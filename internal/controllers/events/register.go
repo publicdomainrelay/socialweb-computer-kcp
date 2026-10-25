@@ -55,6 +55,8 @@ type Options struct {
 }
 
 type sinks struct {
+	ctx context.Context
+
 	opts Options
 
 	mu sync.Mutex
@@ -95,7 +97,7 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(co
 		Repos: opts.RecordWatchRepos, Values: opts.RecordWatchValues, Scope: opts.Scope, Log: log}); err != nil {
 		return nil, err
 	}
-	s := &sinks{opts: opts, markets: map[string]*eventstream.MarketSink{}}
+	s := &sinks{ctx: ctx, opts: opts, markets: map[string]*eventstream.MarketSink{}}
 	bus.Provide[contract.Sink](opts.Bus, schema.GroupKind{Group: eventsv1.GroupName, Kind: contract.HandlerKind}, contract.CapabilityDeliver, s.openMarket)
 	return streams.Run, nil
 }
@@ -124,7 +126,7 @@ func (s *sinks) openMarket(_ context.Context, to commonv1.ObjectRef, _ []string)
 		return sink, nil
 	}
 	sink, err := eventstream.NewMarketSink(eventstream.MarketOptions{Workspace: to.Workspace, Role: role, Dynamic: s.opts.Dynamic,
-		Resolver: s.opts.Resolver, PLCDirectoryURL: s.opts.PLCURL, Log: s.opts.Log})
+		Resolver: s.opts.Resolver, PLCDirectoryURL: s.opts.PLCURL, Context: s.ctx, Log: s.opts.Log})
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -183,6 +184,12 @@ type Requester struct {
 	cfg Config
 
 	inboxed sync.Map
+
+	synced atomic.Bool
+
+	prunedForeign atomic.Int64
+
+	prunedEnded atomic.Int64
 
 	deps Deps
 

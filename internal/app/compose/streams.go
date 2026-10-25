@@ -47,29 +47,15 @@ const (
 	publicSourceValue = "public-"
 )
 
-var MarketStreamCollections = []string{
-	market.RFPNSID,
-	market.BidNSID,
-	market.BidsFreeNSID,
-	market.BidsX402NSID,
-	market.AcceptNSID,
-	market.AcceptsFreeNSID,
-	market.AcceptsX402NSID,
-	market.ReceiptNSID,
-	market.ReceiptsFreeNSID,
-	market.ReceiptsX402NSID,
-	market.EventNSID,
-	market.ComputeEventsVMDeleteNSID,
-	market.ComputeEventsVMOnNetworkNSID,
-	market.ComputeEventsVMStartedNSID,
-	market.ComputeEventsVMTerminatedNSID,
-	market.ComputeEventsVMHostKeysNSID,
-	market.ComputeEventsVMRegisterIdentityNSID,
-	market.ComputeEventsGuestPublicKeyNSID,
-	market.ComputeEventsGuestSignalWebRTCNSID,
-	market.ComputeEventsGuestSecretsNSID,
-	market.ComputeEventsGuestSecretsAppliedNSID,
-	market.ComputeEventsGuestSecretsRequestedNSID,
+var RequesterStreamCollections = []string{market.BidNSID, market.ReceiptNSID, market.EventNSID}
+
+var BidderStreamCollections = []string{market.RFPNSID, market.AcceptNSID, market.EventNSID}
+
+func MarketStreamCollections(role string) []string {
+	if role == RequesterStreamRole {
+		return slices.Clone(RequesterStreamCollections)
+	}
+	return slices.Clone(BidderStreamCollections)
 }
 
 type SourceInput struct {
@@ -328,7 +314,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 		stream := &eventsv1alpha1.EventStream{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: streamLabels},
 			Spec: eventsv1alpha1.EventStreamSpec{
 				SourceRef: sourceRef,
-				Filter:    eventsv1alpha1.EventStreamFilter{Collections: slices.Clone(MarketStreamCollections), DIDs: slices.Clone(entry.dids)},
+				Filter:    eventsv1alpha1.EventStreamFilter{Collections: MarketStreamCollections(s.Role), DIDs: slices.Clone(entry.dids)},
 				Resume:    entry.resume,
 				Sink:      eventsv1alpha1.EventStreamSink{Kind: eventsv1alpha1.EventStreamSinkHandler, Name: sink},
 			}}
@@ -349,7 +335,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 			links = append(links, user...)
 		}
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
-			Cap(events.CapabilitySubscribe, append(slices.Clone(MarketStreamCollections), entry.dids...)...)))
+			Cap(events.CapabilitySubscribe, append(MarketStreamCollections(s.Role), entry.dids...)...)))
 	}
 	links = append(links, SelectorLink(eventLinkName(s.Role, "deliver", ws, sink), streamSelector(ws, streamLabels, nil),
 		commonv1.ObjectRef{Group: eventsv1alpha1.GroupName, Kind: events.HandlerKind, Name: sink, Workspace: ws},

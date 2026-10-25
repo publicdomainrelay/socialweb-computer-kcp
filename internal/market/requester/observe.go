@@ -1,7 +1,6 @@
 package requester
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
@@ -57,6 +57,13 @@ func (q *Requester) observeSync(ctx context.Context, item v1alpha1.StateSync) (t
 	}
 	if item.DeletionTimestamp != nil {
 		return wait, nil
+	}
+	retain, pruned := q.collectInbox(ctx, item)
+	if pruned {
+		return 0, nil
+	}
+	if retain > 0 && (wait == 0 || retain < wait) {
+		wait = retain
 	}
 	switch item.Spec.Sink.Adapter {
 	case BidInboxAdapter:
@@ -171,18 +178,7 @@ func (q *Requester) runnerFor(name string) *contractRunner {
 }
 
 func contractTerminal(contract v1alpha1.ComputeContract) bool {
-	phase := cmp.Or(contract.Status.Phase, v1alpha1.ComputeContractPending)
-	terminal := phase == v1alpha1.ComputeContractReleased
-	if phase == v1alpha1.ComputeContractFailed {
-		terminal = contract.Status.Contract == nil || contract.Status.Contract.Receipt == nil
-	}
-	if terminal {
-		state := contract.Status.Contract
-		if state != nil && state.Receipt != nil && state.Termination == nil && winnerDID(state) != "" {
-			terminal = false
-		}
-	}
-	return terminal
+	return market.RequesterContractDone(contract)
 }
 
 func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.ComputeContract) {

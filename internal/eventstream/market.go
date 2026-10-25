@@ -45,8 +45,6 @@ const (
 
 	marketNamePrefix = "market-"
 
-	computeEventsPrefix = "com.publicdomainrelay.temp.compute.events."
-
 	MarketDedupWindow = 15 * time.Second
 
 	MarketDedupCap = 10000
@@ -69,6 +67,8 @@ type MarketOptions struct {
 
 	PLCDirectoryURL string
 
+	Context context.Context
+
 	Log *slog.Logger
 }
 
@@ -89,6 +89,8 @@ type marketHandler struct {
 	pdses map[syntax.DID]pdsclient.PDS
 
 	seen *seenSet
+
+	addressees *addressees
 }
 
 type marketPayload struct {
@@ -140,14 +142,22 @@ func NewMarketSink(opts MarketOptions) (*MarketSink, error) {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
+	if opts.Context == nil {
+		return nil, errors.New("eventstream: a market handler needs the run context")
+	}
+	addressees, err := newAddressees(opts.Context, opts.Role, opts.Workspace, opts.Dynamic, opts.Log)
+	if err != nil {
+		return nil, fmt.Errorf("eventstream: the market addressees of %s: %w", opts.Workspace, err)
+	}
 	httpClient := httpClientWithFallback(opts.Resolver.HTTPClient, nil)
 	return &marketHandler{
-		opts:      opts,
-		log:       opts.Log,
-		directory: newDirectory(httpClient, opts.PLCDirectoryURL, opts.Workspace),
-		client:    httpClient,
-		pdses:     map[syntax.DID]pdsclient.PDS{},
-		seen:      newSeenSet(MarketDedupWindow, MarketDedupCap),
+		opts:       opts,
+		log:        opts.Log,
+		directory:  newDirectory(httpClient, opts.PLCDirectoryURL, opts.Workspace),
+		client:     httpClient,
+		pdses:      map[syntax.DID]pdsclient.PDS{},
+		seen:       newSeenSet(MarketDedupWindow, MarketDedupCap),
+		addressees: addressees,
 	}, nil
 }
 
@@ -168,6 +178,13 @@ func (h *marketHandler) Deliver(ctx context.Context, event events.Event) error {
 		}
 		adapter := marketAdapter(h.opts.Role, collection)
 		if adapter == "" {
+			h.addressees.skipped(collection)
+			continue
+		}
+		if !h.addressees.wants(ctx, collection, event.Repo) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			continue
 		}
 		uri := "at://" + event.Repo + "/" + collection + "/" + rkey
@@ -221,6 +238,9 @@ func (h *marketHandler) deliverOp(ctx context.Context, event events.Event, adapt
 	value, recordCID, err := h.fetchMarketRecord(ctx, event.Source, repo, collection, rkey, expected)
 	if err != nil {
 		return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
+	}
+	if !h.addressees.addressed(ctx, collection, event.Repo, value) {
+		return ctx.Err()
 	}
 	return h.createSync(ctx, adapter, event.Repo, uri, recordCID, collection, value)
 }
@@ -405,24 +425,16 @@ func marketSyncName(uri, cid string) string {
 }
 
 func marketAdapter(role, collection string) string {
-	compute := strings.HasPrefix(collection, computeEventsPrefix)
 	switch role {
 	case "bidder":
-		switch collection {
-		case market.RFPNSID, market.AcceptNSID, market.ReceiptNSID, market.EventNSID:
-			return marketBidderMarketInbox
-		}
-		if compute {
+		if market.BidderConsumes(collection) {
 			return marketBidderMarketInbox
 		}
 	case "requester":
-		switch collection {
-		case market.BidNSID, market.BidsFreeNSID, market.BidsX402NSID:
+		switch {
+		case collection == market.BidNSID:
 			return marketRequesterBidInbox
-		case market.ReceiptNSID, market.ReceiptsFreeNSID, market.ReceiptsX402NSID, market.EventNSID:
-			return marketRequesterMarketInbox
-		}
-		if compute {
+		case market.RequesterConsumes(collection):
 			return marketRequesterMarketInbox
 		}
 	}

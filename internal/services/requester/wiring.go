@@ -125,7 +125,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	s.core = core
 	s.mu.Unlock()
 	if _, err := intents.Subscribe(ctx, contractmarket.Subscription{
-		Kinds: []string{contractmarket.KindComputeContract, contractmarket.KindStateSync}, Observer: core}); err != nil {
+		Kinds: []string{contractmarket.KindComputeContract, contractmarket.KindStateSync}, Observer: core, Synced: core.Synced}); err != nil {
 		return core, fmt.Errorf("requester: subscribing to the contracts: %w", err)
 	}
 	if _, err := events.SubscribeContractEvents(ctx, core); err != nil {

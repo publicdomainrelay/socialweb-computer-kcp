@@ -85,6 +85,10 @@ func (c *Cache[T]) Run(ctx context.Context) { c.ctrl.RunWithContext(ctx) }
 
 func (c *Cache[T]) HasSynced() bool { return c.ctrl.HasSynced() }
 
+func (c *Cache[T]) WaitSynced(ctx context.Context) bool {
+	return c.ctrl.HasSynced() || cache.WaitForCacheSync(ctx.Done(), c.ctrl.HasSynced)
+}
+
 func (c *Cache[T]) List() []T {
 	var out []T
 	for _, item := range c.store.List() {
