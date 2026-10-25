@@ -712,6 +712,34 @@ Run a bidder as a child application of the market network:
 swc run bidder --host-backend proc --profile market-network --network mn1 --handle b2.mn1.bob.test
 ```
 
+With `--fg` it stays until Ctrl-C, which removes it from the network. With `--network` the profile
+defaults to `market-network`.
+
+### Foreground bidder (no systemd)
+
+[README: run in the foreground](README.md#run-in-the-foreground-no-systemd) has the prod command, the
+prerequisites and the paths. `run bidder --host-backend proc` without `--network` is its own instance
+`b-<handle-with-dashes>`: `bringUp` of a quick-profile instance under a devsup (die-with this process
+with `--fg`), then the MarketBidder root object, the identity wait and the Ready wait. It runs the
+bidder host checks of `check-host -role bidder` first, without the systemd ones.
+
+Join a dev market network over the market protocol only, in its own kcp (the standalone path, with
+no public PLC DID):
+
+```bash
+# variables carry over: swc
+swc dev status --instance mn1 | jq .network.status > /var/tmp/swc/mn1.json
+swc run bidder --market-network-file /var/tmp/swc/mn1.json --handle b3.mn1.bob.test --host-backend proc --fg
+K=/home/test-0001/.local/state/socialweb-computer/dev/b-b3-mn1-bob-test/kcp/admin.kubeconfig
+sudo -n -u test-0001 kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
+  -p '{"spec":{"identity":{"association":"Skip"}}}'
+swc run request --network mn1 --exec 'uname -r'
+swc status --instance b-b3-mn1-bob-test
+```
+
+Ctrl-C (or SIGTERM) on `run bidder` prints the `dev down --keep-state` report (`vmsStopped`,
+`remaining: []`). `swc dev down --instance b-b3-mn1-bob-test` removes its state.
+
 ## Gate and acceptance
 
 ```bash

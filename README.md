@@ -13,6 +13,112 @@ kcp objects such as `ComputeVM`, `ComputeContract`, `NodeClaim`, and `HostProces
 - Plans and backlog: [`docs/plans/`](docs/plans/), [`NEXT.yaml`](NEXT.yaml)
 - Build, install, upgrade, association, ingress, troubleshooting: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
+## Run a bidder
+
+A bidder answers RFPs on the market and boots each guest it wins as a firecracker VM on its host. Two
+ways to run one from the same binary: installed under systemd, or in the foreground as your own user.
+
+### Install from a release (systemd)
+
+From the public bucket, with no credentials (the release rollouts run this path):
+
+```bash
+HANDLE=<your atproto handle>
+BUCKET=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
+V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags \
+  | jq -r '.[].name' | grep '^v' | sort -V | tail -1)
+ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+mkdir -p /var/tmp/swc-release && cd /var/tmp/swc-release
+curl -fLO "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
+curl -fLO "$BUCKET/releases/$V/binaries/SHA256SUMS"
+grep " socialweb-computer-$ARCH$" SHA256SUMS | sha256sum -c -
+sudo install -m 0755 "socialweb-computer-$ARCH" /usr/local/bin/socialweb-computer
+sudo /usr/local/bin/socialweb-computer install bidder --handle "$HANDLE"
+```
+
+`install bidder` creates:
+
+| Item | Where |
+| --- | --- |
+| Account | `swc-bidder`, in group `kvm`, linger on, one subuid/subgid range (`--vm-slots N`, default 256, 65536 ids each) |
+| Unit | `socialweb-computer-bidder@<handle>.service` in `swc-bidder`'s user manager; restarts on exit (`Restart=always`) and starts at boot |
+| State | `/var/lib/socialweb-computer/swc-bidder` (`config.json`, `bin/current`, `bin/previous`) |
+| kcp admin kubeconfig | `/var/lib/socialweb-computer/swc-bidder/handles/<hash>/kcp/admin.kubeconfig` (root only) |
+
+The bidder gets a new DID and waits for its association:
+[CONTRIBUTING: bidder association](CONTRIBUTING.md#bidder-association). Check it:
+
+```bash
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  systemctl --user status "socialweb-computer-bidder@$HANDLE.service"
+sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list
+```
+
+`socialweb-computer status` reads instances that run without systemd (below), not the installed
+unit. Upgrade, uninstall, oauthQr and more: [CONTRIBUTING](CONTRIBUTING.md#install-a-release-bidder).
+
+### Run in the foreground (no systemd)
+
+As a normal user, no root at run time:
+
+```bash
+socialweb-computer run bidder --handle <your atproto handle> --host-backend proc --fg
+```
+
+Every host process (kcp, kine, its front, OpenBao, the core) and every VM is a child of this
+process, under its own supervisor (devsup). `--host-backend proc` is required (there is no default);
+`systemd-user` runs only as an account `install bidder` made. The profile defaults to `prod-qr`, as
+installed.
+
+The account needs, once (root):
+
+| Need | Fix |
+| --- | --- |
+| `/dev/kvm` read-write | `usermod -aG kvm <user>`, then log in again |
+| `/dev/net/tun`, unprivileged user namespaces | `modprobe tun`; on Ubuntu, AppArmor must let the embedded pasta make a user namespace |
+| One subuid and subgid range, 65536 ids per VM | `usermod --add-subuids 655360-1703935 --add-subgids 655360-1703935 <user>` (16 VMs; pick a free range) |
+| `newuidmap`, `newgidmap` | package `uidmap` (Debian/Ubuntu) or `shadow-utils` (Fedora) |
+| `XDG_RUNTIME_DIR` | a login session (ssh or a desktop), or `loginctl enable-linger <user>` |
+
+Not needed: systemd units, linger, cgroup delegation, an open inbound port (every listener binds
+`127.0.0.1:0`; public endpoints go out through the did:key ingress relay `xrpc.fedproxy.com`).
+`run bidder` checks these first and names the missing one and its fix; `socialweb-computer check-host
+-role bidder` lists every check (ignore its systemd rows for this mode).
+
+Identity: the default makes a local PDS repo with a new did:plc on plc.directory, then waits in
+`AwaitingApproval` for the association. `--fg` waits without a deadline and prints the DID. Associate
+it ([CONTRIBUTING](CONTRIBUTING.md#bidder-association)), or skip association:
+
+```bash
+K=~/.local/state/socialweb-computer/dev/b-<handle-with-dashes>/kcp/admin.kubeconfig
+kubectl --kubeconfig "$K" patch marketbidder app --type=merge -p '{"spec":{"identity":{"association":"Skip"}}}'
+```
+
+To sign in as an existing account instead, add `-- --atproto-oauth-qr`; it prints a QR sign-in URL
+and waits for it.
+
+| Item | Where |
+| --- | --- |
+| Instance | `b-<handle-with-dashes>` (`--instance` overrides) |
+| State | `${XDG_STATE_HOME:-~/.local/state}/socialweb-computer/dev/b-<handle-with-dashes>`; `--state-dir DIR` puts it in `DIR/dev/b-<handle-with-dashes>` |
+| Sockets | `$XDG_RUNTIME_DIR/swc/` |
+| Extracted assets | `${XDG_CACHE_HOME:-~/.cache}/socialweb-computer/runtime` |
+
+Check it from another shell: `socialweb-computer status --instance b-<handle-with-dashes>`.
+
+Stop: Ctrl-C or SIGTERM. It stops the VMs (gracefully, then killed), OpenBao, the core, kcp and
+kine, prints a JSON report whose `remaining` is empty, and keeps the state: the next run is the same
+DID. If the process dies any other way, devsup sees it go and stops every unit. Without `--fg`,
+`run bidder` returns once the bidder is Ready and leaves it running under a detached devsup; stop it
+with `socialweb-computer dev down --instance b-<handle-with-dashes> --keep-state`. `dev down` without
+`--keep-state` deletes the state and the DID with it.
+
+Caveats against the installed bidder: no restart on a crash or at boot; the VMs end with the process;
+no cgroup limits on the VMs (the systemd user manager enforces them for an install); no install
+record, so no `upgrade` or `rollback`: the binary is the one you run. A dev market network join and
+the details: [CONTRIBUTING: foreground bidder](CONTRIBUTING.md#foreground-bidder-no-systemd).
+
 ## Use the hosted gateway
 
 `https://k8s.socialweb.computer` is the production gateway. No account with us, no API key. It is
@@ -109,6 +215,7 @@ Install, build, upgrade, associate, uninstall, PDS ingress, and troubleshooting 
 | To | Command | Long form |
 | --- | --- | --- |
 | Install a bidder from a release | `sudo socialweb-computer install bidder --handle <handle>` | [CONTRIBUTING: release bidder](CONTRIBUTING.md#install-a-release-bidder) |
+| Run a bidder in the foreground | `run bidder --handle <handle> --host-backend proc --fg` | [Run a bidder](#run-in-the-foreground-no-systemd) |
 | Associate or skip association | `scripts/associate-bidder.ts` | [CONTRIBUTING: association](CONTRIBUTING.md#bidder-association) |
 | Upgrade a bidder | `upgrade --binary <path> --sha256 <digest>`, then `install bidder` | [CONTRIBUTING: upgrade](CONTRIBUTING.md#upgrade-reinstall-uninstall) |
 | Install or upgrade the gateway | `scripts/deploy.sh` | [CONTRIBUTING: gateway](CONTRIBUTING.md#deploy-the-gateway) |
@@ -117,7 +224,8 @@ Install, build, upgrade, associate, uninstall, PDS ingress, and troubleshooting 
 | Select PDS ingress | `spec.ingress.provider` | [CONTRIBUTING: PDS ingress](CONTRIBUTING.md#pds-ingress-provider) |
 | Inspect a unit or kcp | `units list`, `journalctl`, `kubectl` admin kubeconfig | [CONTRIBUTING: troubleshooting](CONTRIBUTING.md#troubleshooting) |
 
-A bidder needs a 64-bit Linux host with `/dev/kvm`, systemd 253+, cgroup v2 and `/dev/net/tun`.
+An installed bidder needs a 64-bit Linux host with `/dev/kvm`, systemd 253+, cgroup v2 and
+`/dev/net/tun`; a foreground one needs no systemd ([Run a bidder](#run-a-bidder)).
 `install bidder` creates the `swc-bidder` account, its subuid/subgid range and its units. A release
 binary needs only `curl` and `sha256sum`; it embeds every asset. The gateway host must already run
 Caddy with `/etc/caddy/sites` imported.
