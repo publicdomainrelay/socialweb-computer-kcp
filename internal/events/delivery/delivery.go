@@ -42,6 +42,8 @@ const (
 
 	ProgressDelay = time.Minute
 
+	RecentResumeWindow = 10 * time.Minute
+
 	gaplessPrefix = "jetstream/"
 )
 
@@ -152,6 +154,10 @@ func (l *Loop) cursor() *int64 {
 		return l.deps.Resume()
 	}
 	return nil
+}
+
+func Recent(savedAt, now time.Time) bool {
+	return !savedAt.IsZero() && now.Sub(savedAt) < RecentResumeWindow
 }
 
 func Rewound(cursor, rewind int64) *int64 {

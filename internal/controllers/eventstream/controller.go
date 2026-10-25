@@ -456,10 +456,17 @@ func (s *stream) resume() *int64 {
 	if s.es.Spec.Resume == eventsv1.EventStreamResumeLive {
 		return nil
 	}
-	if v, ok := s.c.cursors.Load(s.req.Workspace, s.es.Name, s.uid); ok {
-		return delivery.Rewound(v, s.rewind)
+	recent := s.es.Spec.Resume == eventsv1.EventStreamResumeRecent
+	if saved, ok := s.c.cursors.Load(s.req.Workspace, s.es.Name, s.uid); ok {
+		if recent && !delivery.Recent(saved.SavedAt, time.Now()) {
+			return nil
+		}
+		return delivery.Rewound(saved.Cursor, s.rewind)
 	}
 	if s.es.Status.Cursor > 0 {
+		if recent && (s.es.Status.LastEventAt == nil || !delivery.Recent(s.es.Status.LastEventAt.Time, time.Now())) {
+			return nil
+		}
 		return delivery.Rewound(s.es.Status.Cursor, s.rewind)
 	}
 	if s.es.Spec.Cursor != nil {

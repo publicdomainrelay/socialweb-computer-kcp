@@ -116,8 +116,14 @@ type Stream interface {
 	Close() error
 }
 
+type SavedCursor struct {
+	Cursor int64
+
+	SavedAt time.Time
+}
+
 type CursorStore interface {
-	Load(workspace, name, uid string) (int64, bool)
+	Load(workspace, name, uid string) (SavedCursor, bool)
 
 	Save(workspace, name, uid string, cursor int64) error
 }

@@ -135,6 +135,8 @@ type cursorFile struct {
 	UID string `json:"uid"`
 
 	Cursor int64 `json:"cursor"`
+
+	SavedAt time.Time `json:"savedAt,omitzero"`
 }
 
 func NewCursorStore(dir string) CursorStore {
@@ -155,20 +157,20 @@ func (s CursorStore) path(workspace, name string) string {
 	return filepath.Join(s.dir, clean(workspace), clean(name)+".json")
 }
 
-func (s CursorStore) Load(workspace, name, uid string) (int64, bool) {
+func (s CursorStore) Load(workspace, name, uid string) (events.SavedCursor, bool) {
 	if s.dir == "" {
-		return 0, false
+		return events.SavedCursor{}, false
 	}
 	var f cursorFile
 	if err := fsx.ReadJSON(s.path(workspace, name), &f); err != nil || f.UID != uid {
-		return 0, false
+		return events.SavedCursor{}, false
 	}
-	return f.Cursor, true
+	return events.SavedCursor{Cursor: f.Cursor, SavedAt: f.SavedAt}, true
 }
 
 func (s CursorStore) Save(workspace, name, uid string, cursor int64) error {
 	if s.dir == "" {
 		return nil
 	}
-	return fsx.WriteJSON(s.path(workspace, name), cursorFile{UID: uid, Cursor: cursor}, 0o600)
+	return fsx.WriteJSON(s.path(workspace, name), cursorFile{UID: uid, Cursor: cursor, SavedAt: time.Now().UTC()}, 0o600)
 }

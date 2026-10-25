@@ -55,6 +55,8 @@ const (
 	EventStreamResumePersisted EventStreamResume = "Persisted"
 
 	EventStreamResumeLive EventStreamResume = "Live"
+
+	EventStreamResumeRecent EventStreamResume = "Recent"
 )
 
 type EventStreamSinkKind string
