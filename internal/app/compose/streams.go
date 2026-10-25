@@ -281,7 +281,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 		}
 		links = append(links, user...)
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
-			Cap(events.CapabilitySubscribe, MarketStreamCollections...)))
+			Cap(events.CapabilitySubscribe, append(slices.Clone(MarketStreamCollections), entry.dids...)...)))
 		if entry.derived {
 			b := bidders[i-(len(refs)-len(derivedRefs))]
 			status := v1alpha1.BidderStreamStatus{EventStream: name, Pds: b.pds, Dids: slices.Clone(b.dids), Active: b.active}

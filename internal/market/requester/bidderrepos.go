@@ -1,8 +1,11 @@
 package requester
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 )
 
 const (
@@ -18,6 +22,8 @@ const (
 	maxBidderRepos = 32
 
 	bidCatchUpDelay = 5 * time.Second
+
+	getRepoStatusNSID = "com.atproto.sync.getRepoStatus"
 )
 
 func consideredBidderDIDs(bidders []Bidder, only []string) []string {
@@ -50,11 +56,28 @@ func (q *Requester) bidderRepos(ctx context.Context, dids []string) []v1alpha1.C
 			q.log.Warn("requester_bidder_pds_unresolved", "bidder", did, "err", err)
 			continue
 		}
-		if pds := strings.TrimSpace(ident.PDSEndpoint()); pds != "" {
+		if pds := cmp.Or(q.relayCrawledPDS(ctx, did), strings.TrimSpace(ident.PDSEndpoint())); pds != "" {
 			out = append(out, v1alpha1.ContractBidderRepo{Did: did, Pds: pds, SeenAt: seen})
 		}
 	}
 	return out
+}
+
+func (q *Requester) relayCrawledPDS(ctx context.Context, did string) string {
+	for _, relay := range q.cfg.Relays() {
+		status, err := xrpc.Query[struct {
+			Hostname string `json:"hostname"`
+		}](ctx, &xrpc.Client{Host: relay, HTTP: q.deps.HTTP}, getRepoStatusNSID, url.Values{"did": {did}})
+		host := strings.TrimSpace(status.Hostname)
+		if err != nil || host == "" || strings.ContainsAny(host, "/ ") {
+			continue
+		}
+		if _, port, err := net.SplitHostPort(host); err == nil && port != "" {
+			return "http://" + host
+		}
+		return "https://" + host
+	}
+	return ""
 }
 
 func (r *contractRunner) noteBidderRepos(ctx context.Context, dids []string) {

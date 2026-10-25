@@ -240,7 +240,9 @@ func (h *marketHandler) fetchMarketRecord(ctx context.Context, source string, re
 	}
 	hostname, err := h.relayHost(ctx, source, repo.String())
 	if err != nil {
-		return nil, "", err
+		if hostname = sourceHost(source); hostname == "" {
+			return nil, "", err
+		}
 	}
 	for _, scheme := range []string{"http", "https"} {
 		target := scheme + "://" + hostname + "/xrpc/com.atproto.repo.getRecord?repo=" + url.QueryEscape(repo.String()) +
@@ -304,6 +306,18 @@ func (h *marketHandler) relayHost(ctx context.Context, source, did string) (stri
 		return "", fmt.Errorf("relay getRepoStatus names no host for %s", did)
 	}
 	return strings.TrimSpace(body.Hostname), nil
+}
+
+func sourceHost(source string) string {
+	base, ok := strings.CutPrefix(strings.TrimSpace(source), relay.SourcePrefix)
+	if !ok {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 func (h *marketHandler) authorPDS(ctx context.Context, did syntax.DID) (pdsclient.PDS, error) {
