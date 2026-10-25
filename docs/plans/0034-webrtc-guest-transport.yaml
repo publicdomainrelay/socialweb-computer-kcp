@@ -425,6 +425,8 @@ items:
       mDNS, LLMNR) is allowed by default (spec.guestNetwork.lanUDP, bidder operator only) so same-LAN
       WebRTC works over STUN only; UDP to the host's own high ports is a separate opt-in
       (spec.guestNetwork.hostUDP), on by default only for the bidder-only-me policy.
+      hostUDP includes the host's Tailscale/CGNAT addresses on purpose (user, 2026-10-25): it is on by
+      default only for only-me bidders, whose renter is the operator, who may come from their own tailnet.
     done_when: "Built (17945ac8, c8148e9e, 8d4a6a6f) and verified on dev networks; prod after rc110."
     status: done
 
