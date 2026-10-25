@@ -81,8 +81,10 @@ The account needs, once (root):
 | `newuidmap`, `newgidmap` | package `uidmap` (Debian/Ubuntu) or `shadow-utils` (Fedora) |
 | `XDG_RUNTIME_DIR` | a login session (ssh or a desktop), or `loginctl enable-linger <user>` |
 
-Not needed: systemd units, linger, cgroup delegation, an open inbound port (every listener binds
-`127.0.0.1:0`; public endpoints go out through the did:key ingress relay `xrpc.fedproxy.com`).
+Not needed: systemd units, linger, cgroup delegation, an open inbound TCP port (every listener binds
+`127.0.0.1:0`; public endpoints go out through the did:key ingress relay `xrpc.fedproxy.com`). A guest
+with a WebRTC tunnel gets one UDP port from `spec.guestNetwork.webrtcUDPPorts` (default 31000-31999)
+forwarded on the host's LAN addresses so same-LAN peers reach it; allow that range inbound for UDP.
 `run bidder` checks these first and names the missing one and its fix; `socialweb-computer check-host
 -role bidder` lists every check (ignore its systemd rows for this mode).
 
