@@ -363,7 +363,7 @@ items:
     files:
       - "peer branch origin/kcp-wasm-memory-storage"
     done_when: "ACC34-BROWSER-SSH passes from the peer's page against all three bidders."
-    status: doing
+    status: done
 
   - id: W6-DOCS
     title: "AGENTS.md transport rule, ARCHITECTURE section, catalog rows"
@@ -407,7 +407,9 @@ items:
     title: "Browser ssh over WebRTC"
     depends_on: [W5-BROWSER-PEER]
     done_when: "From the peer's page: sign in, request with Bidders all three, shell over WebRTC shows uid=, release confirmed by requester_released."
-    status: todo
+    result: >
+      2026-10-25, iPhone on cellular, page from main ae7d112f: vmshell-qfj4xu found by discovery (no bidderDids; all three bidders bid, local won), Held at 01:23:19Z, guest agent ICE connected 1.3 s after the offer, root prompt over the datachannel. On home Wi-Fi (same LAN as local) ICE failed: Safari offers only mDNS .local host candidates and the router does not hairpin srflx<->srflx; the wootty fallback (opentunnel, ~2.5 min) worked. Same-LAN WebRTC is an open networking decision for the user (LAN host candidate or TURN).
+    status: done
 
   - id: ACC34-UNCHANGED
     title: "iroh and https paths unchanged"
@@ -479,13 +481,17 @@ items:
       market.relays sources; default discovery relays; bidders requestCrawl their PDS; derive one PDS
       stream per discovered bidder; requesters read Both by default.
     done_when: "The gateway and the page find local, hat-9 and hat-7 with no bidderDids."
-    status: doing
+    result: >
+      Ported vouched, operated (bidder_associate both ways), market.relays and public relay discovery; per-bidder streams; comms defaults to Both. On prod rc110 dev: discovery found hat-7 via bsky's relay and local and hat-9 as bob's operated bidders.
+    status: done
 
   - id: REL-RC110
     title: "rc110 to local, hat-9, hat-7 and the gateway; re-sign bob and alice; drop the gateway's pinned bidderDids"
     depends_on: [W13-DISCOVERY]
     done_when: "All roots Ready on rc110; hat-7 and the gateway owner identities Ready after re-sign; discovery logs show relay/operated sources."
-    status: todo
+    result: >
+      rc110 dev builds of main (d0446143, hat-7 at 2f02ad9c) installed with --allow-dev-binary on local, hat-9, hat-7 and the gateway; bob re-signed on hat-7 through spec.signOutGeneration and the scripted QR. Not yet tagged/published; gateway bidderDids not yet dropped.
+    status: doing
 
 open_questions:
   - "None blocking. Defaults taken: requester offers and guest answers; CLI age identity in memory per proxy session (not OpenBao); ContractEvent outbound is the only direction users create."
