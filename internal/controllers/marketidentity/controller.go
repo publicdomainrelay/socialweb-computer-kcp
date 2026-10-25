@@ -30,6 +30,10 @@ const (
 
 	RecordWatchKind = "AtprotoRecordWatch"
 
+	VaultExport = "hostprocesses"
+
+	VaultKind = "OpenBaoServer"
+
 	eventBuffer = 256
 )
 
@@ -102,6 +106,9 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		}),
 		ctlruntime.WatchesIn(PdsExport, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.Pds) []ctlruntime.Request {
 			return ctl.users(binding.Key(src.Workspace, atproto.ComponentKind, obj.Name))
+		}),
+		ctlruntime.WatchesIn(VaultExport, func(_ context.Context, src ctlruntime.Request, _ *v1alpha1.OpenBaoServer) []ctlruntime.Request {
+			return ctl.users(binding.Key(src.Workspace, VaultKind))
 		})}
 	if opts.Scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(opts.Scope))
@@ -192,7 +199,7 @@ func (c *Controller) associationWatch(ctx context.Context, req ctlruntime.Reques
 
 func (c *Controller) remember(req ctlruntime.Request, object *v1alpha1.MarketIdentity) {
 	identity := object.DeepCopy()
-	var refs []string
+	refs := []string{binding.Key(req.Workspace, VaultKind)}
 	if name := strings.TrimSpace(object.Spec.AssociationWatch); name != "" {
 		refs = append(refs, binding.Key(req.Workspace, RecordWatchKind, name))
 	}

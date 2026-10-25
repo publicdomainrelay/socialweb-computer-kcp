@@ -4382,6 +4382,29 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **The controller runtime lists, then watches; it never asks kcp for a watch-list (plan 0034
+  ACC34-CLI-SSH, 2026-10-25).** Before: client-go 0.36 turns on `WatchListClient` by default, so every
+  informer synced through a streaming watch with `sendInitialEvents`. On a kcp that just started, kcp
+  answers each such watch with its initial-events-end bookmark only after about 1 s (kcp traces
+  `"WatchList" ... total time: 1005ms`, one per resource). multicluster-runtime engages each logical
+  cluster with every controller in turn, and each engagement blocks until its new informer synced, so
+  the engagements of a resumed core advanced one per 1.1 s: the requester's OpenBaoServer was reconciled
+  about 30 s after the controller manager started, and the Requester component started 35 s after it.
+  `run request ssh` after a resume starts a stopped invocation's kcp again (cold), and the resumed
+  MarketRequester still showed its old Ready status, so the CLI published its offer at once and waited
+  for the core: ssh connect to return was 36.1 s (hat-7) and 39.5 s (local), against 2.4 s and 9.2 s
+  for the first ssh. After: `internal/controllers/runtime` replaces client-go's feature gates with
+  `WatchListClient` off, so a reflector lists (served from storage while the watch cache warms) and then
+  watches. Readings (own network p34rsm, `dev down --keep-state` then `dev up`, cold kcp): the network
+  core's OpenBao unsealed 32 s after the manager started and its last engagement came at 55 s; after,
+  5.3 s and 18 s, no `WatchList` trace over 500 ms (63 before), `dev up` 30 s instead of 64 s. Over
+  webrtc on that network: ssh while the invocation runs 0.6 s (offer to answer 0.16 s); ssh after a
+  resume 5.7 s, 7.3 s and 6.9 s, of which offer to answer is the core warming up (5.6 s: OpenBao
+  placed 3.9 s and unsealed 6.2 s after the manager started); the guest answers each offer in 15 to
+  30 ms and ICE connects host to host in 0.3 s. MarketIdentity also watches the OpenBaoServers of its
+  workspace, so an identity waiting on its vault reconciles when the vault is unsealed instead of on
+  its error backoff.
+
 - **A tenant cluster's nodes are one Infra (plan 0031, 2026-10-24).**
   Before: every NodeClaim got a ComputeContract `nodeclaim-<20 hex>` that the NodeClaim controller
   applied, released (spec.release), deleted and orphan-swept itself, listing every ComputeContract of
