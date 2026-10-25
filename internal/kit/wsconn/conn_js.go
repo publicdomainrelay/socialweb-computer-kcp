@@ -18,19 +18,21 @@ const (
 	socketOpen       = 1
 	closeNormal      = 1000
 	closeAbnormal    = 1006
+	frameOverhead    = 64
 )
 
 var socketHandlers = []string{"onopen", "onmessage", "onerror", "onclose"}
 
 type Conn struct {
 	ws     js.Value
-	frames chan []byte
+	ready  chan struct{}
 	opened chan struct{}
 	done   chan struct{}
 
 	mu       sync.Mutex
 	err      error
 	isOpen   bool
+	queue    [][]byte
 	buffered int
 	funcs    []js.Func
 	released bool
@@ -50,7 +52,7 @@ func DialConfig(ctx context.Context, target string, cfg Config) (*Conn, error) {
 	}
 	c := &Conn{
 		ws:     ws,
-		frames: make(chan []byte, BufferedFrames),
+		ready:  make(chan struct{}, 1),
 		opened: make(chan struct{}),
 		done:   make(chan struct{}),
 	}
@@ -148,16 +150,17 @@ func (c *Conn) buffer(frame []byte) error {
 	if c.err != nil {
 		return nil
 	}
-	if c.buffered+len(frame) > MaxBufferedBytes {
-		return fmt.Errorf("wsconn: websocket read buffer is over %d bytes", MaxBufferedBytes)
+	size := len(frame) + frameOverhead
+	if c.buffered+size > MaxBufferedBytes {
+		return fmt.Errorf("wsconn: websocket read buffer is over %d bytes in %d frames", MaxBufferedBytes, len(c.queue))
 	}
+	c.queue = append(c.queue, frame)
+	c.buffered += size
 	select {
-	case c.frames <- frame:
-		c.buffered += len(frame)
-		return nil
+	case c.ready <- struct{}{}:
 	default:
-		return fmt.Errorf("wsconn: websocket read buffer is over %d frames", BufferedFrames)
 	}
+	return nil
 }
 
 func frameOf(event js.Value) ([]byte, error) {
@@ -227,39 +230,48 @@ func (c *Conn) failure() error {
 	return c.err
 }
 
-func (c *Conn) took(frame []byte) []byte {
+func (c *Conn) next() ([]byte, bool) {
 	c.mu.Lock()
-	c.buffered -= len(frame)
-	c.mu.Unlock()
-	return frame
+	defer c.mu.Unlock()
+	if len(c.queue) == 0 {
+		return nil, false
+	}
+	frame := c.queue[0]
+	c.queue[0] = nil
+	c.queue = c.queue[1:]
+	if len(c.queue) == 0 {
+		c.queue = nil
+	}
+	c.buffered -= len(frame) + frameOverhead
+	return frame, true
 }
 
 func (c *Conn) Read(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	select {
-	case frame := <-c.frames:
-		return c.took(frame), nil
-	default:
+	if frame, ok := c.next(); ok {
+		return frame, nil
 	}
 	timer := time.NewTimer(ReadTimeout)
 	defer timer.Stop()
-	select {
-	case frame := <-c.frames:
-		return c.took(frame), nil
-	case <-c.done:
+	for {
 		select {
-		case frame := <-c.frames:
-			return c.took(frame), nil
-		default:
+		case <-c.ready:
+			if frame, ok := c.next(); ok {
+				return frame, nil
+			}
+		case <-c.done:
+			if frame, ok := c.next(); ok {
+				return frame, nil
+			}
+			return nil, c.failure()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+			c.fail(fmt.Errorf("wsconn: websocket read: no frame in %s: %w", ReadTimeout, os.ErrDeadlineExceeded))
+			return nil, c.failure()
 		}
-		return nil, c.failure()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-timer.C:
-		c.fail(fmt.Errorf("wsconn: websocket read: no frame in %s: %w", ReadTimeout, os.ErrDeadlineExceeded))
-		return nil, c.failure()
 	}
 }
 

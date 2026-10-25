@@ -21,8 +21,6 @@ const (
 
 	PongWriteTimeout = 10 * time.Second
 
-	BufferedFrames = 64
-
 	MaxBufferedBytes = 2 * MaxFrameBytes
 )
 

@@ -44,6 +44,8 @@ const (
 
 	RecentResumeWindow = 10 * time.Minute
 
+	StableConnection = 30 * time.Second
+
 	gaplessPrefix = "jetstream/"
 )
 
@@ -160,6 +162,14 @@ func Recent(savedAt, now time.Time) bool {
 	return !savedAt.IsZero() && now.Sub(savedAt) < RecentResumeWindow
 }
 
+func atLeast(cursor, floor *int64) *int64 {
+	if cursor == nil || floor == nil || *cursor <= 0 || *cursor >= *floor {
+		return cursor
+	}
+	v := *floor
+	return &v
+}
+
 func Rewound(cursor, rewind int64) *int64 {
 	if cursor > 0 && rewind > 0 {
 		cursor = max(cursor-rewind, 1)
@@ -170,9 +180,11 @@ func Rewound(cursor, rewind int64) *int64 {
 func (l *Loop) Run(ctx context.Context) {
 	base, limit := l.cfg.ReconnectDelay, l.cfg.MaxReconnectDelay
 	delay := base
+	var floor *int64
 	for ctx.Err() == nil {
 		filter := l.cfg.Filter
-		filter.Cursor = l.cursor()
+		filter.Cursor = atLeast(l.cursor(), floor)
+		floor = filter.Cursor
 		upstream, err := l.deps.Source.Subscribe(ctx, filter)
 		if err != nil {
 			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
@@ -181,7 +193,8 @@ func (l *Loop) Run(ctx context.Context) {
 			l.state.ServerFilter = nil
 			l.mu.Unlock()
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
-			if l.consume(ctx, upstream) {
+			opened := time.Now()
+			if l.consume(ctx, upstream) && time.Since(opened) >= StableConnection {
 				delay = base
 			}
 			_ = upstream.Close()
