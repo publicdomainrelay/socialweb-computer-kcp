@@ -401,7 +401,16 @@ items:
       run request --hold with a webrtc tunnel {tag ssh, port 22} reaches Held on local, hat-9 and
       hat-7; run request ssh --transport webrtc runs "uname -a; id" with host key checking on; time
       from Held to shell is recorded; release ends Released and leaves no ComputeVM.
-    status: todo
+    result: >
+      2026-10-25, bidders rc112, CLI dev build of main afb5f790, requester signed in as alice by
+      -- --atproto-oauth-qr (qr.fedfork.com scope fixed in typescript-helpers 2474c4b). Each host bid
+      alone (the other two suspended) and won: hat-9 did:plc:4vcig7s4..., hat-7 did:plc:ocnuqjlz...,
+      local did:plc:2l2wdry7... (same host and LAN as the CLI, through the forwarded LAN UDP port).
+      Both run request and the second run request ssh printed uid= over webrtc with
+      StrictHostKeyChecking=yes. ssh connect to return: hat-9 5.3 s then 1.9 s, hat-7 2.4 s then 36.1 s,
+      local 9.2 s then 39.5 s (the second, after a resume, is slow on two hosts; open). No a=candidate
+      or AGE-SECRET-KEY in any log. Every release exited 0 and left no ComputeVM.
+    status: done
 
   - id: ACC34-BROWSER-SSH
     title: "Browser ssh over WebRTC"
