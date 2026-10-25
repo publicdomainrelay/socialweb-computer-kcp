@@ -2,6 +2,8 @@ package compose
 
 import (
 	"context"
+	"maps"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -135,6 +137,7 @@ func (c *Composer) Drop(r Root) {
 	delete(c.applied, string(r.UID))
 	c.mu.Unlock()
 	c.adoptions.forget(r)
+	c.linkSets.forget(linkRoot(r))
 }
 
 func (c *Composer) rootsIn(cluster, kind string) []string {
@@ -211,14 +214,41 @@ func mapByLabel(rootKind string, src ctlruntime.Request, labels map[string]strin
 	return []ctlruntime.Request{{Cluster: cluster, Name: name}}
 }
 
+func observed[C ctlruntime.Object](c *Composer, changed func(old, new C) bool) ctlruntime.WatchFilter[C] {
+	if t := reflect.TypeFor[C](); t.Kind() == reflect.Pointer {
+		c.applies.watch(t.Elem().Name())
+	}
+	return ctlruntime.WatchFilter[C]{Changed: changed, Observe: func(obj C, gone bool) { c.applies.observe(obj, gone) }}
+}
+
+func specChanged[C ctlruntime.Object](old, new C) bool {
+	return old.GetGeneration() != new.GetGeneration() || !maps.Equal(old.GetLabels(), new.GetLabels()) ||
+		old.GetDeletionTimestamp().IsZero() != new.GetDeletionTimestamp().IsZero() ||
+		!reflect.DeepEqual(old.GetOwnerReferences(), new.GetOwnerReferences())
+}
+
+func linkChanged(old, new *exposurev1alpha1.ComponentLink) bool {
+	return specChanged(old, new) || old.Status.ObservedGeneration != new.Status.ObservedGeneration || linkAccepted(old) != linkAccepted(new)
+}
+
 func childWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
-	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
+	return childWatchIf[C](c, export, rootKind, nil)
+}
+
+func childWatchIf[C ctlruntime.Object](c *Composer, export, rootKind string, changed func(old, new C) bool) ctlruntime.Option {
+	return ctlruntime.WatchesFiltered(export, observed(c, changed), func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
 		return c.unparked(rootKind, mapByLabel(rootKind, src, obj.GetLabels()), src)
 	})
 }
 
+func appliedWatch[C ctlruntime.Object](c *Composer, export string) ctlruntime.Option {
+	return ctlruntime.WatchesFiltered(export, observed(c, func(_, _ C) bool { return false }), func(context.Context, ctlruntime.Request, C) []ctlruntime.Request {
+		return nil
+	})
+}
+
 func adoptWatch[C ctlruntime.Object](c *Composer, export, rootKind, kind string) ctlruntime.Option {
-	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
+	return ctlruntime.WatchesFiltered(export, observed[C](c, nil), func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
 		out := mapByLabel(rootKind, src, obj.GetLabels())
 		c.noteAdoptable(rootKind, kind, out, src, obj)
 		if kind == KindMarketIdentity {
@@ -230,7 +260,7 @@ func adoptWatch[C ctlruntime.Object](c *Composer, export, rootKind, kind string)
 }
 
 func intentWatch[C ctlruntime.Object](c *Composer, export, rootKind, kind string) ctlruntime.Option {
-	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
+	return ctlruntime.WatchesFiltered(export, observed[C](c, nil), func(_ context.Context, src ctlruntime.Request, obj C) []ctlruntime.Request {
 		if out := mapByLabel(rootKind, src, obj.GetLabels()); len(out) > 0 {
 			c.noteAdoptable(rootKind, kind, out, src, obj)
 			return c.unparked(rootKind, out, src)
@@ -260,15 +290,15 @@ func (c *Composer) Watches(rootKind string) []ctlruntime.Option {
 		childWatch[*v1alpha1.Relay](c, "", rootKind),
 		childWatch[*v1alpha1.IngressProxy](c, "", rootKind),
 		childWatch[*v1alpha1.DispatcherTLS](c, "", rootKind),
-		childWatch[*v1alpha1.LocalRepo](c, "", rootKind),
-		childWatch[*v1alpha1.RemoteRepo](c, "", rootKind),
-		childWatch[*v1alpha1.AtprotoRepo](c, "", rootKind),
+		childWatchIf(c, "", rootKind, specChanged[*v1alpha1.LocalRepo]),
+		childWatchIf(c, "", rootKind, specChanged[*v1alpha1.RemoteRepo]),
+		childWatchIf(c, "", rootKind, specChanged[*v1alpha1.AtprotoRepo]),
 		intentWatch[*v1alpha1.MarketPresence](c, "", rootKind, KindMarketPresence),
 		intentWatch[*v1alpha1.StateSync](c, "", rootKind, KindStateSync),
 		childWatch[*policyv1alpha1.PolicyEngine](c, ExportPolicy, rootKind),
 		childWatch[*exposurev1alpha1.Service](c, ExportExposures, rootKind),
 		childWatch[*exposurev1alpha1.Exposure](c, ExportExposures, rootKind),
-		childWatch[*exposurev1alpha1.ComponentLink](c, ExportExposures, rootKind),
+		childWatchIf(c, ExportExposures, rootKind, linkChanged),
 		adoptWatch[*v1alpha1.OpenBaoServer](c, ExportHostProcesses, rootKind, KindOpenBaoServer),
 		childWatch[*v1alpha1.Vault](c, ExportHostProcesses, rootKind),
 		adoptWatch[*v1alpha1.MarketIdentity](c, ExportMarketIdentities, rootKind, KindMarketIdentity),
@@ -277,11 +307,15 @@ func (c *Composer) Watches(rootKind string) []ctlruntime.Option {
 		intentWatch[*v1alpha1.ComputeContract](c, ExportComputeContracts, rootKind, KindComputeContract),
 		intentWatch[*v1alpha1.Infra](c, ExportComputeContracts, rootKind, "Infra"),
 		intentWatch[*v1alpha1.EphemeralInfra](c, ExportComputeContracts, rootKind, "EphemeralInfra"),
-		childWatch[*eventsv1alpha1.EventStream](c, ExportEvents, rootKind),
-		childWatch[*eventsv1alpha1.EventSource](c, ExportEvents, rootKind),
-		childWatch[*eventsv1alpha1.PdsEventSource](c, ExportEvents, rootKind),
-		childWatch[*eventsv1alpha1.RelayEventSource](c, ExportEvents, rootKind),
-		childWatch[*eventsv1alpha1.JetstreamEventSource](c, ExportEvents, rootKind),
-		childWatch[*pdsv1alpha1.RemotePDS](c, ExportPDS, rootKind),
+		childWatchIf(c, ExportEvents, rootKind, specChanged[*eventsv1alpha1.EventStream]),
+		childWatchIf(c, ExportEvents, rootKind, specChanged[*eventsv1alpha1.EventSource]),
+		childWatchIf(c, ExportEvents, rootKind, specChanged[*eventsv1alpha1.PdsEventSource]),
+		childWatchIf(c, ExportEvents, rootKind, specChanged[*eventsv1alpha1.RelayEventSource]),
+		childWatchIf(c, ExportEvents, rootKind, specChanged[*eventsv1alpha1.JetstreamEventSource]),
+		childWatchIf(c, ExportPDS, rootKind, specChanged[*pdsv1alpha1.RemotePDS]),
+		appliedWatch[*v1alpha1.PdsAccount](c, ""),
+		appliedWatch[*v1alpha1.AtprotoSession](c, ""),
+		appliedWatch[*v1alpha1.PlcIdentity](c, ""),
+		appliedWatch[*v1alpha1.VaultCredential](c, ""),
 	}
 }

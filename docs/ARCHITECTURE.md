@@ -11367,6 +11367,56 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
     backpressure, so the storm was js only). The network relay without a cursor: 30 frames (its
     whole backlog) before, 0 after; with `cursor=0` the backlog; past the head one FutureCursor frame.
 
+### A composer applies a child only when its body or the live object changed (2026-10-25)
+
+- **Before.** On the iPhone page (main 74562e3e, comms Firehose, one contract) the browser requester's
+  root workspace took 918 no-op ComponentLink applies a minute and 99 to 175 no-op applies a minute
+  of each event kind (EventSource, JetstreamEventSource, EventStream, RelayEventSource). Each no-op
+  still costs managed fields, schema validation and a storage `guaranteedUpdate`: in 75 s of heap
+  profile `guaranteedUpdate` was 1.06 GB of 3.39 GB, validation about 320 MB, managed fields about
+  380 MB (the wasm apiserver has no watch cache).
+- **Causes.**
+  - Every root pass applied every composed child (`applyAs`, about 40 ComponentLinks, the event
+    sources and streams, the components, Services and Exposures), changed or not.
+  - The root's child watches had no predicate, so any status write of a child queued the root: the
+    EventStream and EventSource cursor, `lastEventAt` and `lag`, the ComponentLink `ResolvedRefs`
+    condition, the repo and RemotePDS status. The composer reads none of those.
+  - The MarketBidder's `operator` link set holds the root vault link of its `root` set (one name, a
+    different `identity/*` scope), the Gateway's the same link with the same scope: the two sets
+    flipped the `link-set` label (and on the bidder the spec) each pass, and each flip queued the
+    root again, 15 to 16 passes a minute with no input.
+- **The change.** `applyChild` keeps, per workspace, resource, name and field manager, the sha256 of
+  the apply body and a fingerprint of the object it got back (UID, generation, labels,
+  ownerReferences, finalizers, and the managedFields entries other than status). The root's watches
+  (`ctlruntime.WatchesFiltered`, `WatchFilter.Observe`) keep the same fingerprint of every object they
+  see and drop it on delete. An apply is skipped when the body is the one this manager last applied
+  and the watched object still has the fingerprint of that apply; a delete, a generation, label or
+  owner change, or another manager's write makes it apply again, and ApplyComponent's drift revert
+  runs whenever the apply ran. Kinds the root does not watch always apply; PdsAccount,
+  AtprotoSession, PlcIdentity and VaultCredential get a watch that only observes. The event kinds,
+  the repos and RemotePDS queue the root on a generation, label, owner or deletion change only, a
+  ComponentLink also on `status.observedGeneration` or its `Accepted` condition (`LinksAccepted`);
+  components, Services, Exposures, Vaults, OpenBaoServers and MarketIdentities still queue it on
+  status, since the status aggregation reads them. One link set holds a ComponentLink name for a root
+  (`linkSets`): a second set of the same root skips that name until the first set drops it.
+- **Readings.** Market network `p34noop` (1 bidder, network relay), Firehose `run request --tunnel
+  ssh:22:webrtc --transport webrtc --exec "...; sleep 300"`, kcp audit log patches a minute while
+  Held:
+  - Bidder workspace before: 15 to 16 passes a minute; ComponentLink 658 to 670 (671 to 718 of them
+    no-op by resourceVersion), Exposure 107 to 112, Service 61 to 64, EventSource 45 to 48,
+    RelayEventSource 30 to 32, EventStream 15 to 17, VaultCredential 31 to 32, PdsAccount 15 to 16,
+    ComponentLink status 33 to 35 (31 of them the flipping vault link). After: 1 pass a minute; 0
+    applies of every composed kind but the ResourceQuota (1, a core kind no export serves), 0
+    ComponentLink status writes.
+  - Requester workspace: about 35 ComponentLink applies a pass before; 0 applies a minute after.
+    The dev network's streams write little status, so its requester passed only twice a minute
+    before; the browser's public Jetstreams are what queued it every few seconds.
+  - Held in 28 to 36 s before and after; ssh over webrtc ran its command, `run request ssh
+    --transport webrtc` again on the held contract, and the release completed. A comms override
+    (`components.Requester.comms.jetstreamUrls`) pruned the us-west source and stream within 20 s and
+    removing it brought them back; a deleted EventStream and a relabelled ComponentLink came back at
+    once; a foreign `spec.acceptCopies` on the Requester was reverted (`ChildEditReverted`).
+
 ## 16. Vocabulary
 
 | | |

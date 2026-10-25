@@ -127,7 +127,8 @@ func (c *Composer) ApplyComponent(ctx context.Context, r Root, ws string, d Desi
 	if spec != nil {
 		u["spec"] = spec
 	}
-	if err := c.Apply(ctx, r, ws, ct.GVR, u); err != nil {
+	current, err := c.applyChild(ctx, r, r.Manager(), ws, ct.GVR, u)
+	if err != nil || current {
 		return err
 	}
 	return c.revertForeignSpec(ctx, r, ws, ct.GVR, u)
@@ -154,29 +155,43 @@ func (c *Composer) Apply(ctx context.Context, r Root, ws string, gvr schema.Grou
 }
 
 func (c *Composer) applyAs(ctx context.Context, r Root, manager, ws string, gvr schema.GroupVersionResource, u kube.Doc) error {
+	_, err := c.applyChild(ctx, r, manager, ws, gvr, u)
+	return err
+}
+
+func (c *Composer) applyChild(ctx context.Context, r Root, manager, ws string, gvr schema.GroupVersionResource, u kube.Doc) (bool, error) {
 	ws = workspaceOr(ws, r.Workspace)
 	ri, err := c.Client(ws, gvr)
 	if err != nil {
-		return err
+		return false, err
 	}
 	delete(u, "status")
 	if m, ok := u["metadata"].(map[string]any); ok {
 		delete(m, "creationTimestamp")
 	}
-	rc := ri.In(docMetaField(u, "namespace"))
+	namespace := docMetaField(u, "namespace")
+	rc := ri.In(namespace)
 	kind, name := docField(u, "kind"), docMetaField(u, "name")
-	_, err = kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager})
-	if err == nil {
-		return nil
+	key, digest := applyKey(ws, gvr, namespace, name, manager), applyDigest(u)
+	if c.applies.current(key, digest) {
+		return true, nil
 	}
+	got, err := kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager})
+	if err == nil {
+		c.applies.record(key, kind, digest, docObject(*got))
+		return false, nil
+	}
+	c.applies.drop(key)
 	if !apierrors.IsConflict(err) {
-		return fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
+		return false, fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
 	}
 	c.recordConflict(ctx, r, ws, u, err)
-	if _, err := kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
-		return fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
+	got, err = kube.Apply[kube.Doc](ctx, rc, u, kube.ApplyOptions{FieldManager: manager, Force: true})
+	if err != nil {
+		return false, fmt.Errorf("compose: applying %s %s in %s: %w", kind, name, ws, err)
 	}
-	return nil
+	c.applies.record(key, kind, digest, docObject(*got))
+	return false, nil
 }
 
 func (c *Composer) recordConflict(ctx context.Context, r Root, ws string, u kube.Doc, cause error) {

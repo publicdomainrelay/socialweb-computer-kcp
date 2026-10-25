@@ -125,6 +125,16 @@ type watchInput struct {
 	export string
 
 	mapFunc func(ctx context.Context, src Request, obj client.Object) []Request
+
+	changed func(old, new client.Object) bool
+
+	observe func(obj client.Object, gone bool)
+}
+
+type WatchFilter[R Object] struct {
+	Changed func(old, new R) bool
+
+	Observe func(obj R, gone bool)
 }
 
 func Export(name string) Option {
@@ -210,6 +220,10 @@ func Watches[R Object](mapFunc func(ctx context.Context, src Request, obj R) []R
 }
 
 func WatchesIn[R Object](export string, mapFunc func(ctx context.Context, src Request, obj R) []Request) Option {
+	return WatchesFiltered(export, WatchFilter[R]{}, mapFunc)
+}
+
+func WatchesFiltered[R Object](export string, f WatchFilter[R], mapFunc func(ctx context.Context, src Request, obj R) []Request) Option {
 	return func(o *options) {
 		obj, err := newObject[R]()
 		if err != nil {
@@ -220,13 +234,62 @@ func WatchesIn[R Object](export string, mapFunc func(ctx context.Context, src Re
 			o.err = errors.Join(o.err, fmt.Errorf("runtime: the watch of %T has no map func", obj))
 			return
 		}
-		o.watches = append(o.watches, watchInput{object: obj, export: strings.TrimSpace(export), mapFunc: func(ctx context.Context, src Request, obj client.Object) []Request {
+		w := watchInput{object: obj, export: strings.TrimSpace(export), mapFunc: func(ctx context.Context, src Request, obj client.Object) []Request {
 			typed, ok := obj.(R)
 			if !ok {
 				return nil
 			}
 			return mapFunc(ctx, src, typed)
-		}})
+		}}
+		if f.Changed != nil {
+			w.changed = func(old, new client.Object) bool {
+				o, ok1 := old.(R)
+				n, ok2 := new.(R)
+				return !ok1 || !ok2 || f.Changed(o, n)
+			}
+		}
+		if f.Observe != nil {
+			w.observe = func(obj client.Object, gone bool) {
+				if typed, ok := obj.(R); ok {
+					f.Observe(typed, gone)
+				}
+			}
+		}
+		o.watches = append(o.watches, w)
+	}
+}
+
+func filtered(w watchInput, inner mchandler.TypedEventHandlerFunc[client.Object, mcreconcile.Request]) mchandler.TypedEventHandlerFunc[client.Object, mcreconcile.Request] {
+	if w.changed == nil && w.observe == nil {
+		return inner
+	}
+	observe := func(obj client.Object, gone bool) {
+		if w.observe != nil && obj != nil {
+			w.observe(obj, gone)
+		}
+	}
+	return func(cn multicluster.ClusterName, cl cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
+		h := inner(cn, cl)
+		return handler.TypedFuncs[client.Object, mcreconcile.Request]{
+			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[client.Object], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+				observe(e.Object, false)
+				h.Create(ctx, e, q)
+			},
+			UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[client.Object], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+				observe(e.ObjectNew, false)
+				if w.changed != nil && e.ObjectOld != nil && e.ObjectNew != nil && !w.changed(e.ObjectOld, e.ObjectNew) {
+					return
+				}
+				h.Update(ctx, e, q)
+			},
+			DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+				observe(e.Object, true)
+				h.Delete(ctx, e, q)
+			},
+			GenericFunc: func(ctx context.Context, e event.TypedGenericEvent[client.Object], q workqueue.TypedRateLimitingInterface[mcreconcile.Request]) {
+				h.Generic(ctx, e, q)
+			},
+		}
 	}
 }
 
@@ -278,7 +341,7 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 			m.addExport(w.export)
 			source = exportFilter(w.export)
 		}
-		b = b.Watches(w.object, m.mapHandler(o.export, w.mapFunc), source)
+		b = b.Watches(w.object, filtered(w, m.mapHandler(o.export, w.mapFunc)), source)
 	}
 	for _, ch := range o.events {
 		b = b.WatchesRawSource(m.eventSource(o.export, ch))

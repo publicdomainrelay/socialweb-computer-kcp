@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -225,6 +226,7 @@ func (c *Composer) ApplyLinks(ctx context.Context, r Root, set string, links []L
 	if err != nil {
 		return err
 	}
+	c.linkSets.release(linkRoot(r), set, keep)
 	workspaces[r.Workspace] = true
 	for _, ws := range prune {
 		if ws = strings.TrimSpace(ws); ws != "" {
@@ -272,6 +274,9 @@ func (c *Composer) writeLinks(ctx context.Context, r Root, set string, links []L
 		workspaces[ws] = true
 		if keep[ws] == nil {
 			keep[ws] = map[string]bool{}
+		}
+		if !c.linkSets.claim(linkRoot(r), ws, l.Name, set) {
+			continue
 		}
 		keep[ws][l.Name] = true
 		obj := &exposurev1alpha1.ComponentLink{ObjectMeta: metav1.ObjectMeta{Name: l.Name, Labels: map[string]string{LinkSetLabel: set}}, Spec: l.Spec}
@@ -364,4 +369,54 @@ func Existing(snap Snapshot, desired []Desired) []Desired {
 		}
 	}
 	return out
+}
+
+type linkSets struct {
+	mu sync.Mutex
+
+	holders map[string]string
+}
+
+func linkRoot(r Root) string { return r.Cluster + "/" + r.Workspace + "/" + r.Owner() }
+
+func linkSetKey(owner, ws, name string) string { return owner + "|" + ws + "|" + name }
+
+func (l *linkSets) claim(owner, ws, name, set string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.holders == nil {
+		l.holders = map[string]string{}
+	}
+	key := linkSetKey(owner, ws, name)
+	if held, ok := l.holders[key]; ok && held != set {
+		return false
+	}
+	l.holders[key] = set
+	return true
+}
+
+func (l *linkSets) release(owner, set string, keep map[string]map[string]bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prefix := owner + "|"
+	for key, held := range l.holders {
+		if held != set || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		ws, name, _ := strings.Cut(strings.TrimPrefix(key, prefix), "|")
+		if !keep[ws][name] {
+			delete(l.holders, key)
+		}
+	}
+}
+
+func (l *linkSets) forget(owner string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prefix := owner + "|"
+	for key := range l.holders {
+		if strings.HasPrefix(key, prefix) {
+			delete(l.holders, key)
+		}
+	}
 }
