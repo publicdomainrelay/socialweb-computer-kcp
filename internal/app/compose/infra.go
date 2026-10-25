@@ -37,6 +37,7 @@ const (
 	GCSampleEvery       = 30 * time.Second
 	GCRescanEvery       = 5 * time.Minute
 	AdoptRescanEvery    = 5 * time.Minute
+	AdoptSetRescanAfter = 30 * time.Second
 	StateDirSampleEvery = 3 * time.Minute
 	GCStuckAfter        = 10 * time.Minute
 	GCExamples          = 5
@@ -163,7 +164,7 @@ func (c *Composer) ApplySetPhases(ctx context.Context, r Root, setName string, v
 }
 
 func (c *Composer) applySet(ctx context.Context, r Root, set manifests.Set, values any) error {
-	defer c.adoptions.forget(r)
+	defer c.adoptions.setApplied(r)
 	ap, err := kcpapply.New(c.restCfg, kcpapply.Options{WaitTimeout: ApplyTimeout, FieldManager: r.Manager(), Base: c.Workspace(),
 		Labels: map[string]string{OwnerLabel: r.Owner(), RootKindLabel: r.Kind, RootClusterLabel: r.Cluster}, Log: c.log})
 	if err != nil {
@@ -238,6 +239,8 @@ type adoptState struct {
 
 	scannedAt time.Time
 
+	setApplied bool
+
 	pending map[string]bool
 }
 
@@ -259,7 +262,8 @@ func (a *adoptions) due(r Root, now time.Time) map[string]bool {
 	}
 	key := adoptKey(r.Cluster, r.Kind, r.Name)
 	st := a.roots[key]
-	if st == nil || st.uid != r.UID || st.generation != r.Generation || now.Sub(st.scannedAt) >= AdoptRescanEvery {
+	if st == nil || st.uid != r.UID || st.generation != r.Generation || now.Sub(st.scannedAt) >= AdoptRescanEvery ||
+		(st.setApplied && now.Sub(st.scannedAt) >= AdoptSetRescanAfter) {
 		a.roots[key] = &adoptState{uid: r.UID, generation: r.Generation, scannedAt: now}
 		all := make(map[string]bool, len(adoptKinds))
 		for _, k := range adoptKinds {
@@ -283,6 +287,14 @@ func (a *adoptions) mark(cluster, rootKind, name, kind string) {
 		st.pending = map[string]bool{}
 	}
 	st.pending[kind] = true
+}
+
+func (a *adoptions) setApplied(r Root) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if st := a.roots[adoptKey(r.Cluster, r.Kind, r.Name)]; st != nil {
+		st.setApplied = true
+	}
 }
 
 func (a *adoptions) forget(r Root) {
