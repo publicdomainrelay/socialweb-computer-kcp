@@ -28,13 +28,15 @@ type Options struct {
 
 	Pds pdsctl.Lookup
 
+	AwaitPds pdsctl.Await
+
 	Secrets func(ctx context.Context, workspace string, ref commonv1.SecretRef) (map[string]any, error)
 
 	Scope func(workspace string) bool
 }
 
 func Register(m *ctlruntime.Manager, opts Options) error {
-	pdsctl.Provide(pdsctl.Options{Bus: opts.Bus, Servers: opts.Pds, Secrets: opts.Secrets})
+	pdsctl.Provide(pdsctl.Options{Bus: opts.Bus, Servers: opts.AwaitPds, Secrets: opts.Secrets})
 	_, pdsErr := remotepds.Register(m, remotepds.Options{Log: opts.Log, Bus: opts.Bus})
 	_, repoErr := atprotorepoctl.Register(m, atprotorepoctl.Options{Bus: opts.Bus, Log: opts.Log})
 	_, localErr := localrepo.Register(m, localrepo.Options{Bus: opts.Bus, Network: opts.Network, Pds: opts.Pds, Scope: opts.Scope, Log: opts.Log})

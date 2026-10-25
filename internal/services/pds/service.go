@@ -470,6 +470,9 @@ func (s *Service) closeResources() {
 func (s *Service) Server() *atpds.Server {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.started {
+		return nil
+	}
 	return s.server
 }
 

@@ -22,22 +22,24 @@ var GroupKind = schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind}
 
 type Lookup func(workspace, name string) (*atpds.Server, bool)
 
+type Await func(ctx context.Context, workspace, name string) (*atpds.Server, bool)
+
 type Secrets func(ctx context.Context, workspace string, ref commonv1.SecretRef) (map[string]any, error)
 
 type Options struct {
 	Bus *bus.Bus
 
-	Servers Lookup
+	Servers Await
 
 	Secrets Secrets
 }
 
 func Provide(opts Options) {
-	server := func(to commonv1.ObjectRef) (*atpds.Server, error) {
+	server := func(ctx context.Context, to commonv1.ObjectRef) (*atpds.Server, error) {
 		if opts.Servers == nil {
 			return nil, fmt.Errorf("%w: no in-process Pds lookup is configured", pdscontract.ErrUnsupported)
 		}
-		srv, ok := opts.Servers(strings.TrimSpace(to.Workspace), strings.TrimSpace(to.Name))
+		srv, ok := opts.Servers(ctx, strings.TrimSpace(to.Workspace), strings.TrimSpace(to.Name))
 		if !ok || srv == nil {
 			return nil, fmt.Errorf("%w: the Pds %s is not running in this process", pdscontract.ErrNotFound, to.String())
 		}
@@ -52,35 +54,35 @@ func Provide(opts Options) {
 		}
 	}
 	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityAccount, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (atprotorepo.Repo, error) {
-		srv, err := server(to)
+		srv, err := server(ctx, to)
 		if err != nil {
 			return nil, err
 		}
 		return local.NewRepo(ctx, srv, scope)
 	})
-	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityAccount, func(_ context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.Accounts, error) {
-		srv, err := server(to)
+	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityAccount, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.Accounts, error) {
+		srv, err := server(ctx, to)
 		if err != nil {
 			return nil, err
 		}
 		return local.NewAccounts(srv, secrets(to.Workspace), scope), nil
 	})
-	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilitySession, func(_ context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.Sessions, error) {
-		srv, err := server(to)
+	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilitySession, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.Sessions, error) {
+		srv, err := server(ctx, to)
 		if err != nil {
 			return nil, err
 		}
 		return local.NewSessions(srv, secrets(to.Workspace), scope), nil
 	})
-	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityServiceAuth, func(_ context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.ServiceAuth, error) {
-		srv, err := server(to)
+	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilityServiceAuth, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (pdscontract.ServiceAuth, error) {
+		srv, err := server(ctx, to)
 		if err != nil {
 			return nil, err
 		}
 		return local.NewServiceAuth(srv, scope), nil
 	})
-	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilitySync, func(_ context.Context, to commonv1.ObjectRef, _ []string) (pdscontract.Sync, error) {
-		srv, err := server(to)
+	bus.Provide(opts.Bus, GroupKind, pdscontract.CapabilitySync, func(ctx context.Context, to commonv1.ObjectRef, _ []string) (pdscontract.Sync, error) {
+		srv, err := server(ctx, to)
 		if err != nil {
 			return nil, err
 		}

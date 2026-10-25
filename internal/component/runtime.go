@@ -90,6 +90,7 @@ type Runtime struct {
 	cancel    context.CancelFunc
 	started   bool
 	closed    bool
+	changed   chan struct{}
 
 	callbackMu sync.Mutex
 	onStatus   StatusCallback
@@ -364,6 +365,68 @@ func (r *Runtime) forget(inst *instance) {
 		delete(r.instances, inst.uid)
 	}
 	r.mu.Unlock()
+	r.broadcast()
+}
+
+func (r *Runtime) Await(ctx context.Context, key Key, serves func(Service) bool) (Service, bool) {
+	if r == nil || r.registry == nil {
+		return nil, false
+	}
+	timer := time.NewTimer(r.readyTimeoutOf())
+	defer timer.Stop()
+	for {
+		changed := r.changes()
+		if svc, ok := r.registry.Service(key.Workspace, key.Kind, key.Name); ok && (serves == nil || serves(svc)) {
+			return svc, true
+		}
+		if !r.pending(key) {
+			return nil, false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-timer.C:
+			return nil, false
+		case <-changed:
+		}
+	}
+}
+
+func (r *Runtime) pending(key Key) bool {
+	r.mu.Lock()
+	insts := make([]*instance, 0, len(r.instances))
+	for _, inst := range r.instances {
+		insts = append(insts, inst)
+	}
+	r.mu.Unlock()
+	for _, inst := range insts {
+		inst.mu.Lock()
+		coming := inst.key == key && !inst.spec.Suspend && !inst.spec.Deleting && inst.status.Phase != PhaseFailed
+		inst.mu.Unlock()
+		if coming {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) changes() <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.changed == nil {
+		r.changed = make(chan struct{})
+	}
+	return r.changed
+}
+
+func (r *Runtime) broadcast() {
+	r.mu.Lock()
+	changed := r.changed
+	r.changed = nil
+	r.mu.Unlock()
+	if changed != nil {
+		close(changed)
+	}
 }
 
 func (r *Runtime) startLocked(ctx context.Context, inst *instance, spec ComponentSpec) (ComponentStatus, error) {
@@ -446,8 +509,12 @@ func (r *Runtime) stopInstanceLocked(ctx context.Context, inst *instance) error 
 		inst.stopClaimed = true
 	}
 	inst.stopping = true
+	uid := inst.uid
 	inst.mu.Unlock()
 
+	if r.registry != nil && r.registry.Unregister(key, uid) {
+		r.broadcast()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -760,6 +827,7 @@ func (r *Runtime) register(inst *instance, svc Service, endpoints []Endpoint) bo
 	}
 	inst.mu.Unlock()
 	r.registry.Put(entry)
+	r.broadcast()
 	return true
 }
 
@@ -775,9 +843,11 @@ func (r *Runtime) unregister(inst *instance) {
 	if r.bus != nil {
 		r.bus.Remove(key)
 	}
+	r.broadcast()
 }
 
 func (r *Runtime) emit(ctx context.Context, spec ComponentSpec, status ComponentStatus) {
+	r.broadcast()
 	defer func() {
 		if value := recover(); value != nil {
 			r.log.Error("component: status callback panicked",

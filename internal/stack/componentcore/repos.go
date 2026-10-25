@@ -30,15 +30,20 @@ func (c *Core) repoOptions() repos.Options {
 		Dynamic: atprotorecord.DynamicFactory(cfg.DynamicFactory),
 		Network: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: atidentity.DefaultDirectory(), HTTP: external}),
 		Pds: func(workspace, name string) (*atpds.Server, bool) {
-			svc, ok := c.registry.Service(workspace, "Pds", name)
+			svc, ok := c.registry.Service(workspace, pdsKind, name)
 			if !ok {
 				return nil, false
 			}
-			server, ok := svc.(interface{ Server() *atpds.Server })
+			srv := pdsServer(svc)
+			return srv, srv != nil
+		},
+		AwaitPds: func(ctx context.Context, workspace, name string) (*atpds.Server, bool) {
+			svc, ok := c.runtime.Await(ctx, component.Key{Workspace: workspace, Kind: pdsKind, Name: name},
+				func(svc component.Service) bool { return pdsServer(svc) != nil })
 			if !ok {
 				return nil, false
 			}
-			srv := server.Server()
+			srv := pdsServer(svc)
 			return srv, srv != nil
 		},
 		Secrets: func(ctx context.Context, workspace string, ref commonv1.SecretRef) (map[string]any, error) {
@@ -53,6 +58,16 @@ func (c *Core) repoOptions() repos.Options {
 			return credential.Data, nil
 		},
 	}
+}
+
+const pdsKind = "Pds"
+
+func pdsServer(svc component.Service) *atpds.Server {
+	server, ok := svc.(interface{ Server() *atpds.Server })
+	if !ok {
+		return nil
+	}
+	return server.Server()
 }
 
 func (c *Core) credentialResolver(workspace string) (*credentials.Resolver, error) {

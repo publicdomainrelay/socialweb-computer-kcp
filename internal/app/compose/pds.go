@@ -124,6 +124,7 @@ func AppPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 	if err := os.MkdirAll(filepath.Join(stateDir, pdssvc.RepoKeyDir), 0o700); err != nil {
 		return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds repo key directory: %w", err)
 	}
+	hostnames = pdsHostnames(handle, hostnames)
 	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
 	if publicURL == "" && !requireIngress {
 		publicURL = appPdsFallbackURL(network, hostnames)
@@ -154,6 +155,14 @@ func AppPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 		StableHost:     stableHost,
 		OAuth:          oauth,
 	}, nil
+}
+
+func pdsHostnames(handle string, hostnames []string) []string {
+	handle = strings.TrimSpace(handle)
+	if handle == "" || slices.ContainsFunc(hostnames, func(h string) bool { return strings.EqualFold(strings.TrimSpace(h), handle) }) {
+		return hostnames
+	}
+	return append([]string{handle}, hostnames...)
 }
 
 func DesiredPds(desired []Desired) (Desired, bool) {
