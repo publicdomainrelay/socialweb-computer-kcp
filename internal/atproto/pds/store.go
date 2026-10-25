@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
-	_ "modernc.org/sqlite"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 )

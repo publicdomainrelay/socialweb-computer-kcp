@@ -36,6 +36,8 @@ const (
 type Config struct {
 	Kubeconfig string
 
+	Rest *rest.Config
+
 	Workspace string
 
 	Layout devinstance.Layout
@@ -101,7 +103,11 @@ type Composer struct {
 
 func New(cfg Config) (*Composer, error) {
 	var restCfg *rest.Config
-	if cfg.Kube == nil {
+	switch {
+	case cfg.Kube != nil:
+	case cfg.Rest != nil:
+		restCfg = rest.CopyConfig(cfg.Rest)
+	default:
 		var err error
 		restCfg, err = kcpserver.FrontRestConfig(cfg.Kubeconfig)
 		if err != nil {

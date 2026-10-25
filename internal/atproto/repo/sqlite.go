@@ -18,7 +18,6 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
-	_ "modernc.org/sqlite"
 )
 
 const schemaRepos = `CREATE TABLE IF NOT EXISTS atrepo_repos (
