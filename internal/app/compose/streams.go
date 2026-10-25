@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -207,7 +206,7 @@ type PublicSources struct {
 }
 
 func RequesterPublicSources(comms *v1alpha1.MarketComms, network *v1alpha1.MarketNetworkValue, mode v1alpha1.MarketCommsMode) PublicSources {
-	if mode != v1alpha1.MarketCommsModeFirehose {
+	if mode != v1alpha1.MarketCommsModeFirehose && mode != v1alpha1.MarketCommsModeBoth {
 		return PublicSources{}
 	}
 	return PublicSources{Relays: comms.FirehoseRelays(network), Jetstreams: comms.FirehoseJetstreams()}
@@ -241,10 +240,6 @@ func (p PublicSources) sources() []rootSource {
 
 type MarketStreams struct {
 	Links []Link
-
-	Bidders []v1alpha1.BidderStreamStatus
-
-	RequeueAfter time.Duration
 }
 
 func RequesterCommsMode(comms *v1alpha1.MarketComms, forceFirehose bool) v1alpha1.MarketCommsMode {
@@ -266,9 +261,9 @@ type marketStreamRef struct {
 
 	dids []string
 
-	derived bool
+	bound bool
 
-	public bool
+	resume eventsv1alpha1.EventStreamResume
 }
 
 func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (MarketStreams, error) {
@@ -277,45 +272,52 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 	if err != nil {
 		return MarketStreams{}, err
 	}
-	publicRefs, publicLinks, err := c.applyPublicSources(ctx, r, ws, s.Role, s.Public)
+	publicRefs, publicLinks, err := c.applySources(ctx, r, ws, s.Role, publicSourceValue, s.Public.sources())
 	if err != nil {
 		return MarketStreams{}, err
 	}
 	links = append(links, publicLinks...)
-	out := MarketStreams{}
-	mode := streamMode(s)
-	derive := s.Role == RequesterStreamRole && (mode == v1alpha1.MarketCommsModeFirehose || mode == v1alpha1.MarketCommsModeBoth)
-	var bidders []bidderStream
-	if derive {
-		if bidders, out.RequeueAfter, err = c.bidderStreams(ctx, ws, time.Now()); err != nil {
+	if err := c.pruneRetiredBidderSources(ctx, ws, s.Role); err != nil {
+		return MarketStreams{}, err
+	}
+	var requesters []string
+	if s.Role == BidderStreamRole {
+		if requesters, err = c.liveRequesters(ctx, ws); err != nil {
 			return MarketStreams{}, err
 		}
 	}
-	derivedRefs, err := c.applyBidderSources(ctx, r, ws, s.Role, bidders)
+	requesterRefs, requesterLinks, err := c.applySources(ctx, r, ws, s.Role, requesterSourceValue, requesterSources(s.Comms, s.Sources.Network, requesters))
 	if err != nil {
 		return MarketStreams{}, err
 	}
-	if mode != v1alpha1.MarketCommsModeFirehose && mode != v1alpha1.MarketCommsModeBoth {
-		out.Links = links
-		return out, c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, nil)
-	}
+	links = append(links, requesterLinks...)
+	mode := streamMode(s)
 	var refs []marketStreamRef
-	for _, ref := range marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose && len(publicRefs) == 0) {
-		refs = append(refs, marketStreamRef{ref: ref})
+	if mode == v1alpha1.MarketCommsModeFirehose || mode == v1alpha1.MarketCommsModeBoth {
+		for _, ref := range marketSourceRefs(ws, s.Comms, s.Sources.Network, s.ForceFirehose && len(publicRefs) == 0) {
+			refs = append(refs, marketStreamRef{ref: ref})
+		}
+		for _, ref := range publicRefs {
+			refs = append(refs, marketStreamRef{ref: ref, bound: true, resume: eventsv1alpha1.EventStreamResumeLive})
+		}
+		if len(refs) == 0 && (mode == v1alpha1.MarketCommsModeFirehose || s.Role != RequesterStreamRole) {
+			return MarketStreams{}, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
+		}
 	}
-	for _, ref := range publicRefs {
-		refs = append(refs, marketStreamRef{ref: ref, public: true})
+	var requesterStreams []string
+	for _, ref := range requesterRefs {
+		refs = append(refs, marketStreamRef{ref: ref, dids: requesters, bound: true, resume: eventsv1alpha1.EventStreamResumeRecent})
 	}
-	if len(refs) == 0 && !derive {
-		return MarketStreams{}, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
+	if s.Role == BidderStreamRole {
+		defer func() { c.logRequesterStreams(ws, s.Role, requesters, requesterStreams) }()
 	}
-	for i, ref := range derivedRefs {
-		refs = append(refs, marketStreamRef{ref: ref, dids: bidders[i].dids, derived: true})
+	if len(refs) == 0 {
+		return MarketStreams{Links: links}, c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, nil)
 	}
 	streamLabels := map[string]string{marketStreamLabel: s.Role}
 	sink := eventstream.MarketHandlerName(s.Role, ws)
 	keep := map[string]bool{}
-	for i, entry := range refs {
+	for _, entry := range refs {
 		ref := entry.ref
 		name := marketStreamName(s.Role, ref)
 		keep[name] = true
@@ -327,18 +329,19 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 			Spec: eventsv1alpha1.EventStreamSpec{
 				SourceRef: sourceRef,
 				Filter:    eventsv1alpha1.EventStreamFilter{Collections: slices.Clone(MarketStreamCollections), DIDs: slices.Clone(entry.dids)},
+				Resume:    entry.resume,
 				Sink:      eventsv1alpha1.EventStreamSink{Kind: eventsv1alpha1.EventStreamSinkHandler, Name: sink},
 			}}
-		switch {
-		case entry.public:
-			stream.Spec.Resume = eventsv1alpha1.EventStreamResumeLive
-		case s.ForceFirehose && !entry.derived:
+		if s.ForceFirehose && entry.resume == "" {
 			stream.Spec.Cursor = new(int64(0))
 		}
 		if err := c.ApplyTyped(ctx, r, ws, eventsv1alpha1.EventStreamGVR, eventsv1alpha1.GroupVersion.String(), "EventStream", stream); err != nil {
 			return MarketStreams{}, err
 		}
-		if !entry.public {
+		if len(entry.dids) > 0 {
+			requesterStreams = append(requesterStreams, name)
+		}
+		if !entry.bound {
 			user, err := c.userSourceLink(ctx, s.Role, ref)
 			if err != nil {
 				return MarketStreams{}, err
@@ -347,14 +350,6 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 		}
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
 			Cap(events.CapabilitySubscribe, append(slices.Clone(MarketStreamCollections), entry.dids...)...)))
-		if entry.derived {
-			b := bidders[i-(len(refs)-len(derivedRefs))]
-			status := v1alpha1.BidderStreamStatus{EventStream: name, Pds: b.pds, Dids: slices.Clone(b.dids), Active: b.active}
-			if !b.seen.IsZero() {
-				status.SeenAt = b.seen.UTC().Format(time.RFC3339)
-			}
-			out.Bidders = append(out.Bidders, status)
-		}
 	}
 	links = append(links, SelectorLink(eventLinkName(s.Role, "deliver", ws, sink), streamSelector(ws, streamLabels, nil),
 		commonv1.ObjectRef{Group: eventsv1alpha1.GroupName, Kind: events.HandlerKind, Name: sink, Workspace: ws},
@@ -362,11 +357,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 	if err := c.Prune(ctx, ws, eventsv1alpha1.EventStreamGVR, marketStreamLabel+"="+s.Role, keep); err != nil {
 		return MarketStreams{}, err
 	}
-	if derive {
-		c.logBidderStreams(ws, s.Role, out.Bidders)
-	}
-	out.Links = links
-	return out, nil
+	return MarketStreams{Links: links}, nil
 }
 
 func (c *Composer) applyRootSources(ctx context.Context, r Root, ws string, in SourceInput) ([]Link, error) {
@@ -416,12 +407,12 @@ func (c *Composer) applyRootSources(ctx context.Context, r Root, ws string, in S
 	return links, nil
 }
 
-func (c *Composer) applyPublicSources(ctx context.Context, r Root, ws, role string, p PublicSources) ([]commonv1.ObjectRef, []Link, error) {
-	labels := map[string]string{marketSourceLabel: publicSourceValue + role}
+func (c *Composer) applySources(ctx context.Context, r Root, ws, role, value string, sources []rootSource) ([]commonv1.ObjectRef, []Link, error) {
+	labels := map[string]string{marketSourceLabel: value + role}
 	keep := map[string]bool{}
 	var refs []commonv1.ObjectRef
 	var links []Link
-	for _, s := range p.sources() {
+	for _, s := range sources {
 		keep[s.Name] = true
 		backendRef, backendGVR, backend := s.backend()
 		if err := c.ApplyTyped(ctx, r, ws, backendGVR, eventsv1alpha1.GroupVersion.String(), backendRef.Kind, withLabels(backend, labels)); err != nil {
@@ -440,7 +431,7 @@ func (c *Composer) applyPublicSources(ctx context.Context, r Root, ws, role stri
 			From: exposurev1alpha1.ComponentLinkFrom{Ref: &source}, To: backendRef,
 			Capabilities: []exposurev1alpha1.LinkCapability{Cap(events.CapabilitySubscribe, events.ScopeAll)}}})
 	}
-	selector := marketSourceLabel + "=" + publicSourceValue + role
+	selector := marketSourceLabel + "=" + value + role
 	for _, gvr := range []schema.GroupVersionResource{eventsv1alpha1.EventSourceGVR, eventsv1alpha1.RelayEventSourceGVR, eventsv1alpha1.JetstreamEventSourceGVR} {
 		if err := c.Prune(ctx, ws, gvr, selector, keep); err != nil {
 			return nil, nil, err

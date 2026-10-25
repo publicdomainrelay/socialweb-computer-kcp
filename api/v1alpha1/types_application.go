@@ -345,20 +345,6 @@ type ApplicationStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	Market *MarketLoopStatus `json:"market,omitempty"`
-
-	BidderStreams []BidderStreamStatus `json:"bidderStreams,omitempty"`
-}
-
-type BidderStreamStatus struct {
-	EventStream string `json:"eventStream"`
-
-	Pds string `json:"pds"`
-
-	Dids []string `json:"dids,omitempty"`
-
-	Active bool `json:"active,omitempty"`
-
-	SeenAt string `json:"seenAt,omitempty"`
 }
 
 const AnnotationTTLAfterFinished = "socialweb.computer/ttl-after-finished"

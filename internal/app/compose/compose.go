@@ -86,7 +86,9 @@ type Composer struct {
 
 	trusts Trusts
 
-	bidderSets sync.Map
+	requesterSets sync.Map
+
+	requesters requesterIndex
 }
 
 func New(cfg Config) (*Composer, error) {

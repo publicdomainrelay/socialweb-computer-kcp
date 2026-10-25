@@ -416,7 +416,6 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	}
 	q.rememberBidders(bidders)
 	considered := consideredBidderDIDs(bidders, only)
-	r.noteBidderRepos(ctx, considered)
 	catchUpCtx, stopCatchUp := context.WithCancel(ctx)
 	r.catchUpBids(catchUpCtx, considered, rfpURI, rfpCID)
 	r.solicitBids(ctx, bidders, rfpURI, rfpCID)

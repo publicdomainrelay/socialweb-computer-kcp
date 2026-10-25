@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -64,8 +63,6 @@ type pass struct {
 	st v1alpha1.ApplicationStatus
 
 	links []compose.Link
-
-	requeue time.Duration
 }
 
 func (p *pass) write(phase v1alpha1.ApplicationPhase, msg string) (ctlruntime.Result, error) {
@@ -127,7 +124,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
-	return compose.SoonerRequeue(res, p.requeue), err
+	return res, err
 }
 
 func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
@@ -341,7 +338,6 @@ func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID s
 	if err != nil {
 		return err
 	}
-	p.st.BidderStreams, p.requeue = streams.Bidders, streams.RequeueAfter
 	return p.c.ApplyLinks(ctx, p.r, "events", streams.Links)
 }
 

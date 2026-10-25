@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -87,8 +86,6 @@ type pass struct {
 
 	ws string
 
-	requeue time.Duration
-
 	st v1alpha1.ApplicationStatus
 
 	vault []v1alpha1.ApplicationComponent
@@ -152,7 +149,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
-	return compose.SoonerRequeue(res, p.requeue), err
+	return res, err
 }
 
 func (p *pass) deleting(msg string) (ctlruntime.Result, error) {
@@ -680,13 +677,13 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if err := p.c.EnsureLinked(ctx, p.r, all, desired); err != nil {
 		return p.retry("", err)
 	}
-	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole, Workspace: ws,
-		Comms:   compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms),
-		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
+	comms, force := compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms), compose.OAuthReceiveOnly(plan.Mode)
+	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole, Workspace: ws, Comms: comms,
+		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: force,
+		Public: compose.RequesterPublicSources(comms, o.Spec.Network, compose.RequesterCommsMode(comms, force))})
 	if err != nil {
 		return p.fail(err)
 	}
-	p.st.BidderStreams, p.requeue = streams.Bidders, streams.RequeueAfter
 	if err := c.ApplyLinks(ctx, r, "events", streams.Links, ws); err != nil {
 		return ctlruntime.Result{}, err
 	}

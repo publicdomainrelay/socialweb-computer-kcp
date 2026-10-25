@@ -64,7 +64,7 @@ func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) err
 	ctl := &Controller{c: c, guard: guard, rotated: map[string]int64{}}
 	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
-	opts = append(opts, compose.DrainWatch[*v1alpha1.ComputeVM](c, compose.ExportComputeVMs, Kind),
+	opts = append(opts, compose.ComputeVMWatch(c, compose.ExportComputeVMs, Kind),
 		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.MarketBidder](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketbidder: registering the MarketBidder controller: %w", err)
@@ -449,7 +449,7 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 }
 
 func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID string) error {
-	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: "bidder", Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindBidder, BidderComponent, p.o.Spec.Comms),
+	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.BidderStreamRole, Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindBidder, BidderComponent, p.o.Spec.Comms),
 		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return err

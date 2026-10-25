@@ -11170,6 +11170,52 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
     `wantedCollections=com.publicdomainrelay.temp.fo*` got a 400; `compute.events.*` with one
     `wantedDids` was echoed in the info frame.
 
+### No per-bidder streams on the requester; the bidder watches its requesters' records as a fallback (2026-10-25)
+
+- **Before.** In comms modes Firehose and Both the requester composer derived one subscribeRepos per
+  discovered bidder PDS (`bidder-pds-*`, from `status.bidderRepos` of each ComputeContract, kept
+  30 min after the contract ended by a delayed requeue). A bidder on a shared host (a bsky.network
+  PDS) made the requester subscribe to that host's whole firehose: the browser page saw a GC storm
+  from the replay. Both had no public stream: its stream half was the network relay and these
+  derived streams. Requester events to the guest (guest.publicKey, guest.signalWebRTC, guest.secrets)
+  reached the bidder only through submitEvent.
+- **The decision (the user's, 2026-10-25).**
+  - The requester composes no per-bidder stream and classifies no PDS; no bidder DID, PDS host or
+    hostname pattern is configured anywhere. A did:key bidder requestCrawls our relay
+    (relay.mini-cloud-0002.chadig.com, which filters on the server) and a bsky-hosted bidder is on the
+    v2 Jetstreams, so the public sources carry every bidder's records. Both gets the same public
+    sources as Firehose (`RequesterPublicSources`, the same `spec.comms.relayUrls` and
+    `spec.comms.jetstreamUrls` overrides; the network relay replaces the public relay on a market
+    network). `status.bidderRepos` (ComputeContract) and `status.bidderStreams` (the application
+    roots) are gone, with the requester's bidder PDS lookup that fed them, and the `bidder-pds-*`
+    sources of an upgraded instance are pruned by their label `socialweb.computer/bidder-source`.
+  - The bidder (any comms mode) composes, while it has live ComputeVMs, EventStreams of the 22 market
+    NSIDs with `dids` = the requester DIDs of those ComputeVMs, read at runtime
+    (`internal/app/compose/requesterstreams.go`): `requesters-relay-<host>` (the network relay, else
+    `spec.comms.relayUrls` or our relay) and `requesters-jetstream-<host>` (`spec.comms.jetstreamUrls`,
+    else `wss://jetstream.us-east.bsky.network` when there is no network relay). They feed the bidder's
+    market sink, the same intake as submitEvent (`applyMarketEvent`), deduplicated by `uri|cid` in
+    the sink, by the StateSync name and by the guest event queue; submitEvent stays primary. A
+    ComputeVM watch (`compose.ComputeVMWatch`) reconciles the MarketBidder only when the live
+    requester set changes; a new set is a spec change and the stream reconnects with the new filter.
+  - EventStream `spec.resume: Recent` (new): resume from the stored cursor only when it was saved in
+    the last `delivery.RecentResumeWindow` (10 min; the cursor file now records `savedAt`, a stop
+    flushes it), else start live. The bidder's requester streams use it, so a restart or a filter
+    change does not drop an offer, and an old cursor never replays.
+- **Readings.** Market network `dstrm` (2 bidders, network relay, this build plus a dev-only flag file
+  that made the bidder's submitEvent refuse guest events; the flag is not in the tree):
+  - Both (default) `run request --hold --tunnel ssh:22:webrtc --transport webrtc`: the requester's
+    streams were `relay-network` and the two Jetstreams, no `bidder-pds-*`; Held, `uname`/`id` over
+    webrtc (ssh 0.9 s). Stand-ins for the old objects (a `bidder-pds-*` RelayEventSource and
+    EventSource with the old label and a `market-requester-*` EventStream on them) were pruned within
+    9 s. The winning bidder composed `requesters-relay-127.0.0.1-<port>` (resume Recent, `dids` the
+    requester's DID, `serverFilter.supported` true) 3.3 s after its ComputeVM was applied; the losing
+    bidder composed none; release removed it (`compose_requester_streams ... set none`).
+  - With submitEvent refusing guest events, `run request ssh --transport webrtc` on the held contract
+    printed `uid=0`: the guest.publicKey and the offer were queued from the stream 53 ms and 83 ms
+    after the requester published them (`requester_contract_event_published` to `a requester guest
+    event is queued`), and the refused submitEvent calls came 1.6 s after publication.
+
 ## 16. Vocabulary
 
 | | |

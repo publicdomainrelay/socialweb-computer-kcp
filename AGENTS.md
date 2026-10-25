@@ -91,11 +91,15 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   accept and the release; `run request list`, `run request release` and `run request resume` manage
   the invocations it recorded.
 - Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
-  XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Both (the requester
-  default) adds EventStreams from the network relay, `spec.comms.eventSourceRefs` and one subscribeRepos
-  per discovered bidder PDS. Firehose has no inbound endpoint; the requester composer
-  (`internal/app/compose/streams.go`, the same code in the browser build) adds the default public
-  firehoses (`api/v1alpha1` `DefaultFirehoseRelayURLs`, `DefaultFirehoseJetstreamURLs`): our relay
+  XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Firehose has no
+  inbound endpoint. Both (the requester default) is the ingress plus the same streams as Firehose. In
+  Firehose and Both the requester composer (`internal/app/compose/streams.go`, the same code in the
+  browser build) composes EventStreams from the network relay, `spec.comms.eventSourceRefs` and the
+  default public firehoses; it composes no per-bidder stream (no subscribeRepos of a bidder PDS: a
+  did:key bidder requestCrawls our relay and a bsky-hosted one is on the Jetstreams, and a shared
+  host replays every repo it holds), and it prunes the old `bidder-pds-*` sources by their label
+  `socialweb.computer/bidder-source`. The defaults (`api/v1alpha1` `DefaultFirehoseRelayURLs`,
+  `DefaultFirehoseJetstreamURLs`): our relay
   `https://relay.mini-cloud-0002.chadig.com` (subscribeRepos; on a network with a relay host the network
   relay replaces it) and the two Jetstream v2 instances Bluesky documents,
   `wss://jetstream.us-east.bsky.network` and `wss://jetstream.us-west.bsky.network` at
@@ -116,6 +120,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `uri|cid` it took in the last 15 s (at most 10000 keys) and logs `market_event_duplicate_dropped` once
   per key with the running count. A relay stream reconnects 1000 events back, a Jetstream 30 s back,
   after a 1 s backoff that doubles to 30 s.
+- The bidder's requester streams (any comms mode, `internal/app/compose/requesterstreams.go`): requester
+  events reach the bidder through submitEvent first; as a record-only fallback, while the bidder has
+  live ComputeVMs (not deleted, not Lost or Failed), it composes EventStreams with the 22 market NSIDs
+  and `dids` = the requester DIDs of those ComputeVMs (at most 100, read at runtime, never configured):
+  sources `requesters-relay-<host>` (the network relay, else `spec.comms.relayUrls` or our relay; the
+  relay filters on the server) and `requesters-jetstream-<host>` (`spec.comms.jetstreamUrls`, else
+  `wss://jetstream.us-east.bsky.network` when the network has no relay). They deliver to the bidder's
+  market sink (the same intake as submitEvent, deduplicated by `uri|cid`). A ComputeVM watch
+  reconciles the MarketBidder only when that DID set changes; a new set is a spec change, so the stream
+  reconnects with the new filter. Their `spec.resume` is `Recent`: after a restart or a spec change the
+  stream resumes from its stored cursor only when it was saved in the last
+  `delivery.RecentResumeWindow` (10 min), else it starts live. No live ComputeVM, no stream.
 
 ## Guest transports, guest events and the host-loopback fence
 
