@@ -241,7 +241,15 @@ type adoptState struct {
 
 	setApplied bool
 
-	pending map[string]bool
+	pending map[string]map[string]adoptObject
+}
+
+type adoptObject struct {
+	name string
+
+	namespace string
+
+	uid types.UID
 }
 
 type adoptions struct {
@@ -254,7 +262,7 @@ func adoptKey(cluster, rootKind, name string) string {
 	return cluster + "/" + rootKind + "/" + name
 }
 
-func (a *adoptions) due(r Root, now time.Time) map[string]bool {
+func (a *adoptions) due(r Root, now time.Time) (map[string]bool, map[string]map[string]adoptObject) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.roots == nil {
@@ -269,14 +277,14 @@ func (a *adoptions) due(r Root, now time.Time) map[string]bool {
 		for _, k := range adoptKinds {
 			all[k.Kind] = true
 		}
-		return all
+		return all, nil
 	}
-	kinds := st.pending
+	objects := st.pending
 	st.pending = nil
-	return kinds
+	return nil, objects
 }
 
-func (a *adoptions) mark(cluster, rootKind, name, kind string) {
+func (a *adoptions) mark(cluster, rootKind, name, kind string, obj metav1.Object) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	st := a.roots[adoptKey(cluster, rootKind, name)]
@@ -284,9 +292,12 @@ func (a *adoptions) mark(cluster, rootKind, name, kind string) {
 		return
 	}
 	if st.pending == nil {
-		st.pending = map[string]bool{}
+		st.pending = map[string]map[string]adoptObject{}
 	}
-	st.pending[kind] = true
+	if st.pending[kind] == nil {
+		st.pending[kind] = map[string]adoptObject{}
+	}
+	st.pending[kind][obj.GetNamespace()+"/"+obj.GetName()] = adoptObject{name: obj.GetName(), namespace: obj.GetNamespace(), uid: obj.GetUID()}
 }
 
 func (a *adoptions) setApplied(r Root) {
@@ -307,7 +318,7 @@ func (c *Composer) noteAdoptable(rootKind, kind string, reqs []ctlruntime.Reques
 	for _, req := range reqs {
 		cluster := cmp.Or(req.Cluster, src.Cluster)
 		if adoptable(rootKind, kind, obj, OwnerName(rootKind, req.Name)) {
-			c.adoptions.mark(cluster, rootKind, req.Name, kind)
+			c.adoptions.mark(cluster, rootKind, req.Name, kind, obj)
 		}
 	}
 }
@@ -316,43 +327,55 @@ func (c *Composer) Adopt(ctx context.Context, r Root) {
 	if r.Deleting || r.UID == "" {
 		return
 	}
-	kinds := c.adoptions.due(r, time.Now())
+	kinds, objects := c.adoptions.due(r, time.Now())
 	for _, k := range adoptKinds {
-		if !kinds[k.Kind] {
-			continue
-		}
-		ri, err := c.Client(r.Workspace, k.GVR)
-		if err != nil {
-			continue
-		}
-		items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{})
-		if err != nil {
-			continue
-		}
-		for i := range items {
-			u := &items[i]
-			if !adoptable(r.Kind, k.Kind, u, r.Owner()) {
-				continue
+		switch {
+		case kinds[k.Kind]:
+			c.adoptAll(ctx, r, k)
+		case len(objects[k.Kind]) > 0:
+			apiVersion := k.GVR.GroupVersion().String()
+			for _, o := range objects[k.Kind] {
+				c.adoptOne(ctx, r, k, apiVersion, k.Kind, o)
 			}
-			patch := NewDoc(u.APIVersion, u.Kind, u.Name)
-			meta := DocMeta(patch)
-			if u.Namespace != "" {
-				meta["namespace"] = u.Namespace
-			}
-			if u.UID != "" {
-				meta["uid"] = string(u.UID)
-			}
-			meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
-			if err := c.applyAs(ctx, r, r.AdoptManager(), r.Workspace, k.GVR, patch); err != nil {
-				if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-					c.log.Warn("adopting an intent object under its root", "root", r.Owner(), "kind", k.Kind, "name", u.Name, "err", err.Error())
-				}
-				continue
-			}
-			c.log.Info("an intent object hangs from its root", "root", r.Owner(), "kind", k.Kind, "name", u.Name)
-			c.samples.gcDirty.Store(true)
 		}
 	}
+}
+
+func (c *Composer) adoptAll(ctx context.Context, r Root, k adoptKind) {
+	ri, err := c.Client(r.Workspace, k.GVR)
+	if err != nil {
+		return
+	}
+	items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{})
+	if err != nil {
+		return
+	}
+	for i := range items {
+		u := &items[i]
+		if adoptable(r.Kind, k.Kind, u, r.Owner()) {
+			c.adoptOne(ctx, r, k, u.APIVersion, u.Kind, adoptObject{name: u.Name, namespace: u.Namespace, uid: u.UID})
+		}
+	}
+}
+
+func (c *Composer) adoptOne(ctx context.Context, r Root, k adoptKind, apiVersion, kind string, o adoptObject) {
+	patch := NewDoc(apiVersion, kind, o.name)
+	meta := DocMeta(patch)
+	if o.namespace != "" {
+		meta["namespace"] = o.namespace
+	}
+	if o.uid != "" {
+		meta["uid"] = string(o.uid)
+	}
+	meta["ownerReferences"] = []metav1.OwnerReference{r.OwnerRef()}
+	if err := c.applyAs(ctx, r, r.AdoptManager(), r.Workspace, k.GVR, patch); err != nil {
+		if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+			c.log.Warn("adopting an intent object under its root", "root", r.Owner(), "kind", k.Kind, "name", o.name, "err", err.Error())
+		}
+		return
+	}
+	c.log.Info("an intent object hangs from its root", "root", r.Owner(), "kind", k.Kind, "name", o.name)
+	c.samples.gcDirty.Store(true)
 }
 
 type quotaEntry struct {

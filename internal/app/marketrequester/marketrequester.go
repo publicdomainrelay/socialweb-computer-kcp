@@ -63,6 +63,8 @@ type pass struct {
 	st v1alpha1.ApplicationStatus
 
 	links []compose.Link
+
+	identityPhase v1alpha1.MarketIdentityPhase
 }
 
 func (p *pass) write(phase v1alpha1.ApplicationPhase, msg string) (ctlruntime.Result, error) {
@@ -119,8 +121,15 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	if r.Deleting {
 		return p.delete(ctx)
 	}
+	if c.Parked(r) {
+		return ctlruntime.Result{}, nil
+	}
 	res, err := p.reconcile(ctx)
 	if err == nil {
+		if reason := compose.ParkReason(p.st.Phase, p.identityPhase); reason != "" && !r.Suspend {
+			c.Park(ctx, r, compose.RequesterStreamRole, reason)
+			return res, nil
+		}
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
@@ -344,6 +353,7 @@ func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID s
 func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.MarketIdentity) (ctlruntime.Result, error) {
 	c, r, o := p.c, p.r, p.o
 	ws := r.Workspace
+	p.identityPhase = id.Status.Phase
 	switch id.Status.Phase {
 	case v1alpha1.MarketIdentityPhaseFailed, v1alpha1.MarketIdentityPhaseSessionExpired:
 		return p.write(v1alpha1.ApplicationPhaseFailed, "its MarketIdentity: "+id.Status.Message)
@@ -496,6 +506,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if id, err = c.Identity(ctx, ws, RequesterIdentity); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	p.identityPhase = id.Status.Phase
 	if desired, err = p.desired(ctx, plan, id, pdsHandle, pdsPublicURL, ingress, requireIngress, ingressRef); err != nil {
 		return p.fail(err)
 	}

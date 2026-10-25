@@ -102,6 +102,8 @@ type pass struct {
 	o *v1alpha1.MarketBidder
 
 	st v1alpha1.ApplicationStatus
+
+	identityPhase v1alpha1.MarketIdentityPhase
 }
 
 func (p *pass) log() *slog.Logger { return p.c.Log().With("marketbidder", p.o.Name) }
@@ -156,8 +158,15 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	if r.Deleting {
 		return p.delete(ctx)
 	}
+	if c.Parked(r) {
+		return ctlruntime.Result{}, nil
+	}
 	res, err := p.reconcile(ctx)
 	if err == nil {
+		if reason := compose.ParkReason("", p.identityPhase); reason != "" && !r.Suspend {
+			c.Park(ctx, r, "", reason)
+			return res, nil
+		}
 		c.Adopt(ctx, r)
 		c.ApplyQuotas(ctx, r, o.Spec.Quota)
 	}
@@ -465,6 +474,9 @@ func (p *pass) oauthEndpoints(ctx context.Context, snap compose.Snapshot) error 
 func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.MarketIdentity, mount string) (ctlruntime.Result, error) {
 	c, r, o := p.c, p.r, p.o
 	ws := r.Workspace
+	if id.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingScan {
+		p.identityPhase = id.Status.Phase
+	}
 	switch id.Status.Phase {
 	case v1alpha1.MarketIdentityPhaseFailed, v1alpha1.MarketIdentityPhaseSessionExpired:
 		return p.write(v1alpha1.ApplicationPhaseFailed, "its MarketIdentity: "+id.Status.Message)

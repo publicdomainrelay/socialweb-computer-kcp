@@ -82,6 +82,8 @@ type Composer struct {
 
 	adoptions adoptions
 
+	parking parking
+
 	roots rootIndex
 
 	drift map[string]*driftState
