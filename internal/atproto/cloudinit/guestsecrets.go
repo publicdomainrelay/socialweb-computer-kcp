@@ -15,6 +15,8 @@ const (
 
 	SecretsFetchUnit = "setup-secrets.service"
 
+	SecretsDoneStamp = "/var/lib/setup-secrets.done"
+
 	GuestSecretsTag = "secrets"
 
 	GuestSecretsFallbackSealed = "sealed"

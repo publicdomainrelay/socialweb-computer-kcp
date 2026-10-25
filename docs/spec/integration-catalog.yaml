@@ -1361,8 +1361,38 @@ entries:
       kind https and an https address; the contract's status.contract.networks holds {tag: web, kind:
       https, address, at, event}. Over HTTPS the address answers GET / with 200 and the nonce body.
     cases:
-      - "a --tunnel entry other than <tag>:<port>[:<transport>] or a transport other than opentunnel|webrtc: run request fails before any RFP"
+      - "a --tunnel entry other than <tag>:<port>[:<transport>][:shell[=<envFile>]] or <tag>:<port>:<envFile>, or a transport other than opentunnel|webrtc: run request fails before any RFP"
       - "a contract without spec.tunnels: Held as before, no networks, no tunnel unit and no setup-guest-binaries in its user_data"
+    cleanup: >
+      run request release <name>; the ComputeVM, FirecrackerVM and VM unit are gone and the address
+      no longer answers; standard teardown.
+
+  - id: TestAGuestShellTunnel
+    kind: integration
+    source: docs/plans/0032-guest-shell-tunnels.yaml ACC32-SHELL, ACC32-TAGGED-EVENT, ACC32-STATUS-NETWORKS, ACC32-HTTPS-AUTH, ACC32-HELD-UNCHANGED, ACC32-RELEASE; docs/plans/0034-webrtc-guest-transport.yaml (wootty back as the fallback shell, served from the bidder)
+    actors: [requester, bidder, kcp, pds, relay, VM host systemd user units, the opentunnel server, socialweb-guest-agent]
+    setup: >
+      Own network: --bidders 1, no gateway; the guest has outbound HTTPS. A secrets bundle with one
+      entry {"path": "/etc/wootty/wootty.env", "value": "WOOTTY_AUTH_TOKEN=<32 base64url
+      characters>\n"}. `run request --network <inst> --name sh<6 hex> --hold --secrets <bundle>
+      --tunnel wootty:7681:opentunnel:shell --tunnel ssh:22:webrtc --exec 'sleep 1500'` until Held,
+      then until status.contract.networks names wootty and ssh.
+    asserts: >
+      The contract is Held with an iroh vmAddress before any tunnel is up. On the guest the journal of
+      setup-guest-binaries names opentunnel, wootty and socialweb-guest-agent installed with the
+      sha256 of the bidder's socialweb-guest-downloads sidecars, fetched from
+      http://192.0.2.1:<port>/v1/downloads, and the guest made no request to github.com or ghcr.io;
+      the env file is root:root 0600, and guest-tunnel-wootty, wootty-wootty and socialweb-guest-agent
+      are active. status.contract.networks holds {tag: wootty, kind: https, address: <https URL>} and
+      {tag: ssh, kind: webrtc, address: "sha-256 <hex>"}. Over HTTPS the wootty address answers 401
+      on /api/sessions without the cookie and on /api/auth/bootstrap with a wrong bearer, 204 and a
+      wootty_auth cookie with the token, 200 on /api/sessions with the cookie and 200 with the wootty
+      page on /. `run request ssh <name> --transport webrtc --exec 'uname -a'` prints Linux. The
+      token is in no kcp object, record or log line.
+    cases:
+      - "a shell entry without spec.secretsRef: the contract is Failed before any RFP"
+      - "a shell entry on transport webrtc: run request fails before any RFP"
+      - "a token shorter than 32 characters: wootty-<tag> does not start and the URL serves no shell"
     cleanup: >
       run request release <name>; the ComputeVM, FirecrackerVM and VM unit are gone and the address
       no longer answers; standard teardown.

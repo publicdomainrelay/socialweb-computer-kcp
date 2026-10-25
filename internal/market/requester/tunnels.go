@@ -1,10 +1,12 @@
 package requester
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -18,12 +20,26 @@ var (
 	networkTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 	dtlsFingerprintRE = regexp.MustCompile(`^sha-256 [0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){31}$`)
+
+	errShellWithoutSecrets = errors.New("a shell needs its token in spec.secretsRef: the secrets bundle writes the shell's envFile on the guest")
 )
 
 func tunnelsOptions(contract v1alpha1.ComputeContract) (cloudinit.TunnelsOptions, error) {
 	opts := cloudinit.TunnelsOptions{}
+	shell := false
 	for _, t := range contract.Spec.Tunnels {
-		opts.Tunnels = append(opts.Tunnels, cloudinit.Tunnel{Tag: t.Tag, Port: t.Port, Server: t.Server, Transport: string(t.Transport)})
+		tunnel := cloudinit.Tunnel{Tag: t.Tag, Port: t.Port, Server: t.Server, Transport: string(t.Transport)}
+		if t.Shell != nil {
+			tunnel.ShellEnvFile = strings.TrimSpace(t.Shell.EnvFile)
+			if tunnel.ShellEnvFile == "" {
+				tunnel.ShellEnvFile = cloudinit.DefaultShellEnvFile
+			}
+			shell = true
+		}
+		opts.Tunnels = append(opts.Tunnels, tunnel)
+	}
+	if shell && contract.Spec.SecretsRef == nil {
+		return opts, errShellWithoutSecrets
 	}
 	if err := opts.Validate(); err != nil {
 		return opts, err

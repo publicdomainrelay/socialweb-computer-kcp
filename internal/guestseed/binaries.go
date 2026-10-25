@@ -22,6 +22,8 @@ const (
 
 	GuestBinaryAgent = "socialweb-guest-agent"
 
+	GuestBinaryWootty = "wootty"
+
 	GuestAgentUnit = "socialweb-guest-agent.service"
 
 	GuestSecretsUnit = cloudinit.GuestSecretsUnit
@@ -58,6 +60,8 @@ type GuestBinaryNeeds struct {
 
 	Agent bool
 
+	Wootty bool
+
 	Secrets bool
 
 	Units []string
@@ -76,13 +80,16 @@ func GuestDownloadName(name, arch string) string {
 }
 
 func (n GuestBinaryNeeds) Any() bool {
-	return n.OpenTunnel || n.Agent
+	return n.OpenTunnel || n.Agent || n.Wootty
 }
 
 func (n GuestBinaryNeeds) Names() []string {
 	var out []string
 	if n.OpenTunnel {
 		out = append(out, GuestBinaryOpenTunnel)
+	}
+	if n.Wootty {
+		out = append(out, GuestBinaryWootty)
 	}
 	if n.Agent {
 		out = append(out, GuestBinaryAgent)
@@ -102,6 +109,9 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 			out.Secrets = true
 		case strings.HasPrefix(p, unitDir+"guest-tunnel-") && !strings.HasPrefix(p, unitDir+"guest-tunnel-report-") && strings.HasSuffix(p, ".service"):
 			out.OpenTunnel = true
+			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))
+		case strings.HasPrefix(p, unitDir+cloudinit.ShellUnitPrefix) && strings.HasSuffix(p, ".service"):
+			out.Wootty = true
 			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))
 		}
 	}

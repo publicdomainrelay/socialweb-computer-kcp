@@ -22,7 +22,7 @@ var secretsModule UserDataModule = func(ctx Context) (UserDataPatch, error) {
 				Content: `#!/usr/bin/env bash
 set -euo pipefail
 
-STAMP=/var/lib/setup-secrets.done
+STAMP="` + SecretsDoneStamp + `"
 MARKER="` + GuestAgentSecretsPath + `"
 READY="` + GuestSecretsReadyPath + `"
 REQUEST="` + GuestSecretsRequestPath + `"

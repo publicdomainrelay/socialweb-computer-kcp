@@ -31,11 +31,14 @@ const (
 	GuestAgentDownloadPrefix = "socialweb-guest-agent-"
 
 	OpentunnelDownloadPrefix = "opentunnel-"
+
+	WoottyDownloadPrefix = "wootty-"
 )
 
 var RequiredDownloads = []string{
 	GuestAgentDownloadPrefix + "x86_64", GuestAgentDownloadPrefix + "aarch64",
 	OpentunnelDownloadPrefix + "x86_64", OpentunnelDownloadPrefix + "aarch64",
+	WoottyDownloadPrefix + "x86_64", WoottyDownloadPrefix + "aarch64",
 }
 
 type Deps struct {

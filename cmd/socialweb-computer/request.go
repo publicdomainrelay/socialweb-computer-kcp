@@ -269,25 +269,44 @@ func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
 	var out []v1alpha1.ComputeContractTunnel
 	for _, item := range splitList(value) {
 		parts := strings.Split(item, ":")
-		if len(parts) != 2 && len(parts) != 3 {
-			return nil, fmt.Errorf("%q: want <tag>:<port>[:<transport>]", item)
+		if len(parts) < 2 || len(parts) > 4 {
+			return nil, fmt.Errorf("%q: want <tag>:<port>[:<transport>][:shell[=<envFile>]] or <tag>:<port>:<envFile>", item)
 		}
 		port, err := strconv.Atoi(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("%q: port: %w", item, err)
 		}
 		tunnel := v1alpha1.ComputeContractTunnel{Tag: parts[0], Port: port}
-		if len(parts) == 3 {
-			switch transport := v1alpha1.TunnelTransport(parts[2]); transport {
+		rest := parts[2:]
+		if len(rest) > 0 && !strings.HasPrefix(rest[0], "/") && !isShellForm(rest[0]) {
+			switch transport := v1alpha1.TunnelTransport(rest[0]); transport {
 			case v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC:
 				tunnel.Transport = transport
 			default:
-				return nil, fmt.Errorf("%q: transport %q is not %s or %s", item, parts[2], v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC)
+				return nil, fmt.Errorf("%q: transport %q is not %s or %s", item, rest[0], v1alpha1.TunnelTransportOpenTunnel, v1alpha1.TunnelTransportWebRTC)
 			}
+			rest = rest[1:]
+		}
+		switch {
+		case len(rest) == 0:
+		case len(rest) == 1 && strings.HasPrefix(rest[0], "/") && len(parts) == 3:
+			tunnel.Shell = &v1alpha1.ComputeContractShell{EnvFile: rest[0]}
+		case len(rest) == 1 && isShellForm(rest[0]):
+			envFile, _ := strings.CutPrefix(strings.TrimPrefix(rest[0], "shell"), "=")
+			tunnel.Shell = &v1alpha1.ComputeContractShell{EnvFile: envFile}
+		default:
+			return nil, fmt.Errorf("%q: want <tag>:<port>[:<transport>][:shell[=<envFile>]] or <tag>:<port>:<envFile>", item)
+		}
+		if tunnel.Shell != nil && tunnel.Transport == v1alpha1.TunnelTransportWebRTC {
+			return nil, fmt.Errorf("%q: a wootty shell is served over opentunnel, not webrtc", item)
 		}
 		out = append(out, tunnel)
 	}
 	return out, nil
+}
+
+func isShellForm(part string) bool {
+	return part == "shell" || strings.HasPrefix(part, "shell=")
 }
 
 func (r *requestRun) webrtcTunnel() error {

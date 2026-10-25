@@ -106,13 +106,20 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     side is `run request proxy <name> --tag <tag>` (`internal/webrtcproxy`), and `run request ssh
     --transport webrtc` uses it as the ssh ProxyCommand; `run request --tunnel <tag>:<port>[:<transport>]`
     asks for tunnels. STUN is `stun:stun.cloudflare.com:3478` only; no TURN (plan 0034).
+  - The browser shell: ssh over webrtc comes first; wootty is the fallback. An opentunnel entry with
+    `shell {envFile}` (default `/etc/wootty/wootty.env`) runs `wootty-<tag>.service` on
+    `127.0.0.1:<port>` behind that tag's https URL; a shell on transport webrtc is invalid. The shell
+    needs `spec.secretsRef`: its `WOOTTY_AUTH_TOKEN` (32 characters or more, else it does not start)
+    comes only in the secrets bundle, and the unit waits for `setup-guest-binaries.service` and the
+    secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
+    older `<tag>:<port>:<envFile>`) asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
-  (`internal/guestseed`), which fetches opentunnel or socialweb-guest-agent from its own
+  (`internal/guestseed`), which fetches opentunnel, wootty or socialweb-guest-agent from its own
   GuestControlPlane `GET /v1/downloads/<sha256>/<name>` at `http://192.0.2.1:<port>` (a local
   Exposure), checks the sha256 and installs to `/usr/local/bin`. The binaries are the release asset
-  `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`). A guest never fetches from GitHub or
-  GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
+  `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`, which takes wootty from its pinned
+  ghcr.io image layer at build time). A guest never fetches from GitHub or GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
   `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,

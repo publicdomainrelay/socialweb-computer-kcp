@@ -99,7 +99,9 @@ only), `install`, the host contract, and the bootstrap layer that runs an instan
   relay-FQDN guest addresses and the guest package registry are removed. Two other transports are
   opt-in per entry of `spec.tunnels`: transport `opentunnel` (an https URL to a guest port) and
   transport `webrtc` (a datachannel to a guest port through socialweb-guest-agent); each comes back
-  as a tagged `vm.onNetwork` with its kind (plans 0032 and 0034, invariant 36).
+  as a tagged `vm.onNetwork` with its kind (plans 0032 and 0034, invariant 36). The browser shell is
+  ssh over webrtc first, with wootty behind an opentunnel tag (`spec.tunnels[].shell`) as the
+  fallback.
 - **Components:** the bidder's guest-facing endpoints (an allow-list proxy to the bidder's OpenBao for the guest's bind, login and identity token, `POST /v1/events`, `GET /v1/downloads` and the `compute.guest.subscribeEvents` subscription)
   are the GuestControlPlane component of the bidder; the NodeClaim fulfiller is the NodeClaim
   controller (`internal/controllers/nodeclaim`) bound by the gateway's GatewayAPI component.
@@ -3970,9 +3972,11 @@ A change must not break any of these. Each exists because something failed.
     `webrtc` bridges a datachannel to it through socialweb-guest-agent (a `vm.onNetwork` kind
     `webrtc` whose address is the agent's DTLS fingerprint). Each comes back signed by the bidder into
     `status.contract.networks` with its tag and kind (plans 0032 and 0034). The requester's tunnel
-    module carries config only; the bidder installs opentunnel and socialweb-guest-agent from its own
-    GuestControlPlane `/v1/downloads` over the host-loopback map, checked by sha256, and a guest
-    fetches no binary from the internet. WebRTC signaling is age ciphertext in
+    module carries config only; the bidder installs opentunnel, wootty and socialweb-guest-agent from
+    its own GuestControlPlane `/v1/downloads` over the host-loopback map, checked by sha256, and a
+    guest fetches no binary from the internet. A wootty shell rides an opentunnel tag only, needs
+    `spec.secretsRef`, and does not start without a `WOOTTY_AUTH_TOKEN` of 32 characters or more from
+    the secrets bundle. WebRTC signaling is age ciphertext in
     `compute.events.guest.signalWebRTC`, sealed to a `compute.events.guest.publicKey` of the other side;
     no SDP, ICE candidate, IP address or private key is in a record, kcp object or log, and the only
     STUN server is `stun:stun.cloudflare.com:3478`.
@@ -4230,7 +4234,7 @@ fail, rather than the code read against this document alone.
     index allocator. An HNS NAT network per host cannot give every guest this plan; M0-HNS-NETWORK measures
     what Windows can do with it.
   - iroh is the default and required guest transport; guests have no JSR registry or websocat, and a
-    tunnel module (opentunnel or socialweb-guest-agent, installed by the bidder from its own
+    tunnel module (opentunnel, wootty or socialweb-guest-agent, installed by the bidder from its own
     `/v1/downloads`) only when the contract's `spec.tunnels` asks for it (plans 0032 and 0034).
   - The core binary installs to `bin/<sha>/` with `bin/current` and `bin/previous` (not `versions/<sha256>/`);
     assets are `runtime/<sha256>/`, collected when unreferenced. `install` is behind `install.System` and
@@ -10761,6 +10765,8 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
 - **Removed (plan 0034 W0, 2026-10-24).** The browser shell, `spec.tunnels[].shell`,
   its pin, units and scripts are gone; the guest shell moves to the guest's sshd over a WebRTC
   datachannel (plan 0034). opentunnel https tunnels stay as they were.
+- **Restored (plan 0034, 2026-10-24).** The browser shell is back as the fallback to ssh over WebRTC,
+  served from the bidder instead of GHCR (the entry "wootty is back as the fallback browser shell").
 
 ### The tunnel's bring-up time is the opentunnel certificate (2026-10-24)
 
@@ -10849,7 +10855,7 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
     guest fetches from `http://192.0.2.1:<port>`. The bidder adds `setup-guest-binaries.service` with
     pins from its own sidecars whenever user_data has an opentunnel unit or the guest agent's
     `tunnels.json`; the requester's tunnel module carries config only. wootty and
-    `spec.tunnels[].shell` are gone (W0).
+    `spec.tunnels[].shell` were removed in W0 and came back as the fallback shell (the entry below).
   - The host-loopback fence (invariant 37): socialweb-vmexec loads an nf_tables bridge table in the
     guest's namespace before it creates the tap; TCP to 192.0.2.1 is accepted only on the ComputeVM's
     `spec.hostPorts` and reset otherwise, everything else to 192.0.2.1, to 127.0.0.0/8 and to the
@@ -10936,6 +10942,41 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   case the file was `600 root:root` under a `700` directory and `socialweb-guest-secrets.service`
   finished on the ready file; no file under the network's state dir (kine, logs, PDS stores) and no
   journal line held the test value; the ContractEvent and the records held 442 bytes of age armor.
+
+### wootty is back as the fallback browser shell, served from the bidder (2026-10-24, plan 0034)
+
+- **Before.** W0 removed wootty and `spec.tunnels[].shell`; the only shell was the guest's sshd over
+  iroh or a WebRTC datachannel. A browser that cannot run WebRTC (or a network that defeats STUN-only
+  ICE) had no shell.
+- **The decision (user, 2026-10-24).** ssh over webrtc stays first; wootty comes back as the
+  fallback. An opentunnel entry of `spec.tunnels` with `shell {envFile}` (default
+  `/etc/wootty/wootty.env`) gets `wootty-<tag>.service` (`/usr/local/bin/wootty-run.sh`) on
+  `127.0.0.1:<port>` behind that tag's https URL; a shell on transport webrtc is invalid (the CLI and
+  `cloudinit.TunnelsOptions.Validate` refuse it). The requester refuses a shell without
+  `spec.secretsRef` before the RFP (`errShellWithoutSecrets`) and puts no pin in user_data. The unit
+  orders itself after `setup-guest-binaries.service` and `cloudinit.SecretsReadyUnits`, and the run
+  script starts only once `/run/socialweb-guest-agent/secrets.ready` (or `/var/lib/setup-secrets.done`)
+  exists, the binary is installed and `WOOTTY_AUTH_TOKEN` has 32 characters or more; until then it
+  exits and systemd restarts it. The bidder installs wootty like opentunnel: `guestseed` sees a
+  `wootty-*.service` in user_data and adds the wootty pins from its own sidecars; GuestControlPlane
+  requires `wootty-{x86_64,aarch64}`. `scripts/build-guest-downloads.sh` takes the binary from the
+  pinned ghcr.io/icoretech/wootty 0.2.22 layer (`guestDownloads.files.wootty`, the pins W0 removed):
+  an anonymous pull token, the blob checked by its sha256, then the member `usr/local/bin/wootty`.
+  The asset grew from 34.5 MB to 56.8 MB raw (11.4 to 20.4 MB zstd).
+- **After (live, market network p34woo, --bidders 1, local bidder with `--guest-host-udp true`).**
+  `run request --hold --secrets <bundle> --tunnel wootty:7681:opentunnel:shell,ssh:22:webrtc` was
+  Held 29 s after it started. setup-guest-binaries installed opentunnel, wootty and
+  socialweb-guest-agent from the bidder in 1 s, wootty started 1 s later on 127.0.0.1:7681 after the
+  secrets landed (env file `600 root:root`), and `status.contract.networks` held
+  `{ssh, webrtc, sha-256 ...}` at boot and `{wootty, https, https://<route>.<id>.opentunnel.xyz}` 113 s
+  later (the certificate). Over HTTPS `/api/sessions` answered 401 without the cookie, the bootstrap
+  401 with a wrong bearer and 204 with a `wootty_auth` cookie with the token, `/api/sessions` 200
+  with the cookie and `/` 200 with the shell page. `run request ssh --transport webrtc --exec 'uname
+  -a; id'` printed Linux and uid=0 in 5.0 s. A shell without spec.secretsRef was Failed before the
+  RFP; `wootty:7681:webrtc:shell` was refused by the CLI. Release left no ComputeVM or VM directory
+  and the URL stopped answering. The token was in no kcp object, no file of the network's state dir
+  but the guest's own rootfs, and no journal line. Without `--guest-host-udp true` the same contract
+  on the same host failed ICE as invariant 37 says (the router does not hairpin).
 
 ## 16. Vocabulary
 

@@ -389,16 +389,16 @@
     },
     "socialweb-guest-downloads": {
       "version": "this module",
-      "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent or to the assets.opentunnel pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
+      "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), wootty-x86_64 and wootty-aarch64, the wootty member of the guestDownloads.files.wootty image layers (each layer blob fetched from its registry and checked against its sha256 pin before tar extracts the member), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
+      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent, to the assets.opentunnel pins or to the guestDownloads.files.wootty pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
       "executables": {"socialweb-guest-downloads": "."},
       "fetch": {
-        "linux/amd64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}},
-        "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
+        "linux/amd64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "wootty-x86_64": "wootty-x86_64", "wootty-x86_64.sha256": "wootty-x86_64.sha256", "wootty-aarch64": "wootty-aarch64", "wootty-aarch64.sha256": "wootty-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}},
+        "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "wootty-x86_64": "wootty-x86_64", "wootty-x86_64.sha256": "wootty-x86_64.sha256", "wootty-aarch64": "wootty-aarch64", "wootty-aarch64.sha256": "wootty-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "97d96a8bcb4311eda531c8ac654a86d17fcd566e5572e84e3825667e5a65deed", "rawBytes": 34518292, "zstdBytes": 11378225},
-        "linux/arm64": {"treeSha256": "97d96a8bcb4311eda531c8ac654a86d17fcd566e5572e84e3825667e5a65deed", "rawBytes": 34518292, "zstdBytes": 11378225}
+        "linux/amd64": {"treeSha256": "78db5d82d59d71ba31ea2c852cd818b86c92c0618160196c3302ef3459fbba07", "rawBytes": 56770359, "zstdBytes": 20407773},
+        "linux/arm64": {"treeSha256": "78db5d82d59d71ba31ea2c852cd818b86c92c0618160196c3302ef3459fbba07", "rawBytes": 56770359, "zstdBytes": 20407773}
       }
     }
   },
@@ -413,8 +413,32 @@
     "measured": "2026-10-12, 0007 M6-BIDDER-UPGRADE, market network, installed bidder (test-0003), guests rented through the RFP flow running k3s v1.36.4+k3s1 (node Ready, 8 pods Running), SendCtrlAltDel to unit inactive over six releases: 5.46, 5.57 and 5.65 s when every pod's PID 1 exits on SIGTERM; 90.78, 90.85 and 90.88 s when a pod's PID 1 ignores SIGTERM, which the guest's systemd ends at its DefaultTimeoutStopSec of 90 s; the grace is a cap (a stop returns once the unit is inactive), set to the 90 s guest bound plus 10 s"
   },
   "guestDownloads": {
-    "note": "files a guest fetches itself from the internet in the requester-built user_data; none since plan 0034: the bidder serves opentunnel and socialweb-guest-agent to its guests from the socialweb-guest-downloads asset at /v1/downloads, checked by sha256 on the guest",
-    "files": {}
+    "note": "upstream files that scripts/build-guest-downloads.sh takes into the socialweb-guest-downloads asset at build time, each checked by its sha256 pin before tar extracts the member; a guest never fetches them itself: the bidder serves them to its guests at /v1/downloads, checked by sha256 on the guest (plan 0034)",
+    "files": {
+      "wootty": {
+        "version": "0.2.22",
+        "source": "the wootty binary of the image ghcr.io/icoretech/wootty:0.2.22 (index sha256:10119d71c2facbcae8170ea099389f673283785336f81db72a6714f36917a873), which builds apps/web/dist into the binary; the woottyd release tarballs carry no web UI",
+        "verify": "the layer digest is the sha256 of the layer blob, checked by scripts/build-guest-downloads.sh before tar extracts the member; measured 2026-10-24: the layer holds only usr/local/bin/wootty, a static binary embedding dist/index.html and dist/assets",
+        "fetch": {
+          "linux/amd64": {
+            "kind": "oci-layer",
+            "registry": "ghcr.io",
+            "repository": "icoretech/wootty",
+            "sha256": "4ad99ee7b9ad99e59b61e84493b02c14027329a73029b8414422f3335a21ef27",
+            "bytes": 6354988,
+            "member": "usr/local/bin/wootty"
+          },
+          "linux/arm64": {
+            "kind": "oci-layer",
+            "registry": "ghcr.io",
+            "repository": "icoretech/wootty",
+            "sha256": "9111f13dfe48d49f0df703f9a5bf9806549c20d58eee423469ab1b229388ec1a",
+            "bytes": 5826987,
+            "member": "usr/local/bin/wootty"
+          }
+        }
+      }
+    }
   },
   "guestImages": {
     "note": "guest images (kernel + rootfs + image.json) per hypervisor x arch, built by scripts/build-guest-image.sh on any Linux host with docker or podman (plan 0007 M1-GUEST-IMAGE); reproducible from the inputs below, pinned by the sha256 of each output, never embedded, fetched and verified by internal/guestimage",

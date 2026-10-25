@@ -160,7 +160,7 @@ func (s *Service) guestDownloads() map[string]string {
 		return nil
 	}
 	var required []string
-	for _, name := range []string{guestseed.GuestBinaryOpenTunnel, guestseed.GuestBinaryAgent} {
+	for _, name := range []string{guestseed.GuestBinaryOpenTunnel, guestseed.GuestBinaryWootty, guestseed.GuestBinaryAgent} {
 		for _, arch := range guestseed.GuestArches {
 			required = append(required, guestseed.GuestDownloadName(name, arch))
 		}

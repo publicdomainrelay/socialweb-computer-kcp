@@ -36,12 +36,24 @@ const (
 	TunnelTransportOpenTunnel = "opentunnel"
 
 	TunnelTransportWebRTC = "webrtc"
+
+	DefaultShellEnvFile = "/etc/wootty/wootty.env"
+
+	ShellTokenMinLength = 32
+
+	WoottyRunPath = "/usr/local/bin/wootty-run.sh"
+
+	WoottyBinary = "/usr/local/bin/wootty"
+
+	ShellUnitPrefix = "wootty-"
 )
 
 var (
 	tunnelTagRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`)
 
 	tunnelServerRE = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$`)
+
+	tunnelPathRE = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
 )
 
 type Tunnel struct {
@@ -52,6 +64,8 @@ type Tunnel struct {
 	Server string
 
 	Transport string
+
+	ShellEnvFile string
 }
 
 type TunnelsOptions struct {
@@ -80,6 +94,10 @@ func TunnelReportUnit(tag string) string {
 	return "guest-tunnel-report-" + tag + ".service"
 }
 
+func ShellUnit(tag string) string {
+	return ShellUnitPrefix + tag + ".service"
+}
+
 func (t Tunnel) server() string {
 	return strings.TrimRight(cmp.Or(strings.TrimSpace(t.Server), DefaultTunnelServer), "/")
 }
@@ -93,6 +111,7 @@ func (opts TunnelsOptions) Validate() error {
 		return errors.New("cloudinit tunnels: no tunnel is asked for")
 	}
 	tags := map[string]bool{}
+	shellPorts := map[int]string{}
 	for _, t := range opts.Tunnels {
 		if !tunnelTagRE.MatchString(t.Tag) {
 			return fmt.Errorf("cloudinit tunnels: tag %q is not a DNS label of at most 32 characters", t.Tag)
@@ -119,6 +138,19 @@ func (opts TunnelsOptions) Validate() error {
 		default:
 			return fmt.Errorf("cloudinit tunnels: tunnel %s transport %q is not opentunnel or webrtc", t.Tag, t.Transport)
 		}
+		if t.ShellEnvFile == "" {
+			continue
+		}
+		if t.transport() != TunnelTransportOpenTunnel {
+			return fmt.Errorf("cloudinit tunnels: tunnel %s asks for a wootty shell on transport %s; a shell is served over opentunnel only", t.Tag, t.transport())
+		}
+		if !tunnelPathRE.MatchString(t.ShellEnvFile) || strings.Contains(t.ShellEnvFile, "..") {
+			return fmt.Errorf("cloudinit tunnels: tunnel %s envFile %q is not an absolute path", t.Tag, t.ShellEnvFile)
+		}
+		if other, ok := shellPorts[t.Port]; ok {
+			return fmt.Errorf("cloudinit tunnels: shells %s and %s both ask for port %d", other, t.Tag, t.Port)
+		}
+		shellPorts[t.Port] = t.Tag
 	}
 	return nil
 }
@@ -143,6 +175,7 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 	patch := UserDataPatch{}
 	webrtc := guestAgentTunnels{Tunnels: []guestAgentTunnel{}}
 	units := []string{}
+	shells := false
 	for _, t := range opts.Tunnels {
 		if t.transport() == TunnelTransportWebRTC {
 			webrtc.Tunnels = append(webrtc.Tunnels, guestAgentTunnel{Tag: t.Tag, Port: t.Port})
@@ -179,6 +212,32 @@ func tunnelsPatch(opts TunnelsOptions) (UserDataPatch, error) {
 				})},
 		)
 		units = append(units, TunnelUnit(t.Tag))
+		if t.ShellEnvFile == "" {
+			continue
+		}
+		shells = true
+		patch.WriteFiles = append(patch.WriteFiles, WriteFileEntry{Path: "/etc/systemd/system/" + ShellUnit(t.Tag), Owner: "root:root", Permissions: "0644", Content: unitFile(
+			[]string{
+				"Description=wootty browser shell of guest tunnel " + t.Tag + " on 127.0.0.1:" + port,
+				"After=network-online.target " + GuestBinariesUnit + " " + strings.Join(SecretsReadyUnits, " "),
+				"Wants=network-online.target " + GuestBinariesUnit + " " + GuestSecretsUnit,
+				"StartLimitIntervalSec=0",
+			},
+			[]string{
+				"Type=simple",
+				"EnvironmentFile=-" + t.ShellEnvFile,
+				"Environment=HOME=/root TERM=xterm-256color",
+				"WorkingDirectory=/root",
+				"ExecStart=" + WoottyRunPath + " " + port,
+				"Restart=always",
+				"RestartSec=5",
+				"StandardOutput=journal",
+				"StandardError=journal",
+			})})
+		units = append(units, ShellUnit(t.Tag))
+	}
+	if shells {
+		patch.WriteFiles = append(patch.WriteFiles, WriteFileEntry{Path: WoottyRunPath, Owner: "root:root", Permissions: "0700", Content: woottyRunScript})
 	}
 	if len(webrtc.Tunnels) > 0 {
 		raw, err := json.Marshal(webrtc)
@@ -268,4 +327,27 @@ if [ ! -x "` + OnNetworkScriptPath + `" ]; then
   exit 0
 fi
 exec "` + OnNetworkScriptPath + `" "${TAG}" "${URL}"
+`
+
+var woottyRunScript = `#!/usr/bin/env bash
+set -euo pipefail
+PORT="$1"
+if [ ! -f "` + GuestSecretsReadyPath + `" ] && [ ! -f "` + SecretsDoneStamp + `" ]; then
+  echo "wootty: the secrets bundle is not written yet (` + GuestSecretsReadyPath + `); the shell waits" >&2
+  exit 1
+fi
+if [ ! -x "` + WoottyBinary + `" ]; then
+  echo "wootty: ` + WoottyBinary + ` is not installed yet (` + GuestBinariesUnit + `); the shell waits" >&2
+  exit 1
+fi
+TOKEN="${WOOTTY_AUTH_TOKEN:-}"
+if [ "${#TOKEN}" -lt ` + strconv.Itoa(ShellTokenMinLength) + ` ]; then
+  echo "wootty: WOOTTY_AUTH_TOKEN from the secrets bundle is missing or shorter than ` + strconv.Itoa(ShellTokenMinLength) + ` characters; no shell starts without auth" >&2
+  exit 1
+fi
+unset TOKEN
+export WOOTTY_HOST=127.0.0.1
+export WOOTTY_PORT="${PORT}"
+unset WOOTTY_ALLOW_INSECURE_NO_AUTH
+exec ` + WoottyBinary + ` run /bin/bash -l
 `
