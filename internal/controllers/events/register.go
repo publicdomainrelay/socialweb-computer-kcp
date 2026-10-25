@@ -41,6 +41,8 @@ type Options struct {
 
 	StateDir string
 
+	Cursors contract.CursorStore
+
 	RecordWatchChildren atprotorecordwatch.Children
 
 	RecordWatchRepos atprotorecordwatch.Repos
@@ -79,8 +81,11 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(co
 	if _, err := jetstreameventsource.Register(ctx, m, backend); err != nil {
 		return nil, err
 	}
-	streams, err := eventstreamctl.Register(ctx, m, eventstreamctl.Options{Bus: opts.Bus, Log: log,
-		Cursors: delivery.NewCursorStore(filepath.Join(opts.StateDir, CursorDir))})
+	cursors := opts.Cursors
+	if cursors == nil {
+		cursors = delivery.NewCursorStore(filepath.Join(opts.StateDir, CursorDir))
+	}
+	streams, err := eventstreamctl.Register(ctx, m, eventstreamctl.Options{Bus: opts.Bus, Log: log, Cursors: cursors})
 	if err != nil {
 		return nil, err
 	}

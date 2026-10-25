@@ -62,7 +62,7 @@ const (
 type Options struct {
 	Bus *bus.Bus
 
-	Cursors delivery.CursorStore
+	Cursors events.CursorStore
 
 	FlushDelay time.Duration
 
@@ -72,7 +72,7 @@ type Options struct {
 type Controller struct {
 	bus *bus.Bus
 
-	cursors delivery.CursorStore
+	cursors events.CursorStore
 
 	flushDelay time.Duration
 
@@ -134,8 +134,12 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (*Contro
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	cursors := opts.Cursors
+	if cursors == nil {
+		cursors = delivery.CursorStore{}
+	}
 	root, cancel := context.WithCancel(ctx)
-	c := &Controller{bus: opts.Bus, cursors: opts.Cursors, flushDelay: opts.FlushDelay, log: log.With("component", "eventstream-controller"),
+	c := &Controller{bus: opts.Bus, cursors: cursors, flushDelay: opts.FlushDelay, log: log.With("component", "eventstream-controller"),
 		root: root, cancelRoot: cancel, streams: map[string]*stream{}, sources: newRefIndex(), sinks: newRefIndex(),
 		bound: make(chan ctlruntime.Request, boundQueue)}
 	c.wakeOnBind()

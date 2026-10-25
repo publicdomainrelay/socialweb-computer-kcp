@@ -125,6 +125,8 @@ func (t *Tracked) Close() error {
 	return t.stream.Close()
 }
 
+var _ events.CursorStore = CursorStore{}
+
 type CursorStore struct {
 	dir string
 }

@@ -365,10 +365,10 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	if _, err := remoteopenbaoctl.Register(mgr, remoteopenbaoctl.Options{Remote: remoteBao, Log: log}); err != nil {
 		return fmt.Errorf("componentcore: the RemoteOpenBao controller: %w", err)
 	}
+	watchChildren, watchRepos, watchValues := eventsctl.RecordWatch(clients.client)
 	run, err := eventsctl.Register(g.Context(), mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
 		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), HTTPClient: c.networkClient(networkReadTimeout), StateDir: cfg.StateDir,
-		RecordWatchChildren: recordWatchChildren{clients: clients}, RecordWatchRepos: recordWatchRepos{clients: clients},
-		RecordWatchValues: recordWatchValues(clients), Log: log})
+		RecordWatchChildren: watchChildren, RecordWatchRepos: watchRepos, RecordWatchValues: watchValues, Log: log})
 	if err != nil {
 		return fmt.Errorf("componentcore: the event controllers: %w", err)
 	}

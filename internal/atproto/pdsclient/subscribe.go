@@ -19,17 +19,16 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/fxamacker/cbor/v2"
-	"github.com/gorilla/websocket"
 	"github.com/ipfs/go-cid"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/wsconn"
 )
 
 const (
 	initialReconnectDelay = 500 * time.Millisecond
 	maxReconnectDelay     = 15 * time.Second
 	maxReconnectAttempts  = 12
-	maxEventFrameBytes    = 8 << 20
-	wsReadTimeout         = 2 * time.Minute
-	wsWriteTimeout        = 10 * time.Second
+	localHandshakeTimeout = 10 * time.Second
 )
 
 var repoFrameDecMode = func() cbor.DecMode {
@@ -44,23 +43,16 @@ func newLocalSubscribe(ctx context.Context, handlers Handlers, base *url.URL, cu
 	if handlers == nil {
 		return nil, fmt.Errorf("%w: local handler registry is required", ErrInvalidConfig)
 	}
-	dialer := &websocket.Dialer{
-		Proxy:            nil,
-		HandshakeTimeout: 10 * time.Second,
-		NetDialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+	return openWebSocketStream(ctx, subscribeURL(base, cursor), wsconn.Config{
+		HandshakeTimeout: localHandshakeTimeout,
+		Dial: func(ctx context.Context, _, address string) (net.Conn, error) {
 			return handlers.DialHTTP(ctx, address)
 		},
-	}
-	return openWebSocketStream(ctx, dialer, subscribeURL(base, cursor))
+	})
 }
 
 func newRemoteSubscribe(ctx context.Context, base *url.URL, tlsConfig *tls.Config, cursor *int64) (RepoEventStream, error) {
-	dialer := &websocket.Dialer{
-		Proxy:            nil,
-		HandshakeTimeout: 15 * time.Second,
-		TLSClientConfig:  tlsConfig,
-	}
-	return openWebSocketStream(ctx, dialer, subscribeURL(base, cursor))
+	return openWebSocketStream(ctx, subscribeURL(base, cursor), wsconn.Config{TLSConfig: tlsConfig})
 }
 
 func subscribeURL(base *url.URL, cursor *int64) string {
@@ -83,48 +75,30 @@ func subscribeURL(base *url.URL, cursor *int64) string {
 	return out.String()
 }
 
-func openWebSocketStream(ctx context.Context, dialer *websocket.Dialer, rawURL string) (RepoEventStream, error) {
-	conn, response, err := dialer.DialContext(ctx, rawURL, nil)
+func openWebSocketStream(ctx context.Context, rawURL string, cfg wsconn.Config) (RepoEventStream, error) {
+	conn, err := wsconn.DialConfig(ctx, rawURL, cfg)
 	if err != nil {
-		if response != nil {
-			message := http.StatusText(response.StatusCode)
-			message = cmp.Or(message, "websocket handshake failed")
-			return nil, &XRPCError{StatusCode: response.StatusCode, Code: "WebSocketHandshake", Message: message}
+		var handshake *wsconn.HandshakeError
+		if errors.As(err, &handshake) {
+			message := cmp.Or(http.StatusText(handshake.StatusCode), "websocket handshake failed")
+			return nil, &XRPCError{StatusCode: handshake.StatusCode, Code: "WebSocketHandshake", Message: message}
 		}
-		return nil, fmt.Errorf("pdsclient: websocket dial: %w", err)
+		return nil, fmt.Errorf("pdsclient: %w", err)
 	}
-	conn.SetReadLimit(maxEventFrameBytes)
-	conn.SetPingHandler(func(data string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
-		return conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(wsWriteTimeout))
-	})
-	_ = conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
 	return &wsEventStream{conn: conn}, nil
 }
 
 type wsEventStream struct {
-	conn   *websocket.Conn
+	conn   *wsconn.Conn
 	cursor atomic.Int64
 }
 
 func (s *wsEventStream) Next(ctx context.Context) (RepoEvent, error) {
-	if err := ctx.Err(); err != nil {
-		return RepoEvent{}, err
-	}
-	_ = s.conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
-	stop := context.AfterFunc(ctx, func() {
-		_ = s.conn.SetReadDeadline(time.Now())
-	})
-	defer stop()
 	for {
-		_, data, err := s.conn.ReadMessage()
+		data, err := s.conn.Read(ctx)
 		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return RepoEvent{}, ctxErr
-			}
 			return RepoEvent{}, err
 		}
-		_ = s.conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
 		event, ok, err := decodeRepoFrame(data)
 		if err != nil {
 			return RepoEvent{}, err

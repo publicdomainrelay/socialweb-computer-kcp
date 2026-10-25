@@ -116,6 +116,12 @@ type Stream interface {
 	Close() error
 }
 
+type CursorStore interface {
+	Load(workspace, name, uid string) (int64, bool)
+
+	Save(workspace, name, uid string, cursor int64) error
+}
+
 type Source interface {
 	Subscribe(ctx context.Context, filter Filter) (Stream, error)
 }

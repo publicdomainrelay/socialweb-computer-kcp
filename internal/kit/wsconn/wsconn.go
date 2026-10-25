@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -20,9 +18,57 @@ const (
 	ReadTimeout = 2 * time.Minute
 
 	MaxFrameBytes = 8 << 20
+
+	PongWriteTimeout = 10 * time.Second
+
+	BufferedFrames = 64
+
+	MaxBufferedBytes = 2 * MaxFrameBytes
 )
 
 type DialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+type Config struct {
+	Dial             DialFunc
+	TLSConfig        *tls.Config
+	HandshakeTimeout time.Duration
+}
+
+type HandshakeError struct {
+	StatusCode int
+}
+
+func (e *HandshakeError) Error() string {
+	return fmt.Sprintf("wsconn: websocket handshake: %s", cmp.Or(http.StatusText(e.StatusCode), "websocket handshake failed"))
+}
+
+type CloseError struct {
+	Code   int
+	Reason string
+	Clean  bool
+}
+
+func (e *CloseError) Error() string {
+	return fmt.Sprintf("wsconn: websocket closed: code %d reason %q clean %t", e.Code, e.Reason, e.Clean)
+}
+
+func Dial(ctx context.Context, target string, dial DialFunc) (*Conn, error) {
+	return DialConfig(ctx, target, Config{Dial: dial})
+}
+
+func (c Config) handshakeTimeout() time.Duration {
+	if c.HandshakeTimeout > 0 {
+		return c.HandshakeTimeout
+	}
+	return HandshakeTimeout
+}
+
+func (c Config) tlsConfig() *tls.Config {
+	if c.TLSConfig != nil {
+		return c.TLSConfig
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12}
+}
 
 func Normalize(raw string) string {
 	raw = strings.TrimSpace(raw)
@@ -61,53 +107,4 @@ func WebSocketScheme(u *url.URL) {
 	default:
 		u.Scheme = "ws"
 	}
-}
-
-type Conn struct {
-	conn *websocket.Conn
-}
-
-func Dial(ctx context.Context, target string, dial DialFunc) (*Conn, error) {
-	dialer := &websocket.Dialer{
-		HandshakeTimeout: HandshakeTimeout,
-		TLSClientConfig:  &tls.Config{MinVersion: tls.VersionTLS12},
-	}
-	if dial != nil {
-		dialer.NetDialContext = dial
-	}
-	conn, response, err := dialer.DialContext(ctx, target, nil)
-	if err != nil {
-		if response != nil {
-			return nil, fmt.Errorf("wsconn: websocket handshake: %s", cmp.Or(http.StatusText(response.StatusCode), "websocket handshake failed"))
-		}
-		return nil, fmt.Errorf("wsconn: websocket dial: %w", err)
-	}
-	conn.SetReadLimit(MaxFrameBytes)
-	conn.SetPingHandler(func(data string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(ReadTimeout))
-		return conn.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(10*time.Second))
-	})
-	_ = conn.SetReadDeadline(time.Now().Add(ReadTimeout))
-	return &Conn{conn: conn}, nil
-}
-
-func (c *Conn) Read(ctx context.Context) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	_ = c.conn.SetReadDeadline(time.Now().Add(ReadTimeout))
-	stop := context.AfterFunc(ctx, func() { _ = c.conn.SetReadDeadline(time.Now()) })
-	defer stop()
-	_, data, err := c.conn.ReadMessage()
-	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		return nil, err
-	}
-	return data, nil
-}
-
-func (c *Conn) Close() error {
-	return c.conn.Close()
 }

@@ -1,7 +1,8 @@
-package componentcore
+package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,13 +19,26 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 )
 
+type ClientFor func(workspace string) (client.Client, error)
+
 var (
 	_ atprotorecordwatch.Children = recordWatchChildren{}
 	_ atprotorecordwatch.Repos    = recordWatchRepos{}
 )
 
+func RecordWatch(clientFor ClientFor) (atprotorecordwatch.Children, atprotorecordwatch.Repos, atprotorecordwatch.ValueReader) {
+	return recordWatchChildren{clientFor: clientFor}, recordWatchRepos{clientFor: clientFor}, recordWatchValues(clientFor)
+}
+
+func (f ClientFor) client(workspace string) (client.Client, error) {
+	if f == nil {
+		return nil, errors.New("events: the record watch has no workspace clients")
+	}
+	return f(workspace)
+}
+
 type recordWatchChildren struct {
-	clients *workspaceClients
+	clientFor ClientFor
 }
 
 func (r recordWatchChildren) ApplyEventStream(ctx context.Context, workspace string, obj *eventsv1alpha1.EventStream) error {
@@ -40,7 +54,7 @@ func (r recordWatchChildren) ApplyPdsEventSource(ctx context.Context, workspace 
 }
 
 func (r recordWatchChildren) EventStreams(ctx context.Context, workspace, watch string) ([]eventsv1alpha1.EventStream, error) {
-	c, err := r.clients.client(workspace)
+	c, err := r.clientFor.client(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +66,7 @@ func (r recordWatchChildren) EventStreams(ctx context.Context, workspace, watch 
 }
 
 func (r recordWatchChildren) DeleteEventStream(ctx context.Context, workspace, name string) error {
-	c, err := r.clients.client(workspace)
+	c, err := r.clientFor.client(workspace)
 	if err != nil {
 		return err
 	}
@@ -64,41 +78,41 @@ func (r recordWatchChildren) DeleteEventStream(ctx context.Context, workspace, n
 }
 
 func (r recordWatchChildren) apply(ctx context.Context, workspace string, obj client.Object) error {
-	c, err := r.clients.client(workspace)
+	c, err := r.clientFor.client(workspace)
 	if err != nil {
 		return err
 	}
-	gvk, err := apiutil.GVKForObject(obj, r.clients.scheme)
+	gvk, err := apiutil.GVKForObject(obj, c.Scheme())
 	if err != nil {
 		return err
 	}
 	if err := kube.ApplyWith(ctx, c, obj, kube.ApplyOptions{FieldManager: atprotorecordwatch.FieldManager, Force: true}); err != nil {
-		return fmt.Errorf("componentcore: applying %s %s in %s: %w", gvk.Kind, obj.GetName(), workspace, err)
+		return fmt.Errorf("events: applying %s %s in %s: %w", gvk.Kind, obj.GetName(), workspace, err)
 	}
 	return nil
 }
 
 type recordWatchRepos struct {
-	clients *workspaceClients
+	clientFor ClientFor
 }
 
 func (r recordWatchRepos) AtprotoRepo(ctx context.Context, workspace, name string) (*v1alpha1.AtprotoRepo, error) {
-	return get[v1alpha1.AtprotoRepo](ctx, r.clients, workspace, name)
+	return get[v1alpha1.AtprotoRepo](ctx, r.clientFor, workspace, name)
 }
 
 func (r recordWatchRepos) LocalRepo(ctx context.Context, workspace, name string) (*v1alpha1.LocalRepo, error) {
-	return get[v1alpha1.LocalRepo](ctx, r.clients, workspace, name)
+	return get[v1alpha1.LocalRepo](ctx, r.clientFor, workspace, name)
 }
 
 func (r recordWatchRepos) RemoteRepo(ctx context.Context, workspace, name string) (*v1alpha1.RemoteRepo, error) {
-	return get[v1alpha1.RemoteRepo](ctx, r.clients, workspace, name)
+	return get[v1alpha1.RemoteRepo](ctx, r.clientFor, workspace, name)
 }
 
 func get[T any, P interface {
 	*T
 	client.Object
-}](ctx context.Context, clients *workspaceClients, workspace, name string) (*T, error) {
-	c, err := clients.client(workspace)
+}](ctx context.Context, clientFor ClientFor, workspace, name string) (*T, error) {
+	c, err := clientFor.client(workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -109,14 +123,13 @@ func get[T any, P interface {
 	return (*T)(out), nil
 }
 
-func recordWatchValues(clients *workspaceClients) atprotorecordwatch.ValueReader {
+func recordWatchValues(clientFor ClientFor) atprotorecordwatch.ValueReader {
 	return func(ctx context.Context, workspace string, from v1alpha1.AtprotoValueFrom) (map[string]any, error) {
-		c, err := clients.client(workspace)
+		c, err := clientFor.client(workspace)
 		if err != nil {
 			return nil, err
 		}
-		gvr := atprotorecord.ReferenceResource(from)
-		gvk, err := c.RESTMapper().KindFor(gvr)
+		gvk, err := c.RESTMapper().KindFor(atprotorecord.ReferenceResource(from))
 		if err != nil {
 			return nil, err
 		}
@@ -124,18 +137,10 @@ func recordWatchValues(clients *workspaceClients) atprotorecordwatch.ValueReader
 		if err != nil {
 			return nil, err
 		}
-		dyn, err := clients.dynamic(workspace)
-		if err != nil {
-			return nil, err
-		}
-		r := dyn.Resource(mapping.Resource)
+		key := client.ObjectKey{Name: from.Name}
 		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-			r = r.In(from.Namespace)
+			key.Namespace = from.Namespace
 		}
-		doc, err := kube.Get[kube.Doc](ctx, r, from.Name)
-		if err != nil {
-			return nil, err
-		}
-		return *doc, nil
+		return kube.GetWith(ctx, c, gvk, key)
 	}
 }

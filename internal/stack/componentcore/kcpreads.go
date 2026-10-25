@@ -171,3 +171,18 @@ type bidders struct {
 func (b bidders) Get(ctx context.Context, workspace, name string) (*v1alpha1.Bidder, error) {
 	return get[v1alpha1.Bidder](ctx, b.clients, workspace, name)
 }
+
+func get[T any, P interface {
+	*T
+	client.Object
+}](ctx context.Context, clients *workspaceClients, workspace, name string) (*T, error) {
+	c, err := clients.client(workspace)
+	if err != nil {
+		return nil, err
+	}
+	out := P(new(T))
+	if err := c.Get(ctx, client.ObjectKey{Name: name}, out); err != nil {
+		return nil, err
+	}
+	return (*T)(out), nil
+}
