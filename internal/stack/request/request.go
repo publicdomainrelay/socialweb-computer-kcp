@@ -232,6 +232,9 @@ func typeMeta(kind string) metav1.TypeMeta {
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketRequesterSpec) error {
+	if err := compose.AwaitBound(ctx, k.dyn.Resource(compose.APIBindingGVR), compose.RootBindTimeout, compose.RootExports...); err != nil {
+		return err
+	}
 	obj := &v1alpha1.MarketRequester{TypeMeta: typeMeta("MarketRequester"), ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
 	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.MarketRequesterGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err

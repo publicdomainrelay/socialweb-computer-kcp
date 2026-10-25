@@ -169,6 +169,9 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.MarketBidderSpec) error {
+	if err := compose.AwaitBound(ctx, k.dyn.Resource(compose.APIBindingGVR), compose.RootBindTimeout, compose.RootExports...); err != nil {
+		return err
+	}
 	obj := &v1alpha1.MarketBidder{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: string(v1alpha1.ApplicationKindMarketBidder)},
 		ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
 	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.MarketBidderGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})

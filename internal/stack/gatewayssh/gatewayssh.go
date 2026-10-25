@@ -68,6 +68,9 @@ func OpenKcp(kubeconfig string) (*Kcp, error) {
 }
 
 func (k *Kcp) ApplyRoot(ctx context.Context, spec v1alpha1.SshGatewaySpec) error {
+	if err := compose.AwaitBound(ctx, k.dyn.Resource(compose.APIBindingGVR), compose.RootBindTimeout, compose.RootExports...); err != nil {
+		return err
+	}
 	obj := &v1alpha1.SshGateway{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: string(v1alpha1.ApplicationKindSshGateway)},
 		ObjectMeta: metav1.ObjectMeta{Name: RootName}, Spec: spec}
 	_, err := kube.Apply[kube.Doc](ctx, k.dyn.Resource(compose.SshGatewayGVR), obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
