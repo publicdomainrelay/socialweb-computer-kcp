@@ -1,6 +1,6 @@
 plan: "0034"
 title: "WebRTC guest transport: a kind on vm.onNetwork, compute.events.guest.* with an age publicKey handshake, a guest event subscription on GuestControlPlane, a pion guest agent served from the bidder, ContractEvent, and wootty removed"
-status: in_progress
+status: doing
 source: >
   2026-10-24, the user's decisions (binding), read against main at 0c8eed53.
 
@@ -167,7 +167,7 @@ items:
       - docs/ARCHITECTURE.md
       - docs/spec/integration-catalog.yaml
     done_when: "rg -i wootty outside docs/plans and docs/research is empty; go generate ./... leaves no diff; go build ./... and go vet ./... pass; make check-pins passes."
-    status: todo
+    status: done
 
   - id: W1-LEXICONS
     title: "onNetwork kind, compute.events.guest.{publicKey,signalWebRTC}, compute.guest.subscribeEvents"
@@ -183,7 +183,7 @@ items:
       - lexicons/com/publicdomainrelay/temp/compute/guest/subscribeEvents.json
       - internal/atproto/market/{nsid.go,zz_generated.lexicons.go}
     done_when: "go generate ./internal/atproto/market/... leaves no diff after the commit; old onNetwork records parse with the D5 defaults."
-    status: todo
+    status: done
 
   - id: W1-API
     title: "ContractEvent CRD, spec.tunnels[].transport, network kinds"
@@ -199,7 +199,7 @@ items:
       - deploy/*apiresourceschema.yaml
       - deploy/*apiexport*.yaml
     done_when: "go generate ./... leaves no diff; kubectl create of a ContractEvent in a dev requester workspace succeeds; go build ./... passes."
-    status: todo
+    status: done
 
   - id: W2-BIDDER-DOWNLOADS
     title: "GuestControlPlane /v1/downloads and the bidder downloads asset"
@@ -220,7 +220,7 @@ items:
       - internal/versions/versions.json
       - .github/workflows (binaries job stages the asset)
     done_when: "From a guest: GET <issuer>/v1/downloads/<sha>/socialweb-guest-agent-x86_64 returns bytes whose sha256 is <sha>; a wrong sha answers 404."
-    status: todo
+    status: done
 
   - id: W2-BIDDER-INSTALL-MODULE
     title: "The bidder injects the guest binary install module"
@@ -245,7 +245,7 @@ items:
       - internal/services/guestcontrolplane/
       - internal/app/compose/ (the downloads Exposure)
     done_when: "A tunnel contract's rendered user_data fetches only from http://192.0.2.1:<port>/v1/downloads; the guest's journal shows each binary installed with its sha256."
-    status: todo
+    status: done
 
   - id: W2-GUEST-EVENTS-OUT
     title: "POST /v1/events replaces /v1/on-network"
@@ -264,7 +264,7 @@ items:
       - internal/market/bidder/{report.go,syncs.go,submit.go}
       - internal/guestseed/userdata.go
     done_when: "The bidder's repo holds a guest.publicKey payload in a signed market.event bound to the receipt, and the requester's ingress received it through submitEvent."
-    status: todo
+    status: done
 
   - id: W2-GUEST-EVENTS-IN
     title: "The bidder forwards requester guest.* events into a per-VM queue"
@@ -278,7 +278,7 @@ items:
       - internal/market/bidder/submit.go
       - internal/guestcp/ (queue)
     done_when: "A requester guest.publicKey submitEvent answers 200 and lands once in the VM's queue file; a replay of it does not append."
-    status: todo
+    status: done
 
   - id: W2-GUEST-SUBSCRIBE
     title: "compute.guest.subscribeEvents on GuestControlPlane"
@@ -294,7 +294,7 @@ items:
       - internal/exposure/registrar.go (only if the subscription handler needs a hook)
       - deploy/obligations.txt
     done_when: "A guest subscription with cursor 0 receives a requester publicKey sent before it connected and one sent after; reconnecting with the last seq receives nothing old."
-    status: todo
+    status: done
 
   - id: W3-GUEST-AGENT
     title: "cmd/socialweb-guest-agent (pion + age)"
@@ -314,7 +314,7 @@ items:
       - internal/atproto/cloudinit/tunnels.go (agent unit and config)
       - go.mod
     done_when: "On a webrtc contract guest, socialweb-guest-agent is active, the requester sees guest.publicKey and onNetwork kind webrtc for the tag, and journal shows the subscription open."
-    status: todo
+    status: done
 
   - id: W4-REQUESTER-CONTRACTEVENT
     title: "The requester publishes and receives ContractEvents"
@@ -331,7 +331,7 @@ items:
       - internal/market/requester/{events.go,tunnels.go,runner.go}
       - internal/services/requester/
     done_when: "kubectl create of an outbound publicKey ContractEvent reaches Submitted; the guest's publicKey appears as an inbound ContractEvent; both are gone after the contract is deleted."
-    status: todo
+    status: done
 
   - id: W4-CLI-WEBRTC
     title: "run request proxy and ssh over WebRTC from the CLI"
@@ -348,7 +348,7 @@ items:
       - internal/market/requester/session.go
       - internal/webrtcproxy/
     done_when: "ACC34-CLI-SSH passes on all three bidders."
-    status: todo
+    status: done
 
   - id: W5-BROWSER-PEER
     title: "Browser requester over WebRTC (kcp-wasm peer)"
@@ -363,7 +363,7 @@ items:
     files:
       - "peer branch origin/kcp-wasm-memory-storage"
     done_when: "ACC34-BROWSER-SSH passes from the peer's page against all three bidders."
-    status: todo
+    status: doing
 
   - id: W6-DOCS
     title: "AGENTS.md transport rule, ARCHITECTURE section, catalog rows"
@@ -377,7 +377,7 @@ items:
       - docs/ARCHITECTURE.md
       - docs/spec/integration-catalog.yaml
     done_when: "The files state the rule; the catalog holds both rows."
-    status: todo
+    status: done
 
   - id: ACC34-DOWNLOADS
     title: "Guests install from the bidder only"
@@ -413,6 +413,76 @@ items:
     title: "iroh and https paths unchanged"
     depends_on: [W2-GUEST-EVENTS-OUT, W2-BIDDER-INSTALL-MODULE]
     done_when: "A plain run request reaches Held with an iroh vmAddress; an https tunnel contract gets its opentunnel URL as onNetwork kind https; the rc acceptance doc passes with 0 FAIL."
+    status: todo
+
+  - id: W7-GUEST-FENCE
+    title: "Guests reach host loopback only on spec.hostPorts; no LAN or host address; lanUDP and hostUDP allowances"
+    depends_on: [W2-BIDDER-INSTALL-MODULE]
+    decision: >
+      User decisions 2026-10-24: the guest reaches its bidder host only on the GuestControlPlane local
+      port (nf_tables bridge table loaded by socialweb-vmexec, fails closed); TCP to the LAN, the host's
+      own addresses, CGNAT, link-local and metadata is dropped; UDP to RFC1918 high ports (except SSDP,
+      mDNS, LLMNR) is allowed by default (spec.guestNetwork.lanUDP, bidder operator only) so same-LAN
+      WebRTC works over STUN only; UDP to the host's own high ports is a separate opt-in
+      (spec.guestNetwork.hostUDP), on by default only for the bidder-only-me policy.
+    done_when: "Built (17945ac8, c8148e9e, 8d4a6a6f) and verified on dev networks; prod after rc110."
+    status: done
+
+  - id: W8-RELAY-GO
+    title: "The xrpc.fedproxy.com relay is the Go ingress relay"
+    depends_on: []
+    decision: >
+      socialweb-computer internal ingress-relay replaces the deno relay (scripts/deploy-xrpc-relay.sh,
+      drop-in 30-go.conf, --rollback). Subscriptions forward Authorization and atproto-proxy; binary
+      frames accepted; eviction only after 90 s of silence; disconnects log code, reason, duration.
+    done_when: "Deployed d33616e3 then 64491ad2; the browser page stays registered."
+    status: done
+
+  - id: W9-OAUTH
+    title: "Sessions missing new scopes ask to sign in again; stale URLs reissued; never Ready as another account; sign out"
+    depends_on: []
+    decision: >
+      Scope check per producing flow (721de1bb, 11aabf78); oauthBrowser stale URL and AccountMismatch
+      (d3d48e13); spec.signOutGeneration and the bsky.social entryway (b1c62e42, 199ace77).
+    done_when: "Built; prod after rc110: bob (hat-7) and alice (page, gateway) re-sign."
+    status: done
+
+  - id: W10-CONTRACT-TEMPLATE
+    title: "One ComputeContractTemplate for ComputeContract and Infra contracts; the page uses one EphemeralInfra per session"
+    depends_on: [W1-API]
+    decision: "63be6130; Infra contracts carry tunnels incl. shell; record lexicon checked against the Go type; Infra always published (656152e2)."
+    done_when: "Built; the page applies the agreed shape after rc110."
+    status: done
+
+  - id: W11-SEALED-SECRETS
+    title: "Sealed secrets over guest events, explicit opt-in and on demand; getSecrets stays primary"
+    depends_on: [W3-GUEST-AGENT]
+    decision: "spec.secretsFallback None|Sealed; the guest asks only when getSecrets fails or the requester has no ingress (564efb6e)."
+    done_when: "Built and verified on dev networks."
+    status: done
+
+  - id: W12-WOOTTY-FALLBACK
+    title: "wootty is back as the browser fallback shell, served from the bidder"
+    depends_on: [W11-SEALED-SECRETS]
+    decision: "User reversed D13: the page tries ssh over webrtc first, then opens the opentunnel wootty link (7d5cfe0c)."
+    done_when: "Built and verified on a dev network."
+    status: done
+
+  - id: W13-DISCOVERY
+    title: "Requesters discover bidders without a pinned list: ported TS sources, public relays, bidder crawl requests, per-bidder streams, comms Both"
+    depends_on: []
+    decision: >
+      The Go rewrite kept only bidderDids and a market-network relay query; prod ran on a pinned list.
+      Port vouched, operated (badgeBlueKeys bidder_associate both ways), offering watch and
+      market.relays sources; default discovery relays; bidders requestCrawl their PDS; derive one PDS
+      stream per discovered bidder; requesters read Both by default.
+    done_when: "The gateway and the page find local, hat-9 and hat-7 with no bidderDids."
+    status: doing
+
+  - id: REL-RC110
+    title: "rc110 to local, hat-9, hat-7 and the gateway; re-sign bob and alice; drop the gateway's pinned bidderDids"
+    depends_on: [W13-DISCOVERY]
+    done_when: "All roots Ready on rc110; hat-7 and the gateway owner identities Ready after re-sign; discovery logs show relay/operated sources."
     status: todo
 
 open_questions:
