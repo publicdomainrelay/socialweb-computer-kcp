@@ -11216,6 +11216,58 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
     after the requester published them (`requester_contract_event_published` to `a requester guest
     event is queued`), and the refused submitEvent calls came 1.6 s after publication.
 
+### The browser requester's allocation storm: the js WebSocket buffer, cursorless replays, Adopt and a link set loop (2026-10-25)
+
+- **Before.** On the iPhone page (main 54f32470, comms Firehose) the heap allocated 1.38 GB/min with
+  Go GC thrash. A pprof alloc profile put 35 % in `kube.List` (91 % of it `Composer.Adopt`, 440
+  MB/min, 9 % `scanGC`; the wasm apiserver runs without a watch cache, so every LIST decodes from
+  storage). The relay and bidder PDS EventStreams dialed 32 times a minute and the sink dropped 243
+  duplicates a minute; a bidder PDS stream's start cursor walked back from 1048 to 213 to 1.
+- **Causes.**
+  - `conn_js.go` kept at most 64 frames. The browser WebSocket has no receive backpressure, and the
+    consumer awaits kcp per event, so any burst (a backlog replay, the 1000-event rewind of a
+    reconnect) ended the conn with "read buffer is over 64 frames". The delivery loop redialed 1 s
+    later (a connection that received anything reset the backoff) at the last cursor minus 1000,
+    replayed, overflowed again, and the start walked back each round. The EventStream controller
+    did not restart running streams: its For predicate is spec or deletion, its fingerprint holds
+    the EventSource UID, generation and backendRef, and the resume cursor stays in memory.
+  - Our relay answered a cursorless subscribeRepos with its whole backlog (6515 frames on prod); the
+    atproto sync spec says live only. Every requester stream with `spec.resume: Live` connects
+    without a cursor.
+  - `Composer.Adopt` listed the ten adoptKinds on every root reconcile, and `scanGC` every GC kind
+    in every workspace every 30 s.
+  - The MarketRequester and the Gateway put the root vault link (`identity/*`) in both the `root`
+    and the `account` link set. A ComponentLink name hashes from and to only, so the two sets
+    applied one object and flipped its `link-set` label each pass, and each flip queued the root
+    again: about 16 reconciles a minute with no input. The MarketBidder has the same collision
+    (its root link has three prefixes, the account link one, so the spec flips too and the
+    `oidc-rotation/*` capability is briefly missing); `internal/app/marketbidder` still applies it.
+- **The change.** The js Conn queues frames bounded by `MaxBufferedBytes` (16 MiB, 64 bytes counted
+  per frame) only. A reconnect never resumes before the cursor its last connection started at, and
+  the backoff resets only after a connection that stayed up 30 s (`delivery.StableConnection`). The
+  relay's `Sequencer.Watch(nil)` is live only, subscribed under the head lock; a cursor replays and
+  a future cursor gets FutureCursor as before. Adopt scans every kind when the root is new to the
+  composer, its UID or generation changed, its set was applied, or 5 minutes passed
+  (`AdoptRescanEvery`); between, only the kinds an intent or adoption watch marked. The GC sample
+  scans when an unowned or deleting intent object was seen or something was adopted (at most every
+  30 s) and at least every 5 minutes (`GCRescanEvery`). The account link set skips the links the root
+  set holds (`compose.WithoutLinks`).
+- **Readings.** Node 22 running the js build: a gorilla server writes 3000 frames of 300 bytes at once
+  and the client reads with 2 ms per frame; the old Conn failed after 67 frames, the new one read all
+  3000 in 6.6 s; the earlier wsconn js smoke (text, binary, empty, close code, 9 MiB frame, drop,
+  ctx deadline, closed) answers as before. Market network `perf34` (1 bidder, network relay), a
+  Firehose `run request --exec "sleep 420"`, 5 minutes of the kcp audit log of the requester
+  workspace while Held:
+  - Before: 1502 LIST, 1173 patch and 437 get a minute; each adopt kind 16 to 18 LIST a minute; 638
+    ComponentLink patches a minute. After: 44 LIST, 37 patch and 21 get a minute; each adopt kind
+    0.4 a minute. Both were Held in about 26 s, and the ComputeContract and five StateSyncs still got
+    their MarketRequester owner within seconds.
+  - The bidder workspace, its loop unchanged at 15 passes a minute: each adopt kind 16.6 to 0.4 LIST a
+    minute, the GC-only kinds (Postgres, NodeClaim) 1.8 to 0.2.
+  - Each of the three streams dialed once in 7 minutes, before and after (linux has TCP
+    backpressure, so the storm was js only). The network relay without a cursor: 30 frames (its
+    whole backlog) before, 0 after; with `cursor=0` the backlog; past the head one FutureCursor frame.
+
 ## 16. Vocabulary
 
 | | |

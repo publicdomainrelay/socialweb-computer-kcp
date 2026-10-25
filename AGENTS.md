@@ -119,7 +119,11 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   EventStream of a role delivers to one handler sink (`internal/eventstream/market.go`), which drops a
   `uri|cid` it took in the last 15 s (at most 10000 keys) and logs `market_event_duplicate_dropped` once
   per key with the running count. A relay stream reconnects 1000 events back, a Jetstream 30 s back,
-  after a 1 s backoff that doubles to 30 s.
+  but never before the cursor its last connection started at, after a 1 s backoff that doubles to
+  30 s and resets only after a connection that stayed up 30 s. Our relay answers a subscribeRepos
+  without a cursor with live events only (the atproto sync spec); a cursor replays its backlog. The
+  js/wasm WebSocket (`internal/kit/wsconn/conn_js.go`) has no receive backpressure, so it queues
+  frames up to 16 MiB (`MaxBufferedBytes`), never by a frame count.
 - The bidder's requester streams (any comms mode, `internal/app/compose/requesterstreams.go`): requester
   events reach the bidder through submitEvent first; as a record-only fallback, while the bidder has
   live ComputeVMs (not deleted, not Lost or Failed), it composes EventStreams with the 22 market NSIDs
