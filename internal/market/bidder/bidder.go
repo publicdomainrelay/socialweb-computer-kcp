@@ -267,6 +267,10 @@ type Bidder struct {
 
 	synced atomic.Bool
 
+	prunedForeign atomic.Int64
+
+	prunedAged atomic.Int64
+
 	bids *participant.Index[v1alpha1.Bid]
 
 	vms *participant.Index[v1alpha1.ComputeVM]
@@ -470,6 +474,11 @@ func (b *Bidder) observeSync(ctx context.Context, name string) (time.Duration, e
 		d, err := b.outbox.Reconcile(ctx, &sync)
 		wait = earliest(wait, d)
 		errs = append(errs, err)
+	}
+	if retain, pruned := b.collectInbox(ctx, sync); pruned {
+		return 0, errors.Join(errs...)
+	} else {
+		wait = earliest(wait, retain)
 	}
 	if vmName := b.guests.SyncVM(&sync); vmName != "" {
 		if vm, live := b.vms.Get(vmName); live {
