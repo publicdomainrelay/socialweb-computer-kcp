@@ -15,6 +15,7 @@ GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-}"
 GATEWAY_SPEC_FILE="${GATEWAY_SPEC_FILE:-}"
 BINARY="${BINARY:-}"
 SHA256="${SHA256:-}"
+ALLOW_DEV_BINARY="${ALLOW_DEV_BINARY:-}"
 WEB_APP_PORT=8788
 KCP_PORT=6443
 GATEWAY_TLS_PORT=8443
@@ -60,7 +61,7 @@ if [ -n "$GATEWAY_SPEC_FILE" ]; then
   ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "cat > $(q "$INCOMING.spec")" < "$GATEWAY_SPEC_FILE"
 fi
 
-REMOTE_ENV="ACCOUNT=$(q "$ACCOUNT") STATE_DIR=$(q "$STATE_DIR") INCOMING=$(q "$INCOMING") SHA256=$(q "$SHA256") ORIGIN=$(q "$ORIGIN") KCP_ORIGIN=$(q "$KCP_ORIGIN") WEB_APP_PORT=$(q "$WEB_APP_PORT") KCP_PORT=$(q "$KCP_PORT") GATEWAY_TLS_PORT=$(q "$GATEWAY_TLS_PORT") CERT_FRONT_PORT=$(q "$CERT_FRONT_PORT")"
+REMOTE_ENV="ALLOW_DEV_BINARY=$(q "$ALLOW_DEV_BINARY") ACCOUNT=$(q "$ACCOUNT") STATE_DIR=$(q "$STATE_DIR") INCOMING=$(q "$INCOMING") SHA256=$(q "$SHA256") ORIGIN=$(q "$ORIGIN") KCP_ORIGIN=$(q "$KCP_ORIGIN") WEB_APP_PORT=$(q "$WEB_APP_PORT") KCP_PORT=$(q "$KCP_PORT") GATEWAY_TLS_PORT=$(q "$GATEWAY_TLS_PORT") CERT_FRONT_PORT=$(q "$CERT_FRONT_PORT")"
 
 ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$REMOTE_ENV bash -s" <<'REMOTE_EOF'
 set -euo pipefail
@@ -94,7 +95,7 @@ if [ -f "$INCOMING.env" ]; then
 fi
 if [ ! -f "/var/lib/socialweb-computer/install-${ACCOUNT}.json" ]; then
   say "install gateway (the one root step)"
-  "$INCOMING" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" \
+  "$INCOMING" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" ${ALLOW_DEV_BINARY:+--allow-dev-binary} \
     --host-backend systemd-user --kcp-front-address "127.0.0.1:${KCP_PORT}" \
     --tls-front-address "127.0.0.1:${GATEWAY_TLS_PORT}" --cert-front-address "127.0.0.1:${CERT_FRONT_PORT}" \
     "${spec_args[@]}"
@@ -110,7 +111,7 @@ else
   say "upgrade to $SHA256 as $ACCOUNT"
   upgrade_ok=1
   runuser -u "$ACCOUNT" -- env XDG_RUNTIME_DIR="/run/user/$uid" CONFIG_PATH_SOCIALWEB_COMPUTER="$STATE_DIR/config.json" \
-    "$copy" upgrade --binary "$copy" --sha256 "$SHA256" || upgrade_ok=0
+    "$copy" upgrade --binary "$copy" --sha256 "$SHA256" ${ALLOW_DEV_BINARY:+--allow-dev-binary} || upgrade_ok=0
   rm -f "$copy"
   if [ "$upgrade_ok" != "1" ]; then
     # The first start after a restart can fail (systemd 255 exit 219/CGROUP) and Restart=always starts it again.
@@ -132,7 +133,7 @@ else
     say "the core unit is $state; continuing"
   fi
   say "install gateway again with bin/current (renders the unit files, restarts a core whose unit changed)"
-  "$STATE_DIR/bin/current/socialweb-computer" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" \
+  "$STATE_DIR/bin/current/socialweb-computer" install gateway --account "$ACCOUNT" --state-dir "$STATE_DIR" ${ALLOW_DEV_BINARY:+--allow-dev-binary} \
     --host-backend systemd-user --kcp-front-address "127.0.0.1:${KCP_PORT}" \
     --tls-front-address "127.0.0.1:${GATEWAY_TLS_PORT}" --cert-front-address "127.0.0.1:${CERT_FRONT_PORT}" \
     "${spec_args[@]}"
