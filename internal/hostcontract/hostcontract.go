@@ -390,7 +390,7 @@ func kvm(f Facts) Result {
 		return fail(CheckKVM, "/dev/kvm does not exist", "enable hardware virtualization and load kvm_intel or kvm_amd (root); never chmod /dev/kvm")
 	case f.KVMErr != "":
 		return fail(CheckKVM, "/dev/kvm is not read-write for "+f.Account+": "+f.KVMErr,
-			installFix(RoleBidder)+" adds the account to the kvm group before linger; never chmod /dev/kvm")
+			installFix(RoleBidder)+" adds the account to the kvm group before linger; for a foreground run bidder --host-backend proc, add the account to group kvm (root: usermod -aG kvm "+f.Account+") and log in again; never chmod /dev/kvm")
 	}
 	return ok(CheckKVM, "/dev/kvm read-write for "+f.Account)
 }

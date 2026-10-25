@@ -44,7 +44,7 @@ func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1
 	if r.In != nil {
 		in = bufio.NewReader(r.In)
 	}
-	shown := ""
+	shown, status := "", ""
 	var failed error
 	obj, err := r.Watch(ctx, name, func(obj *v1alpha1.MarketIdentity) (bool, error) {
 		if obj == nil {
@@ -65,9 +65,16 @@ func (r IdentityRenderer) WaitReady(ctx context.Context, name string) (*v1alpha1
 				return false, err
 			}
 		}
+		if st := string(obj.Status.Phase) + "|" + obj.Status.Message; obj.Status.PendingAction == nil && obj.Status.Phase != "" && st != status {
+			status = st
+			fmt.Fprintf(r.Out, "identity %s is %s (%s): %s\n", name, obj.Status.Phase, cmp.Or(obj.Status.Did, "no DID yet"), obj.Status.Message)
+		}
 		return false, nil
 	})
 	if err != nil {
+		if obj != nil && obj.Status.Phase != "" {
+			return obj, fmt.Errorf("marketidentity %s is %s, not Ready (%s): %w", name, obj.Status.Phase, obj.Status.Message, err)
+		}
 		return obj, err
 	}
 	return obj, failed

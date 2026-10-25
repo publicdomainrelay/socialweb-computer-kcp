@@ -239,6 +239,12 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	r := &bidderRun{a: a, vals: vals, backend: backend, profile: vals.String("profile"), handle: strings.ToLower(vals.String("handle")),
 		network: vals.String("network")}
+	if r.profile == "" {
+		r.profile = marketbidder.BidderProfileProdQr
+		if r.network != "" || vals.String("market-network-file") != "" {
+			r.profile = marketbidder.BidderProfileNetwork
+		}
+	}
 	if !slices.Contains(marketbidder.BidderProfiles, r.profile) {
 		return a.fail(exitRefused, "run bidder: --profile %q: want one of %s", r.profile, strings.Join(marketbidder.BidderProfiles, ", "))
 	}
@@ -284,6 +290,11 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 		return a.fail(exitRefused, "run bidder: --network: the market network places its children under its own devsup; pass --host-backend=proc")
 	case r.network == "" && r.handle == "":
 		return a.fail(exitRefused, "run bidder: --handle is required: it names the bidder's account and owns its ComputeVMs")
+	}
+	if r.network == "" && backend == hostsvc.BackendProc {
+		if err := a.vmHostPreflight(ctx, r.vals); err != nil {
+			return a.fail(exitRefused, "run bidder: %v", err)
+		}
 	}
 	if r.vals.String("guest-image-source") == "" {
 		if backend == hostsvc.BackendSystemdUser && cachedGuestImage(r.vals.String("state-dir")) {
@@ -484,6 +495,24 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 	if code != exitOK {
 		return code
 	}
+	code = r.serve(ctx, up, spec, started)
+	if !r.vals.Bool("fg") {
+		return code
+	}
+	if ctx.Err() != nil {
+		code = exitOK
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
+	defer cancel()
+	d := downInstance(dctx, r.a, up.layout, true)
+	r.a.printJSON(d)
+	if len(d.Remaining) > 0 {
+		return exitFailed
+	}
+	return code
+}
+
+func (r *bidderRun) serve(ctx context.Context, up upReport, spec v1alpha1.MarketBidderSpec, started time.Time) int {
 	k, err := bidder.OpenKcp(up.AdminKubeconfig)
 	if err != nil {
 		return r.a.fail(exitFailed, "run bidder: %v", err)
@@ -535,13 +564,6 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 	}
 	r.log("run bidder --fg: the bidder lives as long as this process; Ctrl-C stops its instance and keeps its state", "instance", up.Instance)
 	<-ctx.Done()
-	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
-	defer cancel()
-	d := downInstance(dctx, r.a, up.layout, true)
-	r.a.printJSON(d)
-	if len(d.Remaining) > 0 {
-		return exitFailed
-	}
 	return exitOK
 }
 
@@ -557,7 +579,12 @@ func (r *bidderRun) signIn(ctx context.Context, k *bidder.Kcp, spec v1alpha1.Mar
 	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
 		in = os.Stdin
 	}
-	wctx, cancel := context.WithTimeout(ctx, bidderIdentityWait)
+	wctx, cancel := ctx, context.CancelFunc(func() {})
+	if !r.vals.Bool("fg") {
+		wctx, cancel = context.WithTimeout(ctx, bidderIdentityWait)
+	} else {
+		r.log("run bidder --fg: waiting for the bidder identity without a deadline (a QR sign-in, or the association of a new DID); Ctrl-C stops", "identity", marketbidder.BidderIdentity)
+	}
 	defer cancel()
 	id, err := appcli.IdentityRenderer{Client: ids, Watch: k.AwaitIdentity, Out: r.a.stderr, In: in}.WaitReady(wctx, marketbidder.BidderIdentity)
 	if err != nil {

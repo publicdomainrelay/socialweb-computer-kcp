@@ -55,7 +55,7 @@ func (a *app) vmHostPreflight(ctx context.Context, vals clicfg.Values) error {
 		lines = append(lines, fmt.Sprintf("  %s: %s\n    fix: %s", r.Name, r.Detail, r.Fix))
 	}
 	if len(lines) > 0 {
-		return fmt.Errorf("this host cannot run the network's VMs; socialweb-computer check-host -role bidder -state-dir %s lists every check:\n%s",
+		return fmt.Errorf("this host cannot run bidder VMs as this account; socialweb-computer check-host -role bidder -state-dir %s lists every check:\n%s",
 			state, strings.Join(lines, "\n"))
 	}
 	return nil
