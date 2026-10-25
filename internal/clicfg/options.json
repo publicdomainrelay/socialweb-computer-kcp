@@ -602,7 +602,7 @@
     },
     "log-level": {
       "type": "string",
-      "description": "run request proxy: the level of its stderr log lines (debug, info, warn or error); warn keeps an interactive ssh over webrtc quiet, and its fatal error is one plain line",
+      "description": "run request proxy, and the proxy that run request, resume and ssh with --transport webrtc start as the ssh ProxyCommand: the level of its stderr log lines (debug, info, warn or error); warn keeps an interactive ssh over webrtc quiet, and its fatal error is one plain line",
       "default": "warn",
       "env": "SOCIALWEB_PROXY_LOG_LEVEL"
     },

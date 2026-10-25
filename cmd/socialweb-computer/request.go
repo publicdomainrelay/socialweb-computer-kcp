@@ -45,7 +45,7 @@ const (
 )
 
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
-	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag"}
+	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 type requestRun struct {
 	a               *app
@@ -554,6 +554,10 @@ func waitsOnPerson(obj *v1alpha1.MarketIdentity) bool {
 	if obj == nil {
 		return false
 	}
+	switch obj.Status.Phase {
+	case v1alpha1.MarketIdentityPhaseReady, v1alpha1.MarketIdentityPhaseFailed:
+		return false
+	}
 	if obj.Status.PendingAction != nil {
 		return true
 	}
@@ -624,6 +628,9 @@ func (r *requestRun) proxyCommand() (string, error) {
 		return "", fmt.Errorf("resolving this binary's own path for the ProxyCommand: %w", err)
 	}
 	words := []string{exe, "run", "request", "proxy", r.inv.Name, "--tag", r.tag, "--state-dir", r.stateRoot}
+	if level := strings.TrimSpace(r.vals.String("log-level")); level != "" {
+		words = append(words, "--log-level", level)
+	}
 	if r.target != "" {
 		words = append(words, "--contract", r.target)
 	}
@@ -1099,7 +1106,11 @@ func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []str
 	}
 	quiet := *a
 	quiet.stdout = a.stderr
-	quiet.log = slog.New(slog.NewTextHandler(a.stderr, &slog.HandlerOptions{Level: level, ReplaceAttr: dropTime})).With("service", serviceName)
+	handler := &slog.HandlerOptions{Level: level}
+	if level >= slog.LevelWarn {
+		handler.ReplaceAttr = dropTime
+	}
+	quiet.log = slog.New(slog.NewTextHandler(a.stderr, handler)).With("service", serviceName)
 	r, started, code := quiet.openRequest(ctx, vals, rest, "proxy")
 	if r == nil {
 		return code
