@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/strs"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -55,7 +56,7 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 	}
 	if !r.scope.sharedStatus {
 		if live, err := r.liveStatus(ctx, obj); err == nil {
-			dropped(live, status)
+			dropped(live, status, r.scope.foreignStatus, "")
 		}
 	}
 	u.Object["status"] = status
@@ -65,6 +66,29 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 			return nil
 		}
 		return fmt.Errorf("runtime: applying the status of %s: %w", obj.GetName(), err)
+	}
+	return nil
+}
+
+func (r Request) ApplyStatusAs(ctx context.Context, manager string, obj Object, status map[string]any) error {
+	if r.scope == nil || r.scope.client == nil {
+		return errors.New("runtime: the request has no cluster client")
+	}
+	if manager == "" || manager == r.scope.fieldManager {
+		return fmt.Errorf("runtime: applying a status subfield of %s needs a field manager of its own, not %q", obj.GetName(), manager)
+	}
+	full, err := r.unstructured(obj)
+	if err != nil {
+		return err
+	}
+	u := r.skeleton(full, obj)
+	u.Object["status"] = status
+	if err := r.scope.client.Status().Apply(ctx, client.ApplyConfigurationFromUnstructured(u),
+		client.FieldOwner(manager), client.ForceOwnership); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("runtime: applying the status of %s as %s: %w", obj.GetName(), manager, err)
 	}
 	return nil
 }
@@ -224,17 +248,35 @@ func (r Request) liveStatus(ctx context.Context, obj Object) (map[string]any, er
 	return status, nil
 }
 
-func dropped(live, desired map[string]any) {
+func dropped(live, desired map[string]any, foreign []string, prefix string) {
 	for k, v := range live {
-		next, ok := desired[k]
-		if !ok {
-			desired[k] = nil
+		path := prefix + k
+		if slices.Contains(foreign, path) {
+			delete(desired, k)
 			continue
 		}
 		liveMap, liveIsMap := v.(map[string]any)
+		next, ok := desired[k]
+		if !ok || next == nil {
+			if !liveIsMap || !holdsForeign(foreign, path) {
+				desired[k] = nil
+				continue
+			}
+			next = map[string]any{}
+			desired[k] = next
+		}
 		nextMap, nextIsMap := next.(map[string]any)
 		if liveIsMap && nextIsMap {
-			dropped(liveMap, nextMap)
+			dropped(liveMap, nextMap, foreign, path+".")
 		}
 	}
+}
+
+func holdsForeign(foreign []string, path string) bool {
+	for _, f := range foreign {
+		if strings.HasPrefix(f, path+".") {
+			return true
+		}
+	}
+	return false
 }

@@ -80,6 +80,8 @@ type scope struct {
 
 	sharedStatus bool
 
+	foreignStatus []string
+
 	log *slog.Logger
 }
 
@@ -105,6 +107,8 @@ type options struct {
 	events []<-chan Request
 
 	sharedStatus bool
+
+	foreignStatus []string
 
 	backoffBase time.Duration
 
@@ -145,6 +149,10 @@ func Workers(n int) Option {
 
 func SharedStatus() Option {
 	return func(o *options) { o.sharedStatus = true }
+}
+
+func ForeignStatus(paths ...string) Option {
+	return func(o *options) { o.foreignStatus = append(o.foreignStatus, paths...) }
 }
 
 func Events(ch <-chan Request) Option {
@@ -276,7 +284,8 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		b = b.WatchesRawSource(m.eventSource(o.export, ch))
 	}
 	a := &adapter[T]{m: m, name: name, r: r, limiter: limiter, log: log, only: o.only, inWorkspace: o.inWorkspace, gone: o.gone,
-		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, sharedStatus: o.sharedStatus, log: log}}
+		scope: scope{scheme: m.scheme, fieldManager: o.fieldManager, finalizer: o.finalizer, sharedStatus: o.sharedStatus,
+			foreignStatus: o.foreignStatus, log: log}}
 	if err := b.Complete(a); err != nil {
 		return fmt.Errorf("runtime: building the controller %s: %w", name, err)
 	}

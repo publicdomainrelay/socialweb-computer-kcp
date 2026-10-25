@@ -78,6 +78,8 @@ type IngressSpec struct {
 	AuthRequired bool
 
 	AllowedDIDs []string
+
+	OnStatus func(ingress.SubscriberStatus)
 }
 
 type IngressRegistration interface {
@@ -88,6 +90,10 @@ type IngressRegistration interface {
 
 type IngressRegistrationProvider interface {
 	Provider() string
+}
+
+type IngressRegistrationRoute interface {
+	Route() exposurev1alpha1.ExposureIngress
 }
 
 type IngressRegistrar interface {
@@ -173,6 +179,7 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 		TunnelHandler:       tunnel,
 		WSTarget:            wsTarget,
 		WSTargetDialer:      r.wsDialer(spec.Target, spec.Caller()),
+		OnStatus:            spec.OnStatus,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("connecting the ingress subscriber: %w", err)
@@ -186,7 +193,8 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	urlHost := hostport.DIDLabel(did) + "." + publicHost
 	path := normalizePath(spec.Path)
 	raw := scheme + "://" + urlHost + path
-	return &subscriberRegistration{url: raw, subscriber: subscriber}, nil
+	route := exposurev1alpha1.ExposureIngress{Host: urlHost, Did: did, Relay: subscriber.Relay(), URL: raw}
+	return &subscriberRegistration{url: raw, route: route, subscriber: subscriber}, nil
 }
 
 func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) {
@@ -418,7 +426,12 @@ func (r *SubscriberRegistrar) tunnel(target component.Key, name string, caller c
 
 type subscriberRegistration struct {
 	url        string
+	route      exposurev1alpha1.ExposureIngress
 	subscriber *ingress.Subscriber
+}
+
+func (r *subscriberRegistration) Route() exposurev1alpha1.ExposureIngress {
+	return r.route
 }
 
 func (r *subscriberRegistration) URL() string {

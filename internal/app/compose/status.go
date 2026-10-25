@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
@@ -314,6 +315,37 @@ func jsonFields(v any) map[string]bool {
 		}
 	}
 	return out
+}
+
+func SetIngressRegisteredCondition(conditions *[]metav1.Condition, gen int64, snap Snapshot, exposureName string,
+	mode v1alpha1.MarketCommsMode, fallback v1alpha1.SecretsFallback) string {
+	v, ok := snap.View(ComponentKindExposure, exposureName)
+	var registered *metav1.Condition
+	if ok {
+		registered = meta.FindStatusCondition(v.Status.Conditions, exposurev1alpha1.ConditionIngressRegistered)
+	}
+	if registered == nil {
+		meta.RemoveStatusCondition(conditions, exposurev1alpha1.ConditionIngressRegistered)
+		return ""
+	}
+	if registered.Status == metav1.ConditionTrue {
+		meta.SetStatusCondition(conditions, metav1.Condition{Type: exposurev1alpha1.ConditionIngressRegistered, Status: metav1.ConditionTrue,
+			Reason: registered.Reason, Message: "the Exposure " + exposureName + ": " + registered.Message, ObservedGeneration: gen})
+		return ""
+	}
+	down := "ingress down (" + registered.Reason + ")"
+	switch mode {
+	case v1alpha1.MarketCommsModeBoth, v1alpha1.MarketCommsModeFirehose:
+		down += "; bids and events arrive over streams"
+	default:
+		down += "; bids and events wait for the ingress to register"
+	}
+	if fallback == v1alpha1.SecretsFallbackSealed {
+		down += "; guest secrets use the sealed fallback"
+	}
+	meta.SetStatusCondition(conditions, metav1.Condition{Type: exposurev1alpha1.ConditionIngressRegistered, Status: metav1.ConditionFalse,
+		Reason: registered.Reason, Message: down + "; the Exposure " + exposureName + ": " + registered.Message, ObservedGeneration: gen})
+	return down
 }
 
 func ApplicationStatusOf(u *Generic) (v1alpha1.ApplicationStatus, error) {

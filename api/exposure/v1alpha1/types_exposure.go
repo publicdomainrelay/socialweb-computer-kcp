@@ -86,5 +86,49 @@ type ExposureStatus struct {
 
 	Endpoint string `json:"endpoint,omitempty"`
 
+	Ingress *ExposureIngress `json:"ingress,omitempty"`
+
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+type ExposureIngress struct {
+	Host string `json:"host,omitempty"`
+
+	Did string `json:"did,omitempty"`
+
+	Relay string `json:"relay,omitempty"`
+
+	URL string `json:"url,omitempty"`
+
+	Subscriber *ExposureIngressSubscriber `json:"subscriber,omitempty"`
+}
+
+type IngressSubscriberState string
+
+const (
+	IngressSubscriberConnecting IngressSubscriberState = "connecting"
+
+	IngressSubscriberRegistered IngressSubscriberState = "registered"
+
+	IngressSubscriberReconnecting IngressSubscriberState = "reconnecting"
+
+	IngressSubscriberWaiting IngressSubscriberState = "waiting"
+
+	IngressSubscriberClosed IngressSubscriberState = "closed"
+)
+
+type ExposureIngressSubscriber struct {
+	State IngressSubscriberState `json:"state,omitempty"`
+
+	RegisteredAt *metav1.Time `json:"registeredAt,omitempty"`
+
+	LastError string `json:"lastError,omitempty"`
+
+	CloseCode int32 `json:"closeCode,omitempty"`
+
+	RelayVersion string `json:"relayVersion,omitempty"`
+}
+
+const ConditionIngressRegistered = "IngressRegistered"
+
+const FieldManagerIngressSubscriber = "socialweb.computer/ingress-subscriber"

@@ -48,6 +48,7 @@ type SubscriberConfig struct {
 	Synthetic                 bool
 	Dialer                    *websocket.Dialer
 	HTTPClient                *http.Client
+	OnStatus                  func(SubscriberStatus)
 }
 
 type Subscriber struct {
@@ -63,6 +64,9 @@ type Subscriber struct {
 	conn    *websocket.Conn
 	closed  bool
 	writeMu sync.Mutex
+
+	statusMu sync.Mutex
+	status   SubscriberStatus
 
 	tunnels        map[string]*tunnel
 	wsSubs         map[string]*wsSubscription
@@ -110,7 +114,9 @@ func NewSubscriber(ctx context.Context, cfg SubscriberConfig) (*Subscriber, erro
 		syntheticStops: map[string]func(){},
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	s.report(SubscriberConnecting, nil, 0, "")
 	if err := s.openOnce(s.ctx); err != nil {
+		s.report(SubscriberWaiting, err, 0, "")
 		s.cancel()
 		return nil, err
 	}
@@ -131,6 +137,7 @@ func (s *Subscriber) Close() {
 	conn := s.conn
 	s.conn = nil
 	s.mu.Unlock()
+	s.report(SubscriberClosed, nil, 0, "")
 	s.cancel()
 	if conn != nil {
 		_ = conn.Close()
@@ -168,6 +175,7 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&nonceResp); err != nil {
 		return err
 	}
+	version := s.relayVersion(ctx)
 	nonceBytes, err := b64decode(nonceResp.Nonce)
 	if err != nil {
 		return err
@@ -224,6 +232,7 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 		}
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	s.report(SubscriberRegistered, nil, 0, version)
 
 	s.mu.Lock()
 	if s.closed {
@@ -238,9 +247,11 @@ func (s *Subscriber) openOnce(ctx context.Context) error {
 }
 
 func (s *Subscriber) readLoop(conn *websocket.Conn) {
+	var readErr error
 	for {
 		mt, data, err := conn.ReadMessage()
 		if err != nil {
+			readErr = err
 			break
 		}
 		if mt != websocket.TextMessage {
@@ -262,6 +273,7 @@ func (s *Subscriber) readLoop(conn *websocket.Conn) {
 	closed := s.closed
 	s.mu.Unlock()
 	if current && !closed {
+		s.report(SubscriberReconnecting, readErr, closeCode(readErr), "")
 		s.wg.Go(func() { s.reconnect(0) })
 	}
 }
@@ -270,10 +282,12 @@ func (s *Subscriber) reconnect(attempt int) {
 	if s.ctx.Err() != nil {
 		return
 	}
-	if err := s.openOnce(s.ctx); err != nil {
-		if s.ctx.Err() != nil {
-			return
-		}
+	err := s.openOnce(s.ctx)
+	if err == nil {
+		return
+	}
+	if s.ctx.Err() == nil {
+		s.report(SubscriberWaiting, err, 0, "")
 		delay := time.Second
 		for i := 0; i < attempt && delay < 30*time.Second; i++ {
 			delay *= 2

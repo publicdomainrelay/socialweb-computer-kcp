@@ -93,6 +93,15 @@ func (p *pass) wait(msg string) (ctlruntime.Result, error) {
 	return p.write(v1alpha1.ApplicationPhaseProvisioning, msg)
 }
 
+func (p *pass) ingressDown(snap compose.Snapshot, plan compose.AccountPlan) string {
+	name := compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent) + compose.ExposureIngressSuffix
+	mode := compose.RequesterCommsMode(p.o.Spec.Comms, compose.OAuthReceiveOnly(plan.Mode))
+	if down := compose.SetIngressRegisteredCondition(&p.st.Conditions, p.o.Generation, snap, name, mode, p.o.Spec.SecretsFallback); down != "" {
+		return "; " + down
+	}
+	return ""
+}
+
 func (p *pass) snapshot(ctx context.Context) (compose.Snapshot, error) {
 	snap, err := p.c.Snapshot(ctx, p.r.Workspace, p.r.Owner())
 	if err != nil {
@@ -380,8 +389,9 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	p.st.Did = id.Status.Did
 	compose.FillApplicationStatus(&p.st, o.Generation, false, o.Spec.Components, desired, snap, nil)
+	down := p.ingressDown(snap, plan)
 	if snap.Satisfied(desired) {
-		p.st = compose.Ready(p.st, "the existing account is signed in and every component is ready")
+		p.st = compose.Ready(p.st, "the existing account is signed in and every component is ready"+down)
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.MarketRequesterGVR, p.st)
 	}
 	return p.wait("waiting for every component to be ready")
@@ -503,11 +513,12 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	}
 	p.st.Did = id.Status.Did
 	compose.FillApplicationStatus(&p.st, o.Generation, false, o.Spec.Components, desired, snap, nil)
+	down := p.ingressDown(snap, plan)
 	switch msg := compose.AssociationWait(plan, id, compose.RequesterAssociate); {
 	case msg != "":
 		return p.wait(msg)
 	case snap.Satisfied(desired) && p.st.Did != "":
-		p.st = compose.Ready(p.st, "the requester is signed in and its components are ready")
+		p.st = compose.Ready(p.st, "the requester is signed in and its components are ready"+down)
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.MarketRequesterGVR, p.st)
 	case p.st.Did == "":
 		return p.wait("waiting for the requester's MarketIdentity to sign in")

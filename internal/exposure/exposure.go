@@ -18,6 +18,7 @@ import (
 	"time"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/servetls"
@@ -45,6 +46,8 @@ type Binding struct {
 	ServiceGeneration int64
 
 	Target component.Key
+
+	SubscriberChanged func()
 }
 
 type Published struct {
@@ -53,6 +56,8 @@ type Published struct {
 	Endpoint string
 
 	Provider string
+
+	Ingress *exposurev1alpha1.ExposureIngress
 }
 
 const addrInUseRelease = 12
@@ -64,9 +69,10 @@ type Publisher struct {
 	registrar IngressRegistrar
 	log       *slog.Logger
 
-	mu      sync.Mutex
-	running map[string]*publication
-	busy    map[string]int
+	mu          sync.Mutex
+	running     map[string]*publication
+	busy        map[string]int
+	subscribers map[string]exposurev1alpha1.ExposureIngressSubscriber
 }
 
 type publication struct {
@@ -99,7 +105,8 @@ func NewPublisher(cfg PublisherConfig) *Publisher {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Publisher{handlers: cfg.Handlers, ports: cfg.Ports, tls: cfg.TLS, registrar: cfg.Registrar,
-		log: log.With("component", "exposure-publisher"), running: map[string]*publication{}, busy: map[string]int{}}
+		log: log.With("component", "exposure-publisher"), running: map[string]*publication{}, busy: map[string]int{},
+		subscribers: map[string]exposurev1alpha1.ExposureIngressSubscriber{}}
 }
 
 func (p *Publisher) Handler(ctx context.Context, target component.Key, protocol exposurev1alpha1.ServiceProtocol, name string) (http.Handler, bool, error) {
@@ -159,8 +166,30 @@ func (p *Publisher) addrInUse(key string) bool {
 }
 
 func (p *Publisher) Withdraw(workspace, name string) {
-	p.stop(publicationKey(workspace, name))
+	key := publicationKey(workspace, name)
+	p.stop(key)
 	p.release(workspace, name)
+	p.mu.Lock()
+	delete(p.subscribers, key)
+	p.mu.Unlock()
+}
+
+func (p *Publisher) Subscriber(workspace, name string) (exposurev1alpha1.ExposureIngressSubscriber, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	state, ok := p.subscribers[publicationKey(workspace, name)]
+	return state, ok
+}
+
+func (p *Publisher) subscriberReporter(key string, changed func()) func(ingress.SubscriberStatus) {
+	return func(status ingress.SubscriberStatus) {
+		p.mu.Lock()
+		p.subscribers[key] = SubscriberStateOf(status)
+		p.mu.Unlock()
+		if changed != nil {
+			changed()
+		}
+	}
 }
 
 func (p *Publisher) Pause(workspace, name string) {
@@ -353,6 +382,7 @@ func (p *Publisher) startIngress(ctx context.Context, b Binding) (*publication, 
 		TLS:            b.Spec.TLS.Enabled,
 		AuthRequired:   b.Spec.Auth.Required,
 		AllowedDIDs:    append([]string(nil), b.Spec.Auth.AllowedDIDs...),
+		OnStatus:       p.subscriberReporter(publicationKey(b.Workspace, b.Name), b.SubscriberChanged),
 	})
 	if !stop() || err != nil {
 		cancel()
@@ -370,7 +400,12 @@ func (p *Publisher) startIngress(ctx context.Context, b Binding) (*publication, 
 	if path := normalizePath(b.Spec.Path); path == "" || path == "/" {
 		address = originURL(address)
 	}
-	return &publication{published: Published{Address: address, Endpoint: address, Provider: provider},
+	var route *exposurev1alpha1.ExposureIngress
+	if routed, ok := registration.(IngressRegistrationRoute); ok {
+		value := routed.Route()
+		route = &value
+	}
+	return &publication{published: Published{Address: address, Endpoint: address, Provider: provider, Ingress: route},
 		close: func() {
 			_ = registration.Close()
 			cancel()

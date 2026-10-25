@@ -253,6 +253,7 @@ func exposureViewOf(v ComponentView, kind string, m kube.Doc) (ComponentView, er
 		}
 		v.Status.Phase = v1alpha1.ComponentPhase(st.Phase)
 		v.Status.Ready = st.Ready
+		v.Status.Conditions = st.Conditions
 		if st.Address != "" {
 			v.Status.Endpoint = st.Address
 			v.Status.Endpoints = []v1alpha1.Endpoint{{Name: "url", URL: st.Address, Address: st.Endpoint}}

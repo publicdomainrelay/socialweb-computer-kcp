@@ -201,6 +201,10 @@ type MarketStreams struct {
 	RequeueAfter time.Duration
 }
 
+func RequesterCommsMode(comms *v1alpha1.MarketComms, forceFirehose bool) v1alpha1.MarketCommsMode {
+	return streamMode(Streams{Role: RequesterStreamRole, Comms: comms, ForceFirehose: forceFirehose})
+}
+
 func streamMode(s Streams) v1alpha1.MarketCommsMode {
 	if s.ForceFirehose {
 		return v1alpha1.MarketCommsModeFirehose

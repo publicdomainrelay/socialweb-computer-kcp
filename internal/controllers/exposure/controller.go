@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
@@ -34,6 +37,8 @@ const (
 	ServiceKind = "Service"
 
 	IngressProxyKind = "IngressProxy"
+
+	closedReportTimeout = 3 * time.Second
 )
 
 type Options struct {
@@ -52,6 +57,10 @@ type Controller struct {
 	refs *binding.Table[struct{}]
 
 	events *ctlruntime.Queue
+
+	mu sync.Mutex
+
+	subscribed map[string]ctlruntime.Request
 }
 
 func New(opts Options) (*Controller, error) {
@@ -63,7 +72,7 @@ func New(opts Options) (*Controller, error) {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{publisher: opts.Publisher, log: log.With("component", "exposure-controller"), refs: binding.New[struct{}](),
-		events: ctlruntime.NewQueue()}, nil
+		events: ctlruntime.NewQueue(), subscribed: map[string]ctlruntime.Request{}}, nil
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -79,6 +88,13 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		return nil, fmt.Errorf("%s: forwarding component changes: %w", Name, err)
 	}
 	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(events), ctlruntime.Gone(ctl.gone),
+		ctlruntime.ForeignStatus(exposure.SubscriberStatusPath),
+		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.Exposure) []ctlruntime.Request {
+			if !obj.DeletionTimestamp.IsZero() || exposure.IngressRegisteredCurrent(obj) {
+				return nil
+			}
+			return []ctlruntime.Request{src}
+		}),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.Service) []ctlruntime.Request {
 			return ctl.users(binding.Key(src.Workspace, ServiceKind, obj.Name))
 		}),
@@ -97,6 +113,67 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 
 func (c *Controller) Close() {
 	c.publisher.Close()
+	c.mu.Lock()
+	subscribed := c.subscribed
+	c.subscribed = map[string]ctlruntime.Request{}
+	c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), closedReportTimeout)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, req := range subscribed {
+		state, ok := c.publisher.Subscriber(req.Workspace, req.Name)
+		if !ok || state.State != exposurev1alpha1.IngressSubscriberClosed {
+			continue
+		}
+		wg.Go(func() {
+			if err := reportClosed(ctx, req, state); err != nil {
+				c.log.Warn("reporting the closed ingress subscriber", "workspace", req.Workspace, "exposure", req.Name, "err", err)
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func reportClosed(ctx context.Context, req ctlruntime.Request, state exposurev1alpha1.ExposureIngressSubscriber) error {
+	if err := req.ApplyStatusAs(ctx, exposurev1alpha1.FieldManagerIngressSubscriber, exposureRef(req), exposure.SubscriberStatusFields(state)); err != nil {
+		return err
+	}
+	var object exposurev1alpha1.Exposure
+	if err := req.Get(ctx, "", req.Name, &object); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	status := *object.Status.DeepCopy()
+	var route *exposurev1alpha1.ExposureIngress
+	if status.Ingress != nil {
+		status.Ingress.Subscriber = nil
+		if status.Ingress.Host != "" || status.Ingress.URL != "" {
+			route = status.Ingress
+		} else {
+			status.Ingress = nil
+		}
+	}
+	exposure.SetIngressRegistered(&status.Conditions, object.Generation, route, &state)
+	next := object.DeepCopy()
+	next.Status = status
+	return req.ApplyStatus(ctx, next)
+}
+
+func exposureRef(req ctlruntime.Request) *exposurev1alpha1.Exposure {
+	return &exposurev1alpha1.Exposure{ObjectMeta: metav1.ObjectMeta{Name: req.Name}}
+}
+
+func (c *Controller) remember(req ctlruntime.Request, subscribed bool) {
+	key := req.Workspace + "/" + req.Name
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if subscribed {
+		c.subscribed[key] = req
+		return
+	}
+	delete(c.subscribed, key)
 }
 
 func (c *Controller) ComponentChanged(key component.Key) {
@@ -122,6 +199,7 @@ func (c *Controller) users(ref string) []ctlruntime.Request {
 }
 
 func (c *Controller) gone(_ context.Context, req ctlruntime.Request) {
+	c.remember(req, false)
 	c.publisher.Withdraw(req.Workspace, req.Name)
 	c.refs.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 }
@@ -129,6 +207,7 @@ func (c *Controller) gone(_ context.Context, req ctlruntime.Request) {
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *exposurev1alpha1.Exposure) (ctlruntime.Result, error) {
 	self := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
 	if !object.DeletionTimestamp.IsZero() {
+		c.remember(req, false)
 		c.publisher.Withdraw(req.Workspace, req.Name)
 		c.refs.Set(self, nil)
 		return ctlruntime.Result{}, nil
@@ -191,7 +270,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 			fmt.Sprintf("no handler %q is registered for %s/%s in workspace %s", exposure.HandlerName(svc.Spec.Handler), target.Kind, target.Name, target.Workspace))
 	}
 	published, err := c.publisher.Publish(ctx, exposure.Binding{Workspace: req.Workspace, Name: req.Name, Spec: spec, Service: svc.Spec,
-		ServiceGeneration: svc.Generation, Target: target})
+		ServiceGeneration: svc.Generation, Target: target, SubscriberChanged: func() { c.events.Add(req) }})
 	generation := object.Generation
 	status := object.Status
 	if err != nil {
@@ -212,7 +291,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		}
 		conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, true, "HandlerRegistered", "the target handler is registered")
 		conds.Set(&status.Conditions, generation, ConditionReady, false, reason, err.Error())
-		return ctlruntime.Result{}, errors.Join(retry, apply(ctx, req, object, status))
+		return ctlruntime.Result{}, errors.Join(retry, c.apply(ctx, req, object, status, nil))
 	}
 	status.Phase = exposurev1alpha1.ExposureReady
 	status.Ready = true
@@ -225,7 +304,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		message = "the Exposure is bound by the " + published.Provider + " ingress provider"
 	}
 	conds.Set(&status.Conditions, generation, ConditionReady, true, "Ready", message)
-	return ctlruntime.Result{}, apply(ctx, req, object, status)
+	return ctlruntime.Result{}, c.apply(ctx, req, object, status, published.Ingress)
 }
 
 func (c *Controller) withdraw(ctx context.Context, req ctlruntime.Request, object *exposurev1alpha1.Exposure, phase exposurev1alpha1.ExposurePhase,
@@ -239,11 +318,38 @@ func (c *Controller) withdraw(ctx context.Context, req ctlruntime.Request, objec
 	status.Endpoint = ""
 	conds.Set(&status.Conditions, generation, ConditionHandlerRegistered, false, reason, message)
 	conds.Set(&status.Conditions, generation, ConditionReady, false, reason, message)
-	return ctlruntime.Result{}, apply(ctx, req, object, status)
+	return ctlruntime.Result{}, c.apply(ctx, req, object, status, nil)
 }
 
-func apply(ctx context.Context, req ctlruntime.Request, object *exposurev1alpha1.Exposure, status exposurev1alpha1.ExposureStatus) error {
+func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *exposurev1alpha1.Exposure, status exposurev1alpha1.ExposureStatus,
+	route *exposurev1alpha1.ExposureIngress) error {
+	var reported *exposurev1alpha1.ExposureIngressSubscriber
+	if object.Status.Ingress != nil {
+		reported = object.Status.Ingress.Subscriber
+	}
+	sub := reported
+	local, ok := c.publisher.Subscriber(req.Workspace, req.Name)
+	if ok {
+		sub = &local
+	}
+	c.remember(req, ok)
+	if object.Spec.Mode != exposurev1alpha1.ExposureModeIngress {
+		route, sub = nil, nil
+	}
+	status.Ingress = nil
+	if route != nil {
+		served := *route
+		served.Subscriber = nil
+		status.Ingress = &served
+	}
+	exposure.SetIngressRegistered(&status.Conditions, object.Generation, route, sub)
 	next := object.DeepCopy()
 	next.Status = status
-	return req.ApplyStatus(ctx, next)
+	if err := req.ApplyStatus(ctx, next); err != nil {
+		return err
+	}
+	if !ok || exposure.SubscriberStateEqual(reported, &local) {
+		return nil
+	}
+	return req.ApplyStatusAs(ctx, exposurev1alpha1.FieldManagerIngressSubscriber, exposureRef(req), exposure.SubscriberStatusFields(local))
 }

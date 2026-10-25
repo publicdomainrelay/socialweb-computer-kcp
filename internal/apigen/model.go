@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -231,18 +232,13 @@ var columnTypes = map[string]string{
 	"date":    TypeString,
 }
 
-func checkColumn(root *Schema, c v1alpha1.PrinterColumn) error {
-	want, ok := columnTypes[c.Type]
-	if !ok {
-		return fmt.Errorf("type %q is not one of string, integer, boolean, date", c.Type)
-	}
-	if !strings.HasPrefix(c.JSONPath, ".") {
-		return fmt.Errorf("jsonPath %q does not start with a dot", c.JSONPath)
-	}
+var conditionColumn = regexp.MustCompile(`^(\.[A-Za-z0-9.]+)\[\?\(@\.type=="[A-Za-z][A-Za-z0-9]*"\)\]\.(status|reason|message)$`)
+
+func columnField(root *Schema, jsonPath, fieldPath string) (*Schema, error) {
 	s := root
-	for name := range strings.SplitSeq(c.JSONPath[1:], ".") {
+	for name := range strings.SplitSeq(fieldPath[1:], ".") {
 		if s.Ref == RefObjectMeta {
-			return nil
+			return nil, nil
 		}
 		var next *Schema
 		for _, p := range s.Properties {
@@ -251,9 +247,37 @@ func checkColumn(root *Schema, c v1alpha1.PrinterColumn) error {
 			}
 		}
 		if next == nil {
-			return fmt.Errorf("jsonPath %q names no field %s", c.JSONPath, name)
+			return nil, fmt.Errorf("jsonPath %q names no field %s", jsonPath, name)
 		}
 		s = next
+	}
+	return s, nil
+}
+
+func checkColumn(root *Schema, c v1alpha1.PrinterColumn) error {
+	want, ok := columnTypes[c.Type]
+	if !ok {
+		return fmt.Errorf("type %q is not one of string, integer, boolean, date", c.Type)
+	}
+	if !strings.HasPrefix(c.JSONPath, ".") {
+		return fmt.Errorf("jsonPath %q does not start with a dot", c.JSONPath)
+	}
+	if m := conditionColumn.FindStringSubmatch(c.JSONPath); m != nil {
+		list, err := columnField(root, c.JSONPath, m[1])
+		if err != nil {
+			return err
+		}
+		if list == nil || list.Type != TypeArray || list.Items == nil || list.Items.Ref != RefCondition {
+			return fmt.Errorf("jsonPath %q filters %s, which is not a conditions list", c.JSONPath, m[1])
+		}
+		if want != TypeString {
+			return fmt.Errorf("jsonPath %q is a string, the column says %s", c.JSONPath, c.Type)
+		}
+		return nil
+	}
+	s, err := columnField(root, c.JSONPath, c.JSONPath)
+	if err != nil || s == nil {
+		return err
 	}
 	if s.Type != want {
 		return fmt.Errorf("jsonPath %q is a %s, the column says %s", c.JSONPath, s.Type, c.Type)
