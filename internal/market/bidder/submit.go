@@ -44,6 +44,9 @@ func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (
 	if b.cfg.Suspend {
 		return "", ErrSuspended
 	}
+	if b.rfpClosed(rfpURI, nil, "submitRfp") {
+		return "", ErrRFPClosed
+	}
 	bid, err := b.enqueueBid(ctx, rfpURI, rfpCID, issuer)
 	if err != nil {
 		return "", err
@@ -69,6 +72,15 @@ func (b *Bidder) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string) 
 	if existing, ok := b.bids.Get(name); ok {
 		return b.claimBid(ctx, existing, now)
 	}
+	published, err := b.publishedBid(ctx, name)
+	if err != nil {
+		return v1alpha1.Bid{}, fmt.Errorf("reading the bidder's bid record for the RFP: %w", err)
+	}
+	if published != nil {
+		b.log.Info("bidder_rfp_already_bid", "rfp", rfpURI, "bid", published.URI)
+		return v1alpha1.Bid{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: v1alpha1.BidStatus{Phase: v1alpha1.BidPhasePublished,
+			Bid: &commonv1.StrongRef{URI: published.URI, CID: published.CID}}}, nil
+	}
 	bid := v1alpha1.Bid{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: v1alpha1.BidSpec{
@@ -78,7 +90,7 @@ func (b *Bidder) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string) 
 			TTLSecondsAfterFinished: ptr.To(BidTTLSeconds),
 		},
 	}
-	err := b.intents.CreateBid(ctx, bid)
+	err = b.intents.CreateBid(ctx, bid)
 	if errors.Is(err, contract.ErrExists) {
 		waitCtx, cancel := context.WithTimeout(ctx, AwaitTimeout)
 		defer cancel()
@@ -102,6 +114,27 @@ func (b *Bidder) enqueueBid(ctx context.Context, rfpURI, rfpCID, issuer string) 
 	}
 	bid.Status = status
 	return bid, nil
+}
+
+func (b *Bidder) publishedBid(ctx context.Context, name string) (*market.ResolvedRecord, error) {
+	record, err := b.records.GetRecord(ctx, b.cfg.DID, market.BidNSID, name)
+	switch {
+	case err == nil:
+		return &record, nil
+	case errors.Is(err, market.ErrNotFound):
+		return nil, nil
+	}
+	return nil, err
+}
+
+func (b *Bidder) rfpClosed(rfpURI string, record map[string]any, via string) bool {
+	if !market.RFPBidWindowOver(rfpURI, record, b.now()) {
+		return false
+	}
+	if n := b.closedRFPs.Add(1); n == 1 || n%closedRFPLogEvery == 0 {
+		b.log.Info("bidder_rfp_closed", "rfp", rfpURI, "via", via, "closed", n, "bidWindow", market.RFPBidWindow)
+	}
+	return true
 }
 
 func (b *Bidder) claimBid(ctx context.Context, bid v1alpha1.Bid, now time.Time) (v1alpha1.Bid, error) {

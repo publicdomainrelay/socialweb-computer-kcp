@@ -59,6 +59,10 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	}
 	var rfp *market.RFP
 	if bid.Status.Phase == v1alpha1.BidPhaseDeciding {
+		if b.rfpClosed(bid.Spec.Rfp.URI, nil, "bid") {
+			b.failBid(ctx, bid, "BidWindowOver", "the bid window of the RFP closed before the bid was published", now)
+			return 0, nil
+		}
 		if bid.Spec.PayloadNsid == "" || bid.Spec.Policy.Verdict != "allow" {
 			decided, err := b.validateBid(ctx, bid, now)
 			if err != nil || decided == nil {
@@ -228,6 +232,10 @@ func (b *Bidder) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Ti
 	resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID})
 	if err != nil {
 		return nil, fmt.Errorf("resolving the RFP of a bid: %w", err)
+	}
+	if b.rfpClosed(bid.Spec.Rfp.URI, resolved.Value, "bid") {
+		b.failBid(ctx, bid, "BidWindowOver", "the bid window of the RFP closed before the bid was published", now)
+		return nil, nil
 	}
 	rfp, err := market.ParseRFP(resolved.Value)
 	if err != nil {

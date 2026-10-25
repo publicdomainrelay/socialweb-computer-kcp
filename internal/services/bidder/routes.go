@@ -113,6 +113,10 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, err := bidder.SubmitRFP(r.Context(), body.RFPURI, body.RFPCID, issuer)
+	if errors.Is(err, core.ErrRFPClosed) {
+		participant.WriteXRPCError(w, http.StatusConflict, "RFPClosed", err.Error())
+		return
+	}
 	if err != nil {
 		s.log.Warn("recording the bid intent failed", "rfp", body.RFPURI, "err", err)
 		participant.WriteXRPCError(w, http.StatusInternalServerError, "InternalError", err.Error())

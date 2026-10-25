@@ -189,6 +189,9 @@ func (h *marketHandler) Deliver(ctx context.Context, event events.Event) error {
 			continue
 		}
 		uri := "at://" + event.Repo + "/" + collection + "/" + rkey
+		if h.addressees.closed(event.Source, collection, uri, nil) {
+			continue
+		}
 		if op.CID == "" {
 			if err := h.deliverOp(ctx, event, adapter, repo, uri, collection, rkey, op); err != nil {
 				return err
@@ -239,6 +242,9 @@ func (h *marketHandler) deliverOp(ctx context.Context, event events.Event, adapt
 	value, recordCID, err := h.fetchMarketRecord(ctx, event.Source, repo, collection, rkey, expected)
 	if err != nil {
 		return fmt.Errorf("eventstream: fetching the market record %s: %w", uri, err)
+	}
+	if h.addressees.closed(event.Source, collection, uri, value) {
+		return nil
 	}
 	owner, ok := h.addressees.owner(ctx, collection, event.Repo, value, func(ctx context.Context, receiptURI string) (map[string]any, error) {
 		return h.fetchReceipt(ctx, event.Source, receiptURI)

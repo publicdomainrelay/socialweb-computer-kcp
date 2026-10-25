@@ -882,6 +882,9 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 	}
 	switch payload.Collection {
 	case market.RFPNSID:
+		if b.rfpClosed(payload.URI, payload.Record, "inbox") {
+			break
+		}
 		bid, err := b.enqueueBid(ctx, payload.URI, payload.CID, payload.DID)
 		if err != nil {
 			return participant.Observation{}, fmt.Errorf("bidder: recording the bid intent: %w", err)

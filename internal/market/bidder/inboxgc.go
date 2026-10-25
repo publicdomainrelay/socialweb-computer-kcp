@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MarketInboxRetention = 10 * time.Minute
+	MarketInboxRetention = market.RFPBidWindow
 
 	inboxPrunedLogEvery = 100
 )

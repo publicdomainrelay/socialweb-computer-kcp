@@ -4423,6 +4423,35 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **A bidder bids only inside an RFP's bid window, and never twice on one RFP (2026-10-25).**
+  Before (rc117 on hat-7): right after its core restarted, the bob bidder published a bid on each RFP
+  of the gateway requester from the previous 29 h (39 in the first minute, each on a different RFP,
+  contracts long finished). Path: a bidder market EventStream resumes from its stored cursor, rewound
+  (a relay 1000 events, which on our low-traffic relay is about a day; a Jetstream 30 s), and a
+  Persisted stream with no recency bound replays whatever lies behind it; every replayed
+  `market.rfp` went through the sink into a new inbox StateSync and `enqueueBid`. No code lists a
+  requester's `market.rfp` collection, and the gateway re-sends submitRfp only while a contract
+  collects bids. The only dedup was the inbox StateSync of the first delivery; a01e01f7 prunes it
+  10 min after it is Acked, and an RFP the bidder never handled (it was out of the market) had none.
+  The lexicon has no expiry. Now: `market.RFPBidWindow` (10 min from the RFP's `createdAt`, else
+  from its TID rkey; the requester's default bid window is 30 s) gates every entry: the bidder sink
+  drops a closed RFP before the record fetch and again after it (`market_rfp_closed_dropped`, with
+  the source, every 100), submitRfp answers 409 `RFPClosed`, the inbox adapter skips it, and a
+  Deciding Bid of a closed RFP fails `BidWindowOver`. The handled fact is the Bid object (named by
+  `market.BidRKey`) and, after its 24 h TTL, the bidder's own `market.bid` record at that rkey
+  (`bidder_rfp_already_bid`), never an inbox StateSync, and the bidder's inbox retention is the bid
+  window, so a pruned entry is always of a closed RFP. Provision and release StateSyncs, the dedup
+  of a replayed accept or event, are never pruned. Market network `rfpwin` (one bidder, comms Both,
+  test-0001, UTC): four requests ran to Released (09:49 to 10:00, 4 bids); all Bid objects and the
+  open RFP's inbox entry deleted (the state after a TTL and a prune), `dev restart rfpwin
+  bidder-1/core` at 10:04:11: its market stream dialed the network relay at cursor 1 and replayed
+  the backlog, `market_rfp_closed_dropped` from `relay/http://127.0.0.1:25569`, 0 bids; a new
+  request then got its bid (10:05:40) and Held. With that request Held, its Bid deleted (orphaning
+  the ComputeVM) and its inbox entry deleted, a second restart at 10:06:00 replayed the open RFP:
+  `bidder_rfp_already_bid` from the repo record, 0 bids, and the held guest finished and released.
+  A further request got its bid and Held. 6 `the bidder published a bid` lines in all, one per
+  request.
+
 - **A role keeps market objects only for its own contracts (2026-10-25).** Before: the requester's
   market sink turned every record of the collection-filtered public streams into an Outbound,
   Retain StateSync in its root workspace, also other contracts' bids, payload records

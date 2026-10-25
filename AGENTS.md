@@ -136,7 +136,15 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   The roles prune their market inbox StateSyncs (Outbound, Retain: the role adapter is the target,
   and a delete has no remote side): one that matches no own contract at once; the requester's of a
   Released or Failed contract once Acked and 10 min old (`MarketInboxRetention`); the bidder's
-  every Acked one at 10 min (`requester_inbox_pruned`, `bidder_inbox_pruned`, every 100). A relay stream reconnects 1000 events back, a Jetstream 30 s back,
+  every Acked one at 10 min (`requester_inbox_pruned`, `bidder_inbox_pruned`, every 100). No
+  inbox StateSync is a dedup fact. A bidder bids only inside an RFP's bid window
+  (`market.RFPBidWindow`, 10 min from its `createdAt`, else from its TID rkey; the lexicon has no
+  expiry), which the bidder's inbox retention equals: its sink drops a closed RFP before the record
+  fetch and again after it (`market_rfp_closed_dropped`, with the source, every 100), submitRfp
+  answers 409 `RFPClosed`, and a Deciding Bid of a closed RFP fails `BidWindowOver`
+  (`bidder_rfp_closed`). It never bids twice on one RFP: the handled fact is the Bid object (name
+  `market.BidRKey`) and, after its TTL, the bidder's own `market.bid` record at that rkey
+  (`bidder_rfp_already_bid`). A relay stream reconnects 1000 events back, a Jetstream 30 s back,
   but never before the cursor its last connection started at, after a 1 s backoff that doubles to
   30 s and resets only after a connection that stayed up 30 s; each close logs `event_stream_closed`
   (the cursor, `openSeconds`, `retryIn`, the error) and a failed dial `event_stream_subscribe_failed`. Our relay answers a subscribeRepos

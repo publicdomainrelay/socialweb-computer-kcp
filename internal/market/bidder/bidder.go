@@ -60,10 +60,14 @@ const (
 	adapterLabel = "statesync.socialweb.computer/adapter"
 
 	releaseReason = "deleted_on_request"
+
+	closedRFPLogEvery = 100
 )
 
 var (
 	ErrSuspended = errors.New("bidder: the bidder's participation is suspended")
+
+	ErrRFPClosed = errors.New("bidder: the bid window of the RFP is over")
 
 	ErrEventForbidden = errors.New("bidder: not the accept author")
 
@@ -270,6 +274,8 @@ type Bidder struct {
 	prunedForeign atomic.Int64
 
 	prunedAged atomic.Int64
+
+	closedRFPs atomic.Int64
 
 	bids *participant.Index[v1alpha1.Bid]
 

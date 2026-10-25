@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -16,6 +17,8 @@ import (
 
 const (
 	foreignLogEvery = 1000
+
+	closedLogEvery = 100
 
 	temporaryNSIDPrefix = "com.publicdomainrelay.temp."
 
@@ -46,6 +49,8 @@ type addressees struct {
 	waits atomic.Int64
 
 	unaddressed atomic.Int64
+
+	closedRFPs atomic.Int64
 }
 
 func newAddressees(ctx context.Context, role, workspace string, dyn DynamicFactory, log *slog.Logger) (*addressees, error) {
@@ -127,6 +132,17 @@ func (a *addressees) wants(ctx context.Context, collection, author string) bool 
 	if !index.RequesterWants(collection, author) {
 		a.drop(&a.unread, collection)
 		return false
+	}
+	return true
+}
+
+func (a *addressees) closed(source, collection, uri string, record map[string]any) bool {
+	if a.role == "requester" || collection != market.RFPNSID || !market.RFPBidWindowOver(uri, record, time.Now()) {
+		return false
+	}
+	if n := a.closedRFPs.Add(1); n == 1 || n%closedLogEvery == 0 {
+		a.log.Info("market_rfp_closed_dropped", "role", a.role, "workspace", a.workspace, "dropped", n, "source", source, "uri", uri,
+			"bidWindow", market.RFPBidWindow)
 	}
 	return true
 }
