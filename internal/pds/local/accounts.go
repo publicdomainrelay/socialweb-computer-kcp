@@ -60,8 +60,11 @@ func account(ctx context.Context, srv *atpds.Server, did syntax.DID) (pds.Accoun
 		return pds.Account{}, fmt.Errorf("%w: the Pds runs without accounts", pds.ErrUnsupported)
 	}
 	acct, err := store.GetAccount(ctx, did)
-	if err != nil {
+	if errors.Is(err, atpds.ErrAccountNotFound) {
 		return pds.Account{}, fmt.Errorf("%w: %s: %v", pds.ErrNotFound, did, err)
+	}
+	if err != nil {
+		return pds.Account{}, err
 	}
 	out := pds.Account{DID: acct.DID.String(), Handle: acct.Handle, Email: acct.Email, Active: acct.Active}
 	if keys := srv.KeyStore(); keys != nil {

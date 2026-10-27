@@ -402,7 +402,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}}
 	out := []compose.Desired{compose.PolicyEngineDesired(), guest, bidder}
 	if plan.Local {
-		pdsSpec, err := compose.AppPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, pdsPublicURL, in.required, in.ref)
+		pdsSpec, err := compose.AppPdsSpec(stateRoot, "", false, network, pdsHandle, vault, hostnames, pdsPublicURL, in.required, in.ref)
 		if err != nil {
 			return nil, err
 		}

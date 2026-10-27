@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 )
 
@@ -155,6 +156,11 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	log := s.deps.Log
 	var err error
+	unlock, err := lockStateDir(stateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	var (
 		repoStore    *repo.SQLiteStore
 		accountStore *atpds.Store
@@ -496,4 +502,19 @@ func (s *Service) UpdateService(ctx context.Context, did syntax.DID, service str
 		return errors.New("pds: the service is not started")
 	}
 	return server.UpdateService(ctx, did, service)
+}
+
+func lockStateDir(dir string) (func(), error) {
+	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("pds: the state dir lock: %w", err)
+	}
+	if err := hostos.Lock(f, hostos.LockExclusive|hostos.LockNonBlocking); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("pds: the state dir %s is locked by another PDS: %w", dir, err)
+	}
+	return func() {
+		_ = hostos.Unlock(f)
+		_ = f.Close()
+	}, nil
 }

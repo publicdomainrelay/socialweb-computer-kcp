@@ -578,6 +578,10 @@
       "type": "string",
       "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
     },
+    "identity": {
+      "type": "string",
+      "description": "run request: reuse one localRepo DID and repo across invocations from <state-root>/identities/<name>; standalone only, and the first run needs -- --skip-qr or an already-approved identity. Omit for a fresh DID per invocation"
+    },
     "secrets": {
       "type": "string",
       "description": "run request: a secrets bundle file ([{\"path\": \"/abs/path\", \"value\": ...}]); it is written only into the invocation's own OpenBao, the guest fetches it at boot and it never enters a kcp object"

@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +41,12 @@ const (
 	PdsIngressReasonNotReady            = "IngressNotReady"
 	PdsIngressReasonURLInvalid          = "IngressURLInvalid"
 	PdsIngressReasonStableHost          = "StableHostMismatch"
+)
+
+var (
+	ErrIdentityAccountMissing = errors.New("compose: the identity PDS holds no account for the requested DID")
+
+	ErrIdentityInvalid = errors.New("compose: the identity PDS state is not usable")
 )
 
 func PdsSessionPath(name string) string {
@@ -108,7 +115,38 @@ func EnsurePDSKeyFiles(stateDir string) error {
 	return nil
 }
 
-func AppPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle string, vault *commonv1.ObjectRef,
+func PdsStateDir(stateRoot, override string) string {
+	dir := ComponentCRStateDir(stateRoot, ComponentKindPds, PdsComponent)
+	if override = strings.TrimSpace(override); override != "" {
+		dir = override
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+func RequirePDSKeyFiles(stateDir string) error {
+	for _, name := range []string{pdssvc.SessionSecretFile, pdssvc.RotationKeyFile} {
+		info, err := os.Lstat(filepath.Join(stateDir, name))
+		if err != nil {
+			return fmt.Errorf("compose: the app-owned Pds reuse needs %s: %w", name, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("compose: the app-owned Pds reuse needs %s as a regular file", name)
+		}
+	}
+	info, err := os.Lstat(filepath.Join(stateDir, pdssvc.RepoKeyDir))
+	if err != nil {
+		return fmt.Errorf("compose: the app-owned Pds reuse needs %s: %w", pdssvc.RepoKeyDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("compose: the app-owned Pds reuse needs %s as a directory", pdssvc.RepoKeyDir)
+	}
+	return nil
+}
+
+func AppPdsSpec(stateRoot, pdsStateDir string, existing bool, network *v1alpha1.MarketNetworkValue, handle string, vault *commonv1.ObjectRef,
 	hostnames []string, publicURL string, requireIngress bool, ingressRef *commonv1.ObjectRef) (v1alpha1.PdsSpec, error) {
 	plcURL := ""
 	if network != nil {
@@ -117,12 +155,21 @@ func AppPdsSpec(stateRoot string, network *v1alpha1.MarketNetworkValue, handle s
 	if plcURL == "" {
 		return v1alpha1.PdsSpec{}, errors.New("compose: the app-owned Pds needs the network value's plcDirectoryUrl; no PLC URL is available")
 	}
-	stateDir := ComponentCRStateDir(stateRoot, ComponentKindPds, PdsComponent)
-	if err := EnsurePDSKeyFiles(stateDir); err != nil {
-		return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds keys: %w", err)
+	stateDir := PdsStateDir(stateRoot, pdsStateDir)
+	if !filepath.IsAbs(stateDir) {
+		return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds state dir %q is not absolute", stateDir)
 	}
-	if err := os.MkdirAll(filepath.Join(stateDir, pdssvc.RepoKeyDir), 0o700); err != nil {
-		return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds repo key directory: %w", err)
+	if existing {
+		if err := RequirePDSKeyFiles(stateDir); err != nil {
+			return v1alpha1.PdsSpec{}, err
+		}
+	} else {
+		if err := EnsurePDSKeyFiles(stateDir); err != nil {
+			return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds keys: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Join(stateDir, pdssvc.RepoKeyDir), 0o700); err != nil {
+			return v1alpha1.PdsSpec{}, fmt.Errorf("compose: the app-owned Pds repo key directory: %w", err)
+		}
 	}
 	hostnames = pdsHostnames(handle, hostnames)
 	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
@@ -220,6 +267,15 @@ func SchemeHostURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	return strings.ToLower(u.Scheme) + "://" + u.Host, u.Host, true
+}
+
+func SamePDSURL(a, b string) bool {
+	ua, _, oka := SchemeHostURL(a)
+	ub, _, okb := SchemeHostURL(b)
+	if !oka || !okb {
+		return strings.TrimRight(strings.TrimSpace(a), "/") == strings.TrimRight(strings.TrimSpace(b), "/")
+	}
+	return strings.EqualFold(ua, ub)
 }
 
 type PdsIngressError struct {
@@ -442,6 +498,10 @@ type PdsAccount struct {
 	Workspace string
 
 	Pds string
+
+	AdoptDID string
+
+	Sync bool
 }
 
 func (a PdsAccount) pds() string {
@@ -457,7 +517,14 @@ func (a PdsAccount) credentials() commonv1.SecretRef {
 
 func PdsAccountLinks(r Root, a PdsAccount) []Link {
 	pdsRef := AppRef(ComponentKindPds, a.pds(), workspaceOr(a.Workspace, r.Workspace))
-	return []Link{RootAccountLink(r.Ref(), pdsRef), RootVaultLink(r, a.Vault, a.Mount+"/identity/*")}
+	caps := []exposurev1alpha1.LinkCapability{
+		Cap(pds.CapabilityAccount, ScopeAll),
+		Cap(pds.CapabilitySession, ScopeAll),
+	}
+	if a.Sync {
+		caps = append(caps, Cap(pds.CapabilitySync, ScopeAll))
+	}
+	return []Link{RefLink(r.Ref(), pdsRef, caps...), RootVaultLink(r, a.Vault, a.Mount+"/identity/*")}
 }
 
 func (c *Composer) EnsurePdsAccount(ctx context.Context, r Root, a PdsAccount) (string, error) {
@@ -478,6 +545,51 @@ func (c *Composer) EnsurePdsAccount(ctx context.Context, r Root, a PdsAccount) (
 	accounts, err := bus.Resolve[pds.Accounts](ctx, c.cfg.Bus, r.Ref(), pdsRef, bus.Capability{Name: pds.CapabilityAccount, Scope: scope})
 	if err != nil {
 		return "", err
+	}
+	if adopt := strings.TrimSpace(a.AdoptDID); adopt != "" {
+		parsed, err := syntax.ParseDID(adopt)
+		if err != nil {
+			return "", fmt.Errorf("%w: the adopted DID %q: %v", ErrIdentityInvalid, adopt, err)
+		}
+		held, _ := data["did"].(string)
+		if held = strings.TrimSpace(held); held != "" && held != parsed.String() {
+			return "", fmt.Errorf("%w: the invocation vault holds %s, not %s", ErrIdentityInvalid, held, parsed)
+		}
+		acct, err := accounts.Account(ctx, parsed.String())
+		switch {
+		case errors.Is(err, pds.ErrNotFound):
+			return "", fmt.Errorf("%w: %s", ErrIdentityAccountMissing, parsed)
+		case err != nil:
+			return "", err
+		}
+		switch {
+		case acct.DID != parsed.String():
+			return "", fmt.Errorf("%w: the PDS answered %s for %s", ErrIdentityInvalid, acct.DID, parsed)
+		case !acct.Active:
+			return "", fmt.Errorf("%w: the account %s is not active", ErrIdentityInvalid, parsed)
+		case a.Handle != "" && !strings.EqualFold(acct.Handle, a.Handle):
+			return "", fmt.Errorf("%w: the account handle is %s, not %s", ErrIdentityInvalid, acct.Handle, a.Handle)
+		case acct.SigningKey == "":
+			return "", fmt.Errorf("%w: the account %s has no repo signing key", ErrIdentityInvalid, parsed)
+		}
+		if a.Sync {
+			sync, err := bus.Resolve[pds.Sync](ctx, c.cfg.Bus, r.Ref(), pdsRef, bus.Capability{Name: pds.CapabilitySync, Scope: scope})
+			if err != nil {
+				return "", err
+			}
+			if _, err := sync.LatestCommit(ctx, parsed.String()); errors.Is(err, pds.ErrNotFound) {
+				return "", fmt.Errorf("%w: the account %s has no repo", ErrIdentityInvalid, parsed)
+			} else if err != nil {
+				return "", err
+			}
+		}
+		if held != parsed.String() {
+			data["did"] = parsed.String()
+			if err := kv.Write(ctx, a.Mount, a.Path, data); err != nil {
+				return "", err
+			}
+		}
+		return parsed.String(), nil
 	}
 	if did, _ := data["did"].(string); did != "" {
 		if acct, err := accounts.Account(ctx, did); err == nil && acct.DID == did {
@@ -520,9 +632,9 @@ func (c *Composer) EnsurePdsAccount(ctx context.Context, r Root, a PdsAccount) (
 	return did, nil
 }
 
-func SyncRequesterRepoKey(stateRoot, did, requesterDir string) (bool, error) {
+func SyncRequesterRepoKey(stateRoot, pdsStateDir, did, requesterDir string) (bool, error) {
 	sum := sha256.Sum256([]byte(did))
-	keyPath := filepath.Join(ComponentCRStateDir(stateRoot, ComponentKindPds, PdsComponent), pdssvc.RepoKeyDir, hex.EncodeToString(sum[:])+".key")
+	keyPath := filepath.Join(PdsStateDir(stateRoot, pdsStateDir), pdssvc.RepoKeyDir, hex.EncodeToString(sum[:])+".key")
 	raw, err := os.ReadFile(keyPath)
 	if err != nil {
 		return false, fmt.Errorf("the app Pds repo signing key of %s: %w", did, err)

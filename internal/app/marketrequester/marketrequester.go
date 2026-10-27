@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
+	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
 
 const (
@@ -284,9 +285,18 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	out := []compose.Desired{compose.PolicyEngineDesired()}
 	if plan.Local {
-		pdsSpec, err := compose.AppPdsSpec(stateRoot, network, pdsHandle, vault, hostnames, pdsPublicURL, requireIngress, ingressRef)
+		pdsStateDir := compose.OptionValue(o.Spec.Options, "pds-state-dir")
+		identityStore := strings.TrimSpace(pdsStateDir) != ""
+		existing := identityStore && (contractDID(plan, id) != "" || strings.TrimSpace(compose.OptionValue(o.Spec.Options, "expected-pds-url")) != "")
+		pdsSpec, err := compose.AppPdsSpec(stateRoot, pdsStateDir, existing, network, pdsHandle, vault, hostnames, pdsPublicURL, requireIngress, ingressRef)
 		if err != nil {
 			return nil, err
+		}
+		if existing {
+			dir := compose.PdsStateDir(stateRoot, pdsStateDir)
+			if pdsSpec.StateDir != dir || pdsSpec.Storage != nil {
+				return nil, fmt.Errorf("compose: the reused Pds state dir is %s, not %s, or carries storage overrides", pdsSpec.StateDir, dir)
+			}
 		}
 		out = append(out, compose.Desired{Kind: compose.ComponentKindPds, Name: compose.PdsComponent, Spec: pdsSpec})
 		spec.PdsRef = compose.ComponentRefFor(compose.ComponentKindPds, compose.PdsComponent)
@@ -412,6 +422,26 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	ingress *v1alpha1.IngressConfig, requireIngress bool, ingressRef *commonv1.ObjectRef, ingressErr error) (ctlruntime.Result, error) {
 	c, r, o := p.c, p.r, p.o
 	ws := r.Workspace
+	pdsStateDir := compose.PdsStateDir(c.StateRoot(), compose.OptionValue(o.Spec.Options, "pds-state-dir"))
+	identityStore := strings.TrimSpace(compose.OptionValue(o.Spec.Options, "pds-state-dir")) != ""
+	expectedURL := strings.TrimSpace(compose.OptionValue(o.Spec.Options, "expected-pds-url"))
+	didHint := ""
+	if identityStore {
+		didHint = contractDID(plan, id)
+	}
+	existing := identityStore && (didHint != "" || expectedURL != "")
+	if expectedURL != "" && didHint == "" {
+		return p.fail(errors.New("compose: the identity store names a PDS URL but no DID; the store is partial"))
+	}
+	if existing && didHint != "" {
+		wantOAuth := expectedURL != "" || pdsPublicURL != "" || !requireIngress
+		if err := validatePDSStateDir(pdsStateDir, didHint, wantOAuth); err != nil {
+			return p.fail(err)
+		}
+	}
+	if err := checkExpectedPDSURL(expectedURL, pdsPublicURL, existing); err != nil {
+		return p.fail(err)
+	}
 	desired, err := p.desired(ctx, plan, id, pdsHandle, pdsPublicURL, ingress, requireIngress, ingressRef)
 	if err != nil {
 		return p.fail(err)
@@ -455,10 +485,18 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if pdsPublicURL == "" {
 		return p.wait("waiting for the app Pds public URL")
 	}
+	if err := checkExpectedPDSURL(expectedURL, pdsPublicURL, existing); err != nil {
+		return p.fail(err)
+	}
 	if desired, err = p.desired(ctx, plan, id, pdsHandle, pdsPublicURL, ingress, requireIngress, ingressRef); err != nil {
 		return p.fail(err)
 	}
 	pds, _ := compose.DesiredPds(desired)
+	if spec, ok := pds.Spec.(v1alpha1.PdsSpec); ok {
+		if err := checkExpectedPDSURL(expectedURL, spec.PublicURL, existing); err != nil {
+			return p.fail(err)
+		}
+	}
 	if err := p.c.EnsureAdding(ctx, p.r, []compose.Desired{pds}); err != nil {
 		return p.retry("", err)
 	}
@@ -468,7 +506,8 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if !snap.PdsApplied(compose.PdsComponent) {
 		return p.wait("waiting for the app Pds to apply its public URL")
 	}
-	account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.PdsSessionPath("requester"), Handle: pdsHandle}
+	account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.PdsSessionPath("requester"),
+		Handle: pdsHandle, AdoptDID: didHint, Sync: true}
 	if err := c.ApplyLinks(ctx, r, "account", compose.WithoutLinks(compose.PdsAccountLinks(r, account), p.links)); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -477,6 +516,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	}
 	did, err := c.EnsurePdsAccount(ctx, r, account)
 	if err != nil {
+		if errors.Is(err, compose.ErrIdentityAccountMissing) || errors.Is(err, compose.ErrIdentityInvalid) {
+			return p.fail(err)
+		}
 		return p.retry("its app Pds account", err)
 	}
 	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
@@ -490,7 +532,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return ctlruntime.Result{}, err
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, RequesterComponent)
-	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), did, requesterDir)
+	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), pdsStateDir, did, requesterDir)
 	if err != nil {
 		return p.retry("its app Pds signing key", err)
 	}
@@ -536,4 +578,32 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.wait("waiting for the requester's MarketIdentity to sign in")
 	}
 	return p.wait("waiting for every component to be ready")
+}
+
+func validatePDSStateDir(dir, did string, wantOAuth bool) error {
+	_, err := pdssvc.ValidateStateDir(dir, did, wantOAuth)
+	return err
+}
+
+func checkExpectedPDSURL(expected, got string, existing bool) error {
+	if !existing || expected == "" || got == "" {
+		return nil
+	}
+	if compose.SamePDSURL(expected, got) {
+		return nil
+	}
+	return fmt.Errorf("compose: the identity PDS public URL is %s, not the recorded %s; refusing to rewrite the DID document", got, expected)
+}
+
+func contractDID(plan compose.AccountPlan, id *v1alpha1.MarketIdentity) string {
+	if did := strings.TrimSpace(plan.Identity.Did); did != "" {
+		return did
+	}
+	if id == nil {
+		return ""
+	}
+	if did := strings.TrimSpace(id.Status.Did); did != "" {
+		return did
+	}
+	return strings.TrimSpace(id.Spec.Did)
 }

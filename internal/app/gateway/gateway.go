@@ -453,7 +453,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	mode, guestSSHKeysFile := compose.RequesterComponentFields(o.Spec.Options, plan.Mode)
 	var pds compose.Desired
 	if plan.Local {
-		pdsSpec, err := compose.AppPdsSpec(stateRoot, network, in.pdsHandle, vault, hostnames, in.pdsPublicURL, in.requireIngress, in.ingressRef)
+		pdsSpec, err := compose.AppPdsSpec(stateRoot, "", false, network, in.pdsHandle, vault, hostnames, in.pdsPublicURL, in.requireIngress, in.ingressRef)
 		if err != nil {
 			return nil, err
 		}
@@ -631,7 +631,7 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 		return nil, nil, "", false, err
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, marketrequester.RequesterComponent)
-	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), did, requesterDir)
+	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), "", did, requesterDir)
 	if err != nil {
 		return nil, nil, "", false, fmt.Errorf("its app Pds signing key: %w", err)
 	}

@@ -47,6 +47,8 @@ const (
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity")
+
 type requestRun struct {
 	a               *app
 	vals            clicfg.Values
@@ -69,6 +71,199 @@ type requestRun struct {
 	standalone      devinstance.Layout
 	instanceDir     string
 	resuming        bool
+	cleanupOnly     bool
+	identity        *request.IdentityStore
+	identityState   *request.Identity
+	identityObject  *v1alpha1.MarketIdentity
+	expectedPDSURL  string
+}
+
+func (r *requestRun) openIdentity(name string) error {
+	idName := strings.TrimSpace(r.vals.String("identity"))
+	if idName == "" {
+		return nil
+	}
+	if r.inv.Mode == request.ModeNetwork {
+		return errors.New("--identity is for a standalone invocation; a market network places its child before its state dir exists")
+	}
+	if r.root.Identity.Mode != "" && r.root.Identity.Mode != v1alpha1.MarketIdentityModeLocalRepo {
+		return fmt.Errorf("--identity needs the localRepo identity mode, not %s", r.root.Identity.Mode)
+	}
+	if r.root.Identity.PdsURL != "" {
+		return errors.New("--identity does not take --atproto-pds-url")
+	}
+	store, err := request.OpenIdentity(r.stateRoot, idName)
+	if err != nil {
+		return err
+	}
+	fail := func(err error) error {
+		store.Close()
+		return err
+	}
+	id, err := store.Load()
+	if err != nil {
+		return fail(err)
+	}
+	if held, err := store.PDSLockHeld(); err != nil {
+		return fail(err)
+	} else if held {
+		return fail(fmt.Errorf("the identity %s is in use by a running PDS; release or stop its invocation first", idName))
+	}
+	if id != nil {
+		if id.DID == "" {
+			accounts, err := request.ReadAccounts(store.PDSDir())
+			if err != nil {
+				return fail(err)
+			}
+			switch len(accounts) {
+			case 1:
+				id.DID, id.Handle = accounts[0].DID, accounts[0].Handle
+			case 0:
+			default:
+				return fail(fmt.Errorf("the identity %s PDS holds %d accounts; one identity serves one account", idName, len(accounts)))
+			}
+		}
+		if id.DID == "" && id.PDSPublicURL != "" {
+			return fail(fmt.Errorf("the identity %s names a PDS URL but no DID; the store is partial", idName))
+		}
+		if id.Handle != "" && r.root.Identity.Handle != "" && !strings.EqualFold(r.root.Identity.Handle, id.Handle) {
+			return fail(fmt.Errorf("the identity %s uses handle %s, not %s", idName, id.Handle, r.root.Identity.Handle))
+		}
+		r.root.Identity.Mode = v1alpha1.MarketIdentityModeLocalRepo
+		r.root.Identity.Did = id.DID
+		if id.Handle != "" {
+			r.root.Identity.Handle = id.Handle
+		}
+		switch v1alpha1.AssociationMode(id.Association) {
+		case v1alpha1.AssociationSkip:
+			r.root.Identity.Association = v1alpha1.AssociationSkip
+		case v1alpha1.AssociationRequireApproval:
+			r.root.Identity.Association = v1alpha1.AssociationRequireApproval
+		default:
+			return fail(fmt.Errorf("the identity %s has association %q", idName, id.Association))
+		}
+		r.root.Identity.ApprovedAssociations = append([]string(nil), id.ApprovedAssociations...)
+		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 {
+			return fail(fmt.Errorf("the identity %s is RequireApproval with no approved operator; this CLI does not verify claims, so use --skip-qr to create a skip identity", idName))
+		}
+		if id.PLCDirectoryURL != "" && r.root.Network != nil && r.root.Network.PLCDirectoryURL != "" &&
+			!strings.EqualFold(strings.TrimRight(id.PLCDirectoryURL, "/"), strings.TrimRight(r.root.Network.PLCDirectoryURL, "/")) {
+			return fail(fmt.Errorf("the identity %s uses PLC %s, not %s", idName, id.PLCDirectoryURL, r.root.Network.PLCDirectoryURL))
+		}
+		if id.DID != "" {
+			rot, err := store.Validate(id.DID, id.PDSPublicURL != "")
+			if err != nil {
+				return fail(fmt.Errorf("the identity %s: %w", idName, err))
+			}
+			if id.RotationKeyDID != "" && rot != id.RotationKeyDID {
+				return fail(fmt.Errorf("the identity %s rotation key is %s, not the recorded %s", idName, rot, id.RotationKeyDID))
+			}
+			id.RotationKeyDID = rot
+		}
+		r.identityState = id
+	} else {
+		if entries, err := os.ReadDir(store.PDSDir()); err == nil && len(entries) > 0 {
+			return fail(fmt.Errorf("the identity %s has PDS state but no identity.json; refusing to adopt it", idName))
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fail(err)
+		}
+		if r.root.Identity.Association != v1alpha1.AssociationSkip {
+			return fail(fmt.Errorf("a new identity needs -- --skip-qr; this CLI cannot bootstrap operator approval"))
+		}
+		r.identityState = &request.Identity{Schema: request.IdentitySchema, Name: idName, Mode: "localRepo", Association: string(v1alpha1.AssociationSkip)}
+	}
+	if err := store.EnsureDirs(); err != nil {
+		return fail(err)
+	}
+	r.identityState.LastInvocation = &request.IdentityInvocation{Name: name, StateDir: request.InstanceStateDir(r.stateRoot, name)}
+	if err := store.Save(r.identityState); err != nil {
+		return fail(err)
+	}
+	r.expectedPDSURL = strings.TrimSpace(r.identityState.PDSPublicURL)
+	r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: "pds-state-dir", Value: store.PDSDir()})
+	if r.expectedPDSURL != "" {
+		r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: "expected-pds-url", Value: r.expectedPDSURL})
+	}
+	r.root.Options = r.appOptions
+	r.identity = store
+	r.inv.Identity = idName
+	r.summary.Identity = idName
+	r.log("the identity is "+idName, "did", r.identityState.DID, "store", store.Dir())
+	return nil
+}
+
+func (r *requestRun) linkIdentityExposure() error {
+	if r.identity == nil {
+		return nil
+	}
+	return r.identity.LinkExposure(request.InstanceStateDir(r.stateRoot, r.inv.Name))
+}
+
+func (r *requestRun) saveIdentityDID(obj *v1alpha1.MarketIdentity) {
+	if r.identity == nil || r.identityState == nil || obj == nil {
+		return
+	}
+	did := strings.TrimSpace(obj.Status.Did)
+	if did == "" {
+		return
+	}
+	handle := strings.TrimSpace(obj.Status.Handle)
+	if r.identityState.DID == did && (handle == "" || r.identityState.Handle == handle) {
+		return
+	}
+	r.identityState.DID = did
+	if handle != "" {
+		r.identityState.Handle = handle
+	}
+	if err := r.identity.Save(r.identityState); err != nil {
+		r.a.log.Warn("writing the identity DID", "identity", r.identity.Name(), "err", err.Error())
+	}
+}
+
+func (r *requestRun) finalizeIdentity() error {
+	if r.identity == nil || r.identityState == nil {
+		return nil
+	}
+	obj := r.identityObject
+	if obj == nil {
+		ids, err := r.kcp.Identities()
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), requestSummaryRead)
+		defer cancel()
+		obj, err = ids.GetMarketIdentity(ctx, marketrequester.RequesterIdentity)
+		if err != nil {
+			return err
+		}
+	}
+	did := strings.TrimSpace(obj.Status.Did)
+	if did == "" {
+		return errors.New("the requester identity reports no DID")
+	}
+	if r.identityState.DID != "" && r.identityState.DID != did {
+		return fmt.Errorf("the requester DID is %s, not the identity's %s", did, r.identityState.DID)
+	}
+	r.identityState.DID = did
+	r.identityState.Mode = "localRepo"
+	if handle := strings.TrimSpace(obj.Status.Handle); handle != "" {
+		r.identityState.Handle = handle
+	}
+	if pdsURL := strings.TrimSpace(obj.Status.PdsURL); pdsURL != "" {
+		r.identityState.PDSPublicURL = pdsURL
+	}
+	r.identityState.Association = string(r.root.Identity.Association)
+	r.identityState.ApprovedAssociations = append([]string(nil), r.root.Identity.ApprovedAssociations...)
+	if r.root.Network != nil {
+		r.identityState.PLCDirectoryURL = r.root.Network.PLCDirectoryURL
+	}
+	if rot, err := r.identity.ReadRotationKeyDID(); err == nil {
+		r.identityState.RotationKeyDID = rot
+	}
+	if r.identityState.LastInvocation == nil {
+		r.identityState.LastInvocation = &request.IdentityInvocation{Name: r.inv.Name, StateDir: request.InstanceStateDir(r.stateRoot, r.inv.Name)}
+	}
+	return r.identity.Save(r.identityState)
 }
 
 func splitWords(rest []string) ([]string, []string) {
@@ -90,6 +285,9 @@ func (r *requestRun) log(msg string, args ...any) {
 func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	root, err := devinstance.StateRoot(vals.String("state-dir"), a.env)
 	if err != nil {
+		return nil, err
+	}
+	if root, err = filepath.Abs(root); err != nil {
 		return nil, err
 	}
 	r := &requestRun{a: a, vals: vals, stateRoot: root, hold: vals.Bool("hold"), skipSSH: vals.Bool("skip-ssh"),
@@ -137,6 +335,10 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
+		switch p.Name {
+		case "identity", "pds-state-dir", "expected-pds-url":
+			return fmt.Errorf("--%s is reserved; pass global flags before --", p.Name)
+		}
 		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
 		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
@@ -497,7 +699,7 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 				return
 			}
 		}
-		d := downInstance(ctx, r.a, l, !remove)
+		d := downInstance(ctx, r.a, l, !remove, true)
 		if len(d.Remaining) > 0 {
 			r.a.log.Warn("processes of the invocation's kcp remain", "pids", fmt.Sprint(d.Remaining))
 		}
@@ -543,6 +745,7 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 	defer deadline.Stop()
 	watch := func(ctx context.Context, name string, each func(*v1alpha1.MarketIdentity) (bool, error)) (*v1alpha1.MarketIdentity, error) {
 		return r.kcp.AwaitIdentity(ctx, name, func(obj *v1alpha1.MarketIdentity) (bool, error) {
+			r.saveIdentityDID(obj)
 			if !untilAssociated && obj != nil && obj.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
 				return true, nil
 			}
@@ -553,7 +756,10 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 			return each(obj)
 		})
 	}
-	_, err = appcli.IdentityRenderer{Client: ids, Watch: watch, Out: r.a.stderr, In: in, Hint: r.identityHint}.WaitReady(wctx, marketrequester.RequesterIdentity)
+	id, err := appcli.IdentityRenderer{Client: ids, Watch: watch, Out: r.a.stderr, In: in, Hint: r.identityHint}.WaitReady(wctx, marketrequester.RequesterIdentity)
+	if id != nil {
+		r.identityObject = id
+	}
 	if cause := context.Cause(wctx); err != nil && cause != nil && ctx.Err() == nil {
 		return fmt.Errorf("%w: %w", cause, err)
 	}
@@ -858,6 +1064,14 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		r.inv.Mode = request.ModeNetwork
 	}
 	r.summary = request.Summary{Name: name, Mode: r.inv.Mode, Network: network, CreatedAt: r.inv.CreatedAt}
+	if err := r.openIdentity(name); err != nil {
+		return a.fail(exitRefused, "run request: %v", err)
+	}
+	defer func() {
+		if r.identity != nil {
+			r.identity.Close()
+		}
+	}()
 	if !r.skipSSH {
 		pub, _, err := request.EnsureKey(ctx, filepath.Join(request.Dir(r.stateRoot, name), request.SSHDir))
 		if err != nil {
@@ -868,6 +1082,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := request.WriteInvocation(r.inv); err != nil {
 		return a.fail(exitFailed, "run request: %v", err)
 	}
+	if err := r.linkIdentityExposure(); err != nil {
+		return a.fail(exitFailed, "run request: %v", err)
+	}
 	r.log("a fresh kcp for this invocation", "mode", r.inv.Mode, "network", network)
 	if err := r.start(ctx, true); err != nil {
 		r.writeSummaryQuiet()
@@ -876,6 +1093,36 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitFailed, "run request: stopped before the requester was Ready, so no contract was posted; the invocation's kcp is stopped and its state is kept in %s (delete that directory to drop it)", request.Dir(r.stateRoot, name))
 		}
 		return a.fail(exitFailed, "run request: %v", err)
+	}
+	if r.identity != nil {
+		ids, err := r.kcp.Identities()
+		if err != nil {
+			r.writeSummaryQuiet()
+			r.stop(context.WithoutCancel(ctx), false)
+			return a.fail(exitFailed, "run request: the identity: %v", err)
+		}
+		ictx, cancel := context.WithTimeout(context.Background(), requestSummaryRead)
+		obj, err := ids.GetMarketIdentity(ictx, marketrequester.RequesterIdentity)
+		cancel()
+		if err != nil {
+			r.writeSummaryQuiet()
+			r.stop(context.WithoutCancel(ctx), false)
+			return a.fail(exitFailed, "run request: the identity: %v", err)
+		}
+		r.identityObject = obj
+		expected := r.expectedPDSURL
+		live := strings.TrimSpace(obj.Status.PdsURL)
+		if expected != "" && live != "" && !compose.SamePDSURL(expected, live) {
+			r.writeSummaryQuiet()
+			r.stop(context.WithoutCancel(ctx), false)
+			return a.fail(exitFailed, "run request: the identity PDS public URL is %s, not the recorded %s; refusing to post against a changed DID-document endpoint", live, expected)
+		}
+		if err := r.finalizeIdentity(); err != nil {
+			r.writeSummaryQuiet()
+			r.stop(context.WithoutCancel(ctx), false)
+			return a.fail(exitFailed, "run request: the identity: %v", err)
+		}
+		r.identity.Close()
 	}
 	if bundle != nil {
 		ref, err := r.kcp.PutSecrets(ctx, bundle, r.networkTimeout)
@@ -912,11 +1159,30 @@ func (a *app) loadRequest(vals clicfg.Values, rest []string, verb string) (*requ
 	if err != nil {
 		return nil, a.fail(exitRefused, "run request %s: %v", verb, err)
 	}
+	if inv.StateRoot != "" && inv.StateRoot != r.stateRoot {
+		return nil, a.fail(exitRefused, "run request %s: invocation %s belongs to state root %s, not %s", verb, inv.Name, inv.StateRoot, r.stateRoot)
+	}
 	r.inv = inv
 	if s, err := request.ReadSummary(r.stateRoot, inv.Name); err == nil {
 		r.summary = s
 	} else {
 		r.summary = request.Summary{Name: inv.Name, Mode: inv.Mode, Network: inv.Network, Instance: inv.Instance, CreatedAt: inv.CreatedAt}
+	}
+	if r.summary.Identity == "" {
+		r.summary.Identity = inv.Identity
+	}
+	if inv.Identity != "" {
+		instanceState := request.InstanceStateDir(r.stateRoot, inv.Name)
+		if _, err := os.Stat(instanceState); err != nil {
+			if verb != "release" {
+				return nil, a.fail(exitRefused, "run request %s: invocation %s's kcp state is gone; start a new invocation with --identity %s", verb, inv.Name, inv.Identity)
+			}
+			r.cleanupOnly = true
+			return r, exitOK
+		}
+		if err := request.LinkIdentityExposure(r.stateRoot, inv.Identity, instanceState); err != nil {
+			return nil, a.fail(exitRefused, "run request %s: %v", verb, err)
+		}
 	}
 	return r, exitOK
 }
@@ -925,6 +1191,9 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 	r, code := a.loadRequest(vals, rest, verb)
 	if r == nil {
 		return nil, code
+	}
+	if r.cleanupOnly {
+		return r, exitOK
 	}
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
 	r.resuming = verb == "resume"
@@ -948,6 +1217,15 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 	if r == nil {
 		return code
 	}
+	if r.cleanupOnly {
+		r.stop(context.WithoutCancel(ctx), true)
+		if err := os.RemoveAll(request.Dir(r.stateRoot, r.inv.Name)); err != nil {
+			return a.fail(exitFailed, "run request release: removing the invocation: %v", err)
+		}
+		r.log("the invocation's kcp state was already gone; the invocation is removed and the identity store is kept")
+		r.a.printJSON(r.summary)
+		return exitOK
+	}
 	c, err := r.release(ctx)
 	if err != nil || c == nil || c.Status.Phase != v1alpha1.ComputeContractReleased {
 		phase := ""
@@ -963,6 +1241,13 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 	}
 	r.writeSummary(ctx, c)
 	r.stop(context.WithoutCancel(ctx), true)
+	if r.standalone.StateDir != "" {
+		if _, err := os.Stat(r.standalone.StateDir); err == nil {
+			r.writeSummary(ctx, nil)
+			r.a.printJSON(r.summary)
+			return a.fail(exitFailed, "run request release: the invocation's processes remain; its state is kept")
+		}
+	}
 	r.writeSummary(ctx, nil)
 	r.a.printJSON(r.summary)
 	return exitOK
@@ -971,6 +1256,9 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
 	root, err := devinstance.StateRoot(vals.String("state-dir"), a.env)
 	if err != nil {
+		return a.fail(exitRefused, "run request list: %v", err)
+	}
+	if root, err = filepath.Abs(root); err != nil {
 		return a.fail(exitRefused, "run request list: %v", err)
 	}
 	list, err := request.List(root)
@@ -990,8 +1278,8 @@ func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 		if s.Network != "" {
 			where = "network " + s.Network
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
-			cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
+		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t identity=%s did=%s winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
+			cmp.Or(s.Identity, "-"), cmp.Or(s.Did, "-"), cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "no invocations under", request.Root(root))

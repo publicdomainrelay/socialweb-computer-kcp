@@ -736,10 +736,16 @@ swc run request list --json | jq -r '.[].name'
 swc run request release "$(swc run request list --json | jq -r '.[0].name')"
 ```
 
-`run request` options: `--network`, `--name`, `--secrets`, `--tunnel`, `--exec`, `--hold`,
-`--skip-ssh`, `--contract-timeout`, `--transport`, `--tag`; `run request ssh`, `resume` and `proxy`
-also take `--contract` and `--log-level`. `--tunnel` is
+`run request` options: `--network`, `--name`, `--identity`, `--secrets`, `--tunnel`, `--exec`,
+`--hold`, `--skip-ssh`, `--contract-timeout`, `--transport`, `--tag`; `run request ssh`, `resume` and
+`proxy` also take `--contract` and `--log-level`. `--tunnel` is
 `<tag>:<port>[:<transport>][:shell[=<envFile>]]`, transport `opentunnel` (default) or `webrtc`.
+
+`--identity <name>` reuses one localRepo did:plc, repo and embedded PDS state across invocations
+from `<state-root>/identities/<name>/`; the first run needs `-- --skip-qr`. Each invocation still gets
+a fresh kcp and OpenBao. One PDS process per identity store is enforced; `ssh`/`release` attach to a
+running kcp. `release` keeps the identity store; delete it manually only after the invocation is
+released.
 
 Run a bidder as a child application of the market network:
 

@@ -141,11 +141,29 @@ a deadline; Ctrl-C stops it before any contract is posted. The session stays in 
 OpenBao; the account is its own operator, so bidders vouched by it bid.
 
 The default identity (`localRepo`) makes a new did:plc per invocation with association
-`RequireApproval`: it waits in `AwaitingApproval` until the operator's verified association claim
-names that DID (`scripts/associate-bidder.ts --requester-did <did>`, printed with the DID), and no
-bid is accepted before that. `-- --skip-qr` (association `Skip`) skips the wait, but the requester
-then has no operator, so its default policy `requester-tangled-vouch` vouches no prod bidder; a
-market network sets `Skip` for its own requesters and needs neither.
+`RequireApproval`. The standalone requester does not wire the operator's association watch, so a
+`RequireApproval` identity needs an already-approved root or a manual `approvedAssociations` seed.
+`-- --skip-qr` (association `Skip`) skips the wait, but the requester then has no operator, so its
+default policy `requester-tangled-vouch` vouches no prod bidder; a market network sets `Skip` for its
+own requesters and needs neither.
+
+### Reuse one localRepo identity
+
+`--identity <name>` keeps the embedded PDS identity (`<state-root>/identities/<name>/`) across
+invocations. The first run needs `-- --skip-qr`; later runs reuse the same did:plc, repo, repo
+sequence and embedded PDS state, while each invocation still gets a fresh kcp and OpenBao:
+
+```bash
+socialweb-computer run request --identity me --name demo1 --hold -- --skip-qr
+socialweb-computer run request release demo1
+socialweb-computer run request --identity me --name demo2 -- --skip-qr
+```
+
+`release` removes the invocation's kcp state and keeps the identity store. One PDS process per
+identity store: a second invocation that would start a PDS on it is refused while the first PDS
+runs. kcp reads and writes from several commands are fine; `ssh` and `release` attach to a running
+kcp. Delete `<state-root>/identities/<name>` only after the invocation is released: it destroys the
+DID and its keys.
 
 ## Use the hosted gateway
 

@@ -504,7 +504,7 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
 	defer cancel()
-	d := downInstance(dctx, r.a, up.layout, true)
+	d := downInstance(dctx, r.a, up.layout, true, false)
 	r.a.printJSON(d)
 	if len(d.Remaining) > 0 {
 		return exitFailed

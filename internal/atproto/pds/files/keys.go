@@ -83,8 +83,10 @@ func SessionSecret(stateDir string, path string) ([]byte, error) {
 	return secret, nil
 }
 
+const OAuthSignerFile = "oauth-signing.key"
+
 func OAuthSigner(stateDir string) (atcrypto.PrivateKey, error) {
-	return resolvePrivateKey(stateDir, "oauth-signing.key", func() (atcrypto.PrivateKeyExportable, error) {
+	return resolvePrivateKey(stateDir, OAuthSignerFile, func() (atcrypto.PrivateKeyExportable, error) {
 		return atcrypto.GeneratePrivateKeyP256()
 	})
 }

@@ -637,7 +637,7 @@ func devUp(ctx context.Context, a *app, vals clicfg.Values, host bool) int {
 	<-ctx.Done()
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
 	defer cancel()
-	d := downInstance(dctx, a, r.layout, vals.Bool("keep-state"))
+	d := downInstance(dctx, a, r.layout, vals.Bool("keep-state"), false)
 	a.printJSON(d)
 	if len(d.Remaining) > 0 {
 		return exitFailed
@@ -783,7 +783,7 @@ func runDevDown(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		}
 		defer lock.Close()
 	}
-	r := downInstance(ctx, a, l, vals.Bool("keep-state"))
+	r := downInstance(ctx, a, l, vals.Bool("keep-state"), false)
 	a.printJSON(r)
 	if len(r.Remaining) > 0 {
 		return exitFailed
@@ -791,7 +791,7 @@ func runDevDown(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	return exitOK
 }
 
-func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState bool) downReport {
+func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState, retainOnLeftover bool) downReport {
 	started := time.Now()
 	r := downReport{Instance: l.ID, LeftoverKilled: []int{}, Remaining: []int{}}
 	var rec devinstance.Record
@@ -836,6 +836,10 @@ func downInstance(ctx context.Context, a *app, l devinstance.Layout, keepState b
 	awaitExit(r.LeftoverKilled, 100*time.Millisecond)
 	if left := devsup.InstanceProcesses(l.ID); len(left) > 0 {
 		r.Remaining = left
+	}
+	if len(r.Remaining) > 0 && retainOnLeftover {
+		r.Seconds = time.Since(started).Seconds()
+		return r
 	}
 	if err := os.RemoveAll(l.RuntimeDir); err == nil {
 		r.RemovedRuntime = true

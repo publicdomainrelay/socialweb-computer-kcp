@@ -70,6 +70,7 @@ type Invocation struct {
 	Mode      string    `json:"mode"`
 	Network   string    `json:"network,omitempty"`
 	Instance  string    `json:"instance"`
+	Identity  string    `json:"identity,omitempty"`
 	StateRoot string    `json:"stateRoot"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -92,6 +93,7 @@ type Summary struct {
 	Mode             string           `json:"mode"`
 	Network          string           `json:"network,omitempty"`
 	Instance         string           `json:"instance"`
+	Identity         string           `json:"identity,omitempty"`
 	KcpURL           string           `json:"kcpURL,omitempty"`
 	KcpColdSeconds   float64          `json:"kcpColdSeconds,omitempty"`
 	Did              string           `json:"did,omitempty"`
