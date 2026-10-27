@@ -32,7 +32,8 @@ const (
 )
 
 var available = map[string]map[Need]bool{
-	"linux": {NeedHostBackend: true, NeedProc: true, NeedSystemdUser: true, NeedVMRuntime: true},
+	"linux":  {NeedHostBackend: true, NeedProc: true, NeedSystemdUser: true, NeedVMRuntime: true},
+	"darwin": {NeedProc: true},
 }
 
 var needNames = map[Need]string{

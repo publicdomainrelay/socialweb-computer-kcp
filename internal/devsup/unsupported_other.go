@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package devsup
 
@@ -11,13 +11,7 @@ import (
 )
 
 func Run(ctx context.Context, o Options) error {
-	return fmt.Errorf("%w: devsup, the proc placement backend, is unsupported on %s; see plan 0011/0012", hostsvc.ErrUnsupported, runtime.GOOS)
-}
-
-type SweepReport struct {
-	Unit    string `json:"unit"`
-	PGID    int    `json:"pgid"`
-	Verdict string `json:"verdict"`
+	return fmt.Errorf("%w: devsup, the proc placement backend, is unsupported on %s; see plan 0011", hostsvc.ErrUnsupported, runtime.GOOS)
 }
 
 func SweepOffline(state string) ([]SweepReport, error) {

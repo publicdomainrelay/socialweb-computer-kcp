@@ -17,12 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	EnvNotifySocket = "NOTIFY_SOCKET"
-	EnvListenFDs    = "LISTEN_FDS"
-	EnvListenNames  = "LISTEN_FDNAMES"
-)
-
 type storedFD struct {
 	name string
 	f    *os.File
@@ -33,6 +27,8 @@ type fdStore struct {
 	conn *net.UnixConn
 	fds  []storedFD
 }
+
+func (st *fdStore) socket() string { return st.path }
 
 func (s *server) notifyPath(name string) string {
 	sum := sha256.Sum256([]byte(s.id + "/" + name))

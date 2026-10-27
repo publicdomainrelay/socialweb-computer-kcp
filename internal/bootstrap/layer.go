@@ -38,6 +38,7 @@ type Params struct {
 	KinePath     string
 	PostgresRoot string
 	FrontAddress string
+	FDStore      bool
 	Owner        string
 	InstanceDir  string
 	ReadyTimeout time.Duration
@@ -64,7 +65,7 @@ func DevApps(profile string, l devinstance.Layout) ([]table.App, error) {
 func (c Config) Params(a table.App) Params {
 	l := c.Layout
 	p := Params{App: a, Exe: c.Exe, KcpPath: c.KcpPath, KinePath: c.KinePath, PostgresRoot: c.PostgresRoot,
-		FrontAddress: c.frontAddress(), Owner: l.ID, InstanceDir: l.StateDir, ReadyTimeout: c.ReadyTimeout,
+		FrontAddress: c.frontAddress(), FDStore: c.fdStore, Owner: l.ID, InstanceDir: l.StateDir, ReadyTimeout: c.ReadyTimeout,
 		Dir: l.KcpDir(), Run: l.RuntimeDir, Logs: l.Logs}
 	if a.Key != l.Short {
 		p.Dir = filepath.Join(l.StateDir, "apps", a.Key, "kcp")
@@ -158,7 +159,7 @@ func (p Params) Spec(e table.Entry, frontURL string) (hostsvc.UnitSpec, error) {
 		}
 	case table.KindFront:
 		spec, err = kcpserver.FrontSpec(kcpserver.FrontConfig{Unit: e.Unit, Slice: n.Slice(), Exe: p.Exe, Owner: p.Owner,
-			Address: p.FrontAddress, Control: p.FrontControl(), State: p.FrontState()})
+			Address: p.FrontAddress, Control: p.FrontControl(), State: p.FrontState(), FDStore: p.FDStore})
 	case table.KindSlot:
 		spec, err = kcpserver.SlotSpec(kcpserver.SlotConfig{Unit: e.Unit, Slice: n.Slice(), Exec: p.KcpPath,
 			Root: p.SlotRoot(e.Slot), EtcdServers: p.KineURL(p.App.KineOf(e.Slot)), FrontURL: frontURL, Shape: p.shape(),

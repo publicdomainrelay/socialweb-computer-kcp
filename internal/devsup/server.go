@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package devsup
 
@@ -42,7 +42,13 @@ type unit struct {
 	exited      chan struct{}
 	restarts    []time.Time
 	restartT    *time.Timer
-	store       *fdStore
+	store       unitStore
+}
+
+type unitStore interface {
+	socket() string
+	launchFiles() ([]*os.File, []string)
+	release()
 }
 
 type watcher struct {
@@ -111,8 +117,8 @@ func Run(ctx context.Context, o Options) error {
 	if err := hostos.Lock(lockf, hostos.LockExclusive|hostos.LockNonBlocking); err != nil {
 		return fmt.Errorf("devsup: another devsup holds %s: %w", lockf.Name(), err)
 	}
-	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-		return fmt.Errorf("devsup: PR_SET_CHILD_SUBREAPER: %w", err)
+	if err := becomeSubreaper(); err != nil {
+		return fmt.Errorf("devsup: becoming a child subreaper: %w", err)
 	}
 	boot, err := hostos.BootID()
 	if err != nil {
@@ -151,13 +157,8 @@ func Run(ctx context.Context, o Options) error {
 	term := make(chan os.Signal, 2)
 	signal.Notify(term, syscall.SIGTERM, syscall.SIGINT)
 	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
-	wake := [2]int{-1, -1}
 	if o.DieWith > 0 {
-		if err := unix.Pipe2(wake[:], unix.O_CLOEXEC); err != nil {
-			l.Close()
-			return abort(fmt.Errorf("devsup: the die-with wake pipe: %w", err))
-		}
-		s.wg.Go(func() { s.dieWith(o.DieWith, wake[0]) })
+		s.wg.Go(func() { s.dieWith(o.DieWith) })
 	}
 	s.wg.Go(func() {
 		select {
@@ -173,13 +174,7 @@ func Run(ctx context.Context, o Options) error {
 	<-s.done
 	l.Close()
 	s.closeConns()
-	if wake[1] >= 0 {
-		unix.Close(wake[1])
-	}
 	s.wg.Wait()
-	if wake[0] >= 0 {
-		unix.Close(wake[0])
-	}
 	os.Remove(o.Socket)
 	os.Remove(filepath.Join(o.State, "devsup.json"))
 	log.Info("devsup stopped", "instance", s.id)
@@ -223,29 +218,12 @@ func (s *server) stopAll() {
 	}
 }
 
-func (s *server) dieWith(pid, wake int) {
-	fd, err := unix.PidfdOpen(pid, 0)
-	if err != nil {
-		s.log.Info("the watched pid is already gone", "pid", pid)
-		s.shutdown()
+func (s *server) dieWith(pid int) {
+	if err := hostos.AwaitExit(s.life, pid, 0); err != nil {
 		return
 	}
-	defer unix.Close(fd)
-	for {
-		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}, {Fd: int32(wake), Events: unix.POLLIN}}
-		n, err := unix.Poll(fds, -1)
-		if err == unix.EINTR {
-			continue
-		}
-		if fds[0].Revents == 0 && fds[1].Revents != 0 {
-			return
-		}
-		if n > 0 || err != nil {
-			s.log.Info("the watched pid exited", "pid", pid)
-			s.shutdown()
-			return
-		}
-	}
+	s.log.Info("the watched pid exited", "pid", pid)
+	s.shutdown()
 }
 
 func (s *server) spawner() {
@@ -832,13 +810,12 @@ func (s *server) launch(u *unit) error {
 	env := s.unitEnv(u, inv)
 	files := []*os.File{null, out, errf}
 	if u.store != nil {
-		env = append(env, EnvNotifySocket+"="+u.store.path)
+		env = append(env, EnvNotifySocket+"="+u.store.socket())
 		stored, listenEnv := u.store.launchFiles()
 		files = append(files, stored...)
 		env = append(env, listenEnv...)
 	}
-	attr := &os.ProcAttr{Dir: dir, Env: env, Files: files,
-		Sys: &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}}
+	attr := &os.ProcAttr{Dir: dir, Env: env, Files: files, Sys: hostos.UnitProcAttr()}
 	reply := make(chan spawnResult, 1)
 	var r spawnResult
 	select {
@@ -1007,30 +984,6 @@ func (s *server) identify(name string, pid int) (hostsvc.Identity, error) {
 	}
 	return hostsvc.Identity{Unit: name, InvocationID: st.InvocationID, PID: pid, StartTicks: ticks, BootID: s.boot,
 		Backend: hostsvc.BackendProc, Manager: s.id}, nil
-}
-
-var errGone = errors.New("the process is gone")
-
-func pin(pid int) (uint64, error) {
-	if pid <= 0 {
-		return 0, fmt.Errorf("%w: pid %d", errGone, pid)
-	}
-	fd, err := unix.PidfdOpen(pid, 0)
-	if errors.Is(err, unix.ESRCH) {
-		return 0, fmt.Errorf("%w: pidfd_open(%d): %v", errGone, pid, err)
-	}
-	if err != nil {
-		return 0, err
-	}
-	defer unix.Close(fd)
-	p, ok := readProcInfo(pid)
-	if !ok || p.state == 'Z' || p.state == 'X' {
-		return 0, fmt.Errorf("%w: pid %d", errGone, pid)
-	}
-	if err := unix.PidfdSendSignal(fd, 0, nil, 0); err != nil {
-		return 0, fmt.Errorf("%w: pidfd_send_signal(%d, 0): %v", errGone, pid, err)
-	}
-	return p.ticks, nil
 }
 
 func (s *server) check(want hostsvc.Identity) (hostsvc.Observation, error) {

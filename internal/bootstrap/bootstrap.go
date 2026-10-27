@@ -57,6 +57,7 @@ type Config struct {
 	OnTick       func()
 	Application  *table.App
 	Retention    kcpdatastore.BackupRetention
+	fdStore      bool
 	Log          *slog.Logger
 	silent       map[string]bool
 	portDeadline time.Time
@@ -402,6 +403,7 @@ func HandoverStaleLease(ctx context.Context, admin *kcpserver.HTTPAdmin, log *sl
 
 func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance.Record) error {
 	cfg.ReadyTimeout = opt.Positive(cfg.ReadyTimeout, DefaultReadyTimeout)
+	cfg.fdStore = m.Capabilities().FDStore
 	if len(rec.StandIns) > 0 {
 		return ensureStandIns(ctx, m, cfg, rec)
 	}
@@ -637,6 +639,7 @@ func Ensure(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance
 }
 
 func Roll(ctx context.Context, m hostsvc.Manager, cfg Config, rec *devinstance.Record) (kcpserver.RollReport, error) {
+	cfg.fdStore = m.Capabilities().FDStore
 	l := cfg.Layout
 	slots, err := kcpserver.ReadSlots(l.SlotsFile())
 	if err != nil {

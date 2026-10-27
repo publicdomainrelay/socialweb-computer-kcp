@@ -16,8 +16,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 )
 
-const MaxSocketPath = 107
-
 const RoleRequester = "requester"
 
 const basenameChars = 16
@@ -118,12 +116,14 @@ func StateRoot(option string, env Env) (string, error) {
 	return filepath.Join(home, ".local", "state", "socialweb-computer"), nil
 }
 
-func RuntimeRoot(env Env) (string, error) {
-	v, ok := env.LookupEnv("XDG_RUNTIME_DIR")
-	if !ok || v == "" {
-		return "", errors.New("devinstance: XDG_RUNTIME_DIR is unset; devsup sockets live there (a login session or linger provides it)")
+func RuntimeRoot(stateRoot string, env Env) (string, error) {
+	if v, ok := env.LookupEnv("XDG_RUNTIME_DIR"); ok && v != "" {
+		return filepath.Join(v, "swc"), nil
 	}
-	return filepath.Join(v, "swc"), nil
+	if stateRoot != "" {
+		return filepath.Join(stateRoot, "run"), nil
+	}
+	return "", errors.New("devinstance: neither XDG_RUNTIME_DIR (a login session or linger provides it) nor a state root is set")
 }
 
 type Layout struct {

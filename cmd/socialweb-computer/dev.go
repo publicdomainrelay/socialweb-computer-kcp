@@ -73,7 +73,7 @@ func (a *app) layoutOf(name string, vals clicfg.Values) (devinstance.Layout, err
 	if err != nil {
 		return devinstance.Layout{}, err
 	}
-	rt, err := devinstance.RuntimeRoot(a.env)
+	rt, err := devinstance.RuntimeRoot(root, a.env)
 	if err != nil {
 		return devinstance.Layout{}, err
 	}

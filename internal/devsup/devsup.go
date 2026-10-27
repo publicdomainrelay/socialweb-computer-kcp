@@ -1,6 +1,7 @@
 package devsup
 
 import (
+	"errors"
 	"log/slog"
 	"syscall"
 	"time"
@@ -13,6 +14,12 @@ const (
 	EnvDevsup     = "SWC_DEVSUP"
 	EnvInvocation = "INVOCATION_ID"
 	EnvInstance   = "SWC_INSTANCE"
+)
+
+const (
+	EnvNotifySocket = "NOTIFY_SOCKET"
+	EnvListenFDs    = "LISTEN_FDS"
+	EnvListenNames  = "LISTEN_FDNAMES"
 )
 
 const (
@@ -58,6 +65,14 @@ const (
 	SweepGroup
 	SweepRefuseReused
 )
+
+type SweepReport struct {
+	Unit    string `json:"unit"`
+	PGID    int    `json:"pgid"`
+	Verdict string `json:"verdict"`
+}
+
+var errGone = errors.New("the process is gone")
 
 func (v SweepVerdict) String() string {
 	switch v {

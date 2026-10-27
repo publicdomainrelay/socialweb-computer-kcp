@@ -193,6 +193,7 @@ type FrontConfig struct {
 	Control string
 	State   string
 	Log     string
+	FDStore bool
 }
 
 const FrontMemoryMax = 256 << 20
@@ -208,14 +209,17 @@ func FrontSpec(c FrontConfig) (hostsvc.UnitSpec, error) {
 		Name:        c.Unit,
 		Description: "L4 front of kcp for " + c.Owner,
 		Exec: []string{c.Exe, "internal", "apiserver-front", "--owner", c.Owner, "--kcp-front-address", c.Address,
-			"--front-control", c.Control, "--front-state", c.State, "--front-fd-store"},
+			"--front-control", c.Control, "--front-state", c.State},
 		WorkDir:     filepath.Dir(c.State),
 		Slice:       c.Slice,
 		Restart:     hostsvc.RestartAlways,
 		KillSignal:  syscall.SIGTERM,
 		StopTimeout: FrontStopTimeout,
-		FDStore:     1,
 		Limits:      hostsvc.Limits{MemoryMax: FrontMemoryMax},
+	}
+	if c.FDStore {
+		spec.Exec = append(spec.Exec, "--front-fd-store")
+		spec.FDStore = 1
 	}
 	if c.Log != "" {
 		spec.Output = hostsvc.Output{StdoutFile: c.Log, StderrFile: c.Log}

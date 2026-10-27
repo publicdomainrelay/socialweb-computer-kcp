@@ -782,6 +782,136 @@ swc status --instance b-b3-mn1-bob-test
 Ctrl-C (or SIGTERM) on `run bidder` prints the `dev down --keep-state` report (`vmsStopped`,
 `remaining: []`). `swc dev down --instance b-b3-mn1-bob-test` removes its state.
 
+## Run the requester where the release assets are not staged
+
+`run request` brings up its own kcp (kine over sqlite, the port-0 front, one kcp slot, the core) as
+units of the proc placement backend (`devsup`, `hostsvc` backend `proc`), then posts the RFP from a
+requester that runs in the core process. The backend has a darwin implementation, so the requester
+runs on macOS natively; the bidder role does not (it needs the launchd backend and the
+Virtualization.framework runtime, plan 0012). On a release platform, `scripts/build-socialweb-computer.sh
+--dev` stages every pinned asset and the binary resolves them itself. This section is for the hosts
+where that cannot run: macOS (not a release platform in `internal/versions/versions.json`), and a
+Linux host whose asset staging fails on an unrelated pinned asset (the PGDG deb by-hash the pin
+names has since been withdrawn, or its rustc is not rustup-managed). Give the four executables by
+path instead.
+
+### The four executables
+
+| Executable | Why | Pin |
+| --- | --- | --- |
+| `kcp` | the API server of the invocation's kcp | built from the pinned commit; `kcp --version` must name the version `internal/versions/versions.json` pins |
+| `kine` | the sqlite etcd shim under kcp | the release binary, its sha256 pinned |
+| `bao` | the requester's own OpenBao (the vault phase of its set) | the release archive, verified against `checksums.txt` |
+| `dumbpipe` | iroh ssh into the guest (`--transport iroh`, the default) | the release archive, the sha256 GitHub publishes for it is the pin |
+
+`internal/versions/versions.json` carries the URL and the sha256 of each under `assets.<name>.fetch.<os>/<arch>`,
+so a host reads them from the checkout it built:
+
+```bash
+v=internal/versions/versions.json
+url=$(jq -r '.assets.kine.fetch["linux/amd64"].url' "$v")
+sha=$(jq -r '.assets.kine.fetch["linux/amd64"].sha256' "$v")
+curl -fsSL -o kine "$url" && echo "$sha  kine" | sha256sum -c -
+```
+
+kcp is built from source, `CGO_ENABLED=0`, with the version flags the pin names:
+
+```bash
+git clone https://github.com/kcp-dev/kcp
+git -C kcp checkout 74e9fb9c03f778c57d1a6a782d5adc9476ec1af5
+cd kcp && CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly \
+  -ldflags="-s -w -buildid= \
+    -X k8s.io/client-go/pkg/version.gitVersion=v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778 \
+    -X k8s.io/client-go/pkg/version.gitCommit=74e9fb9c03f778c57d1a6a782d5adc9476ec1af5 \
+    -X k8s.io/client-go/pkg/version.gitTreeState=clean \
+    -X k8s.io/component-base/version.gitVersion=v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778 \
+    -X k8s.io/component-base/version.gitCommit=74e9fb9c03f778c57d1a6a782d5adc9476ec1af5 \
+    -X k8s.io/component-base/version.gitTreeState=clean" \
+  -o ../bin/kcp ./cmd/kcp
+```
+
+Two build facts for this binary: the generated deepcopy imports `encoding/json/jsontext`, so a Go
+1.26 toolchain needs `GOEXPERIMENT=jsonv2` (Go 1.27 has it on); and `CGO_ENABLED=0` is enough and
+avoids needing libc headers. `GOTOOLCHAIN=go1.26.6` (the version `go.mod` names) builds on a host
+whose own Go differs.
+
+The policy engine embeds no Deno outside a `-tags embed_deno` release build, so `deno` must be on
+`PATH` when the PolicyEngine component starts (`internal/policyengine/deno`, pinned v2.9.3). Without
+it the root stays `Provisioning` with `PolicyEngine/policy-engine ready=false phase=Pending`.
+
+Then build this tree and run one invocation, with the four paths:
+
+```bash
+go build -o bin/socialweb-computer ./cmd/socialweb-computer
+bin/socialweb-computer run request --name host1 \
+  --kcp-path "$PWD/bin/kcp" --kine-path "$PWD/bin/kine" --bao-path "$PWD/bin/bao" --dumbpipe-path "$PWD/bin/dumbpipe" \
+  --exec 'uname -a' -- --skip-qr
+```
+
+### macOS
+
+`scripts/build-socialweb-computer.sh --dev` refuses darwin: it builds only the release platforms of
+`versions.json`, and darwin/arm64 is a seam there with only vfkit pinned. Build the binary with plain
+`go build` (Go 1.27 or newer) and pass the paths as above; the darwin kcp, kine (the cgo sqlite
+build, `CGO_ENABLED=1 CGO_CFLAGS="-DSQLITE_USE_ALLOCA=1" go build -tags nats` of v0.17.1), bao
+(`openbao_2.6.2_darwin_arm64.tar.gz`) and dumbpipe (`dumbpipe-v0.39.0-darwin-aarch64.tar.gz`) are
+built or fetched once into `~/.tmp/swc-mac/bin`.
+
+### Linux
+
+On a release platform, `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/<work>` stages
+every pinned asset once and the binary resolves them itself, so `run request` then takes no path
+options. When that staging fails on an asset the requester never uses (the PGDG deb the postgres pin
+names has been withdrawn upstream; a rustc that is not rustup-managed stops the meshd downloads), use
+the explicit-path recipe above, with `GOTOOLCHAIN` and `GOEXPERIMENT=jsonv2` as on Windows.
+
+### Windows
+
+Use WSL2: a native Windows requester would need a windows placement backend, and there is none yet
+(plan 0011). Windows 11's WSL2 carries AF_UNIX, so the devsup, kine and front sockets work unchanged.
+Copy the checkout into the distro, install the toolchain there, and run as a non-root user, because
+dev refuses uid 0. In a WSL shell (`wsl.exe -d Ubuntu`), as root:
+
+```bash
+apt-get update && apt-get install -y golang-go jq zstd make
+useradd -m -s /bin/bash swc
+```
+
+then, as that user (`su - swc`):
+
+```bash
+CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.6 \
+  go build -o ~/bin/socialweb-computer ./cmd/socialweb-computer
+~/bin/socialweb-computer run request --name wsl1 \
+  --kcp-path ~/bin/kcp --kine-path ~/bin/kine --bao-path ~/bin/bao --dumbpipe-path ~/bin/dumbpipe \
+  --exec 'uname -a' -- --skip-qr
+```
+
+The distro's own `golang-go` is 1.26, hence `GOEXPERIMENT=jsonv2` and the toolchain pin; the Ubuntu
+image's gcc has no libc headers, which `CGO_ENABLED=0` avoids. The four executables are the
+linux/amd64 ones above, and `deno` has to be on `PATH` as on any other host.
+
+### What differs on macOS
+
+| Area | On macOS |
+| --- | --- |
+| `XDG_RUNTIME_DIR` | usually unset; the instance's runtime dir, its devsup socket and the front's control socket fall back to `<state-dir>/run` |
+| front fd store | the proc backend offers none (`hostsvc` `Capabilities.FDStore` false), so the front binds its address itself and the kcp slot is restarted when the front is placed on a new port |
+| unix socket paths | `sun_path` is 104 bytes, so the limit is 103, not 107 |
+| bound ports | read from `lsof` (about 25 ms per read) instead of `/proc` |
+| process identity | kinfo start time and `kern.boottime` instead of start ticks and `/proc` |
+| child reaping | no subreaper; an orphaned grandchild reparents to launchd and the env-attribution sweep kills it |
+
+### Reading the result
+
+`kubectl --kubeconfig <state-dir>/requests/<name>/dev/<name>/kcp/admin.kubeconfig get marketrequester
+app` reads the root (`Ready` when the pod-less stack is up); `get computecontract` shows the RFP it
+posted. The requester's PDS, ingress proxy and policy engine run in the core process, so nothing
+else is needed on the host. The RFP reaches public bidders through the ingress relay: the contract
+leaves `Requesting` with a verified receipt, goes `Held` when the guest publishes its address, and
+`--exec` runs over iroh ssh before the contract is released. `--skip-ssh` rents, reports and releases
+without a session.
+
 ## Gate and acceptance
 
 ```bash

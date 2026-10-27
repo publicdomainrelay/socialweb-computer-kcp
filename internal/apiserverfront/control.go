@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-const MaxSocketPath = 107
-
 const (
 	OpStatus = "status"
 	OpSet    = "set"

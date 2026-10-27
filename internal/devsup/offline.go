@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package devsup
 
@@ -8,12 +8,6 @@ import (
 	"path/filepath"
 	"syscall"
 )
-
-type SweepReport struct {
-	Unit    string `json:"unit"`
-	PGID    int    `json:"pgid"`
-	Verdict string `json:"verdict"`
-}
 
 func SweepOffline(state string) ([]SweepReport, error) {
 	entries, err := filepath.Glob(filepath.Join(state, "units", "*.json"))
