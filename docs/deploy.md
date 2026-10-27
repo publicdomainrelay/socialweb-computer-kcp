@@ -5,21 +5,20 @@ one-time host items. Short path in [CONTRIBUTING](../CONTRIBUTING.md#deploy-the-
 
 ```mermaid
 flowchart TD
-  tag["git tag v*"] --> gh["GitHub CI<br/>gate, binaries, guest image"]
-  gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag"]
+  tag["git tag v*"] --> gh["GitHub CI<br/>gate, pins, binaries, guest image"]
+  main["push to main"] --> gh
+  gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag, main/commit"]
   bucket --> deploy["scripts/deploy.sh"]
   deploy --> gw["gateway host"]
   deploy --> bidder["bidder host"]
-  gh --> gl["GitLab suite<br/>13 integration tests"]
-  gh --> canary["nightly canary<br/>throwaway DID"]
 ```
 
-Two deploy shapes, and they differ:
+Three deploy shapes, and they differ:
 
 | Shape | What happens | What survives |
 | --- | --- | --- |
-| Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts every installed and transient unit and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, web app sessions, running components. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
-| Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; components are replaced only when the spec or the TypeScript tree changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its PDS repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
+| Routine gateway deploy (`scripts/deploy.sh` on an installed gateway) | `upgrade --binary --sha256`, then `install gateway` again; the core adopts every installed and transient unit and rolls the kcp slot only when kcp's argv or binary changed | State dir and its kcp objects, the root OpenBao (requester repo key, sessions), the gateway requester's DID and its association record, gateway sessions, running components. Read on prod: web session across rc8 to rc9, requester DID and association across rc11 to rc21 with no new claim |
+| Routine bidder upgrade (as the account: `upgrade --binary <path> --sha256 <digest>`, then the same `install bidder` again) | The bidder's core restarts on the new binary; components are replaced only when the spec or the component set changed | The bidder's state dir, its OpenBao (repo key), the bidder DID and handle, its association record, its PDS repo. Read on prod: Bob's bidder DID and association across rc11 to rc21 with no new claim |
 | Fresh install (`install gateway` or `install bidder` on an empty host, or a lost or purged state dir) | First install; new keys generated | Nothing. The identity gets a new DID and needs one association claim again (`scripts/associate-bidder.ts` with `--bidder-did` or `--requester-did`; the application's association watch approves it, with no manual `approvedAssociations` patch) |
 
 The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
@@ -43,7 +42,7 @@ Verify the deployment by scaling a tenant cluster from zero and back:
 
 ```bash
 GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer K=computer.socialweb.k8s
-# apply the Job below to the canary cluster, then poll it (see Manage a tenant cluster over XRPC)
+# apply the Job below to the canary cluster, then poll it (README: Apply objects and read Jobs without a kubeconfig)
 jq -n '{cluster: "canary", manifest: {apiVersion: "batch/v1", kind: "Job",
   metadata: {name: "scale-check", namespace: "default"},
   spec: {backoffLimit: 0, template: {spec: {restartPolicy: "Never",
@@ -56,7 +55,8 @@ curl -sS "$GW/xrpc/$K.getJob?cluster=canary&namespace=default&name=scale-check&t
 
 A tenant cluster scales from zero when you apply a pod to it: the pod raises a `NodeClaim`, the cluster runs the RFP flow for a market VM, the node joins, and the pod runs. Deleting the pod returns the cluster to zero nodes and deletes the VM. Applying a Job on a cluster at zero nodes works the same way; poll `getJob` or watch `#nodeClaim` on `subscribeClusters`.
 
-Roll back as the account with `socialweb-computer rollback`.
+Roll back as the account with `socialweb-computer rollback --state-dir <state>` (or with
+`CONFIG_PATH_SOCIALWEB_COMPUTER=<state>/config.json` set).
 
 Once per host, or when the item changes:
 
@@ -72,5 +72,5 @@ The deploy inputs (gateway.env, gateway-spec.yaml) live on the orphan branch `sw
 
 ## See also
 
-- [The gateway and its web app](gateway.md)
+- [The gateway and its API front](gateway.md)
 - [CONTRIBUTING](../CONTRIBUTING.md#deploy-the-gateway)

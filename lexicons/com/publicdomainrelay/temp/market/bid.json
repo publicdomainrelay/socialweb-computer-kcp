@@ -14,6 +14,7 @@
           "config": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The bid configuration, such as a compute.config.wif.simple record." },
           "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The terms: a market.bids.free or market.bids.x402 record." },
           "submitAccept": { "type": "string", "description": "Where the requester submits the accept: a DID service ref (did#serviceId) or an HTTP URL." },
+          "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC listen records, including the STUN servers it gathers with." },
           "createdAt": { "type": "string", "format": "datetime" },
           "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
         }

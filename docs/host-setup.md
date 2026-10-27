@@ -1,6 +1,6 @@
 # Host setup and the guest image
 
-The long form of the README host prerequisites: the bare-host packages and their settings, plus how a bidder resolves and verifies its guest image. Short path in [the README](../README.md#prerequisites).
+The long form of the README host prerequisites: the bare-host packages and their settings, plus how a bidder resolves and verifies its guest image. Short path in [the README](../README.md#run-your-own).
 
 A bare Ubuntu 24.04 or Fedora host needs these OS packages and settings for the market network and `run request` below. `dev up` for a network with a bidder checks the host first, and `run request` checks for `ssh`; each stops at once, naming what is missing and its fix; `socialweb-computer check-host -role bidder -state-dir <dir>` lists every check.
 

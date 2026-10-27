@@ -13,6 +13,7 @@
           "domain": { "type": "string", "description": "The market domain, such as compute." },
           "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The requested thing, such as a compute.vm record." },
           "submitBid": { "type": "string", "description": "Where bidders submit bids: a DID service ref (did#serviceId) or an HTTP URL." },
+          "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The requester's com.publicdomainrelay.temp.ingress.webRTC listen records: the transports a stream listener can use when submitBid names no reachable HTTP service." },
           "policies": {
             "type": "array",
             "description": "Policy records the bidder evaluates before it bids.",

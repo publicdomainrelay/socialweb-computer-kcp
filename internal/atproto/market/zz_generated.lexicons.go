@@ -100,6 +100,7 @@ type Accept struct {
 	Type        string                     `json:"$type"`
 	Bid         StrongRef                  `json:"bid"`
 	CreatedAt   string                     `json:"createdAt,omitempty"`
+	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	Payload     *StrongRef                 `json:"payload,omitempty"`
 	RFP         StrongRef                  `json:"rfp"`
 	Signatures  Signatures                 `json:"signatures,omitempty"`
@@ -306,6 +307,7 @@ type Bid struct {
 	Type         string                     `json:"$type"`
 	Config       *StrongRef                 `json:"config,omitempty"`
 	CreatedAt    string                     `json:"createdAt,omitempty"`
+	Ingress      []StrongRef                `json:"ingress,omitempty"`
 	Payload      StrongRef                  `json:"payload"`
 	RFP          StrongRef                  `json:"rfp"`
 	Signatures   Signatures                 `json:"signatures,omitempty"`
@@ -1116,11 +1118,60 @@ func (v *HostKey) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type IngressWebRTC struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Descriptor *StrongRef                 `json:"descriptor,omitempty"`
+	ID         string                     `json:"id"`
+	Kind       string                     `json:"kind"`
+	Mode       string                     `json:"mode"`
+	Peer       string                     `json:"peer,omitempty"`
+	Sdp        string                     `json:"sdp,omitempty"`
+	Session    string                     `json:"session,omitempty"`
+	StunUrls   []string                   `json:"stunUrls,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (IngressWebRTC) NSID() string {
+	return "com.publicdomainrelay.temp.ingress.webRTC"
+}
+
+func ParseIngressWebRTC(value map[string]any) (*IngressWebRTC, error) {
+	var out IngressWebRTC
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.ingress.webRTC", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v IngressWebRTC) MarshalJSON() ([]byte, error) {
+	type plain IngressWebRTC
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.ingress.webRTC"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *IngressWebRTC) UnmarshalJSON(b []byte) error {
+	type plain IngressWebRTC
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = IngressWebRTC(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type Offering struct {
 	Type        string                     `json:"$type"`
 	AppliesTo   []string                   `json:"appliesTo,omitempty"`
 	CreatedAt   string                     `json:"createdAt"`
 	EndpointURL string                     `json:"endpointUrl,omitempty"`
+	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	RefreshedAt string                     `json:"refreshedAt,omitempty"`
 	Extra       map[string]json.RawMessage `json:"-"`
 	absent      map[string]json.RawMessage
@@ -1163,6 +1214,7 @@ type RFP struct {
 	Type       string                     `json:"$type"`
 	CreatedAt  string                     `json:"createdAt,omitempty"`
 	Domain     string                     `json:"domain,omitempty"`
+	Ingress    []StrongRef                `json:"ingress,omitempty"`
 	Payload    StrongRef                  `json:"payload"`
 	Policies   []StrongRef                `json:"policies,omitempty"`
 	Signatures Signatures                 `json:"signatures,omitempty"`
@@ -1210,6 +1262,7 @@ type Receipt struct {
 	Bid         StrongRef                  `json:"bid"`
 	CID         string                     `json:"cid"`
 	CreatedAt   string                     `json:"createdAt,omitempty"`
+	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	Payload     *StrongRef                 `json:"payload,omitempty"`
 	RFP         StrongRef                  `json:"rfp"`
 	Signatures  Signatures                 `json:"signatures,omitempty"`

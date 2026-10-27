@@ -110,6 +110,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		ServiceAuth:    s.openServiceAuth,
 		Guests:         guests{},
 		ContractEvents: events,
+		Ingress:        s.ingress,
 		Directory:      s.directory,
 		HTTP:           s.client,
 		Now:            time.Now,

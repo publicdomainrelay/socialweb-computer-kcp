@@ -26,16 +26,17 @@ var gatewaySshOptions = slices.Concat([]string{backendOpt, "profile", "network",
 	"network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"})
 
 type gatewaySshRun struct {
-	a              *app
-	vals           clicfg.Values
-	profile        string
-	network        string
-	options        []v1alpha1.ApplicationOption
-	comms          *v1alpha1.MarketComms
-	value          *v1alpha1.MarketNetworkValue
-	bidderDids     []string
-	ownerSessions  string
-	networkTimeout time.Duration
+	a                *app
+	vals             clicfg.Values
+	profile          string
+	network          string
+	options          []v1alpha1.ApplicationOption
+	comms            *v1alpha1.MarketComms
+	value            *v1alpha1.MarketNetworkValue
+	bidderDids       []string
+	ownerSessions    string
+	requesterIngress *v1alpha1.IngressConfig
+	networkTimeout   time.Duration
 }
 
 type gatewaySshSummary struct {
@@ -100,6 +101,17 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 			var applied bool
 			var err error
 			if r.comms, applied, err = applyCommsOption(r.comms, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run gateway ssh does not take", p.Name, p.To)
+			}
+			continue
+		}
+		if strings.HasPrefix(p.To, "spec.requesterIngress") {
+			var applied bool
+			var err error
+			if r.requesterIngress, applied, err = applyIngressOption(r.requesterIngress, p.Name, p.Value); err != nil {
 				return err
 			}
 			if !applied {
@@ -183,7 +195,7 @@ func (r *gatewaySshRun) inNetwork(ctx context.Context) int {
 		return r.a.fail(exitRefused, "run gateway ssh: --name: %v", err)
 	}
 	app := v1alpha1.NetworkApp{Name: name, Kind: v1alpha1.ApplicationKindSshGateway, Profile: r.profile, Options: r.options,
-		OwnerSessionsFile: r.ownerSessions}
+		OwnerSessionsFile: r.ownerSessions, RequesterIngress: r.requesterIngress}
 	cur, found, err := request.NetworkApp(ctx, netRec.AdminKubeconfig, name)
 	switch {
 	case err != nil:
@@ -232,7 +244,7 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: --name: %v", err)
 	}
-	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options, Comms: r.comms})
+	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options, Comms: r.comms, RequesterIngress: r.requesterIngress})
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
 	}

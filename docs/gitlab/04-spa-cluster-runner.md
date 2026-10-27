@@ -1,17 +1,20 @@
-# 04 - A runner for a cluster from the SPA
+# 04 - A runner for a cluster made through the gateway
 
-Audience: an operator running GitLab CI jobs on a tenant cluster the user made in the
-socialweb-computer-k8s web app, where the cluster is not on the operator's host.
+Audience: an operator running GitLab CI jobs on a tenant cluster the user made through the gateway,
+where the cluster is not on the operator's host.
 
-Outcome: a GitLab runner on the GitLab host, holding nothing but a kubeconfig the user downloaded
-from https://k8s.socialweb.computer, placing job Pods into that user's tenant cluster through the
-kcp mount.
+Outcome: a GitLab runner on the GitLab host, holding nothing but a kubeconfig the user fetched with
+`getKubeconfig` at https://k8s.socialweb.computer, placing job Pods into that user's tenant cluster
+through the kcp mount.
 
 This is the second runner shape. [02](02-gitlab-runner.md) runs on the kcp host and reaches the
 tenant apiserver on its loopback port with a client certificate, because that is where the apiserver
-binds. 04 is for the case where the cluster is not on the operator's host at all: the
-user made it in the web app, the nodes are rented from the compute market, and the only way in is the
-URL the web app handed them.
+binds. 04 is for the case where the cluster is not on the operator's host at all: the user made it
+through the gateway, the nodes are rented from the compute market, and the only way in is the URL
+`getKubeconfig` returned.
+
+The gateway is API-only; there is no SPA. [README: Use the hosted
+gateway](../../README.md#use-the-hosted-gateway) has the `createCluster` and `getKubeconfig` calls.
 
 Read [01](01-kcp-server.md) for the kcp host and the tenant cluster, [02](02-gitlab-runner.md) for
 the loopback runner shape, and [03](03-jobs.md) for the job side.
@@ -20,7 +23,7 @@ the loopback runner shape, and [03](03-jobs.md) for the job side.
 
 | | |
 | --- | --- |
-| Web app | `https://k8s.socialweb.computer` |
+| Gateway API | `https://k8s.socialweb.computer` |
 | kcp front | `https://kcp.socialweb.computer` |
 | cluster in a kubeconfig | `https://kcp.socialweb.computer/clusters/root:<accountHash>:<cluster>:clusters` |
 
@@ -29,7 +32,7 @@ the loopback runner shape, and [03](03-jobs.md) for the job side.
 `root:<accountHash>:<cluster>:clusters` (`MountPath`).
 
 The kubeconfig's user is a client certificate and its key, made by the cluster's own OpenBao PKI for
-the user's DID and valid for the lifetime the user chose in the web app (at most 24 hours, or no
+the user's DID and valid for the lifetime the user chose in `getKubeconfig` (at most 24 hours, or no
 expiry when the user asks for one):
 
 ```yaml
@@ -58,8 +61,8 @@ On the GitLab host (`ssh gitlab`).
 ## Prerequisites
 
 - The GitLab host resolves and reaches `kcp.socialweb.computer` (the cluster).
-- A user account, a cluster made in the web app, and the kubeconfig downloaded from it. The web app
-  hands out a file that needs no helper on the runner host.
+- A user account, a cluster made through the gateway, and the kubeconfig from `getKubeconfig`. It
+  needs no helper on the runner host.
 - Outbound HTTPS from the GitLab host to the internet.
 - A GitLab project to run jobs in, and a runner registered to it.
 - The user is cluster-admin in their own cluster, so there is no RBAC for the operator to grant. See
@@ -67,7 +70,7 @@ On the GitLab host (`ssh gitlab`).
 
 ## The kubeconfig
 
-The web app hands out one file, `<cluster>.kubeconfig.yaml`. Put it on the runner host where only the
+`getKubeconfig` returns one kubeconfig file. Put it on the runner host where only the
 runner's user can read it:
 
 ```bash
@@ -93,7 +96,7 @@ kubectl get nodes
 
 ### The certificate expires, and that is the rotation
 
-The certificate has the lifetime the user chose in the web app, up to 24 hours (the gateway refuses
+The certificate has the lifetime the user chose in `getKubeconfig`, up to 24 hours (the gateway refuses
 anything under 60 seconds or over 24 hours), or no expiry when the user asks for a kubeconfig that
 never expires. Past the lifetime the client certificate front answers 401 and every job fails at
 authentication. Rotation is downloading a new kubeconfig and overwriting the file. Nothing else in the
@@ -142,7 +145,7 @@ description: "Pause pods, below job pods, so a job preempts one."
 
 ### The credential is cluster-admin
 
-The credential this shape uses is the client certificate of the kubeconfig the web app hands out.
+The credential this shape uses is the client certificate of the kubeconfig `getKubeconfig` returns.
 
 | Shape from 01 | This shape |
 | --- | --- |

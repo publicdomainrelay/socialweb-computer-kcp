@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
@@ -52,6 +53,166 @@ func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (
 		return "", err
 	}
 	return bid.Name, nil
+}
+
+func (b *Bidder) AnswerIngress(ctx context.Context, offer tunnel.Offer, requesterDID string) (tunnel.Answer, error) {
+	if b.ingress == nil {
+		return tunnel.Answer{}, errors.New("bidder: no WebRTC ingress transport is configured")
+	}
+	if offer.Peer != "" && offer.Peer != b.cfg.DID {
+		return tunnel.Answer{}, fmt.Errorf("bidder: the ingress offer names %s and this bidder is %s", offer.Peer, b.cfg.DID)
+	}
+	id := tunnel.ID(requesterDID)
+	if id == "" || offer.ID != id {
+		return tunnel.Answer{}, fmt.Errorf("bidder: the ingress offer names %s and the requester %s", offer.ID, requesterDID)
+	}
+	answer, err := b.ingress.Answer(ctx, offer)
+	if err != nil {
+		return tunnel.Answer{}, err
+	}
+	return answer, nil
+}
+
+func (b *Bidder) AnswerIngressRecords(ctx context.Context, refs []market.StrongRef, requesterDID string) ([]market.StrongRef, error) {
+	if b.ingress == nil {
+		return nil, errors.New("bidder: no WebRTC ingress transport is configured")
+	}
+	for _, ref := range refs {
+		if market.ATURIAuthority(ref.URI) != requesterDID || market.NSIDFromURI(ref.URI) != market.IngressWebRTCNSID {
+			continue
+		}
+		resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: ref.URI, CID: ref.CID})
+		if err != nil {
+			b.log.Warn("bidder_webrtc_offer_unresolved", "offer", ref.URI, "err", err)
+			continue
+		}
+		record, err := market.ParseIngressWebRTC(resolved.Value)
+		if err != nil {
+			b.log.Warn("bidder_webrtc_offer_invalid", "offer", ref.URI, "err", err)
+			continue
+		}
+		if err := record.Validate(); err != nil {
+			b.log.Warn("bidder_webrtc_offer_invalid", "offer", ref.URI, "err", err)
+			continue
+		}
+		if record.Mode != market.IngressModeOffer {
+			continue
+		}
+		if record.Peer != b.cfg.DID || record.ID != tunnel.ID(requesterDID) {
+			b.log.Warn("bidder_webrtc_offer_mismatch", "offer", ref.URI, "requester", requesterDID)
+			continue
+		}
+		answer, err := b.AnswerIngress(ctx, tunnel.Offer{
+			Kind: tunnel.KindWebRTC, ID: record.ID, Session: record.Session,
+			Peer: record.Peer, Type: tunnel.SignalOffer, SDP: record.Sdp,
+		}, requesterDID)
+		if err != nil {
+			return nil, err
+		}
+		value, err := market.EncodeRecord(market.IngressWebRTC{
+			Kind: tunnel.KindWebRTC, Mode: market.IngressModeAnswer, ID: answer.ID, Peer: requesterDID,
+			Session: answer.Session, Sdp: answer.SDP, Descriptor: record.Descriptor,
+			StunUrls: []string{tunnel.DefaultSTUN}, CreatedAt: market.NowISO(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		answerRef, err := b.records.CreateRecord(ctx, b.cfg.DID, market.IngressWebRTCNSID, value)
+		if err != nil {
+			return nil, err
+		}
+		b.ingressMu.Lock()
+		b.ingressLive[answer.ID] = true
+		b.ingressMu.Unlock()
+		out := []market.StrongRef{answerRef}
+		if descriptor := b.ingressDescriptor(ctx); descriptor != nil {
+			out = append(out, market.NewStrongRef(descriptor.URI, descriptor.CID))
+		}
+		return out, nil
+	}
+	return nil, errors.New("bidder: the request names no ingress offer for this bidder")
+}
+
+func (b *Bidder) ingressDescriptor(ctx context.Context) *market.RecordRef {
+	if b.ingress == nil || b.records == nil {
+		return nil
+	}
+	id := tunnel.ID(b.cfg.DID)
+	if id == "" {
+		return nil
+	}
+	b.ingressRefMu.Lock()
+	cached := b.ingressRef
+	b.ingressRefMu.Unlock()
+	if cached != nil {
+		return &market.RecordRef{URI: cached.URI, CID: cached.CID}
+	}
+	value, err := market.EncodeRecord(market.IngressWebRTC{
+		Kind: tunnel.KindWebRTC, Mode: market.IngressModeListen, ID: id,
+		StunUrls: []string{tunnel.DefaultSTUN}, CreatedAt: market.NowISO(),
+	})
+	if err != nil {
+		b.log.Warn("bidder_webrtc_descriptor_failed", "err", err)
+		return nil
+	}
+	ref, err := participant.EnsureRecordAt(ctx, b.records, b.cfg.DID, market.IngressWebRTCNSID, "webrtc", value)
+	if err != nil {
+		b.log.Warn("bidder_webrtc_descriptor_failed", "err", err)
+		return nil
+	}
+	b.ingressRefMu.Lock()
+	b.ingressRef = &ref
+	b.ingressRefMu.Unlock()
+	b.log.Info("bidder_webrtc_descriptor", "uri", ref.URI, "cid", ref.CID)
+	return &market.RecordRef{URI: ref.URI, CID: ref.CID}
+}
+
+func (b *Bidder) ingressRecords(ctx context.Context) []market.RecordRef {
+	ref := b.ingressDescriptor(ctx)
+	if ref == nil {
+		return nil
+	}
+	return []market.RecordRef{*ref}
+}
+
+func (b *Bidder) IngressRecords(ctx context.Context) []market.StrongRef {
+	refs := b.ingressRecords(ctx)
+	out := make([]market.StrongRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, market.NewStrongRef(ref.URI, ref.CID))
+	}
+	return out
+}
+
+func (b *Bidder) liveIngress(ownerDID string) string {
+	id := tunnel.ID(ownerDID)
+	if id == "" {
+		return ""
+	}
+	b.ingressMu.Lock()
+	live := b.ingressLive[id]
+	b.ingressMu.Unlock()
+	if !live {
+		return ""
+	}
+	return id
+}
+
+func (b *Bidder) submitEndpoint(rfp *market.RFP, requesterDID string) string {
+	if rfp == nil {
+		return ""
+	}
+	if id := b.liveIngress(requesterDID); id != "" {
+		return tunnel.Ref(id)
+	}
+	return strings.TrimSpace(rfp.SubmitBid)
+}
+
+func (b *Bidder) eventEndpoint(ctx context.Context, requesterDID, serviceRef string) string {
+	if id := b.liveIngress(requesterDID); id != "" {
+		return tunnel.Ref(id)
+	}
+	return b.submitEventURL(ctx, serviceRef)
 }
 
 func (b *Bidder) SubmitAccept(ctx context.Context, acceptURI, acceptCID, issuer string) (string, error) {
@@ -203,12 +364,18 @@ func (b *Bidder) submitBid(ctx context.Context, endpoint string, ref market.Stro
 		return fmt.Errorf("reading the bid record %s: %w", ref.URI, err)
 	}
 	body := map[string]any{"uri": ref.URI, "cid": ref.CID, "record": record.Value}
+	if refs := b.IngressRecords(ctx); len(refs) > 0 {
+		body["ingress"] = refs
+	}
 	return b.outbound.Post(ctx, endpoint, market.SubmitBidNSID, body)
 }
 
 func (b *Bidder) submitEventURL(ctx context.Context, ref string) string {
 	ref = strings.TrimSpace(ref)
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		return ref
+	}
+	if tunnel.IsRef(ref) {
 		return ref
 	}
 	did, fragment, found := strings.Cut(ref, "#")

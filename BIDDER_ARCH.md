@@ -1,8 +1,8 @@
 # Bidder architecture
 
-Observed on 2026-10-22 from the installed bidder on this host, hat-9 and hat-7, and from the
-Go source at commit `5fad226a` (release binary sha256
-`30ab2e465a080bbe47ea16e085cdd99d10c640f4c90d438484363a443b31bd92`).
+Host readings on 2026-10-22 from the installed bidder on this host, hat-9 and hat-7 (release binary
+sha256 `30ab2e465a080bbe47ea16e085cdd99d10c640f4c90d438484363a443b31bd92`); the source claims were
+rechecked against commit `1cad64b0` on 2026-10-26.
 
 ## Shape
 
@@ -86,8 +86,8 @@ inherits `MarketNetworkValue.ingress` and its `dispatcher` instead.
 session into the bidder's OpenBao at `bidder/data/identity/bidder/pds-session`, and the PDS repo key
 at `bidder/data/identity/bidder/keys`. The bidder's own repo is the PDS, not the operator's repo.
 
-Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo and the
-operator DID in `MarketIdentity.spec.approvedAssociations`. The record shape is:
+Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo; the
+verified operator DID lands in `MarketIdentity.status.associations`. The record shape is:
 
 ```json
 {
@@ -101,22 +101,19 @@ operator DID in `MarketIdentity.spec.approvedAssociations`. The record shape is:
 ```
 
 `scripts/associate-bidder.ts` writes that record from a mode-0600 credentials file without printing
-the handle or password. The operator DID is added with:
+the handle or password. The operator's `AtprotoRecordWatch/association` verifies the claim and the
+identity controller writes the operator DID into `status.associations`, setting `Associated=True`
+with reason `Associated`. With `spec.association: Skip` it sets `Associated=True` and reason
+`AssociationSkipped`. A manual patch of `spec.approvedAssociations` is a declarative workaround, not
+the accepted path:
 
 ```bash
 sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
   -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
 ```
 
-The identity controller copies approved DIDs into `status.associations` and sets
-`Associated=True` with reason `Associated`. With `spec.association: Skip` it sets
-`Associated=True` and reason `AssociationSkipped`.
-
-The generic `AtprotoRecord` reconciler is not implemented in this Go tree. The declaration
-`AtprotoRecord/association` is rendered, but it has no phase and no controller writes the record
-into the PDS. The record for the associated hosts in this run was written once through the PDS
-session and the PDS API; the record is durable in the PDS and is listed by
-`com.atproto.repo.listRecords`.
+The bidder's own `AtprotoRecord/association` is applied into the app's PDS by the `AtprotoRecord`
+controller; the record is listed by `com.atproto.repo.listRecords`.
 
 ## Live bidder instances
 
@@ -152,9 +149,6 @@ new DID and needs the one association claim; an upgrade keeps the state, DID, re
 
 ## Known gaps
 
-- No generic `AtprotoRecord` controller. The declaration exists but is not applied to the PDS.
-- No automatic `pendingAction` association flow. Approval is `spec.approvedAssociations` plus the
-  claim helper; the watch/EventStream is running but does not write the approval itself.
 - Ingress Exposures are Pending on a standalone bidder with no `IngressProxy`.
 - `AtprotoRecordWatch/association` can report `invalid repo op` while the PDS stream is consumed;
   the association state above does not depend on that watch.

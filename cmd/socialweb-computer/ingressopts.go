@@ -9,7 +9,8 @@ import (
 func applyIngressOption(ingress *v1alpha1.IngressConfig, name, value string) (*v1alpha1.IngressConfig, bool, error) {
 	switch name {
 	case "ingress-provider", "ingress-public-host", "ingress-xrpc-host", "ingress-relay-url",
-		"ingress-opentunnel-command", "ingress-opentunnel-route-name", "ingress-opentunnel-local-host", "ingress-opentunnel-proxy-protocol":
+		"ingress-opentunnel-command", "ingress-opentunnel-route-name", "ingress-opentunnel-local-host", "ingress-opentunnel-proxy-protocol",
+		"requester-ingress-provider", "requester-ingress-webrtc-stun":
 	default:
 		return ingress, false, nil
 	}
@@ -17,8 +18,13 @@ func applyIngressOption(ingress *v1alpha1.IngressConfig, name, value string) (*v
 		ingress = &v1alpha1.IngressConfig{}
 	}
 	switch name {
-	case "ingress-provider":
+	case "ingress-provider", "requester-ingress-provider":
 		ingress.Provider = value
+	case "requester-ingress-webrtc-stun":
+		if ingress.WebRTC == nil {
+			ingress.WebRTC = &v1alpha1.IngressWebRTCConfig{}
+		}
+		ingress.WebRTC.STUNURLs = splitList(value)
 	case "ingress-public-host":
 		ingress.PublicHost = value
 	case "ingress-xrpc-host":

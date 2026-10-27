@@ -71,16 +71,17 @@ Only `firecracker-x86_64` is published. An arm64 host builds one with `scripts/b
 
 ## Identity and association
 
-The `prod-qr` profile uses a local repo: the bidder's own PDS, never the operator's repo. `install
+The default identity is `localRepo`: the bidder's own PDS, never the operator's repo. `install
 bidder` creates the PDS account and writes the DID into `MarketIdentity/bidder`, the session into the
-bidder's OpenBao and the repo key there too.
+bidder's OpenBao and the repo key there too. `-- --atproto-oauth-qr` signs in an existing account
+instead; that account's PDS holds the repo and the bidder runs no local PDS.
 
 Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo with
 `challenge` the operator DID, `keyId` the bidder DID and service `bidder_associate`.
 `scripts/associate-bidder.ts` writes the record from a mode-0600 credentials file and prints neither
 handle nor password. The application's `AtprotoRecordWatch/association` verifies it and the identity
-controller writes the operator DID into `MarketIdentity.spec.approvedAssociations`; no manual patch
-is needed.
+controller writes the operator DID into `MarketIdentity.status.associations`; no manual patch is
+needed. `spec.approvedAssociations` is the declarative workaround, not the accepted path.
 
 ```bash
 HANDLE=bobvmbuilder.bsky.social
@@ -105,8 +106,9 @@ sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
   -p '{"spec":{"identity":{"association":"Skip"}}}'
 ```
 
-The generic `AtprotoRecord` reconciler is not implemented in this Go tree. The helper writes the
-claim once; the approved DID and the claim are the proof.
+The bidder's own `AtprotoRecord/association` is applied through the app's PDS by the `AtprotoRecord`
+controller. The helper writes the operator's claim once; the verified claim is the proof, and the
+identity reports `Associated=True`.
 
 ## Upgrade and uninstall
 

@@ -18,7 +18,7 @@ BINARY=<path to socialweb-computer> SHA256=<sha256> SSH_KEY=~/.ssh/id_ed25519_no
 ```
 
 `deploy.sh` runs `socialweb-computer install gateway` the first time and `upgrade` after, then waits
-until the web app answers `/api/config`. Check it as the account:
+until the gateway answers `/api/config`. Check it as the account:
 
 ```bash
 systemctl --user status socialweb-computer-gateway.service

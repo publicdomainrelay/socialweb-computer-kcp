@@ -13,7 +13,8 @@ Three steps, one document each:
 | 3 | [Jobs](03-jobs.md) | Job images, pipelines, one job per node, scaling, the cross-node limit |
 
 Step 1 leaves you holding a cluster URL, three credential files and a group name. Step 2 points a
-runner at them. Step 3 is what happens when a job runs.
+runner at them. Step 3 is what happens when a job runs. [04](04-spa-cluster-runner.md) is the second
+runner shape, for a cluster the user made through the gateway and is not on the operator's host.
 
 ## Reachability: the single operational fact
 
@@ -45,7 +46,7 @@ That value is the `host` you put in the runner config.
 A GitLab on another host cannot reach a loopback-bound apiserver, and no runner setting fixes that.
 Making it work means the kcp host publishing an authenticated front for the apiserver, which widens a
 trust boundary this project keeps at loopback on purpose: `internal/gatewaymain/config.go` refuses to
-bind anything but loopback, and the host's caddy publishes only the web app and the kcp front
+bind anything but loopback, and the host's caddy publishes only the gateway API and the kcp front
 (`scripts/deploy.sh`). See [01](01-kcp-server.md#gitlab-on-its-own-vm-does-not-work).
 
 ## Cross-node traffic and DNS: the newest part

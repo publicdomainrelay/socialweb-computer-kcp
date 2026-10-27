@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/webrtc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
@@ -115,6 +116,11 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 	if err != nil {
 		return nil, err
 	}
+	peer := webrtc.NewPeer(s.log)
+	s.mu.Lock()
+	s.marketPeer = peer
+	s.mu.Unlock()
+	httpClient := webrtc.Client(s.egress.Client(DefaultCallTimeout), peer)
 	cfg := core.Config{
 		DID:                 s.did,
 		Workspace:           s.workspace,
@@ -151,8 +157,9 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		Guests:      guests{},
 		GuestEvents: s.guestEvents(),
 		WebRTCPorts: ports,
+		Ingress:     peer,
 		Tokens:      participant.NewTokens(s.minter(), DefaultCallTimeout),
-		HTTP:        s.egress.Client(DefaultCallTimeout),
+		HTTP:        httpClient,
 		Directory:   s.dir,
 		Policy:      s.policyRuns(),
 		Log:         s.log,

@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
@@ -225,6 +226,8 @@ type Deps struct {
 
 	WebRTCPorts GuestUDPPorts
 
+	Ingress tunnel.Answerer
+
 	Tokens *participant.Tokens
 
 	HTTP *http.Client
@@ -254,6 +257,16 @@ type Bidder struct {
 	guestEvents GuestQueue
 
 	webrtcPorts GuestUDPPorts
+
+	ingress tunnel.Answerer
+
+	ingressMu sync.Mutex
+
+	ingressLive map[string]bool
+
+	ingressRefMu sync.Mutex
+
+	ingressRef *market.StrongRef
 
 	outbound *participant.Outbound
 
@@ -346,6 +359,8 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		guests:      deps.Guests,
 		guestEvents: deps.GuestEvents,
 		webrtcPorts: deps.WebRTCPorts,
+		ingress:     deps.Ingress,
+		ingressLive: map[string]bool{},
 		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
 		directory:   deps.Directory,

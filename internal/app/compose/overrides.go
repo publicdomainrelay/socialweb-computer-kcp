@@ -187,6 +187,8 @@ func OverrideComms(overrides v1alpha1.ComponentOverrides, kind, name string, bas
 
 func ingressOverride(kind string, out map[string]any, ingress *v1alpha1.IngressConfig) error {
 	switch kind {
+	case ComponentKindRequester:
+		return setJSON(out, "ingress", ingress)
 	case ComponentKindPds:
 		if ingress.IngressRef != nil {
 			return setJSON(out, "ingressRef", ingress.IngressRef)

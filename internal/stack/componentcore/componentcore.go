@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,10 +21,12 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	nodeclaimctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostlifecycle"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/webrtc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
@@ -305,7 +308,14 @@ func (c *Core) register() error {
 			return pds.New(spec, pds.Deps{Instance: in, Egress: egress(in)})
 		})},
 		{requester.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.RequesterSpec) (*requester.Service, error) {
-			return requester.New(ctx, spec, requester.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+			return requester.New(ctx, spec, requester.Deps{
+				Instance:       in,
+				Egress:         egress(in),
+				OAuthCallbacks: c.oauthCallbacks,
+				OpenIngress: func(handler http.Handler, options tunnel.ServiceOptions) (tunnel.Service, error) {
+					return webrtc.NewService(webrtc.ServiceConfig{Handler: handler, Log: in.Log, Options: options})
+				},
+			})
 		})},
 		{sshserver.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
 			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})

@@ -26,6 +26,7 @@ import (
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
@@ -171,6 +172,8 @@ type Deps struct {
 
 	ContractEvents contractmarket.ContractEvents
 
+	Ingress tunnel.Service
+
 	Directory identity.Directory
 
 	HTTP *http.Client
@@ -284,6 +287,10 @@ type Requester struct {
 	heldMu sync.Mutex
 
 	heldSessions map[string]*heldSession
+
+	ingressMu sync.Mutex
+
+	ingressRef *market.StrongRef
 }
 
 var _ contractmarket.Observer = (*Requester)(nil)
@@ -398,6 +405,43 @@ func (c Config) InboundXRPC() bool {
 		return true
 	}
 	return false
+}
+
+func (c Config) WebRTCIngress() bool {
+	return c.InboundXRPC() && c.Spec.Ingress != nil && c.Spec.Ingress.ProviderName() == v1alpha1.IngressProviderWebRTC
+}
+
+func (c Config) WebRTCIngressOptions() tunnel.ServiceOptions {
+	opts := tunnel.ServiceOptions{STUN: c.WebRTCSTUN()}
+	if c.Spec.Ingress != nil && c.Spec.Ingress.WebRTC != nil {
+		webRTC := c.Spec.Ingress.WebRTC
+		if seconds := ptr.Deref(webRTC.SessionTTLSeconds, 0); seconds > 0 {
+			opts.SessionTTL = time.Duration(seconds) * time.Second
+		}
+		if sessions := ptr.Deref(webRTC.MaxSessions, 0); sessions > 0 {
+			opts.MaxSessions = int(sessions)
+		}
+	}
+	return opts
+}
+
+func (c Config) WebRTCSTUN() []string {
+	if c.Spec.Ingress != nil && c.Spec.Ingress.WebRTC != nil {
+		if urls := cleanedSTUN(c.Spec.Ingress.WebRTC.STUNURLs); len(urls) > 0 {
+			return urls
+		}
+	}
+	return []string{tunnel.DefaultSTUN}
+}
+
+func cleanedSTUN(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	for _, raw := range urls {
+		if value := strings.TrimSpace(raw); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func (c Config) dataDir() string {
@@ -561,6 +605,9 @@ func (q *Requester) Start(ctx context.Context) error {
 		RelayURLs:   q.cfg.DiscoveryRelays(),
 		BidderDIDs:  append([]string(nil), q.cfg.Spec.BidderDIDs...),
 		OperatorDID: strings.TrimSpace(q.cfg.Spec.OperatorDID),
+		Ingress:     q.ingress(),
+		IngressRef:  q.ingressDescriptor,
+		IngressSTUN: q.cfg.WebRTCSTUN(),
 		HTTPClient:  q.deps.HTTP,
 		Timeout:     q.cfg.BidWindow,
 		Log:         q.log,
@@ -733,6 +780,61 @@ func (q *Requester) callbackRef(fragment string) string {
 		return ""
 	}
 	return q.callbackDID() + "#" + fragment
+}
+
+func (q *Requester) ingress() tunnel.Service {
+	if !q.cfg.WebRTCIngress() {
+		return nil
+	}
+	return q.deps.Ingress
+}
+
+func (q *Requester) ingressDescriptor(ctx context.Context) *market.RecordRef {
+	if q.ingress() == nil || q.repo == nil {
+		return nil
+	}
+	id := tunnel.ID(q.repoDID)
+	if id == "" {
+		return nil
+	}
+	q.ingressMu.Lock()
+	cached := q.ingressRef
+	q.ingressMu.Unlock()
+	if cached != nil {
+		return &market.RecordRef{URI: cached.URI, CID: cached.CID}
+	}
+	value, err := market.EncodeRecord(market.IngressWebRTC{Kind: tunnel.KindWebRTC, Mode: market.IngressModeListen, ID: id, StunUrls: q.cfg.WebRTCSTUN(), CreatedAt: q.nowISO()})
+	if err != nil {
+		q.log.Warn("requester_webrtc_descriptor_failed", "err", err)
+		return nil
+	}
+	ref, err := participant.EnsureRecordAt(ctx, q.repo, q.repoDID, market.IngressWebRTCNSID, "webrtc", value)
+	if err != nil {
+		q.log.Warn("requester_webrtc_descriptor_failed", "err", err)
+		return nil
+	}
+	q.ingressMu.Lock()
+	q.ingressRef = &ref
+	q.ingressMu.Unlock()
+	q.log.Info("requester_webrtc_descriptor", "uri", ref.URI, "cid", ref.CID)
+	return &market.RecordRef{URI: ref.URI, CID: ref.CID}
+}
+
+func (q *Requester) ingressRecords(ctx context.Context) []market.RecordRef {
+	ref := q.ingressDescriptor(ctx)
+	if ref == nil {
+		return nil
+	}
+	return []market.RecordRef{*ref}
+}
+
+func (q *Requester) IngressRecords(ctx context.Context) []market.StrongRef {
+	refs := q.ingressRecords(ctx)
+	out := make([]market.StrongRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, market.NewStrongRef(ref.URI, ref.CID))
+	}
+	return out
 }
 
 func (q *Requester) guestCAPEM() string {

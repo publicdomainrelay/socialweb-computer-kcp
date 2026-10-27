@@ -81,20 +81,9 @@ func firstIngress(ingress []*v1alpha1.IngressConfig) *v1alpha1.IngressConfig {
 }
 
 func IngressProviderFor(ingress *v1alpha1.IngressConfig) string {
-	if ingress == nil {
-		return ""
-	}
-	provider := strings.ToLower(strings.TrimSpace(ingress.Provider))
-	switch provider {
-	case v1alpha1.IngressProviderXRPCSubscription, v1alpha1.IngressProviderOpenTunnel, v1alpha1.IngressProviderIroh:
+	switch provider := ingress.ProviderName(); provider {
+	case v1alpha1.IngressProviderXRPCSubscription, v1alpha1.IngressProviderOpenTunnel, v1alpha1.IngressProviderIroh, v1alpha1.IngressProviderWebRTC:
 		return provider
-	case "":
-		if ingress.OpenTunnel != nil {
-			return v1alpha1.IngressProviderOpenTunnel
-		}
-		if ingress.Xrpc != nil && strings.TrimSpace(ingress.Xrpc.IngressProxyHost) != "" {
-			return v1alpha1.IngressProviderXRPCSubscription
-		}
 	}
 	return ""
 }

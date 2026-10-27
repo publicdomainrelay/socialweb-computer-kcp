@@ -576,6 +576,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	options := market.RFPOptions{
 		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
 		SubmitBid: q.submitBidRef(),
+		Ingress:   q.ingressRecords(ctx),
 		Domain:    "compute",
 		CreatedAt: q.nowISO(),
 	}
@@ -623,6 +624,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 			RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
 			SubmitEvent: q.submitEventRef(),
+			Ingress:     q.ingressRecords(ctx),
 			CreatedAt:   q.nowISO(),
 		}, q.signer)
 		if err != nil {

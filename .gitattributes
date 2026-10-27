@@ -1,1 +1,5 @@
-deploy/apiresourceschema-revisions.txt merge=union
+deploy/apiresourceschema-revisions.txt merge=union linguist-generated=true
+api/**/zz_generated.*.go linguist-generated=true
+internal/**/zz_generated.*.go linguist-generated=true
+deploy/*-apiresourceschema.yaml linguist-generated=true
+deploy/*-apiexport.yaml linguist-generated=true

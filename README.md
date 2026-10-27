@@ -52,11 +52,14 @@ The bidder gets a new DID and waits for its association:
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
   systemctl --user status "socialweb-computer-bidder@$HANDLE.service"
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list \
+  --host-backend systemd-user --state-dir /var/lib/socialweb-computer/swc-bidder
 ```
 
-`socialweb-computer status` reads instances that run without systemd (below), not the installed
-unit. Upgrade, uninstall, oauthQr and more: [CONTRIBUTING](CONTRIBUTING.md#install-a-release-bidder).
+`units list` needs the backend and the state root when it runs outside the unit; the unit itself
+gets them from the `CONFIG_PATH_SOCIALWEB_COMPUTER` environment. `socialweb-computer status` reads
+instances that run without systemd (below), not the installed unit. Upgrade, uninstall, oauthQr and
+more: [CONTRIBUTING](CONTRIBUTING.md#install-a-release-bidder).
 
 ### Run in the foreground (no systemd)
 

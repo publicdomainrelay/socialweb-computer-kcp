@@ -41,12 +41,12 @@
     },
     "profile": {
       "type": "string",
-      "description": "Dev profile: quick (kine on sqlite + one kcp slot), prodlike (the gateway shape: a postgres unit, one kine per kcp slot on it, blue/green slots a and b behind the front) or market-network (a quick-shaped instance whose MarketNetwork root object runs the shared atproto services and composes child applications, each in its own workspace root:<app> of the one kcp). run bidder: the MarketBidder profile, prod-qr (QR sign-in into the handle's real account, no PDS), market-network (the bidder's own account on the market network's PDS; needs --network) or dev-local (a local repo, the ephemeral-PDS mode); unset: market-network with --network or --market-network-file, prod-qr otherwise",
+      "description": "Dev profile: quick (kine on sqlite + one kcp slot), prodlike (the gateway shape: a postgres unit, one kine per kcp slot on it, blue/green slots a and b behind the front) or market-network (a quick-shaped instance whose MarketNetwork root object runs the shared atproto services and composes child applications, each in its own workspace root:<app> of the one kcp). run bidder: the MarketBidder profile, prod-qr (the production profile; its identity defaults to a local repo and PDS, and -- --atproto-oauth-qr signs in the handle's real account instead), market-network (the bidder's own account on the market network's PDS; needs --network) or dev-local (a local repo, the ephemeral-PDS mode); unset: market-network with --network or --market-network-file, prod-qr otherwise",
       "env": "SOCIALWEB_DEV_PROFILE"
     },
     "bidders": {
       "type": "number",
-      "description": "dev up --profile market-network: how many MarketBidder child applications the network composes (bidder-1 .. bidder-N), each with its own kcp",
+      "description": "dev up --profile market-network: how many MarketBidder child applications the network composes (bidder-1 .. bidder-N), each in its own workspace root:<app> of the network's one kcp",
       "env": "SOCIALWEB_DEV_BIDDERS",
       "default": 1
     },

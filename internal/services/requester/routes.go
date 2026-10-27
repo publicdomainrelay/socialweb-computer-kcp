@@ -151,7 +151,11 @@ func (s *Service) submitRecord(w http.ResponseWriter, r *http.Request, nsid, ser
 		writeRequestError(w, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
+	response := map[string]any{"ok": true}
+	if refs := core.IngressRecords(r.Context()); len(refs) > 0 {
+		response["ingress"] = refs
+	}
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 func (s *Service) getSecrets(w http.ResponseWriter, r *http.Request) {

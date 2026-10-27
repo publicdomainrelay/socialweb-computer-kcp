@@ -12,7 +12,8 @@
           "required": ["acceptUri", "acceptCid"],
           "properties": {
             "acceptUri": { "type": "string", "format": "at-uri", "description": "The market.accept record." },
-            "acceptCid": { "type": "string", "format": "cid" }
+            "acceptCid": { "type": "string", "format": "cid" },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The requester's com.publicdomainrelay.temp.ingress.webRTC listen records for this call." }
           }
         }
       },
@@ -28,7 +29,8 @@
             "acceptCid": { "type": "string", "format": "cid" },
             "uri": { "type": "string", "format": "at-uri", "description": "The market.receipt, when it is already written." },
             "cid": { "type": "string", "format": "cid" },
-            "submitEvent": { "type": "string", "description": "Where the requester submits events: a DID service ref (did#serviceId) or an HTTP URL." }
+            "submitEvent": { "type": "string", "description": "Where the requester submits events: a DID service ref (did#serviceId) or an HTTP URL." },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC listen records for this call." }
           }
         }
       },

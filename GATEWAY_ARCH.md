@@ -1,8 +1,8 @@
 # Gateway architecture
 
-Observed on 2026-10-22 on the installed production gateway `socialweb.computer` and from the Go
-source at commit `5fad226a` (release binary sha256
-`30ab2e465a080bbe47ea16e085cdd99d10c640f4c90d438484363a443b31bd92`).
+Host readings on 2026-10-22 on the installed production gateway `socialweb.computer` (release binary
+sha256 `30ab2e465a080bbe47ea16e085cdd99d10c640f4c90d438484363a443b31bd92`); the source claims were
+rechecked against commit `1cad64b0` on 2026-10-26.
 
 ## Shape
 
@@ -148,7 +148,7 @@ that requester repo DID, not a browser account DID.
 
 Web sign-in uses the PDS as the OAuth authorization server, with the GatewayAPI as the OAuth client
 and callback server. The browser session is a cookie held by the gateway; the PDS session is in the
-root vault, not in the web app's memory. Alice's observed session:
+root vault, not in the gateway's memory. Alice's observed session:
 
 - handle `aliceoa.bsky.social`
 - DID `did:plc:lpfuqerea3deuoyrn7ojser4`
@@ -231,8 +231,6 @@ certificate handoff and a new Alice sign-in.
 - Ingress Exposures are Pending without an `IngressProxy`; the public path is the Caddy local front.
 - A fresh install must refresh Caddy's gateway, edge-client and kcp CA files. `scripts/deploy.sh`
   does this; a bare `install gateway` does not.
-- The generic `AtprotoRecord` reconciler is absent; gateway records declared as `AtprotoRecord`
-  objects do not get applied by the Go tree.
 - The `app` workspace type is immutable; an old `denoruntime` install cannot be upgraded in place.
 
 ## Inspect

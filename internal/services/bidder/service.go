@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/webrtc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
@@ -108,6 +109,8 @@ type Service struct {
 	authorizer atomic.Pointer[participant.Authorizer]
 
 	relay *ingress.Subscriber
+
+	marketPeer *webrtc.Peer
 
 	bidder atomic.Pointer[core.Bidder]
 
@@ -240,6 +243,8 @@ func (s *Service) stopWith(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		cancel, relay := s.cancel, s.relay
+		peer := s.marketPeer
+		s.marketPeer = nil
 		s.started = false
 		s.mu.Unlock()
 		if cancel != nil {
@@ -247,6 +252,9 @@ func (s *Service) stopWith(ctx context.Context) error {
 		}
 		if relay != nil {
 			relay.Close()
+		}
+		if peer != nil {
+			_ = peer.Close()
 		}
 		s.stopErr = supervise.Join(ctx, s.wg.Wait)
 	})

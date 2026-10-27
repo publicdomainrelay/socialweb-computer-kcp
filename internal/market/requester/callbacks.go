@@ -35,6 +35,8 @@ type SubmittedRecord struct {
 	CID string `json:"cid"`
 
 	Record map[string]any `json:"record"`
+
+	Ingress []market.StrongRef `json:"ingress,omitempty"`
 }
 
 func invalidRequest(err error) *RequestError {

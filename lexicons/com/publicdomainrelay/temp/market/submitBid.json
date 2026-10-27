@@ -13,7 +13,8 @@
           "properties": {
             "uri": { "type": "string", "format": "at-uri", "description": "The market.bid record." },
             "cid": { "type": "string", "format": "cid" },
-            "record": { "type": "ref", "ref": "com.publicdomainrelay.temp.market.bid", "description": "The market.bid record value." }
+            "record": { "type": "ref", "ref": "com.publicdomainrelay.temp.market.bid", "description": "The market.bid record value." },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC listen records for this call." }
           }
         }
       },
@@ -23,7 +24,8 @@
           "type": "object",
           "required": ["ok"],
           "properties": {
-            "ok": { "type": "boolean" }
+            "ok": { "type": "boolean" },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The requester's com.publicdomainrelay.temp.ingress.webRTC listen records for this call." }
           }
         }
       },

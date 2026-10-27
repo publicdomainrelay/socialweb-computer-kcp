@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -30,6 +31,8 @@ type Deps struct {
 	Egress component.Egress
 
 	OAuthCallbacks *oauthcallback.Registry
+
+	OpenIngress func(handler http.Handler, options tunnel.ServiceOptions) (tunnel.Service, error)
 }
 
 type Service struct {
@@ -60,6 +63,8 @@ type Service struct {
 	done chan struct{}
 
 	core *role.Requester
+
+	ingress tunnel.Service
 
 	wg sync.WaitGroup
 }
@@ -111,6 +116,13 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	s.log.Info("requester_registered", "workspace", s.cfg.Workspace, "name", s.deps.Self.Name)
+	if s.cfg.WebRTCIngress() {
+		if _, err := s.openIngress(); err != nil {
+			s.log.Warn("requester_webrtc_ingress_off", "err", err.Error())
+		} else {
+			s.log.Info("requester_webrtc_ingress", "id", tunnel.ID(s.cfg.RepoDID))
+		}
+	}
 	core, err := s.setup(runCtx)
 	if err != nil {
 		cancel()
@@ -138,6 +150,25 @@ func (s *Service) register() error {
 	return s.deps.Bus.RegisterHTTP(component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.deps.Self.Name}, s.handler())
 }
 
+func (s *Service) openIngress() (tunnel.Service, error) {
+	if s.deps.OpenIngress == nil {
+		return nil, errors.New("requester: no WebRTC ingress factory is configured")
+	}
+	key := component.Key{Workspace: s.cfg.Workspace, Kind: Kind, Name: s.deps.Self.Name}
+	mux := s.handler()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(w, r.WithContext(component.WithCaller(r.Context(), key)))
+	})
+	service, err := s.deps.OpenIngress(handler, s.cfg.WebRTCIngressOptions())
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.ingress = service
+	s.mu.Unlock()
+	return service, nil
+}
+
 func (s *Service) finish(ctx context.Context, core *role.Requester) {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
 	defer cancel()
@@ -149,8 +180,13 @@ func (s *Service) finish(ctx context.Context, core *role.Requester) {
 	s.started = false
 	s.ready = false
 	s.core = nil
+	ingress := s.ingress
+	s.ingress = nil
 	done := s.done
 	s.mu.Unlock()
+	if ingress != nil {
+		_ = ingress.Close()
+	}
 	close(done)
 }
 
@@ -179,7 +215,13 @@ func (s *Service) Endpoints() []component.Endpoint {
 	if !s.ready {
 		return nil
 	}
-	return []component.Endpoint{{Name: "http", Protocol: component.ProtocolHTTP}}
+	endpoints := []component.Endpoint{{Name: "http", Protocol: component.ProtocolHTTP}}
+	if s.cfg.WebRTCIngress() {
+		if id := tunnel.ID(s.cfg.RepoDID); id != "" {
+			endpoints = append(endpoints, component.Endpoint{Name: "webrtc", Protocol: "webrtc", Address: tunnel.Ref(id)})
+		}
+	}
+	return endpoints
 }
 
 func (s *Service) Stop(ctx context.Context) error {

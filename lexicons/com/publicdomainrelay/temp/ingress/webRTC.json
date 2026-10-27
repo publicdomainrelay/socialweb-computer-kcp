@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.ingress.webRTC",
+  "description": "A WebRTC ingress descriptor or one session of it. A listen record names the requester's ingress; offer and answer records carry the SDP for one peer and reference the listen record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kind", "mode", "id", "createdAt"],
+        "properties": {
+          "kind": { "type": "string", "knownValues": ["webrtc"] },
+          "mode": { "type": "string", "knownValues": ["listen", "offer", "answer"] },
+          "id": { "type": "string", "description": "The requester's ingress id: hex sha256 of the requester repo DID." },
+          "peer": { "type": "string", "format": "did", "description": "The other party: the target bidder of an offer, the requester of an answer." },
+          "session": { "type": "string", "description": "A per-offer nonce; an answer applies only to the offer with the same id and session." },
+          "descriptor": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The listen record this offer or answer belongs to." },
+          "sdp": { "type": "string" },
+          "stunUrls": { "type": "array", "items": { "type": "string" }, "description": "The ICE servers (STUN URLs) this side gathers with." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

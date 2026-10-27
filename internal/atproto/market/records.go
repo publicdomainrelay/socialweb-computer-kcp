@@ -108,6 +108,64 @@ func validateOptionalServiceRef(value string) error {
 	return ValidServiceRef(value)
 }
 
+func validateIngressRef(ref *StrongRef) error {
+	if ref == nil {
+		return nil
+	}
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	if NSIDFromURI(ref.URI) != IngressWebRTCNSID {
+		return fmt.Errorf("%w: ingress ref %q is not %s", ErrInvalidRecord, ref.URI, IngressWebRTCNSID)
+	}
+	return nil
+}
+
+func validateIngressList(refs []StrongRef) error {
+	for i := range refs {
+		if err := validateIngressRef(&refs[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *IngressWebRTC) Validate() error {
+	if r == nil {
+		return fmt.Errorf("%w: the ingress webRTC record is empty", ErrInvalidRecord)
+	}
+	if r.Kind != "webrtc" {
+		return fmt.Errorf("%w: ingress kind %q", ErrInvalidRecord, r.Kind)
+	}
+	switch r.Mode {
+	case IngressModeListen:
+		if r.Peer != "" || r.Session != "" || r.Sdp != "" || r.Descriptor != nil {
+			return fmt.Errorf("%w: a listen ingress names no peer, session, sdp or descriptor", ErrInvalidRecord)
+		}
+	case IngressModeOffer, IngressModeAnswer:
+		if r.Peer == "" || r.Session == "" || r.Sdp == "" {
+			return fmt.Errorf("%w: an ingress %s needs peer, session and sdp", ErrInvalidRecord, r.Mode)
+		}
+	default:
+		return fmt.Errorf("%w: ingress mode %q", ErrInvalidRecord, r.Mode)
+	}
+	if r.ID == "" {
+		return fmt.Errorf("%w: ingress id is empty", ErrInvalidRecord)
+	}
+	if err := validateOptionalDatetime(r.CreatedAt, "createdAt"); err != nil {
+		return err
+	}
+	for _, raw := range r.StunUrls {
+		if strings.TrimSpace(raw) == "" {
+			return fmt.Errorf("%w: ingress stunUrls has an empty entry", ErrInvalidRecord)
+		}
+	}
+	if err := validateIngressRef(r.Descriptor); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateAttestationCID(value, what string) error {
 	if value == "" || !IsAttestationCIDString(value) {
 		return fmt.Errorf("%w: %s cid is not an attestation cid", ErrInvalidRecord, what)
@@ -160,6 +218,9 @@ func (r *RFP) Validate() error {
 	if err := validateOptionalServiceRef(r.SubmitBid); err != nil {
 		return err
 	}
+	if err := validateIngressList(r.Ingress); err != nil {
+		return err
+	}
 	if err := validateOptionalDatetime(r.CreatedAt, "createdAt"); err != nil {
 		return err
 	}
@@ -179,6 +240,9 @@ func (r *Bid) Validate() error {
 	if err := validateOptionalServiceRef(r.SubmitAccept); err != nil {
 		return err
 	}
+	if err := validateIngressList(r.Ingress); err != nil {
+		return err
+	}
 	if err := validateOptionalDatetime(r.CreatedAt, "createdAt"); err != nil {
 		return err
 	}
@@ -196,6 +260,9 @@ func (r *Accept) Validate() error {
 		return err
 	}
 	if err := validateOptionalServiceRef(r.SubmitEvent); err != nil {
+		return err
+	}
+	if err := validateIngressList(r.Ingress); err != nil {
 		return err
 	}
 	if err := validateOptionalDatetime(r.CreatedAt, "createdAt"); err != nil {
@@ -222,6 +289,9 @@ func (r *Receipt) Validate() error {
 		return err
 	}
 	if err := validateOptionalServiceRef(r.SubmitEvent); err != nil {
+		return err
+	}
+	if err := validateIngressList(r.Ingress); err != nil {
 		return err
 	}
 	if err := validateAttestationCID(r.CID, "receipt"); err != nil {
@@ -252,6 +322,9 @@ func (r *Offering) Validate() error {
 		return err
 	}
 	if err := validateAppliesTo(r.AppliesTo); err != nil {
+		return err
+	}
+	if err := validateIngressList(r.Ingress); err != nil {
 		return err
 	}
 	if r.CreatedAt == "" {
@@ -361,6 +434,21 @@ func optionalStrongRef(ref *RecordRef) (*StrongRef, error) {
 	return &out, nil
 }
 
+func optionalStrongRefs(refs []RecordRef) ([]StrongRef, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	out := make([]StrongRef, 0, len(refs))
+	for _, ref := range refs {
+		value, err := strongRef(ref)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
 func isoOrNow(value string) string {
 	if value == "" {
 		return NowISO()
@@ -382,6 +470,7 @@ func createSigned(ctx context.Context, w RecordWriter, repo, rkey string, record
 type RFPOptions struct {
 	Payload   RecordRef
 	SubmitBid string
+	Ingress   []RecordRef
 	Domain    string
 	Policies  []RecordRef
 	CreatedAt string
@@ -395,7 +484,11 @@ func BuildRFP(opts RFPOptions) (RFP, error) {
 	if err := validateOptionalServiceRef(opts.SubmitBid); err != nil {
 		return RFP{}, err
 	}
-	out := RFP{Payload: payload, Domain: opts.Domain, SubmitBid: opts.SubmitBid, CreatedAt: isoOrNow(opts.CreatedAt)}
+	ingress, err := optionalStrongRefs(opts.Ingress)
+	if err != nil {
+		return RFP{}, err
+	}
+	out := RFP{Payload: payload, Domain: opts.Domain, SubmitBid: opts.SubmitBid, Ingress: ingress, CreatedAt: isoOrNow(opts.CreatedAt)}
 	for _, p := range opts.Policies {
 		ref, err := strongRef(p)
 		if err != nil {
@@ -423,6 +516,7 @@ type BidOptions struct {
 	Config       *RecordRef
 	Payload      RecordRef
 	SubmitAccept string
+	Ingress      []RecordRef
 	CreatedAt    string
 }
 
@@ -439,10 +533,14 @@ func BuildBid(opts BidOptions) (Bid, error) {
 	if err != nil {
 		return Bid{}, err
 	}
+	ingress, err := optionalStrongRefs(opts.Ingress)
+	if err != nil {
+		return Bid{}, err
+	}
 	if err := validateOptionalServiceRef(opts.SubmitAccept); err != nil {
 		return Bid{}, err
 	}
-	return Bid{RFP: rfp, Config: config, Payload: payload, SubmitAccept: opts.SubmitAccept, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
+	return Bid{RFP: rfp, Config: config, Payload: payload, SubmitAccept: opts.SubmitAccept, Ingress: ingress, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
 }
 
 func BidRKey(bidderDID, rfpURI, rfpCID string) string {
@@ -463,6 +561,7 @@ type AcceptOptions struct {
 	Bid         RecordRef
 	Payload     *RecordRef
 	SubmitEvent string
+	Ingress     []RecordRef
 	CreatedAt   string
 }
 
@@ -479,10 +578,14 @@ func BuildAccept(opts AcceptOptions) (Accept, error) {
 	if err != nil {
 		return Accept{}, err
 	}
+	ingress, err := optionalStrongRefs(opts.Ingress)
+	if err != nil {
+		return Accept{}, err
+	}
 	if err := validateOptionalServiceRef(opts.SubmitEvent); err != nil {
 		return Accept{}, err
 	}
-	return Accept{RFP: rfp, Bid: bid, Payload: payload, SubmitEvent: opts.SubmitEvent, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
+	return Accept{RFP: rfp, Bid: bid, Payload: payload, SubmitEvent: opts.SubmitEvent, Ingress: ingress, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
 }
 
 func CreateAcceptAt(ctx context.Context, w RecordWriter, repo, rkey string, opts AcceptOptions, signer *Signer) (SignedRecord, error) {
@@ -499,6 +602,7 @@ type ReceiptRefs struct {
 	Accept      RecordRef
 	Payload     *RecordRef
 	SubmitEvent string
+	Ingress     []RecordRef
 }
 
 func BuildReceipt(refs ReceiptRefs, createdAt string) (Receipt, error) {
@@ -518,10 +622,14 @@ func BuildReceipt(refs ReceiptRefs, createdAt string) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
+	ingress, err := optionalStrongRefs(refs.Ingress)
+	if err != nil {
+		return Receipt{}, err
+	}
 	if err := validateOptionalServiceRef(refs.SubmitEvent); err != nil {
 		return Receipt{}, err
 	}
-	out := Receipt{RFP: rfp, Bid: bid, Accept: accept, Payload: payload, SubmitEvent: refs.SubmitEvent, CreatedAt: isoOrNow(createdAt)}
+	out := Receipt{RFP: rfp, Bid: bid, Accept: accept, Payload: payload, SubmitEvent: refs.SubmitEvent, Ingress: ingress, CreatedAt: isoOrNow(createdAt)}
 	if payload == nil {
 		out.Extra = map[string]json.RawMessage{"payload": json.RawMessage("null")}
 	}
@@ -566,7 +674,7 @@ func PutEvent(ctx context.Context, w RecordWriter, repo, rkey string, opts Event
 	return SignedRecord{URI: ref.URI, CID: ref.CID, Record: signed}, nil
 }
 
-func BuildOffering(endpointURL string, appliesTo []string, createdAt, refreshedAt string) (Offering, error) {
+func BuildOffering(endpointURL string, appliesTo []string, ingress []RecordRef, createdAt, refreshedAt string) (Offering, error) {
 	endpointURL = strings.TrimSpace(endpointURL)
 	if err := validateOptionalServiceRef(endpointURL); err != nil {
 		return Offering{}, err
@@ -574,7 +682,11 @@ func BuildOffering(endpointURL string, appliesTo []string, createdAt, refreshedA
 	if err := validateAppliesTo(appliesTo); err != nil {
 		return Offering{}, err
 	}
-	return Offering{EndpointURL: endpointURL, AppliesTo: appliesTo, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
+	records, err := optionalStrongRefs(ingress)
+	if err != nil {
+		return Offering{}, err
+	}
+	return Offering{EndpointURL: endpointURL, AppliesTo: appliesTo, Ingress: records, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
 }
 
 func BuildHeartbeat(offeringURI, createdAt string) (Heartbeat, error) {

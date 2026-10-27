@@ -12,7 +12,8 @@
           "required": ["rfpUri", "rfpCid"],
           "properties": {
             "rfpUri": { "type": "string", "format": "at-uri", "description": "The market.rfp record." },
-            "rfpCid": { "type": "string", "format": "cid" }
+            "rfpCid": { "type": "string", "format": "cid" },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The com.publicdomainrelay.temp.ingress.webRTC offer records for this bidder. The bidder answers them in the reply with its own answer and listen records." }
           }
         }
       },
@@ -24,7 +25,8 @@
           "properties": {
             "ok": { "type": "boolean" },
             "name": { "type": "string", "description": "The bid intent the bidder recorded." },
-            "phase": { "type": "string", "description": "The phase of the bid intent." }
+            "phase": { "type": "string", "description": "The phase of the bid intent." },
+            "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC answer and listen records for the request's offers, carrying the SDP and the bidder's STUN servers." }
           }
         }
       },

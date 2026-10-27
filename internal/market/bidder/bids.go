@@ -110,7 +110,7 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 			return earliest(wait, BidSubmitRetry)
 		}
 		status := cloneBidStatus(bid.Status)
-		setSubmitEndpoint(&status, bid.Generation, rfp)
+		b.setSubmitEndpoint(&status, bid.Generation, rfp, market.ATURIAuthority(bid.Spec.Rfp.URI))
 		b.applyBidStatus(ctx, bid, status)
 		if bid.Status.Submit == nil {
 			return wait
@@ -178,11 +178,11 @@ func (b *Bidder) sendBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 	return earliest(wait, submitBackoff(&next, at))
 }
 
-func setSubmitEndpoint(status *v1alpha1.BidStatus, generation int64, rfp *market.RFP) {
+func (b *Bidder) setSubmitEndpoint(status *v1alpha1.BidStatus, generation int64, rfp *market.RFP, requesterDID string) {
 	if status.Submit != nil || rfp == nil {
 		return
 	}
-	endpoint := strings.TrimSpace(rfp.SubmitBid)
+	endpoint := b.submitEndpoint(rfp, requesterDID)
 	status.Submit = &v1alpha1.BidSubmit{Endpoint: endpoint}
 	if endpoint == "" {
 		return
@@ -372,7 +372,7 @@ func (b *Bidder) recordPublishFailure(ctx context.Context, bid *v1alpha1.Bid, er
 
 func (b *Bidder) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref market.StrongRef, rfp *market.RFP, now time.Time) bool {
 	status := cloneBidStatus(bid.Status)
-	setSubmitEndpoint(&status, bid.Generation, rfp)
+	b.setSubmitEndpoint(&status, bid.Generation, rfp, market.ATURIAuthority(bid.Spec.Rfp.URI))
 	if status.Phase == v1alpha1.BidPhasePublished && status.Bid != nil && status.Bid.URI == ref.URI && status.Bid.CID == ref.CID && status.LastError == "" {
 		return b.applyBidStatus(ctx, bid, status)
 	}
@@ -419,6 +419,7 @@ func (b *Bidder) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now time
 		Config:       &market.RecordRef{URI: configRef.URI, CID: configRef.CID},
 		Payload:      market.RecordRef{URI: payload.URI, CID: payload.CID},
 		SubmitAccept: b.cfg.EndpointURL,
+		Ingress:      b.ingressRecords(ctx),
 		CreatedAt:    now.Format(time.RFC3339),
 	})
 	if err != nil {

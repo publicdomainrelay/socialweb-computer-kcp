@@ -278,6 +278,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
 		Comms:                o.Spec.Comms,
+		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
 		SuspendParticipation: o.Spec.Suspend,
 	}

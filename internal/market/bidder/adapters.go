@@ -245,6 +245,9 @@ func (b *Bidder) applyEvent(ctx context.Context, request participant.OutboxReque
 	}
 	if target := payload.submitTarget(request); target != "" {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
+		if refs := b.IngressRecords(ctx); len(refs) > 0 {
+			body["ingress"] = refs
+		}
 		postCtx, cancel := context.WithTimeout(ctx, EventSubmitTimeout)
 		err := b.outbound.Post(postCtx, target, market.SubmitEventNSID, body)
 		cancel()
@@ -635,7 +638,7 @@ func (b *Bidder) acceptContract(ctx context.Context, request participant.OutboxR
 	}
 	out.bidConfig = market.StrongRef{URI: parsedBid.Config.URI, CID: parsedBid.Config.CID}
 	out.bidConfigValue = configResolved.Value
-	out.submitEventURL = b.submitEventURL(ctx, accept.SubmitEvent)
+	out.submitEventURL = b.eventEndpoint(ctx, payload.RequesterDID, accept.SubmitEvent)
 	if strings.TrimSpace(accept.SubmitEvent) != "" && out.submitEventURL == "" {
 		b.log.Warn("the accept's submitEvent does not resolve; the firehose carries the event", "accept", payload.Accept.URI, "submitEvent", accept.SubmitEvent)
 	}
@@ -649,6 +652,7 @@ func (b *Bidder) acceptContract(ctx context.Context, request participant.OutboxR
 		Accept:      market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID},
 		Payload:     &market.RecordRef{URI: out.rfp.Payload.URI, CID: out.rfp.Payload.CID},
 		SubmitEvent: receiptSubmitEvent,
+		Ingress:     b.ingressRecords(ctx),
 	}, acceptResolved, payload.RequesterDID)
 	if err != nil {
 		return out, nil, fmt.Errorf("bidder: writing the receipt: %w", err)
@@ -796,7 +800,7 @@ func (b *Bidder) applyRelease(ctx context.Context, request participant.OutboxReq
 	observedAt := b.stamp()
 	info := contractInfo{receiptURI: payload.ReceiptURI, receiptCID: resolved.CID,
 		acceptURI: receipt.Accept.URI, acceptCID: receipt.Accept.CID, acceptAuthor: payload.RequesterDID,
-		submitEventURL: b.submitEventURL(ctx, receipt.SubmitEvent)}
+		submitEventURL: b.eventEndpoint(ctx, payload.RequesterDID, receipt.SubmitEvent)}
 	vm := b.vmForAccept(receipt.Accept.URI, receipt.Accept.CID)
 	if vm == nil {
 		bid := b.bidForAcceptStatus(receipt.Accept.URI, receipt.Accept.CID)

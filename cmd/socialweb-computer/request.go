@@ -137,7 +137,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	var nv v1alpha1.MarketNetworkValue
 	nvSet := false
 	for _, p := range parsed {
-		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs"
+		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
 		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
@@ -172,6 +172,15 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 		case p.To == "spec.bidderDids":
 			r.root.BidderDids = append(r.root.BidderDids, splitList(p.Value)...)
+		case strings.HasPrefix(p.To, "spec.requesterIngress"):
+			var applied bool
+			var err error
+			if r.root.RequesterIngress, applied, err = applyIngressOption(r.root.RequesterIngress, p.Name, p.Value); err != nil {
+				return err
+			}
+			if !applied {
+				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
+			}
 		case strings.HasPrefix(p.To, "spec.ingress"):
 			var applied bool
 			var err error
@@ -388,7 +397,8 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		}
 		if fresh {
 			app := v1alpha1.NetworkApp{Name: r.inv.Name, Kind: v1alpha1.ApplicationKindMarketRequester,
-				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions, SecretsFallback: r.root.SecretsFallback}
+				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions, SecretsFallback: r.root.SecretsFallback,
+				RequesterIngress: r.root.RequesterIngress}
 			if r.root.Comms != nil {
 				app.Components = v1alpha1.ComponentOverrides{compose.ComponentKindRequester: {Comms: r.root.Comms}}
 			}

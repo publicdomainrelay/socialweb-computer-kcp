@@ -214,7 +214,7 @@ func trimmedUnique(in []string) []string {
 }
 
 type IngressConfig struct {
-	Provider string `json:"provider,omitempty"`
+	Provider string `json:"provider,omitempty" apigen:"enum=webrtc|xrpc-subscription|opentunnel|iroh"`
 
 	IngressRef *commonv1.ObjectRef `json:"ingressRef,omitempty"`
 
@@ -223,6 +223,35 @@ type IngressConfig struct {
 	Xrpc *IngressXrpcConfig `json:"xrpc,omitempty"`
 
 	OpenTunnel *IngressProxyOpenTunnel `json:"opentunnel,omitempty"`
+
+	WebRTC *IngressWebRTCConfig `json:"webrtc,omitempty"`
+}
+
+type IngressWebRTCConfig struct {
+	STUNURLs []string `json:"stunUrls,omitempty" apigen:"userEndpoint"`
+
+	SessionTTLSeconds *int32 `json:"sessionTtlSeconds,omitempty" apigen:"default=600,minimum=1"`
+
+	MaxSessions *int32 `json:"maxSessions,omitempty" apigen:"default=64,minimum=1"`
+}
+
+func (c *IngressConfig) ProviderName() string {
+	if c == nil {
+		return ""
+	}
+	if provider := strings.ToLower(strings.TrimSpace(c.Provider)); provider != "" {
+		return provider
+	}
+	if c.WebRTC != nil {
+		return IngressProviderWebRTC
+	}
+	if c.OpenTunnel != nil {
+		return IngressProviderOpenTunnel
+	}
+	if c.Xrpc != nil && strings.TrimSpace(c.Xrpc.IngressProxyHost) != "" {
+		return IngressProviderXRPCSubscription
+	}
+	return ""
 }
 
 type IngressXrpcConfig struct {
@@ -654,6 +683,8 @@ type MarketRequesterSpec struct {
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
+	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
+
 	BidderDids []string `json:"bidderDids,omitempty"`
 
 	Options []ApplicationOption `json:"options,omitempty"`
@@ -690,6 +721,8 @@ type GatewaySpec struct {
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
+
+	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
 
@@ -751,6 +784,8 @@ type SshGatewaySpec struct {
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
+
+	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
 
@@ -818,6 +853,8 @@ type NetworkApp struct {
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
 	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
+
+	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
 
 	Components ComponentOverrides `json:"components,omitempty"`
 

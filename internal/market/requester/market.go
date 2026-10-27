@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
@@ -79,6 +80,8 @@ type AcceptReply struct {
 	CID string
 
 	SubmitEvent string
+
+	Ingress []market.StrongRef
 
 	Status int
 
@@ -231,6 +234,12 @@ type HTTPMarket struct {
 	OperatorDID string
 
 	DenyBidderDIDs []string
+
+	Ingress tunnel.Service
+
+	IngressRef func(ctx context.Context) *market.RecordRef
+
+	IngressSTUN []string
 
 	HTTPClient *http.Client
 
@@ -487,10 +496,25 @@ func (m *HTTPMarket) postWithClient(ctx context.Context, client *http.Client, en
 }
 
 func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFPRequest) ([]BidRecord, error) {
-	status, body, err := m.post(ctx, bidder.Endpoint, market.SubmitRFPNSID, bidder.Audience, map[string]any{
+	body := map[string]any{
 		"rfpUri": rfp.URI,
 		"rfpCid": rfp.CID,
-	}, m.Timeout)
+	}
+	var offer tunnel.Offer
+	offered := false
+	if m.Ingress != nil {
+		current, err := m.Ingress.Offer(ctx, m.RepoDID, bidder.DID)
+		if err != nil {
+			m.log().Warn("requester_webrtc_offer_failed", "bidder", bidder.DID, "err", err.Error())
+		} else if ref, err := m.createIngressOffer(ctx, current, bidder.DID); err != nil {
+			m.log().Warn("requester_webrtc_offer_record_failed", "bidder", bidder.DID, "err", err.Error())
+		} else {
+			body["ingress"] = []map[string]any{ref.Map()}
+			offer = current
+			offered = true
+		}
+	}
+	status, reply, err := m.post(ctx, bidder.Endpoint, market.SubmitRFPNSID, bidder.Audience, body, m.Timeout)
 	if errors.Is(err, xrpc.ErrTooLarge) {
 		return nil, err
 	}
@@ -498,15 +522,15 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 		return nil, fmt.Errorf("%w: %w", ErrBidderUnreachable, err)
 	}
 	if status < 200 || status > 299 {
-		detail := stringOf(body["error"])
-		if message := stringOf(body["message"]); message != "" {
+		detail := stringOf(reply["error"])
+		if message := stringOf(reply["message"]); message != "" {
 			detail = strings.TrimSpace(detail + ": " + message)
 		}
 		err := fmt.Errorf("requester: submitRfp to %s answered HTTP %d", bidder.Endpoint, status)
 		if detail != "" {
 			err = fmt.Errorf("requester: submitRfp to %s answered HTTP %d: %s", bidder.Endpoint, status, detail)
 		}
-		if stringOf(body["error"]) == bidderSuspendedError {
+		if stringOf(reply["error"]) == bidderSuspendedError {
 			return nil, err
 		}
 		if status == http.StatusNotFound || status == http.StatusTooManyRequests || status >= 500 {
@@ -514,7 +538,120 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 		}
 		return nil, err
 	}
-	return bidsFromReply(bidder.DID, body), nil
+	if offered {
+		m.acceptIngress(ctx, bidder.DID, offer, reply)
+	}
+	return bidsFromReply(bidder.DID, reply), nil
+}
+
+func (m *HTTPMarket) ingressList(ctx context.Context) []market.StrongRef {
+	if m.IngressRef == nil {
+		return nil
+	}
+	ref := m.IngressRef(ctx)
+	if ref == nil || ref.URI == "" {
+		return nil
+	}
+	return []market.StrongRef{market.NewStrongRef(ref.URI, ref.CID)}
+}
+
+func (m *HTTPMarket) createIngressOffer(ctx context.Context, offer tunnel.Offer, bidderDID string) (market.StrongRef, error) {
+	if m.Reader == nil {
+		return market.StrongRef{}, errors.New("requester: no record store for the ingress offer")
+	}
+	var descriptor *market.StrongRef
+	if m.IngressRef != nil {
+		if ref := m.IngressRef(ctx); ref != nil && ref.URI != "" {
+			strong := market.NewStrongRef(ref.URI, ref.CID)
+			descriptor = &strong
+		}
+	}
+	value, err := market.EncodeRecord(market.IngressWebRTC{
+		Kind:       tunnel.KindWebRTC,
+		Mode:       market.IngressModeOffer,
+		ID:         offer.ID,
+		Peer:       bidderDID,
+		Session:    offer.Session,
+		Sdp:        offer.SDP,
+		Descriptor: descriptor,
+		StunUrls:   m.IngressSTUN,
+		CreatedAt:  market.NowISO(),
+	})
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	return m.Reader.CreateRecord(ctx, m.RepoDID, market.IngressWebRTCNSID, value)
+}
+
+func (m *HTTPMarket) acceptIngress(ctx context.Context, bidderDID string, offer tunnel.Offer, body map[string]any) {
+	if m.Ingress == nil || m.Reader == nil || body == nil {
+		return
+	}
+	raw, ok := body["ingress"]
+	if !ok {
+		return
+	}
+	refs, err := ingressRefsOf(raw)
+	if err != nil {
+		m.log().Warn("requester_webrtc_answer_invalid", "bidder", bidderDID, "err", err.Error())
+		return
+	}
+	for _, ref := range refs {
+		if market.ATURIAuthority(ref.URI) != bidderDID || market.NSIDFromURI(ref.URI) != market.IngressWebRTCNSID {
+			continue
+		}
+		resolved, err := m.Reader.Resolve(ctx, market.RecordRef{URI: ref.URI, CID: ref.CID})
+		if err != nil {
+			m.log().Warn("requester_webrtc_answer_unresolved", "bidder", bidderDID, "answer", ref.URI, "err", err.Error())
+			continue
+		}
+		record, err := market.ParseIngressWebRTC(resolved.Value)
+		if err != nil {
+			m.log().Warn("requester_webrtc_answer_invalid", "bidder", bidderDID, "err", err.Error())
+			continue
+		}
+		if err := record.Validate(); err != nil {
+			m.log().Warn("requester_webrtc_answer_invalid", "bidder", bidderDID, "err", err.Error())
+			continue
+		}
+		if record.Mode != market.IngressModeAnswer {
+			continue
+		}
+		if record.ID != offer.ID || record.Session != offer.Session || record.Peer != m.RepoDID {
+			m.log().Warn("requester_webrtc_answer_mismatch", "bidder", bidderDID, "answer", ref.URI)
+			continue
+		}
+		answer := tunnel.Answer{Kind: tunnel.KindWebRTC, ID: record.ID, Session: record.Session, Peer: bidderDID, Type: tunnel.SignalAnswer, SDP: record.Sdp}
+		if err := m.Ingress.Accept(ctx, answer); err != nil {
+			m.log().Warn("requester_webrtc_accept_failed", "bidder", bidderDID, "err", err.Error())
+			continue
+		}
+		m.log().Info("requester_webrtc_connected", "bidder", bidderDID, "id", answer.ID, "session", answer.Session)
+		return
+	}
+	m.log().Warn("requester_webrtc_answer_missing", "bidder", bidderDID, "session", offer.Session)
+}
+
+func ingressRefsOf(raw any) ([]market.StrongRef, error) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var refs []market.StrongRef
+	if err := json.Unmarshal(encoded, &refs); err != nil {
+		return nil, err
+	}
+	out := make([]market.StrongRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.URI == "" || ref.CID == "" {
+			continue
+		}
+		out = append(out, ref)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("the ingress list names no record")
+	}
+	return out, nil
 }
 
 func bidsFromReply(did string, body map[string]any) []BidRecord {
@@ -561,10 +698,14 @@ func bidRecordOf(did string, value map[string]any) *BidRecord {
 func (m *HTTPMarket) SubmitAccept(ctx context.Context, bidder Bidder, acceptURI, acceptCID string) (*AcceptReply, error) {
 	client := *m.client()
 	client.Timeout = 0
-	status, body, err := m.postWithClient(ctx, &client, bidder.Endpoint, market.SubmitAcceptNSID, bidder.Audience, map[string]any{
+	request := map[string]any{
 		"acceptUri": acceptURI,
 		"acceptCid": acceptCID,
-	}, submitAcceptProvisionTimeout)
+	}
+	if refs := m.ingressList(ctx); len(refs) > 0 {
+		request["ingress"] = refs
+	}
+	status, body, err := m.postWithClient(ctx, &client, bidder.Endpoint, market.SubmitAcceptNSID, bidder.Audience, request, submitAcceptProvisionTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -573,16 +714,23 @@ func (m *HTTPMarket) SubmitAccept(ctx context.Context, bidder Bidder, acceptURI,
 		reply.URI, _ = body["uri"].(string)
 		reply.CID, _ = body["cid"].(string)
 		reply.SubmitEvent, _ = body["submitEvent"].(string)
+		if raw, ok := body["ingress"]; ok {
+			reply.Ingress, _ = ingressRefsOf(raw)
+		}
 	}
 	return reply, nil
 }
 
 func (m *HTTPMarket) SubmitEvent(ctx context.Context, bidder Bidder, event SubmitEventRequest) (int, error) {
-	status, body, err := m.post(ctx, bidder.Endpoint, market.SubmitEventNSID, bidder.Audience, map[string]any{
+	request := map[string]any{
 		"uri":    event.URI,
 		"cid":    event.CID,
 		"record": event.Record,
-	}, m.Timeout)
+	}
+	if refs := m.ingressList(ctx); len(refs) > 0 {
+		request["ingress"] = refs
+	}
+	status, body, err := m.post(ctx, bidder.Endpoint, market.SubmitEventNSID, bidder.Audience, request, m.Timeout)
 	if err == nil && (status < 200 || status > 299) {
 		err = &participant.CallError{Status: status, Err: &xrpc.Error{Status: status, Name: stringOf(body["error"]), Message: stringOf(body["message"])}}
 	}

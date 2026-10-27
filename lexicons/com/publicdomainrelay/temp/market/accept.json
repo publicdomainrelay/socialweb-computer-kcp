@@ -14,6 +14,7 @@
           "bid": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The accepted market.bid." },
           "payload": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The accept terms: a market.accepts.free or market.accepts.x402 record." },
           "submitEvent": { "type": "string", "description": "Where the bidder submits events: a DID service ref (did#serviceId) or an HTTP URL." },
+          "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The requester's com.publicdomainrelay.temp.ingress.webRTC listen records for the events of this contract." },
           "createdAt": { "type": "string", "format": "datetime" },
           "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
         }

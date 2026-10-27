@@ -371,6 +371,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		rfpOptions := market.RFPOptions{
 			Payload:   market.RecordRef{URI: state.Payload.URI, CID: state.Payload.CID},
 			SubmitBid: q.submitBidRef(),
+			Ingress:   q.ingressRecords(ctx),
 			Domain:    "compute",
 			CreatedAt: q.nowISO(),
 		}
@@ -516,6 +517,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
 			SubmitEvent: q.submitEventRef(),
+			Ingress:     q.ingressRecords(ctx),
 			CreatedAt:   q.nowISO(),
 		}, q.signer)
 		if err != nil {

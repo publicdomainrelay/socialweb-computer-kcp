@@ -472,6 +472,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		BidderDIDs:           slices.Clone(o.Spec.BidderDids),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
 		Comms:                o.Spec.Comms,
+		Ingress:              o.Spec.RequesterIngress,
 		SuspendParticipation: o.Spec.Suspend,
 	}
 	if plan.Local {

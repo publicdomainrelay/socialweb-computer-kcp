@@ -11,6 +11,7 @@
         "required": ["appliesTo", "createdAt"],
         "properties": {
           "endpointUrl": { "type": "string", "description": "Where requesters submit RFPs: a DID service ref (did#serviceId) or an HTTP URL." },
+          "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC listen records, including the STUN servers it gathers with." },
           "appliesTo": {
             "type": "array",
             "description": "The payload collections the bidder bids on.",

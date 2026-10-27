@@ -274,6 +274,10 @@ func PdsAppIngress(spec *v1alpha1.IngressConfig, network *v1alpha1.MarketNetwork
 		return true, nil, nil, pdsIngressErr(PdsIngressReasonProviderUnsupported,
 			"the Pds cannot use ingress provider %s until a later plan", v1alpha1.IngressProviderIroh)
 	}
+	if IngressProviderFor(cfg) == v1alpha1.IngressProviderWebRTC {
+		return true, nil, nil, pdsIngressErr(PdsIngressReasonProviderUnsupported,
+			"the Pds cannot use ingress provider %s", v1alpha1.IngressProviderWebRTC)
+	}
 	if IngressProviderFor(cfg) == "" {
 		if cfg != nil || production {
 			return true, nil, nil, pdsIngressErr(PdsIngressReasonProviderMissing,

@@ -43,17 +43,20 @@ Options:
 | `--build-root DIR` | Checkouts, caches and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
 | `--update-pins` | Rebuild owned assets and write new pins to `internal/versions/versions.json`. `make` passes it. |
 
-TypeScript-only change in a running market network:
+A code change in a running market network. Every component runs in the core process, so a component
+change needs a new core binary; `--sync-only` only re-mirrors the tree and does not build one:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
-scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc --sync-only
+scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
 sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) \
-  /var/tmp/swc/bin/socialweb-computer dev restart mn1 relay:relay
+  /var/tmp/swc/bin/socialweb-computer dev restart mn1 core --binary /var/tmp/swc/bin/socialweb-computer
 ```
 
-Usage: `dev restart [<instance>] [<app>/][<workspace>:][<kind>/]<component>`; replace `mn1`
-and the component with yours.
+`dev restart [<instance>] [<app>/]core` replaces the core of an instance, or of a market network
+child application with `<app>/`; replace `mn1` with yours. `dev restart <instance>
+[<app>/][<workspace>:][<kind>/]<component>` restarts one component through its kcp object without
+a new binary.
 
 ## Release build
 
@@ -208,7 +211,7 @@ sudo "$B" install bidder --handle <handle>
 A fresh install creates a new DID. Association is one `badgeBlueKeys` record in the operator's repo
 with `challenge` the operator DID and `keyId` the bidder DID, service `bidder_associate`. The
 `AtprotoRecordWatch/association` of the application reads it and the identity controller writes the
-operator DID into `MarketIdentity.spec.approvedAssociations`; no manual patch is needed. The helper
+operator DID into `MarketIdentity.status.associations`; no manual patch is needed. The helper
 reads the handle and password from a mode-0600 credentials file and prints neither.
 
 ```bash
@@ -413,6 +416,7 @@ Environment variables:
 | `KCP_ORIGIN` | kcp host. | `kcp.<DOMAIN>` |
 | `GATEWAY_ENV_FILE` | Shipped as `$STATE_DIR/gateway.env`. | |
 | `GATEWAY_SPEC_FILE` | Shipped as `/var/lib/socialweb-computer/gateway-spec-$ACCOUNT.yaml`. | |
+| `ALLOW_DEV_BINARY` | Pass `--allow-dev-binary` to `install gateway` and `upgrade`. | off |
 
 Caddy certificate handoff (inside `scripts/deploy.sh`, after the gateway answers):
 
@@ -432,10 +436,10 @@ sudo systemctl status caddy --no-pager
 sudo ls -l /etc/caddy/socialweb-computer
 ```
 
-`k8s.<domain>` proxies to the web app front on `127.0.0.1:8788`. `kcp.<domain>` proxies to kcp
+`k8s.<domain>` proxies to the gateway API front on `127.0.0.1:8788`. `kcp.<domain>` proxies to kcp
 `6443` without a client certificate and to the certificate front `8444` with one.
 
-After a fresh deploy the requester has no web app session, so cluster claims log
+After a fresh deploy the requester has no gateway session, so cluster claims log
 `no oauth session stored`. Sign in with `scripts/oauth-signin.ts --creds <file> --account ALICE
 --url https://k8s.socialweb.computer/ --start-api`.
 
@@ -523,12 +527,21 @@ whose host does not resolve.
 
 ### Market transport modes
 
-`spec.comms.mode` is `XRPC` (default), `Firehose` or `Both`. PDS writes happen in every mode.
+`spec.comms.mode` is `XRPC`, `Firehose` or `Both`; the requester defaults to `Both` and a bidder to
+`XRPC`. PDS writes happen in every mode.
 
 An external relay or firehose is an `EventSource` over a `RelayEventSource` (or a
-`JetstreamEventSource`) whose `spec.url` is the endpoint; the root's `spec.comms.eventSourceRefs` names
-the EventSources. The root adds the network relay (from the network value's relay host) and, for an
-OAuth identity with no other source, the bsky JetStream source it composes itself.
+`JetstreamEventSource`) whose `spec.url` is the endpoint; the root's `spec.comms.eventSourceRefs`
+names those EventSources.
+
+In `Firehose` and `Both` the requester composes the public sources itself. `spec.comms.relayUrls`
+defaults to our relay `https://relay.mini-cloud-0002.chadig.com` (a market network's relay replaces
+it), and `spec.comms.jetstreamUrls` defaults to the two Jetstream v2 instances,
+`wss://jetstream.us-east.bsky.network` and `wss://jetstream.us-west.bsky.network` at
+`/xrpc/network.bsky.jetstream.subscribeEvents`. An empty list turns that source off. A bidder
+composes no per-bidder stream; while it has live ComputeVMs it composes requester streams from those
+requesters' DIDs, and resumes one from its stored cursor only when the cursor was saved in the last
+10 minutes.
 
 ```bash
 K=$(sudo sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig" | head -1)
@@ -543,19 +556,22 @@ kind: EventSource
 metadata: {name: relay-example}
 spec: {backendRef: {group: events.socialweb.computer, kind: RelayEventSource, name: relay-example}}
 YAML
-# Firehose only: no submit XRPC; events come from the named EventSources
-socialweb-computer run bidder --profile prod-qr --handle <handle> \
+# Firehose only: no submit XRPC; events come from the named EventSource
+socialweb-computer run bidder --host-backend proc --profile prod-qr --handle <handle> \
   -- --comms-mode Firehose --comms-event-source relay-example
-# Both: XRPC first, durable inbox dedupe for the firehose copy
+# Both: XRPC first, then the public sources and the named EventSource
 socialweb-computer run request --name demo \
   -- --comms-mode Both --comms-event-source relay-example
 ```
 
-Firehose and Both need at least one event source; otherwise the root reports `Failed`. The root
-creates one `EventStream` per EventSource with sink handler `market-<role>@<workspace>` and writes
-the ComponentLinks the streams resolve through (`events.subscribe`, `events.deliver`). Incoming records
-become deterministic `StateSync` inboxes keyed by `uri#cid`; duplicate delivery from both transports
-creates one object. Switching back to XRPC deletes the root's market EventStreams.
+A bidder in Firehose or Both needs a source (a named EventSource or the network relay); otherwise
+the root fails closed instead of falling back to XRPC. Every market EventStream of a role delivers to
+one sink, which drops a `uri|cid` it took in the last 15 s and logs
+`market_event_duplicate_dropped`. The `StateSync` inboxes are not the dedup fact: the requester keeps
+only records of its own ComputeContracts and the bidder only RFPs, accepts whose bid is in its repo
+and events whose receipt is in its repo. The requester prunes the inbox of a Released or Failed
+contract 10 minutes after it is Acked; the bidder prunes every Acked inbox after 10 minutes.
+Switching back to XRPC deletes the root's market EventStreams.
 
 
 ### Account modes
@@ -567,6 +583,10 @@ creates one object. Switching back to XRPC deletes the root's market EventStream
 | `oauthBrowser` | Existing account signed in from a browser callback | None |
 | `oauthQr` | Existing account signed in by scanning a QR | None |
 | `oauthDelegated` | Existing account signed in by a delegated flow | None |
+| `oauthSessionProxy` | The gateway's per-account session: `spec.did` and a `spec.sessionRef` to that session in the vault | None |
+
+`run bidder` and `run request` do not set `oauthSessionProxy`; a cluster claim uses it to act as the
+signed-in account.
 
 ```bash
 # Managed, unassociated: patch the root after it exists (or use run request -- --skip-qr)
@@ -575,7 +595,7 @@ sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
   -p '{"spec":{"identity":{"association":"Skip"}}}'
 # Existing account on another PDS (password comes from ATPROTO_PASSWORD)
 export ATPROTO_PASSWORD=...   # never echo it
-socialweb-computer run bidder --profile prod-qr --handle <handle> \
+socialweb-computer run bidder --host-backend proc --profile prod-qr --handle <handle> \
   -- --atproto-identity-mode pdsAccount --atproto-pds-url https://pds.example
 # OAuth browser
 socialweb-computer run request --name demo \
@@ -645,9 +665,10 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 Units, logs and kcp status. The unit account for a bidder is `swc-bidder`, for a gateway `socialweb`.
 
 ```bash
-# units as the account
+# units as the account (the unit itself reads the backend and state from config.json)
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
-  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list
+  /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer units list \
+  --host-backend systemd-user --state-dir /var/lib/socialweb-computer/swc-bidder
 # bidder unit and journal (system journal: swc-bidder is a system account)
 sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) \
   systemctl --user status 'socialweb-computer-bidder@<handle>.service'
@@ -715,8 +736,10 @@ swc run request list --json | jq -r '.[].name'
 swc run request release "$(swc run request list --json | jq -r '.[0].name')"
 ```
 
-`run request` options: `--network`, `--name`, `--secrets`, `--exec`, `--hold`, `--skip-ssh`,
-`--contract-timeout`.
+`run request` options: `--network`, `--name`, `--secrets`, `--tunnel`, `--exec`, `--hold`,
+`--skip-ssh`, `--contract-timeout`, `--transport`, `--tag`; `run request ssh`, `resume` and `proxy`
+also take `--contract` and `--log-level`. `--tunnel` is
+`<tag>:<port>[:<transport>][:shell[=<envFile>]]`, transport `opentunnel` (default) or `webrtc`.
 
 Run a bidder as a child application of the market network:
 

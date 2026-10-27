@@ -641,6 +641,8 @@ type RequesterSpec struct {
 
 	Comms *MarketComms `json:"comms,omitempty"`
 
+	Ingress *IngressConfig `json:"ingress,omitempty"`
+
 	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
@@ -849,6 +851,8 @@ const (
 	IngressProviderIroh = "iroh"
 
 	IngressProviderOpenTunnel = "opentunnel"
+
+	IngressProviderWebRTC = "webrtc"
 )
 
 type IngressProxySpec struct {

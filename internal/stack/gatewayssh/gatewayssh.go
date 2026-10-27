@@ -31,6 +31,7 @@ type SpecInput struct {
 	BidderDids        []string
 	Options           []v1alpha1.ApplicationOption
 	Comms             *v1alpha1.MarketComms
+	RequesterIngress  *v1alpha1.IngressConfig
 	OwnerSessionsFile string
 }
 
@@ -42,7 +43,7 @@ func Spec(in SpecInput) (v1alpha1.SshGatewaySpec, error) {
 		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: the %s profile takes its network value from a market network (--network)", in.Profile)
 	}
 	return v1alpha1.SshGatewaySpec{Profile: in.Profile, Network: in.Network, BidderDids: in.BidderDids, Comms: in.Comms, Options: in.Options,
-		OwnerSessionsFile: in.OwnerSessionsFile}, nil
+		RequesterIngress: in.RequesterIngress, OwnerSessionsFile: in.OwnerSessionsFile}, nil
 }
 
 func InstanceID(name string) string {

@@ -384,6 +384,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
 		Comms:                o.Spec.Comms,
+		Ingress:              o.Spec.RequesterIngress,
 		SuspendParticipation: o.Spec.Suspend,
 	}}
 	sshServer := compose.Desired{Kind: compose.ComponentKindSshServer, Name: SshServerComponent, Spec: v1alpha1.SshServerSpec{

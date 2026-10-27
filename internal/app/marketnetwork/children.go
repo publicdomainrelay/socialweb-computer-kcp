@@ -635,10 +635,11 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Suspend: suspend, Network: &value,
 			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
 			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components,
-			SecretsFallback: app.SecretsFallback}}
+			SecretsFallback: app.SecretsFallback, RequesterIngress: app.RequesterIngress}}
 	case v1alpha1.ApplicationKindSshGateway:
 		root = &v1alpha1.SshGateway{ObjectMeta: meta, Spec: v1alpha1.SshGatewaySpec{Profile: app.Profile, Suspend: suspend, Network: &value,
-			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms, Components: app.Components}}
+			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, OwnerSessionsFile: app.OwnerSessionsFile, Comms: comms, Components: app.Components,
+			RequesterIngress: app.RequesterIngress}}
 	}
 	if root != nil {
 		if err := ctl.applyRoot(ctx, r, rec, app.Kind, root); err != nil {
