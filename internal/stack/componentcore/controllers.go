@@ -354,6 +354,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 		return fmt.Errorf("componentcore: the repo controllers: %w", err)
 	}
 	if err := policyctl.Register(mgr, policyctl.Options{Bus: c.handlers, PLCURL: cfg.PLCBaseURL, HTTP: c.networkClient(networkReadTimeout), Log: log, Disabled: cfg.DisablePolicy,
+		Sandbox: newSandbox(),
 		Actions: func(workspace string) (map[string]policycontroller.ActionHandler, error) {
 			return policyActionHandlers(c.store, workspace)
 		}}); err != nil {

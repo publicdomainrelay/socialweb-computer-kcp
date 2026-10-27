@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -20,7 +21,7 @@ import (
 const defaultGhaLiteTimeout = 30 * time.Second
 
 type GhaLiteOptions struct {
-	DenoPath        string
+	Sandbox         sandbox.Runner
 	ResolveAction   workflow.ActionResolver
 	Timeout         time.Duration
 	MaxConsoleBytes int64
@@ -28,7 +29,7 @@ type GhaLiteOptions struct {
 }
 
 type GhaLite struct {
-	denoPath        string
+	sandbox         sandbox.Runner
 	resolveAction   workflow.ActionResolver
 	timeout         time.Duration
 	maxConsoleBytes int64
@@ -43,7 +44,7 @@ func NewGhaLite(opts GhaLiteOptions) *GhaLite {
 	timeout := opts.Timeout
 	timeout = opt.Positive(timeout, defaultGhaLiteTimeout)
 	return &GhaLite{
-		denoPath:        opts.DenoPath,
+		sandbox:         opts.Sandbox,
 		resolveAction:   resolver,
 		timeout:         timeout,
 		maxConsoleBytes: opts.MaxConsoleBytes,
@@ -134,7 +135,7 @@ func (g *GhaLite) run(ctx context.Context, request *models.Request) (*models.Res
 	}
 	defer cancel()
 	executor := workflow.New(workflow.Options{
-		DenoPath:        g.denoPath,
+		Sandbox:         g.sandbox,
 		ResolveAction:   g.resolveAction,
 		MaxConsoleBytes: g.maxConsoleBytes,
 		MaxOutputBytes:  g.maxOutputBytes,

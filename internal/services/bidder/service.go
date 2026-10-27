@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/webrtc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
@@ -71,6 +72,8 @@ type Deps struct {
 	Egress component.Egress
 
 	OAuthCallbacks *oauthcallback.Registry
+
+	Sandbox sandbox.Runner
 }
 
 type Service struct {

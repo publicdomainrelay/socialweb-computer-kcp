@@ -1066,6 +1066,74 @@ staged binaries are what the live run uses, and the bidder takes them by path.
 Each run keeps its log at `<state>/<name>.log`, so any result is re-read with
 `grep -E "exitCode|vmAddress|releaseStatus" <state>/<name>.log`.
 
+### The Web Worker runner in the browser build
+
+`../wasm` (the kcp-plus-socialweb js/wasm checkout) builds the runner into two places:
+
+- `socialweb-wasm/cmd/sandbox-wasm`: a small module that exposes `sandboxAvailable()`,
+  `sandboxKind()` and `sandboxRun(source, timeoutMs)` (a Promise). Built with
+  `GOOS=js GOARCH=wasm go build -modfile=.go.wasm.mod ./cmd/sandbox-wasm`, its `-replace` pointing at
+  the tree under test.
+- The combined page module (`cmd/kcp-wasm`): `socialwebSandboxAvailable` and the page export
+  `socialwebSandboxRun` (through `socialwebCall`, answered by `__kcpResolve`).
+
+Both are asynchronous by contract. A `sandbox.Runner.Run` call blocks its goroutine until the worker
+answers, and a JavaScript event cannot be delivered while a `syscall/js` callback is on the stack, so
+nothing may call `Run` synchronously from a js callback: the export hands the work to a goroutine and
+answers through a Promise (or `__kcpResolve`). In Go code the rule is the same: call `Run` from a Go
+goroutine, never from inside a `js.FuncOf` callback.
+
+Proven with the `sandbox-wasm` module on 2026-10-27, same Go source, in headless Chrome (CDP
+`Runtime.evaluate` against a page loading `wasm_exec.js` + `sandbox.wasm`) and in Deno (the same two
+files through `WebAssembly.instantiate`): available `true`, kind `webworker`,
+`console.log("hi from worker", 1 + 1)` -> `{"exitCode":0,"stdout":"hi from worker 2"}`,
+a throw -> `{"exitCode":1,...}` with `stdout: "before"` and the stack on stderr, an awaited program ->
+`{"exitCode":0,"stdout":"v+1 42"}`, and a program that outlives its timeout ->
+`{"exitCode":-1,"timedOut":true}`. The combined page module carries the export but was not driven
+through the shell page in this pass: booting `cmd/kcp-wasm` needs the shell's fs shim and worker
+protocol, which the bare test page does not provide.
+
+### Which runtime runs the sandbox
+
+The sandbox is a `sandbox.Runner` (`internal/contract/sandbox`): `Run(Program{Source, Dir, Timeout})`
+returns `{ExitCode, TimedOut, Stdout, Stderr}`, `Available()` says whether the runtime can run one, and
+`Kind()` names it. Two implementations:
+
+| Package | Build | Runs the program as |
+| --- | --- | --- |
+| `internal/sandbox/deno` | `!js` | `deno run --no-remote --no-lock --quiet --allow-read=<dir> --allow-write=<dir> --deny-net --deny-run --deny-ffi --ext ts -`, program on stdin |
+| `internal/sandbox/worker` | `js && wasm` | a Web Worker: the shim in `worker.go` captures `console.*`, runs the program, and posts `{exitCode, stdout, stderr}` back |
+
+The composition layer picks one by build tag: `internal/stack/componentcore/sandbox_deno.go` and
+`sandbox_worker.go` both define `newSandbox()`, so neither the bidder nor the policy engine names a
+runtime. That is what lets a bidder built into the browser (the kcp-plus-socialweb wasm module in the
+`wasm` checkout, which already overlays the js versions of `hostos`, `portscan` and the atproto stores)
+serve `kind: deno` without a `deno` binary: it runs the requester's program as a Web Worker in the page.
+A bidder whose runner is absent or unavailable declines deno RFPs (`Available()`), it does not bid and
+fail. The native runner resolves deno through `internal/policyengine/deno.Resolve`, so a `-tags
+embed_deno` release build uses its embedded deno for both the sandbox and the policy engine.
+
+The policy engine runs its gha-lite jobs through the same runner (`workflow.Options.Sandbox`): each
+`if:`/`${{ }}` expression and each `uses:` action is a `Run` with `Net: true`, a closed environment
+(`NO_COLOR`, `DENO_NO_UPDATE_CHECK` and the step env only) and no filesystem scope, which is the
+permission set the engine had before. Two differences, both deliberate:
+
+- A runner that reports `Fenced() == false` is refused for policy code. The expression then falls back
+  to the pure-Go property-path resolver (no code runs) and an action step fails, so the verdict is
+  Deny. This is why the browser build does not evaluate policy code: a Web Worker is not a security
+  boundary against the page's own origin, and policy workflows are arbitrary counterparty TS. The
+  deno runner reports `Fenced() == true`.
+- A non-zero exit, a timeout and an unavailable runner are all errors, and every error becomes a
+  failed step, `ExitStatus: failure` and `Deny` (`statusToVerdict` allows only `ExitStatus: success`).
+
+The deno runner's own flags follow `Program.Net`: `--allow-net` when the caller asks for network,
+otherwise `--deny-net --no-remote --no-lock` (no network means no remote resolution either), plus
+`--deny-run --deny-ffi` and read/write of `Program.Dir` only when it is set.
+
+Limits of the worker runner: it executes JavaScript, not TypeScript (a browser Worker has no type
+stripping), and it has whatever the page's worker has, so the fence is the Worker's own isolation, not
+`deno`'s permission flags. The deno runner keeps the explicit flags above.
+
 ## Gate and acceptance
 
 ```bash

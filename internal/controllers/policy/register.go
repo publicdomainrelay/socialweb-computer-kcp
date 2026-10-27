@@ -9,6 +9,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policyengine"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policytrigger"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policyworkflow"
@@ -16,7 +17,6 @@ import (
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	pecontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/controller"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/deno"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/registry"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
@@ -32,6 +32,8 @@ type Options struct {
 	HTTP *http.Client
 
 	DefaultRunTTL time.Duration
+
+	Sandbox sandbox.Runner
 
 	Disabled bool
 
@@ -62,7 +64,6 @@ func Register(m *ctlruntime.Manager, opts Options) error {
 			log.Info(message, attributes...)
 		}
 	}
-	denoPath, _ := deno.Resolve("")
 	client := atproto.NewClient()
 	if opts.HTTP != nil {
 		client.HTTP = opts.HTTP
@@ -71,11 +72,11 @@ func Register(m *ctlruntime.Manager, opts Options) error {
 		client.PLCURL = plcURL
 	}
 	host := trust.NewResolver(trust.ResolverOptions{Client: client, Log: logf})
-	policies := registry.GhaLiteOnly(executor.NewGhaLite(executor.GhaLiteOptions{DenoPath: denoPath}))
+	policies := registry.GhaLiteOnly(executor.NewGhaLite(executor.GhaLiteOptions{Sandbox: opts.Sandbox}))
 	records := pecontroller.NewRecordResolver(func(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error) {
 		return host.Resolve(ctx, atproto.StrongRef{URI: ref.URI, CID: ref.CID})
 	}, policies)
-	engines := pecontroller.NewEngineManager(pecontroller.NewDefaultEngineFactory(pecontroller.Config{DenoPath: denoPath, Host: host, Log: logf}))
+	engines := pecontroller.NewEngineManager(pecontroller.NewDefaultEngineFactory(pecontroller.Config{Sandbox: opts.Sandbox, Host: host, Log: logf}))
 	if _, err := policyengine.Register(m, policyengine.Options{Bus: opts.Bus, Engines: engines, Log: log}); err != nil {
 		return err
 	}

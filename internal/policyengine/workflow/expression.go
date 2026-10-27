@@ -1,15 +1,14 @@
 package workflow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 )
 
 var (
@@ -284,11 +283,12 @@ func isPropertyByte(value byte) bool {
 }
 
 func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[string]string) (string, string, error) {
-	if e.opts.DenoPath == "" {
+	if e.opts.Sandbox == nil || !e.opts.Sandbox.Available() {
 		return "", "", fmt.Errorf("deno runtime unavailable")
 	}
-	command := exec.CommandContext(ctx, e.opts.DenoPath, "run", "--quiet", "--no-prompt", "--no-config", "--allow-net", "-")
-	command.Stdin = strings.NewReader(script)
+	if !e.opts.Sandbox.Fenced() {
+		return "", "", fmt.Errorf("the %s sandbox runner enforces no fence; policy code is not run there", e.opts.Sandbox.Kind())
+	}
 	env := make(map[string]string, len(extraEnv)+2)
 	maps.Copy(env, extraEnv)
 	if _, exists := env["NO_COLOR"]; !exists {
@@ -297,26 +297,18 @@ func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[stri
 	if _, exists := env["DENO_NO_UPDATE_CHECK"]; !exists {
 		env["DENO_NO_UPDATE_CHECK"] = "1"
 	}
-	command.Env = envSlice(env)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
+	result, err := e.opts.Sandbox.Run(ctx, sandbox.Program{Source: script, Net: true, Env: env})
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return stdout.String(), stderr.String(), ctxErr
+		return result.Stdout, result.Stderr, ctxErr
 	}
-	return stdout.String(), stderr.String(), err
-}
-
-func envSlice(env map[string]string) []string {
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		keys = append(keys, key)
+	if err != nil {
+		return result.Stdout, result.Stderr, err
 	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+env[key])
+	if result.TimedOut {
+		return result.Stdout, result.Stderr, fmt.Errorf("the policy sandbox outlived its deadline")
 	}
-	return out
+	if result.ExitCode != 0 {
+		return result.Stdout, result.Stderr, fmt.Errorf("policy code exited with %d", result.ExitCode)
+	}
+	return result.Stdout, result.Stderr, nil
 }

@@ -111,8 +111,7 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 
 func newAPI() *webrtc.API {
 	settings := webrtc.SettingEngine{}
-	settings.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6})
-	settings.SetSTUNGatherTimeout(stunGatherTimeout)
+	tuneSettings(&settings)
 	return webrtc.NewAPI(webrtc.WithSettingEngine(settings))
 }
 

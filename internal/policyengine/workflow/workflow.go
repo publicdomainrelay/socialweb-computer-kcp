@@ -12,7 +12,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/deno"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 )
 
@@ -28,7 +28,7 @@ type Action struct {
 type ActionResolver func(uses string) (*Action, error)
 
 type Options struct {
-	DenoPath        string
+	Sandbox         sandbox.Runner
 	ResolveAction   ActionResolver
 	MaxConsoleBytes int64
 	MaxOutputBytes  int64
@@ -63,11 +63,6 @@ type Executor struct {
 }
 
 func New(options Options) *Executor {
-	if options.DenoPath == "" {
-		if path, err := deno.Resolve(""); err == nil {
-			options.DenoPath = path
-		}
-	}
 	return &Executor{
 		opts: options,
 		Context: &Context{

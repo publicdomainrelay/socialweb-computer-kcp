@@ -13,10 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/deno"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
@@ -38,7 +38,7 @@ type Limits struct {
 
 type Config struct {
 	Limits           Limits
-	DenoPath         string
+	Sandbox          sandbox.Runner
 	ResolveAction    workflow.ActionResolver
 	Host             trust.Host
 	DisableActions   bool
@@ -96,12 +96,6 @@ func NewEngine(config Config) *Engine {
 	if config.Limits.MaxCacheBytes < 0 {
 		config.Limits.MaxCacheBytes = 0
 	}
-	denoPath := config.DenoPath
-	if denoPath == "" {
-		if path, err := deno.Resolve(""); err == nil {
-			denoPath = path
-		}
-	}
 	resolver := config.ResolveAction
 	if config.DisableActions {
 		resolver = func(uses string) (*workflow.Action, error) {
@@ -114,7 +108,6 @@ func NewEngine(config Config) *Engine {
 	if log == nil {
 		log = func(string, string, map[string]any) {}
 	}
-	config.DenoPath = denoPath
 	return &Engine{
 		config:     config,
 		resolver:   resolver,
@@ -169,7 +162,7 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 }
 
 func (e *Engine) Ready() bool {
-	return e.config.DenoPath != ""
+	return e.config.Sandbox != nil && e.config.Sandbox.Available() && e.config.Sandbox.Fenced()
 }
 
 func (e *Engine) ActiveRuns() int32 {
@@ -318,7 +311,7 @@ func (e *Engine) executeWithID(ctx context.Context, runID string, request *Polic
 	defer e.active.Add(-1)
 	seed := e.seedRequest(request, opts.Cache)
 	executor := workflow.New(workflow.Options{
-		DenoPath:        e.config.DenoPath,
+		Sandbox:         e.config.Sandbox,
 		ResolveAction:   e.resolver,
 		MaxConsoleBytes: e.config.Limits.MaxConsoleBytes,
 		MaxOutputBytes:  e.config.Limits.MaxOutputBytes,

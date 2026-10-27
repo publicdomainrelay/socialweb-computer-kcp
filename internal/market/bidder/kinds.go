@@ -22,7 +22,7 @@ func (b *Bidder) servesKind(kind string) bool {
 	if !slices.Contains(served, kind) {
 		return false
 	}
-	if kind == string(v1alpha1.ComputeKindDeno) && b.cfg.DenoPath == "" {
+	if kind == string(v1alpha1.ComputeKindDeno) && (b.cfg.Sandbox == nil || !b.cfg.Sandbox.Available()) {
 		return false
 	}
 	return true

@@ -299,7 +299,7 @@ func (c *Core) register() error {
 			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims, Logins: c.logins})
 		})},
 		{bidder.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks})
+			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks, Sandbox: newSandbox()})
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})
