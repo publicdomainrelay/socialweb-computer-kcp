@@ -76,16 +76,24 @@ type Invocation struct {
 }
 
 type ContractSummary struct {
-	Phase         string   `json:"phase,omitempty"`
-	WinnerDid     string   `json:"winnerDid,omitempty"`
-	Bids          int      `json:"bids,omitempty"`
-	ReceiptUri    string   `json:"receiptUri,omitempty"`
-	VMAddress     string   `json:"vmAddress,omitempty"`
-	Networks      []string `json:"networks,omitempty"`
-	HostKeys      []string `json:"hostKeys,omitempty"`
-	ReleaseOK     *bool    `json:"releaseOk,omitempty"`
-	ReleaseStatus int      `json:"releaseStatus,omitempty"`
-	Termination   string   `json:"termination,omitempty"`
+	Phase         string          `json:"phase,omitempty"`
+	WinnerDid     string          `json:"winnerDid,omitempty"`
+	Bids          int             `json:"bids,omitempty"`
+	ReceiptUri    string          `json:"receiptUri,omitempty"`
+	VMAddress     string          `json:"vmAddress,omitempty"`
+	Networks      []string        `json:"networks,omitempty"`
+	HostKeys      []string        `json:"hostKeys,omitempty"`
+	ReleaseOK     *bool           `json:"releaseOk,omitempty"`
+	ReleaseStatus int             `json:"releaseStatus,omitempty"`
+	Termination   string          `json:"termination,omitempty"`
+	Sandbox       *SandboxSummary `json:"sandbox,omitempty"`
+}
+
+type SandboxSummary struct {
+	ExitCode int    `json:"exitCode"`
+	TimedOut bool   `json:"timedOut,omitempty"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
 }
 
 type Summary struct {
@@ -178,6 +186,9 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 	}
 	if k.Receipt != nil {
 		s.ReceiptUri = k.Receipt.URI
+	}
+	if k.Sandbox != nil {
+		s.Sandbox = &SandboxSummary{ExitCode: k.Sandbox.ExitCode, TimedOut: k.Sandbox.TimedOut, Stdout: k.Sandbox.Stdout, Stderr: k.Sandbox.Stderr}
 	}
 	if k.HostKeys != nil {
 		for _, h := range k.HostKeys.Keys {

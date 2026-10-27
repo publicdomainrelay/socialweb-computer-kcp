@@ -11,6 +11,7 @@
         "required": ["role"],
         "properties": {
           "role": { "type": "string", "description": "The VM name within the requester's contract." },
+          "kind": { "type": "string", "knownValues": ["vm", "deno"], "description": "What the bidder runs for this request: a firecracker virtual machine (the default when absent), or a deno sandbox that runs user_data as its program and reports its output as a guest event." },
           "cpus": { "type": "integer", "minimum": 1 },
           "mem": { "type": "string", "description": "Memory size, such as 4G." },
           "disk": { "type": "string", "description": "Disk size, such as 50G." },

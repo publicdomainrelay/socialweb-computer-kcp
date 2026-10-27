@@ -214,6 +214,7 @@ func (v *Infra) UnmarshalJSON(b []byte) error {
 
 type InfraContract struct {
 	BidderDids        []string                   `json:"bidderDids,omitempty"`
+	ComputeKind       string                     `json:"computeKind,omitempty"`
 	DenyBidderDids    []string                   `json:"denyBidderDids,omitempty"`
 	Name              string                     `json:"name"`
 	Policy            string                     `json:"policy,omitempty"`

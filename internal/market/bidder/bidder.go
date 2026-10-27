@@ -125,6 +125,12 @@ type Config struct {
 	Suspend bool
 
 	Relays []string
+
+	ComputeKinds []string
+
+	StateDir string
+
+	DenoPath string
 }
 
 type GuestVM struct {
@@ -264,6 +270,10 @@ type Bidder struct {
 
 	ingressLive map[string]bool
 
+	sandboxMu sync.Mutex
+
+	sandboxes map[string]*sandboxRun
+
 	ingressRefMu sync.Mutex
 
 	ingressRef *market.StrongRef
@@ -369,6 +379,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		now:         now,
 		bids:        participant.NewIndex[v1alpha1.Bid](),
 		vms:         participant.NewIndex[v1alpha1.ComputeVM](),
+		sandboxes:   map[string]*sandboxRun{},
 		syncs:       participant.NewIndex[v1alpha1.StateSync](),
 		locks:       map[string]*sync.Mutex{},
 		retryAt:     map[string]time.Time{},
@@ -414,6 +425,9 @@ func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Dura
 		}
 		return b.reconcileBid(ctx, change.Name)
 	case contract.KindComputeVM:
+		if cached, ok := b.vms.Get(change.Name); ok {
+			b.observeSandbox(&cached)
+		}
 		return b.observeVM(ctx, change.Name)
 	default:
 		return b.observeSync(ctx, change.Name)

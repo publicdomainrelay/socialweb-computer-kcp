@@ -12,7 +12,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "knownValues": ["iroh", "https", "webrtc"],
+            "knownValues": ["iroh", "https", "webrtc", "sandbox"],
             "maxLength": 16,
             "description": "What address is. Absent, it reads as iroh when tag is absent and https when tag is present. iroh: address is the VM's iroh ticket. https: tag names the tunnel and address is its https URL. webrtc: tag names the tunnel and address is the guest agent's DTLS certificate fingerprint (\"sha-256 AB:CD:...\"), which the requester checks against the a=fingerprint of the guest's answer."
           },

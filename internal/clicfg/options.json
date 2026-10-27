@@ -756,6 +756,10 @@
       "type": "boolean",
       "description": "internal atproto-relay: crawl PDS hosts over http and ws instead of https and wss (local runs only)",
       "env": "SOCIALWEB_ATPROTO_RELAY_INSECURE_HTTP"
+    },
+    "compute-kinds": {
+      "type": "string",
+      "description": "Comma-separated compute kinds the bidder serves (vm, deno); no vm makes it a deno sandbox bidder, which needs --host-backend=proc and --fg"
     }
   }
 }

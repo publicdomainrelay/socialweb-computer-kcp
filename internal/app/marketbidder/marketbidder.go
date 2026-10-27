@@ -391,6 +391,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		GuestImageSource:     image,
 		Firecracker:          firecracker,
 		Kcp:                  kcp,
+		ComputeKinds:         append([]string(nil), o.Spec.ComputeKinds...),
 		Operator:             o.Spec.Operator,
 		Policy:               o.Spec.Policy,
 		PolicyArgs:           compose.OptionValue(o.Spec.Options, "policy-args"),

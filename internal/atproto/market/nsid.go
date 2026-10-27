@@ -32,9 +32,11 @@ const (
 	SubmitAcceptLXM = SubmitAcceptNSID
 	SubmitEventLXM  = SubmitEventNSID
 
-	ComputeVMNSID                       = "com.publicdomainrelay.temp.compute.vm"
-	ComputeEventsVMDeleteNSID           = "com.publicdomainrelay.temp.compute.events.vm.delete"
-	ComputeEventsVMOnNetworkNSID        = "com.publicdomainrelay.temp.compute.events.vm.onNetwork"
+	ComputeVMNSID                = "com.publicdomainrelay.temp.compute.vm"
+	ComputeEventsVMDeleteNSID    = "com.publicdomainrelay.temp.compute.events.vm.delete"
+	ComputeEventsVMOnNetworkNSID = "com.publicdomainrelay.temp.compute.events.vm.onNetwork"
+
+	ComputeEventsVMSandboxNSID          = "com.publicdomainrelay.temp.compute.events.vm.sandbox"
 	ComputeEventsVMStartedNSID          = "com.publicdomainrelay.temp.compute.events.vm.started"
 	ComputeEventsVMTerminatedNSID       = "com.publicdomainrelay.temp.compute.events.vm.terminated"
 	ComputeEventsVMHostKeysNSID         = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"

@@ -432,6 +432,13 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.contract.DenyBidderDids = append(r.contract.DenyBidderDids, splitList(p.Value)...)
 		case p.To == "contract.vmName":
 			r.contract.VMName = p.Value
+		case p.To == "contract.computeKind":
+			switch kind := v1alpha1.ComputeKind(strings.TrimSpace(p.Value)); kind {
+			case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
+				r.contract.ComputeKind = kind
+			default:
+				return fmt.Errorf("--compute-kind %q: want vm or deno", p.Value)
+			}
 		case p.To == "contract.userData":
 			b, err := os.ReadFile(p.Value)
 			if err != nil {
@@ -1049,6 +1056,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	network := vals.String("network")
 	if err := r.passthrough(pass, network != ""); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
+	}
+	if r.contract.ComputeKind == v1alpha1.ComputeKindDeno {
+		r.skipSSH = true
 	}
 	if err := r.webrtcTunnel(); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)

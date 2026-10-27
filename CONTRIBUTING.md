@@ -912,6 +912,160 @@ leaves `Requesting` with a verified receipt, goes `Held` when the guest publishe
 `--exec` runs over iroh ssh before the contract is released. `--skip-ssh` rents, reports and releases
 without a session.
 
+## Run a bidder that sells a deno sandbox
+
+A bidder can offer a compute kind that is not a virtual machine: `computeKind: deno` in the contract
+(the payload's `kind`) makes the bidder run `spec.userData` as a Deno program on the bidder's host and
+report its output, instead of booting a firecracker guest. Nothing about that needs KVM, a guest image
+or a VM runtime, so this is the bidder a macOS or WSL2 host can run.
+
+The pieces: `kind` on `com.publicdomainrelay.temp.compute.vm` (absent reads as `vm`), `computeKind` on
+the contract and the Bidder spec, the `DenoSandbox` backend kind on the ComputeVM, and the guest event
+`com.publicdomainrelay.temp.compute.events.vm.sandbox` (`exitCode`, `timedOut`, `stdout`, `stderr`).
+The sandbox runs `deno run --no-remote --no-lock --deny-net --deny-run --deny-ffi` with read and
+write of its own work dir only, at most 2 minutes.
+
+A bidder serves the kinds it is told to, and drops an RFP of a kind it does not serve before it bids:
+
+```bash
+run bidder --host-backend proc --compute-kinds deno --handle <handle> --fg \
+  --state-dir <state> --kcp-path <kcp> --kine-path <kine> --bao-path <bao> \
+  --openbao-plugin-dir <dir with both openbao plugins>
+```
+
+`--compute-kinds` takes `vm`, `deno` or both; the default is `vm`. One bidder serves both (`vm,deno`):
+the kind of each accepted RFP decides whether a firecracker guest or a sandbox runs, and both count
+against `maxConcurrentGuests`. Without `vm` the bidder opens no VM runtime, runs no KVM preflight, and
+applies the bidder API sets itself (`internal/computevm` `ApplyBidderSets`), because the ComputeVM
+controller that usually applies them is not started. A bidder with no `deno` on `PATH` (pinned v2.9.3)
+declines deno RFPs rather than bidding on a kind it cannot run. On macOS the two OpenBao plugins need
+the darwin pins that `internal/versions/versions.json` now carries for them.
+
+The requester asks for the kind after `--`, with the program in the usual user-data file:
+
+```bash
+run request --name deno1 <the four paths> -- --skip-qr --compute-kind deno --user-data prog.ts
+```
+
+`--compute-kind deno` skips ssh (a sandbox has no guest to ssh into). The contract goes `Held` when
+the sandbox has reported its result, and `summary.json` carries `contract.sandbox {exitCode, timedOut,
+stdout, stderr}`. A program:
+
+```ts
+console.log(`hello from ${Deno.build.os}/${Deno.build.arch}`);
+```
+
+One market caveat: a bidder running older code does not read `kind`, so it still bids on a deno RFP
+and, if it wins, boots a VM for it. On a market with other bidders, pin the requester to the deno
+bidder with `--allow-bidder-dids <did>` (the bidder's `MarketIdentity bidder` status; `--deny-bidder-dids` is the
+inverse).
+
+Read on each host: macOS `sandbox://...` with `hello from darwin/arm64`, hat-7 and WSL2
+`hello from linux/x86_64`, exit 0, release 200.
+
+### The proof recipe (three hosts)
+
+One request runner, copied to every host; it prints the fields a proof reads:
+
+```bash
+#!/usr/bin/env bash
+# run-one.sh <kind> <name> <bidder-did> <userdata>; env SWC_BIN SWC_STATE KCP KINE BAO
+set -e
+kind="$1"; name="$2"; did="$3"; ud="$4"
+extra=()
+[ "$kind" = deno ] && extra=(--compute-kind deno)
+"$SWC_BIN" run request --name "$name" --state-dir "$SWC_STATE" \
+  --kcp-path "$KCP" --kine-path "$KINE" --bao-path "$BAO" \
+  --ready-timeout 90s --network-timeout 180s --contract-timeout 5m --skip-ssh \
+  -- --skip-qr --allow-bidder-dids "$did" "${extra[@]}" --user-data "$ud" \
+  > "$SWC_STATE/$name.log" 2>&1
+grep -E "\"phase\": \"(Held|Released|Failed)\"|exitCode|\"stdout\"|vmAddress|releaseStatus|winnerDid" "$SWC_STATE/$name.log" | tail -6 | cut -c1-190
+```
+
+Start a bidder per host (all in the foreground under devsup, which dies with the process):
+
+```bash
+# macOS, deno only
+nohup ~/.tmp/swc-mac/bin/socialweb-computer run bidder --host-backend proc --compute-kinds deno \
+  --handle probe.deno.test --fg --state-dir ~/.tmp/swc-mac/state \
+  --kcp-path ~/.tmp/swc-mac/bin/kcp --kine-path ~/.tmp/swc-mac/bin/kine --bao-path ~/.tmp/swc-mac/bin/bao \
+  --openbao-plugin-dir ~/.tmp/swc-mac/bin/plugins > ~/.tmp/swc-mac/bidder-mac-deno.log 2>&1 &
+
+# hat-7, both kinds (VM assets at explicit paths; see the VM half below)
+B=$HOME/.tmp/swc-req/bin
+nohup "$B/socialweb-computer" run bidder --host-backend proc --compute-kinds vm,deno --handle probe.mixed.test --fg \
+  --state-dir "$HOME/.tmp/swc-req/state-mixed" \
+  --kcp-path "$B/kcp" --kine-path "$B/kine" --bao-path "$B/bao" --openbao-plugin-dir "$B/plugins" \
+  --userns-stage-path "$B/vm/swc-userns-stage" --pasta-path "$B/vm/pasta" \
+  --vmexec-path "$B/vm/socialweb-vmexec" --firecracker-path "$B/vm/firecracker" \
+  > "$HOME/.tmp/swc-req/mixed.log" 2>&1 &
+
+# desktop: WSL2, deno only, as a non-root user (dev refuses uid 0)
+wsl.exe -d Ubuntu -u root -e bash -c 'su - swc -c "export PATH=/usr/local/bin:\$PATH; cd ~; nohup /var/tmp/swc-req/bin/socialweb-computer run bidder --host-backend proc --compute-kinds deno --handle probe.deno.test --fg --state-dir /home/swc/.tmp/swc-req/state --kcp-path /var/tmp/swc-req/bin/kcp --kine-path /var/tmp/swc-req/bin/kine --bao-path /var/tmp/swc-req/bin/bao --openbao-plugin-dir /var/tmp/swc-req/bin/plugins > /home/swc/bidder-deno.log 2>&1 < /dev/null & echo started"'
+```
+
+Wait for the root, and read the bidder DID for the allowlist:
+
+```bash
+KUBECONFIG=<state>/dev/<instance>/kcp/admin.kubeconfig kubectl get marketbidder app -o jsonpath='{.status.phase}'
+KUBECONFIG=<state>/dev/<instance>/kcp/admin.kubeconfig kubectl get marketidentity bidder -o jsonpath='{.status.did}'
+```
+
+Then, on macOS and hat-7, run the matrix directly:
+
+```bash
+export SWC_BIN=$HOME/.tmp/swc-mac/bin/socialweb-computer SWC_STATE=$HOME/.tmp/swc-mac/state \
+       KCP=$HOME/.tmp/swc-mac/bin/kcp KINE=$HOME/.tmp/swc-mac/bin/kine BAO=$HOME/.tmp/swc-mac/bin/bao
+bash run-one.sh vm   m3-mac-vm   <bidder-did> $HOME/.tmp/swc-mac/vm.yaml
+bash run-one.sh deno m3-mac-deno <bidder-did> $HOME/.tmp/swc-mac/prog.ts
+```
+
+On desktop the arguments go into the script, not through the command line: a nested call crosses ssh,
+the MSYS bash, `wsl.exe` and `su -c`, and positional parameters are lost on the way.
+
+```bash
+# ~/swc-desk/wsl-deno.sh
+wsl.exe -d Ubuntu -u root -e bash -c 'su - swc -c "export PATH=/usr/local/bin:\$PATH SWC_BIN=/var/tmp/swc-req/bin/socialweb-computer SWC_STATE=/home/swc/.tmp/swc-req/state KCP=/var/tmp/swc-req/bin/kcp KINE=/var/tmp/swc-req/bin/kine BAO=/var/tmp/swc-req/bin/bao; bash /home/swc/run-one.sh deno d-wsl-deno <bidder-did> /home/swc/prog.ts"'
+ssh desktop 'bash ~/swc-desk/wsl-deno.sh' | tr -d '\r' | tail -5
+```
+
+The two user-data files:
+
+```ts
+// prog.ts, the program of a deno request
+console.log(`hello from ${Deno.build.os}/${Deno.build.arch}`);
+```
+```yaml
+# vm.yaml, the cloud-init of a vm request
+#cloud-config
+runcmd:
+  - [ sh, -c, "echo vm-ok > /tmp/vm-ok" ]
+```
+
+Getting the hosts to that point: build the binary with the pinned toolchain (`CGO_ENABLED=0
+GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.6`, `cmd/socialweb-computer`), ship the tree with rsync to a
+Linux host or a tar stream into the distro, and stage the two OpenBao plugins to a directory that
+matches the pins.
+
+The VM half on hat-7 needs four pinned assets, a subuid range for the account, and `/dev/kvm`:
+
+```bash
+scripts/stage-assets.sh --platform linux/amd64 --asset firecracker --asset pasta --blobs $HOME/.tmp/swc-req/vmblobs
+scripts/stage-assets.sh --platform linux/amd64 --asset socialweb-vmexec --print-pins --blobs $HOME/.tmp/swc-req/vmblobs
+scripts/stage-assets.sh --platform linux/amd64 --asset swc-userns-stage --blobs $HOME/.tmp/swc-req/vmblobs
+for a in firecracker pasta socialweb-vmexec swc-userns-stage; do
+  zstd -q -d -c $HOME/.tmp/swc-req/vmblobs/linux_amd64/$a.tar.zst | tar -x -C $HOME/.tmp/swc-req/bin/vm
+done
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
+```
+
+`--print-pins` is for a dirty tree: `socialweb-vmexec` embeds `internal/versions/versions.json`, so a
+changed pin makes the built binary differ from its own pin and `stage-assets.sh` refuses it. The
+staged binaries are what the live run uses, and the bidder takes them by path.
+
+Each run keeps its log at `<state>/<name>.log`, so any result is re-read with
+`grep -E "exitCode|vmAddress|releaseStatus" <state>/<name>.log`.
+
 ## Gate and acceptance
 
 ```bash

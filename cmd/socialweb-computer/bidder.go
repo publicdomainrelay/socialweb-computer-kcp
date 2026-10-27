@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -39,7 +40,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -60,6 +61,7 @@ type bidderRun struct {
 	password       string
 	readyTimeout   time.Duration
 	networkTimeout time.Duration
+	computeKinds   []string
 }
 
 type bidderSummary struct {
@@ -273,6 +275,17 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)
 		}
 	}
+	r.computeKinds = splitList(vals.String("compute-kinds"))
+	if len(r.computeKinds) == 0 {
+		r.computeKinds = []string{string(v1alpha1.ComputeKindVM)}
+	}
+	for _, k := range r.computeKinds {
+		switch v1alpha1.ComputeKind(k) {
+		case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
+		default:
+			return a.fail(exitRefused, "run bidder: --compute-kinds %q: want vm or deno", k)
+		}
+	}
 	if r.policy == "" {
 		r.policy = vals.String("bidder-policy")
 	}
@@ -291,10 +304,13 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	case r.network == "" && r.handle == "":
 		return a.fail(exitRefused, "run bidder: --handle is required: it names the bidder's account and owns its ComputeVMs")
 	}
-	if r.network == "" && backend == hostsvc.BackendProc {
+	if r.network == "" && backend == hostsvc.BackendProc && r.servesVM() {
 		if err := a.vmHostPreflight(ctx, r.vals); err != nil {
 			return a.fail(exitRefused, "run bidder: %v", err)
 		}
+	}
+	if !r.servesVM() {
+		return r.runDenoOnly(ctx, backend)
 	}
 	if r.vals.String("guest-image-source") == "" {
 		if backend == hostsvc.BackendSystemdUser && cachedGuestImage(r.vals.String("state-dir")) {
@@ -395,8 +411,32 @@ func (r *bidderRun) kcpProvider() *v1alpha1.KcpProvider {
 }
 
 func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
+	var kcp *v1alpha1.KcpProvider
+	if r.servesVM() {
+		kcp = r.kcpProvider()
+	}
 	return bidder.Spec(bidder.SpecInput{Profile: r.profile, Handle: r.handle, Policy: r.policy, Network: r.value, PdsUrl: r.pdsURL,
-		Mode: r.identityMode, Kcp: r.kcpProvider(), Ingress: r.ingress, Comms: r.comms, Options: r.options, GuestNetwork: r.guestNetwork})
+		Mode: r.identityMode, Kcp: kcp, Ingress: r.ingress, Comms: r.comms, Options: r.options, GuestNetwork: r.guestNetwork,
+		ComputeKinds: r.computeKinds})
+}
+
+func (r *bidderRun) servesVM() bool {
+	for _, k := range r.computeKinds {
+		if k == string(v1alpha1.ComputeKindVM) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *bidderRun) runDenoOnly(ctx context.Context, backend hostsvc.Backend) int {
+	if backend != hostsvc.BackendProc {
+		return r.a.fail(exitRefused, "run bidder: --compute-kinds without vm runs in the foreground under devsup; pass --host-backend=proc (or --fg)")
+	}
+	if !r.vals.Bool("fg") {
+		return r.a.fail(exitRefused, "run bidder: --compute-kinds without vm runs in the foreground; pass --fg so the sandbox units die with this process")
+	}
+	return r.standalone(ctx)
 }
 
 func (r *bidderRun) marketNetwork() (devinstance.Layout, devinstance.Record, error) {
@@ -490,7 +530,11 @@ func (r *bidderRun) standalone(ctx context.Context) int {
 	if instance == "" {
 		instance = bidder.InstanceID(r.handle)
 	}
-	vals := r.vals.With("instance", instance).With("profile", bootstrap.ProfileQuick).With("handle", r.handle)
+	vmHandle := r.handle
+	if !r.servesVM() {
+		vmHandle = ""
+	}
+	vals := r.vals.With("instance", instance).With("profile", bootstrap.ProfileQuick).With("handle", vmHandle).With(appRoleOpt, table.RoleBidder)
 	up, code := bringUp(ctx, r.a, vals, false)
 	if code != exitOK {
 		return code

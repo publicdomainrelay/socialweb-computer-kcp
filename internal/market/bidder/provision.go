@@ -57,6 +57,8 @@ type provisionRequest struct {
 }
 
 type vmRecord struct {
+	Kind string `json:"kind"`
+
 	CPUs int32 `json:"cpus"`
 
 	Mem string `json:"mem"`
@@ -106,6 +108,9 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	record, err := parseVMRecord(req.vmPayload.Value)
 	if err != nil {
 		return "", err
+	}
+	if record.Kind == string(v1alpha1.ComputeKindDeno) {
+		return b.provisionSandbox(ctx, req, record)
 	}
 	acceptKey := b.guests.AcceptKey(req.acceptURI, req.acceptCID)
 	if acceptKey != "" {

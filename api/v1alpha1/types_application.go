@@ -651,6 +651,8 @@ type MarketBidderSpec struct {
 	Operator string `json:"operator,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty" apigen:"listType=set"`
+
+	ComputeKinds []string `json:"computeKinds,omitempty" apigen:"listType=set"`
 }
 
 type MarketRequester struct {

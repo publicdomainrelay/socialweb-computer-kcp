@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync"
@@ -95,6 +96,14 @@ func (s *Service) resolveIdentity(ctx context.Context) {
 	s.did = found.Status.Did
 }
 
+func denoPath() string {
+	p, err := exec.LookPath("deno")
+	if err != nil {
+		return ""
+	}
+	return p
+}
+
 func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 	if s.did == "" {
 		return nil, errors.New("bidder: the record store needs the bidder DID")
@@ -145,6 +154,9 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		BidTTL:              seconds(s.spec.BidTTLSeconds),
 		Suspend:             s.spec.SuspendParticipation,
 		Relays:              append([]string(nil), s.spec.Network.Relays()...),
+		ComputeKinds:        append([]string(nil), s.spec.ComputeKinds...),
+		StateDir:            s.stateDir(),
+		DenoPath:            denoPath(),
 	}
 	if s.spec.Kcp != nil {
 		cfg.StopGraceSeconds = s.spec.Kcp.StopGraceSeconds

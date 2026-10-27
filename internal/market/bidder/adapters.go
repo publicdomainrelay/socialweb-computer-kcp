@@ -889,6 +889,11 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 		if b.rfpClosed(payload.URI, payload.Record, "inbox") {
 			break
 		}
+		if _, served := b.inboxServesKind(ctx, payload.URI, payload.CID); !served {
+			b.log.Info("market inbox dropped an RFP of a compute kind this bidder does not serve", "rfp", payload.URI)
+			b.inboxed.Store(inboxKey(request), true)
+			return participant.InboxObservation(request, payload.URI), nil
+		}
 		bid, err := b.enqueueBid(ctx, payload.URI, payload.CID, payload.DID)
 		if err != nil {
 			return participant.Observation{}, fmt.Errorf("bidder: recording the bid intent: %w", err)

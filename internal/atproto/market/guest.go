@@ -7,6 +7,8 @@ const (
 	OnNetworkKindHTTPS  = "https"
 	OnNetworkKindWebRTC = "webrtc"
 
+	OnNetworkKindSandbox = "sandbox"
+
 	GuestPublicKeyKindAgeX25519 = "age-x25519"
 
 	GuestSignalKindOffer  = "offer"

@@ -48,6 +48,14 @@ func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (
 	if b.rfpClosed(rfpURI, nil, "submitRfp") {
 		return "", ErrRFPClosed
 	}
+	kind, err := b.rfpKind(ctx, rfpURI, rfpCID)
+	if err != nil {
+		return "", err
+	}
+	if !b.servesKind(kind) {
+		b.log.Info("bidder: an RFP asks for a compute kind this bidder does not serve", "rfp", rfpURI, "kind", kind)
+		return "", ErrKindUnsupported
+	}
 	bid, err := b.enqueueBid(ctx, rfpURI, rfpCID, issuer)
 	if err != nil {
 		return "", err

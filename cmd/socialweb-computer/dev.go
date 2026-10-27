@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devcore"
@@ -1014,6 +1015,14 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return exitOK
 	}
 	cfg := devcore.Config{Layout: rec.Layout, ReadyTimeout: timeout, Log: a.log, SignInGuard: bidder.CheckSignIn}
+	if rec.VM == nil && rec.Role == table.RoleBidder && rec.AdminKubeconfig != "" {
+		if err := computevm.ApplyBidderSets(ctx, computevm.Config{Handle: rec.Layout.ID, Log: a.log}, rec.AdminKubeconfig,
+			rec.BaseWorkspace); err != nil {
+			a.log.Warn("applying the bidder's API sets without a VM runtime failed", "err", err.Error())
+		} else {
+			a.log.Info("the bidder's API sets are applied: this bidder serves only compute kinds that need no VM runtime")
+		}
+	}
 	if rec.VM != nil {
 		rt, vm, err := a.instanceVMRuntime(ctx, rec)
 		if err != nil {

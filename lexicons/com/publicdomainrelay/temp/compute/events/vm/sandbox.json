@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.sandbox",
+  "description": "A deno sandbox reports that its program ended, with its output; sent as the payload of a market.event.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["exitCode", "createdAt"],
+        "properties": {
+          "exitCode": { "type": "integer", "description": "The program's exit status; -1 when the sandbox was killed." },
+          "timedOut": { "type": "boolean", "description": "The sandbox was stopped at its deadline rather than ending on its own." },
+          "stdout": { "type": "string", "maxLength": 65536, "description": "The program's standard output, capped." },
+          "stderr": { "type": "string", "maxLength": 65536, "description": "The program's standard error, capped." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

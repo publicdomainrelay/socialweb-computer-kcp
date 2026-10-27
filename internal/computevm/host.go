@@ -114,6 +114,15 @@ func Open(ctx context.Context, c Config) (*Host, error) {
 
 func (h *Host) Config() Config { return h.c }
 
+func ApplyBidderSets(ctx context.Context, c Config, kubeconfig, workspace string) error {
+	restCfg, err := kcpserver.FrontRestConfig(kubeconfig)
+	if err != nil {
+		return err
+	}
+	c.Workspace = cmp.Or(workspace, hostprocess.DefaultWorkspace)
+	return applySets(ctx, c, restCfg)
+}
+
 func (h *Host) Log() *slog.Logger { return h.c.log() }
 
 func applySets(ctx context.Context, c Config, restCfg *rest.Config) error {

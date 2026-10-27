@@ -822,6 +822,51 @@ func (v *ComputeEventsVMRegisterIdentity) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsVMSandbox struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	ExitCode   int64                      `json:"exitCode"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Stderr     string                     `json:"stderr,omitempty"`
+	Stdout     string                     `json:"stdout,omitempty"`
+	TimedOut   bool                       `json:"timedOut,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsVMSandbox) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.vm.sandbox"
+}
+
+func ParseComputeEventsVMSandbox(value map[string]any) (*ComputeEventsVMSandbox, error) {
+	var out ComputeEventsVMSandbox
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.vm.sandbox", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsVMSandbox) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsVMSandbox
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.vm.sandbox"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsVMSandbox) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsVMSandbox
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsVMSandbox(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsVMStarted struct {
 	Type       string                     `json:"$type"`
 	CreatedAt  string                     `json:"createdAt"`
@@ -941,6 +986,7 @@ type ComputeVM struct {
 	Cpus      int64                      `json:"cpus,omitempty"`
 	CreatedAt string                     `json:"createdAt,omitempty"`
 	Disk      string                     `json:"disk,omitempty"`
+	Kind      string                     `json:"kind,omitempty"`
 	Location  *ComputeVMLocation         `json:"location,omitempty"`
 	Mem       string                     `json:"mem,omitempty"`
 	Network   string                     `json:"network,omitempty"`

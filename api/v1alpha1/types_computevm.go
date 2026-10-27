@@ -49,7 +49,15 @@ type ComputeVMSpec struct {
 
 	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
 
+	Sandbox *ComputeVMSandbox `json:"sandbox,omitempty"`
+
 	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
+}
+
+type ComputeVMSandbox struct {
+	Source string `json:"source"`
+
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 }
 
 type GuestNetworkOptions struct {
@@ -334,6 +342,8 @@ const (
 )
 
 const BackendKindFirecrackerVM = "FirecrackerVM"
+
+const BackendKindDenoSandbox = "DenoSandbox"
 
 const FinalizerComputeVM = "computevm.socialweb.computer/release"
 

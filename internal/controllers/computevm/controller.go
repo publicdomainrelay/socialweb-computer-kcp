@@ -64,6 +64,23 @@ func (c *Controller) backend(ctx context.Context, req ctlruntime.Request, vm *v1
 	return &fvm, nil
 }
 
+func isSandbox(vm *v1alpha1.ComputeVM) bool {
+	ref := vm.Spec.BackendRef
+	return ref.Kind == v1alpha1.BackendKindDenoSandbox && (ref.Group == "" || ref.Group == v1alpha1.GroupName) && ref.Name != ""
+}
+
+func (c *Controller) reconcileSandbox(ctx context.Context, req ctlruntime.Request, vm *v1alpha1.ComputeVM) (ctlruntime.Result, error) {
+	if !vm.DeletionTimestamp.IsZero() || computevm.ReleaseRequested(vm) {
+		return c.release(ctx, req, vm)
+	}
+	st := vm.Status
+	st.Conditions = append([]metav1.Condition(nil), st.Conditions...)
+	st.Phase, st.Message = v1alpha1.ComputeVMPhaseRunning, "the deno sandbox runs on the bidder"
+	setCondition(&st, vm.Generation, v1alpha1.ComputeVMConditionBackendBound, true, "DenoSandbox", "the bidder runs the sandbox itself")
+	setCondition(&st, vm.Generation, v1alpha1.ComputeVMConditionReady, true, "Ready", st.Message)
+	return ctlruntime.Result{}, c.write(ctx, req, vm, st)
+}
+
 func backendSupported(vm *v1alpha1.ComputeVM) bool {
 	ref := vm.Spec.BackendRef
 	return ref.Kind == v1alpha1.BackendKindFirecrackerVM && (ref.Group == "" || ref.Group == v1alpha1.GroupName) && ref.Name != ""
@@ -159,6 +176,9 @@ func (c *Controller) declare(ctx context.Context, req ctlruntime.Request, drop s
 	}
 	names := make([]string, 0, len(list.Items))
 	for _, vm := range list.Items {
+		if isSandbox(&vm) {
+			continue
+		}
 		if vm.Spec.Owner.Handle == c.handle && vm.Name != drop {
 			names = append(names, vm.Name)
 		}
@@ -175,6 +195,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 	}
 	st := vm.Status
 	st.Conditions = append([]metav1.Condition(nil), st.Conditions...)
+	if isSandbox(vm) {
+		return c.reconcileSandbox(ctx, req, vm)
+	}
 	if !backendSupported(vm) {
 		setCondition(&st, vm.Generation, v1alpha1.ComputeVMConditionBackendBound, false, "UnsupportedBackend",
 			fmt.Sprintf("spec.backendRef names %s/%s; this host runs FirecrackerVM", vm.Spec.BackendRef.Kind, vm.Spec.BackendRef.Name))

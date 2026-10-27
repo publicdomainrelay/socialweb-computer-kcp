@@ -33,7 +33,7 @@ const (
 
 var available = map[string]map[Need]bool{
 	"linux":  {NeedHostBackend: true, NeedProc: true, NeedSystemdUser: true, NeedVMRuntime: true},
-	"darwin": {NeedProc: true},
+	"darwin": {NeedHostBackend: true, NeedProc: true},
 }
 
 var needNames = map[Need]string{
@@ -82,7 +82,7 @@ func Tree() []Verb {
 		{Path: "serve gateway kcp", Summary: "the gateway application instance: adopts or starts its kcp store, kine, front and active slot, applies its sets and its Gateway root object, then runs the root vault, the gateway, the TLS front, the clusterprovider and the door", Needs: []Need{NeedHostBackend}},
 		{Path: "serve gateway xrpc", Summary: "the XRPC gateway (SOCIALWEB_GATEWAY_* env)"},
 		{Path: "serve provider", Summary: "the cluster provider (SOCIALWEB_CLUSTERPROVIDER_* env)"},
-		{Path: "run bidder", Summary: "a bidder application instance: applies its MarketBidder root object with --profile prod-qr|market-network|dev-local into the handle's own kcp (--network <market network> makes it a child of that network), renders the sign-in and returns when Ready (--fg stays); hono-bidder options after --", Needs: []Need{NeedHostBackend, NeedVMRuntime}},
+		{Path: "run bidder", Summary: "a bidder application instance: applies its MarketBidder root object with --profile prod-qr|market-network|dev-local into the handle's own kcp (--network <market network> makes it a child of that network), renders the sign-in and returns when Ready (--fg stays); hono-bidder options after --", Needs: []Need{NeedHostBackend}},
 		{Path: "run gateway ssh", Summary: "ssh to a guest through the relay", BuiltBy: "plan 0008 M4-RUN-GATEWAY-SSH"},
 		{Path: "run request", Summary: "rent a guest through the RFP flow: a fresh kcp per invocation (--network <market network> makes it a child of that network), the requester component, ssh with StrictHostKeyChecking=yes; request-vm-ssh options after --", Needs: []Need{NeedProc}},
 		{Path: "run request list", Summary: "every invocation's summary.json; starts no kcp", Needs: []Need{NeedProc}},

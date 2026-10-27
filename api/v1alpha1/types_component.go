@@ -435,6 +435,8 @@ type BidderSpec struct {
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
+
+	ComputeKinds []string `json:"computeKinds,omitempty" apigen:"listType=set"`
 }
 
 type SecretsFallback string

@@ -495,8 +495,10 @@ func (s *server) collect(u *unit) {
 	if cur, ok := s.units[u.spec.Name]; ok && cur == u {
 		delete(s.units, u.spec.Name)
 	}
-	u.store.release()
-	u.store = nil
+	if u.store != nil {
+		u.store.release()
+		u.store = nil
+	}
 	os.Remove(s.recordPath(u.spec.Name))
 }
 
@@ -593,8 +595,10 @@ func (s *server) closeConns() {
 		c.Close()
 	}
 	for _, u := range s.units {
-		u.store.release()
-		u.store = nil
+		if u.store != nil {
+			u.store.release()
+			u.store = nil
+		}
 	}
 }
 

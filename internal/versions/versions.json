@@ -53,360 +53,1482 @@
     "linux/amd64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-guest-downloads", "socialweb-vmexec", "swc-userns-stage"]
+      "assets": [
+        "bao",
+        "deno",
+        "dumbpipe",
+        "external-secrets",
+        "external-secrets-bundle",
+        "firecracker",
+        "k3s",
+        "kcp",
+        "kine",
+        "openbao-plugin-auth-atproto",
+        "openbao-plugin-auth-sshsig",
+        "opentunnel",
+        "pasta",
+        "postgres",
+        "socialweb-computer-k8s-downloads",
+        "socialweb-guest-downloads",
+        "socialweb-vmexec",
+        "swc-userns-stage"
+      ]
     },
     "linux/arm64": {
       "status": "release",
       "owner": "plan 0006 M1-ASSETS",
-            "assets": ["bao", "deno", "dumbpipe", "external-secrets", "external-secrets-bundle", "firecracker", "k3s", "kcp", "kine", "openbao-plugin-auth-atproto", "openbao-plugin-auth-sshsig", "opentunnel", "pasta", "postgres", "socialweb-computer-k8s-downloads", "socialweb-guest-downloads", "socialweb-vmexec"]
+      "assets": [
+        "bao",
+        "deno",
+        "dumbpipe",
+        "external-secrets",
+        "external-secrets-bundle",
+        "firecracker",
+        "k3s",
+        "kcp",
+        "kine",
+        "openbao-plugin-auth-atproto",
+        "openbao-plugin-auth-sshsig",
+        "opentunnel",
+        "pasta",
+        "postgres",
+        "socialweb-computer-k8s-downloads",
+        "socialweb-guest-downloads",
+        "socialweb-vmexec"
+      ]
     },
-    "darwin/arm64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, owned by plan 0012; vfkit is pinned, the other assets follow with the plan's M1 and M2 items", "assets": ["vfkit"]},
-    "darwin/amd64": {"status": "seam", "owner": "plan 0012", "note": "seam: builds and vets, no assets, owned by plan 0012", "assets": []},
-    "windows/amd64": {"status": "seam", "owner": "plan 0011", "note": "seam: builds and vets, no assets, owned by plan 0011", "assets": []},
-    "windows/arm64": {"status": "seam", "owner": "plan 0011", "note": "seam: builds and vets, no assets, owned by plan 0011", "assets": []}
+    "darwin/arm64": {
+      "status": "seam",
+      "owner": "plan 0012",
+      "note": "seam: builds and vets, owned by plan 0012; vfkit is pinned, the other assets follow with the plan's M1 and M2 items",
+      "assets": [
+        "vfkit",
+        "openbao-plugin-auth-atproto",
+        "openbao-plugin-auth-sshsig"
+      ]
+    },
+    "darwin/amd64": {
+      "status": "seam",
+      "owner": "plan 0012",
+      "note": "seam: builds and vets, no assets, owned by plan 0012",
+      "assets": []
+    },
+    "windows/amd64": {
+      "status": "seam",
+      "owner": "plan 0011",
+      "note": "seam: builds and vets, no assets, owned by plan 0011",
+      "assets": []
+    },
+    "windows/arm64": {
+      "status": "seam",
+      "owner": "plan 0011",
+      "note": "seam: builds and vets, no assets, owned by plan 0011",
+      "assets": []
+    }
   },
   "assets": {
     "kcp": {
       "version": "v0.33.0-162-g74e9fb9c03f778",
       "source": "github.com/kcp-dev/kcp main at commit 74e9fb9c03f778c57d1a6a782d5adc9476ec1af5 (2026-10-22, Merge pull request #4479), unpatched, built here by scripts/stage-assets.sh (fetch kind gosrc): the GitHub source archive of that commit, cmd/kcp with CGO_ENABLED=0 go build -trimpath -buildvcs=false -mod=readonly -ldflags='-s -w -buildid=' plus kcp's own Makefile version -X flags (values pinned in gosrc.versionVars, gitVersion from git describe --tags --match='v*' --abbrev=14 of the commit, buildDate the commit date), with the pinned toolchain; modules from proxy.golang.org, verified by the archive's go.sum",
       "verify": "the source archive's sha256 is pinned here and its pax comment must name the pinned commit; the build is reproducible, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a gosrc change re-pins it)",
-      "executables": {"kcp": "kcp"},
+      "executables": {
+        "kcp": "kcp"
+      },
       "gosrc": {
         "url": "https://github.com/kcp-dev/kcp/archive/74e9fb9c03f778c57d1a6a782d5adc9476ec1af5.tar.gz",
         "sha256": "1f896ebc6193ef01cd82f0420a506bfe661e9ca8982ad2f72463363251eb8b70",
         "commit": "74e9fb9c03f778c57d1a6a782d5adc9476ec1af5",
         "toolchain": "go1.26.6",
         "package": "./cmd/kcp",
-        "versionPackages": ["k8s.io/client-go/pkg/version", "k8s.io/component-base/version"],
-        "versionVars": {"gitVersion": "v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778", "gitCommit": "74e9fb9c03f778c57d1a6a782d5adc9476ec1af5", "gitTreeState": "clean", "gitMajor": "1", "gitMinor": "36", "buildDate": "2026-10-22T16:36:10Z"}
+        "versionPackages": [
+          "k8s.io/client-go/pkg/version",
+          "k8s.io/component-base/version"
+        ],
+        "versionVars": {
+          "gitVersion": "v1.36.0+kcp-v0.33.0-162-g74e9fb9c03f778",
+          "gitCommit": "74e9fb9c03f778c57d1a6a782d5adc9476ec1af5",
+          "gitTreeState": "clean",
+          "gitMajor": "1",
+          "gitMinor": "36",
+          "buildDate": "2026-10-22T16:36:10Z"
+        }
       },
       "fetch": {
-        "linux/amd64": {"kind": "gosrc", "members": {"kcp": "kcp"}},
-        "linux/arm64": {"kind": "gosrc", "members": {"kcp": "kcp"}}
+        "linux/amd64": {
+          "kind": "gosrc",
+          "members": {
+            "kcp": "kcp"
+          }
+        },
+        "linux/arm64": {
+          "kind": "gosrc",
+          "members": {
+            "kcp": "kcp"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "2fc5be2b9418bbd7961e7e0913054f8db409ef66da25f465c3bf30f4eae4bdd4", "rawBytes": 123207806, "zstdBytes": 24419908},
-        "linux/arm64": {"treeSha256": "7b534b4865161f3d5b6b749f89cdc5fa64589d4d19ebd302c825b1865e2202e2", "rawBytes": 114032766, "zstdBytes": 21521584}
+        "linux/amd64": {
+          "treeSha256": "2fc5be2b9418bbd7961e7e0913054f8db409ef66da25f465c3bf30f4eae4bdd4",
+          "rawBytes": 123207806,
+          "zstdBytes": 24419908
+        },
+        "linux/arm64": {
+          "treeSha256": "7b534b4865161f3d5b6b749f89cdc5fa64589d4d19ebd302c825b1865e2202e2",
+          "rawBytes": 114032766,
+          "zstdBytes": 21521584
+        }
       }
     },
     "kine": {
       "version": "v0.17.1",
       "source": "github.com/k3s-io/kine release v0.17.1 (the cgo build, sqlite included)",
       "verify": "sha256 pinned here and matched against the release's sha256sum-<arch>.txt; upstream publishes no signature",
-      "executables": {"kine": "kine"},
+      "executables": {
+        "kine": "kine"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/kine-amd64", "sha256": "790abe084aa21a2c6fbd2678f79bcf680369a4f56ec6f0a28a0fb56eafcb22db", "archive": "raw", "members": {"kine-amd64": "kine"}, "checksums": {"url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/sha256sum-amd64.txt", "name": "kine-amd64"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/kine-arm64", "sha256": "491d49897df089b01c71f936757eaa070f0718bb743315974a00dc90ee2d363c", "archive": "raw", "members": {"kine-arm64": "kine"}, "checksums": {"url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/sha256sum-arm64.txt", "name": "kine-arm64"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/kine-amd64",
+          "sha256": "790abe084aa21a2c6fbd2678f79bcf680369a4f56ec6f0a28a0fb56eafcb22db",
+          "archive": "raw",
+          "members": {
+            "kine-amd64": "kine"
+          },
+          "checksums": {
+            "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/sha256sum-amd64.txt",
+            "name": "kine-amd64"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/kine-arm64",
+          "sha256": "491d49897df089b01c71f936757eaa070f0718bb743315974a00dc90ee2d363c",
+          "archive": "raw",
+          "members": {
+            "kine-arm64": "kine"
+          },
+          "checksums": {
+            "url": "https://github.com/k3s-io/kine/releases/download/v0.17.1/sha256sum-arm64.txt",
+            "name": "kine-arm64"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "f79aced8215e5ef6038aac49664cc9a867be128d755b8dc05583cf1fbb3aac9f", "rawBytes": 47145400, "zstdBytes": 13104735},
-        "linux/arm64": {"treeSha256": "5ed2ea681157b211bcfc82319406d3282968e28191b7829ce41ff4c8f3fa1e77", "rawBytes": 44063312, "zstdBytes": 11756637}
+        "linux/amd64": {
+          "treeSha256": "f79aced8215e5ef6038aac49664cc9a867be128d755b8dc05583cf1fbb3aac9f",
+          "rawBytes": 47145400,
+          "zstdBytes": 13104735
+        },
+        "linux/arm64": {
+          "treeSha256": "5ed2ea681157b211bcfc82319406d3282968e28191b7829ce41ff4c8f3fa1e77",
+          "rawBytes": 44063312,
+          "zstdBytes": 11756637
+        }
       }
     },
     "bao": {
       "version": "v2.6.2",
       "source": "github.com/openbao/openbao release v2.6.2",
       "verify": "sha256 pinned here, matched against checksums.txt, whose detached GPG signature checksums.txt.gpgsig must verify with the OpenBao release key (primary fingerprint pinned here)",
-      "executables": {"bao": "bao"},
+      "executables": {
+        "bao": "bao"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao_2.6.2_linux_amd64.tar.gz", "sha256": "8dc11cc5fca0b539a9e352727dacb4e2d304daffcf9a66e0718ac325a20d05aa", "archive": "tar.gz", "members": {"bao": "bao"}, "checksums": {"url": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt", "name": "openbao_2.6.2_linux_amd64.tar.gz", "signature": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt.gpgsig", "key": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao-gpg-pub-20240618.asc", "fingerprint": "66D15FDD87287219C8E15478D200CD702853E6D0"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao_2.6.2_linux_arm64.tar.gz", "sha256": "1b408e01f3565ac0cbcb88d637dca271d0515148fb72efdeff4473a34fa50c4e", "archive": "tar.gz", "members": {"bao": "bao"}, "checksums": {"url": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt", "name": "openbao_2.6.2_linux_arm64.tar.gz", "signature": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt.gpgsig", "key": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao-gpg-pub-20240618.asc", "fingerprint": "66D15FDD87287219C8E15478D200CD702853E6D0"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao_2.6.2_linux_amd64.tar.gz",
+          "sha256": "8dc11cc5fca0b539a9e352727dacb4e2d304daffcf9a66e0718ac325a20d05aa",
+          "archive": "tar.gz",
+          "members": {
+            "bao": "bao"
+          },
+          "checksums": {
+            "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt",
+            "name": "openbao_2.6.2_linux_amd64.tar.gz",
+            "signature": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt.gpgsig",
+            "key": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao-gpg-pub-20240618.asc",
+            "fingerprint": "66D15FDD87287219C8E15478D200CD702853E6D0"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao_2.6.2_linux_arm64.tar.gz",
+          "sha256": "1b408e01f3565ac0cbcb88d637dca271d0515148fb72efdeff4473a34fa50c4e",
+          "archive": "tar.gz",
+          "members": {
+            "bao": "bao"
+          },
+          "checksums": {
+            "url": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt",
+            "name": "openbao_2.6.2_linux_arm64.tar.gz",
+            "signature": "https://github.com/openbao/openbao/releases/download/v2.6.2/checksums.txt.gpgsig",
+            "key": "https://github.com/openbao/openbao/releases/download/v2.6.2/openbao-gpg-pub-20240618.asc",
+            "fingerprint": "66D15FDD87287219C8E15478D200CD702853E6D0"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "829af4b8d5a8d8f6ab0c15d9926f130e8b9942a40ffc3b744ffb2fb957c8b6c3", "rawBytes": 196404560, "zstdBytes": 63034977},
-        "linux/arm64": {"treeSha256": "5b1241cf0aeda2a529b617e198add0fa913ee8be3def2865f0a9b55f8ec621f6", "rawBytes": 185398885, "zstdBytes": 58045272}
+        "linux/amd64": {
+          "treeSha256": "829af4b8d5a8d8f6ab0c15d9926f130e8b9942a40ffc3b744ffb2fb957c8b6c3",
+          "rawBytes": 196404560,
+          "zstdBytes": 63034977
+        },
+        "linux/arm64": {
+          "treeSha256": "5b1241cf0aeda2a529b617e198add0fa913ee8be3def2865f0a9b55f8ec621f6",
+          "rawBytes": 185398885,
+          "zstdBytes": 58045272
+        }
       }
     },
     "k3s": {
       "version": "v1.36.4+k3s1",
       "source": "github.com/k3s-io/k3s release v1.36.4+k3s1",
       "verify": "sha256 pinned here and matched against the release's sha256sum-<arch>.txt; upstream publishes no signature",
-      "executables": {"k3s": "k3s"},
+      "executables": {
+        "k3s": "k3s"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/k3s", "sha256": "835873f37245fc615f547a2fe2af9402a347875f13fa64a1f136de644955ea3f", "archive": "raw", "members": {"k3s": "k3s"}, "checksums": {"url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/sha256sum-amd64.txt", "name": "k3s"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/k3s-arm64", "sha256": "c920706346d5ad4e5cd3c7bf1bb09ce71ebe07fec829e513e40f1caf98aed8bb", "archive": "raw", "members": {"k3s-arm64": "k3s"}, "checksums": {"url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/sha256sum-arm64.txt", "name": "k3s-arm64"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/k3s",
+          "sha256": "835873f37245fc615f547a2fe2af9402a347875f13fa64a1f136de644955ea3f",
+          "archive": "raw",
+          "members": {
+            "k3s": "k3s"
+          },
+          "checksums": {
+            "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/sha256sum-amd64.txt",
+            "name": "k3s"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/k3s-arm64",
+          "sha256": "c920706346d5ad4e5cd3c7bf1bb09ce71ebe07fec829e513e40f1caf98aed8bb",
+          "archive": "raw",
+          "members": {
+            "k3s-arm64": "k3s"
+          },
+          "checksums": {
+            "url": "https://github.com/k3s-io/k3s/releases/download/v1.36.4%2Bk3s1/sha256sum-arm64.txt",
+            "name": "k3s-arm64"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "0e191a2d87c8beab7e4a8a049dbad08c8e51ef27f4c1eccdb70edbcc6f9bd9e0", "rawBytes": 78991522, "zstdBytes": 72752926},
-        "linux/arm64": {"treeSha256": "6d185c33623c2fb44e91316ede334103cfe348a69fa1ac5785dd4b854d29dbf4", "rawBytes": 71368866, "zstdBytes": 65439600}
+        "linux/amd64": {
+          "treeSha256": "0e191a2d87c8beab7e4a8a049dbad08c8e51ef27f4c1eccdb70edbcc6f9bd9e0",
+          "rawBytes": 78991522,
+          "zstdBytes": 72752926
+        },
+        "linux/arm64": {
+          "treeSha256": "6d185c33623c2fb44e91316ede334103cfe348a69fa1ac5785dd4b854d29dbf4",
+          "rawBytes": 71368866,
+          "zstdBytes": 65439600
+        }
       }
     },
     "external-secrets": {
       "version": "v2.11.0",
       "source": "the digest-pinned upstream image ghcr.io/external-secrets/external-secrets:v2.11.0 (the same index digest as components.external-secrets.image), its binary layer",
       "verify": "OCI content addressing: the index, the per-platform manifest and the layer are each fetched by digest and re-hashed, and each must name the next; the upstream cosign keyless signature is not checked here",
-      "executables": {"external-secrets": "external-secrets"},
+      "executables": {
+        "external-secrets": "external-secrets"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "oci", "registry": "ghcr.io", "repository": "external-secrets/external-secrets", "index": "sha256:66fb710878cbf3eba4a927e35c5d75e29a202c9bab238aad64bfb23b786b962b", "manifest": "sha256:a73a67dc0ad81a8883d67ac86aa6e45aa7afcc49b24d53dc72eb83afc624fb02", "layer": "sha256:94b8b13c73fb33abd1a937b461d65cacd94037ab5779cf961179d9bdfca6f873", "members": {"usr/bin/external-secrets": "external-secrets"}},
-        "linux/arm64": {"kind": "oci", "registry": "ghcr.io", "repository": "external-secrets/external-secrets", "index": "sha256:66fb710878cbf3eba4a927e35c5d75e29a202c9bab238aad64bfb23b786b962b", "manifest": "sha256:ac7af4de424eacbad4b9526932b4e35f135ce3dfbb7587aa9f6a144e7696cce4", "layer": "sha256:1987ef60743268a68ef8aac63ebcde8a688abeb5fe06435d05c9729d472b9a0a", "members": {"usr/bin/external-secrets": "external-secrets"}}
+        "linux/amd64": {
+          "kind": "oci",
+          "registry": "ghcr.io",
+          "repository": "external-secrets/external-secrets",
+          "index": "sha256:66fb710878cbf3eba4a927e35c5d75e29a202c9bab238aad64bfb23b786b962b",
+          "manifest": "sha256:a73a67dc0ad81a8883d67ac86aa6e45aa7afcc49b24d53dc72eb83afc624fb02",
+          "layer": "sha256:94b8b13c73fb33abd1a937b461d65cacd94037ab5779cf961179d9bdfca6f873",
+          "members": {
+            "usr/bin/external-secrets": "external-secrets"
+          }
+        },
+        "linux/arm64": {
+          "kind": "oci",
+          "registry": "ghcr.io",
+          "repository": "external-secrets/external-secrets",
+          "index": "sha256:66fb710878cbf3eba4a927e35c5d75e29a202c9bab238aad64bfb23b786b962b",
+          "manifest": "sha256:ac7af4de424eacbad4b9526932b4e35f135ce3dfbb7587aa9f6a144e7696cce4",
+          "layer": "sha256:1987ef60743268a68ef8aac63ebcde8a688abeb5fe06435d05c9729d472b9a0a",
+          "members": {
+            "usr/bin/external-secrets": "external-secrets"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "14d0d200c9609b519c934dbb212d97fe34d49d4f08cb3a4e3f568916f7d8e44a", "rawBytes": 295538116, "zstdBytes": 81505431},
-        "linux/arm64": {"treeSha256": "2ca8c0764fb7782eac2f0cd09dc1421e951f7f11d107875a2786da0fbb737bcf", "rawBytes": 283082381, "zstdBytes": 76307811}
+        "linux/amd64": {
+          "treeSha256": "14d0d200c9609b519c934dbb212d97fe34d49d4f08cb3a4e3f568916f7d8e44a",
+          "rawBytes": 295538116,
+          "zstdBytes": 81505431
+        },
+        "linux/arm64": {
+          "treeSha256": "2ca8c0764fb7782eac2f0cd09dc1421e951f7f11d107875a2786da0fbb737bcf",
+          "rawBytes": 283082381,
+          "zstdBytes": 76307811
+        }
       }
     },
     "dumbpipe": {
       "version": "v0.39.0",
       "source": "github.com/n0-computer/dumbpipe release v0.39.0",
       "verify": "sha256 pinned here (GitHub's asset digest); upstream publishes neither a checksum file nor a signature",
-      "executables": {"dumbpipe": "dumbpipe"},
+      "executables": {
+        "dumbpipe": "dumbpipe"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/n0-computer/dumbpipe/releases/download/v0.39.0/dumbpipe-v0.39.0-linux-x86_64.tar.gz", "sha256": "9ac5e71983eba4cf4f47e92e4694dad0f0133abba4f14dd2a2a8428cece88fef", "archive": "tar.gz", "members": {"dumbpipe": "dumbpipe"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/n0-computer/dumbpipe/releases/download/v0.39.0/dumbpipe-v0.39.0-linux-aarch64.tar.gz", "sha256": "8cd099afe80c69ac58bfbc975b28e29d41caea141f3dd396457345a739836a0e", "archive": "tar.gz", "members": {"dumbpipe": "dumbpipe"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/n0-computer/dumbpipe/releases/download/v0.39.0/dumbpipe-v0.39.0-linux-x86_64.tar.gz",
+          "sha256": "9ac5e71983eba4cf4f47e92e4694dad0f0133abba4f14dd2a2a8428cece88fef",
+          "archive": "tar.gz",
+          "members": {
+            "dumbpipe": "dumbpipe"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/n0-computer/dumbpipe/releases/download/v0.39.0/dumbpipe-v0.39.0-linux-aarch64.tar.gz",
+          "sha256": "8cd099afe80c69ac58bfbc975b28e29d41caea141f3dd396457345a739836a0e",
+          "archive": "tar.gz",
+          "members": {
+            "dumbpipe": "dumbpipe"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "b9d78696a060bc30f270731679d8222a1a4645f1c6f9c30aae647be6ef85d89e", "rawBytes": 8617456, "zstdBytes": 3097638},
-        "linux/arm64": {"treeSha256": "92829aed18f366df3bd3a7295e28e1a225414a56819622c37693d02a8255ca91", "rawBytes": 7248832, "zstdBytes": 2854766}
+        "linux/amd64": {
+          "treeSha256": "b9d78696a060bc30f270731679d8222a1a4645f1c6f9c30aae647be6ef85d89e",
+          "rawBytes": 8617456,
+          "zstdBytes": 3097638
+        },
+        "linux/arm64": {
+          "treeSha256": "92829aed18f366df3bd3a7295e28e1a225414a56819622c37693d02a8255ca91",
+          "rawBytes": 7248832,
+          "zstdBytes": 2854766
+        }
       }
     },
     "opentunnel": {
       "version": "v0.5.5",
       "source": "github.com/anomalyco/opentunnel release v0.5.5",
       "verify": "sha256 pinned here (GitHub's asset digest); upstream publishes a SHA256SUMS asset that names each archive",
-      "executables": {"opentunnel": "opentunnel"},
+      "executables": {
+        "opentunnel": "opentunnel"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-x64.tar.gz", "sha256": "cb51e3b425e6c61708296dc3f973c225a949f957d7c524704da6a01fa8148d85", "checksums": {"url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS", "name": "opentunnel-linux-x64.tar.gz"}, "archive": "tar.gz", "members": {"opentunnel": "opentunnel"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-arm64.tar.gz", "sha256": "183f2b3b534c8e34841503186b9bbb858d9b8d3191471cce87d8eee40facb897", "checksums": {"url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS", "name": "opentunnel-linux-arm64.tar.gz"}, "archive": "tar.gz", "members": {"opentunnel": "opentunnel"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-x64.tar.gz",
+          "sha256": "cb51e3b425e6c61708296dc3f973c225a949f957d7c524704da6a01fa8148d85",
+          "checksums": {
+            "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS",
+            "name": "opentunnel-linux-x64.tar.gz"
+          },
+          "archive": "tar.gz",
+          "members": {
+            "opentunnel": "opentunnel"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/opentunnel-linux-arm64.tar.gz",
+          "sha256": "183f2b3b534c8e34841503186b9bbb858d9b8d3191471cce87d8eee40facb897",
+          "checksums": {
+            "url": "https://github.com/anomalyco/opentunnel/releases/download/v0.5.5/SHA256SUMS",
+            "name": "opentunnel-linux-arm64.tar.gz"
+          },
+          "archive": "tar.gz",
+          "members": {
+            "opentunnel": "opentunnel"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "99a811c864b492b69530cd03254c0f0bcdb995de5e1d63fe8178f37a516025ab", "rawBytes": 6654576, "zstdBytes": 2572563},
-        "linux/arm64": {"treeSha256": "537cb690e4bb5183aea3fa9a1eddc5b1e089f5516fcd40ba5e040cd56552515e", "rawBytes": 5650496, "zstdBytes": 2400434}
+        "linux/amd64": {
+          "treeSha256": "99a811c864b492b69530cd03254c0f0bcdb995de5e1d63fe8178f37a516025ab",
+          "rawBytes": 6654576,
+          "zstdBytes": 2572563
+        },
+        "linux/arm64": {
+          "treeSha256": "537cb690e4bb5183aea3fa9a1eddc5b1e089f5516fcd40ba5e040cd56552515e",
+          "rawBytes": 5650496,
+          "zstdBytes": 2400434
+        }
       }
     },
     "external-secrets-bundle": {
       "version": "v2.11.0",
       "source": "github.com/external-secrets/external-secrets release v2.11.0, its external-secrets.yaml (the bundle components.external-secrets.bundleSha256 pins)",
       "verify": "sha256 pinned here, equal to components.external-secrets.bundleSha256",
-      "executables": {"external-secrets-bundle": "external-secrets.yaml"},
+      "executables": {
+        "external-secrets-bundle": "external-secrets.yaml"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/external-secrets/external-secrets/releases/download/v2.11.0/external-secrets.yaml", "sha256": "c427124642886d240af8f28d294714a168d920ef8e5d55db14600e00ed0cfb80", "archive": "raw", "members": {"external-secrets.yaml": "external-secrets.yaml"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/external-secrets/external-secrets/releases/download/v2.11.0/external-secrets.yaml", "sha256": "c427124642886d240af8f28d294714a168d920ef8e5d55db14600e00ed0cfb80", "archive": "raw", "members": {"external-secrets.yaml": "external-secrets.yaml"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/external-secrets/external-secrets/releases/download/v2.11.0/external-secrets.yaml",
+          "sha256": "c427124642886d240af8f28d294714a168d920ef8e5d55db14600e00ed0cfb80",
+          "archive": "raw",
+          "members": {
+            "external-secrets.yaml": "external-secrets.yaml"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/external-secrets/external-secrets/releases/download/v2.11.0/external-secrets.yaml",
+          "sha256": "c427124642886d240af8f28d294714a168d920ef8e5d55db14600e00ed0cfb80",
+          "archive": "raw",
+          "members": {
+            "external-secrets.yaml": "external-secrets.yaml"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "6146cf4ed0df6f2f9f42a395c239143128e3ae727af949759666cb20babe3181", "rawBytes": 2007547, "zstdBytes": 47789},
-        "linux/arm64": {"treeSha256": "6146cf4ed0df6f2f9f42a395c239143128e3ae727af949759666cb20babe3181", "rawBytes": 2007547, "zstdBytes": 47789}
+        "linux/amd64": {
+          "treeSha256": "6146cf4ed0df6f2f9f42a395c239143128e3ae727af949759666cb20babe3181",
+          "rawBytes": 2007547,
+          "zstdBytes": 47789
+        },
+        "linux/arm64": {
+          "treeSha256": "6146cf4ed0df6f2f9f42a395c239143128e3ae727af949759666cb20babe3181",
+          "rawBytes": 2007547,
+          "zstdBytes": 47789
+        }
       }
     },
     "firecracker": {
       "version": "v1.13.1",
       "source": "github.com/firecracker-microvm/firecracker release v1.13.1 (the version the linux proofs ran)",
       "verify": "sha256 pinned here and matched against the release's .sha256.txt; upstream publishes no signature",
-      "executables": {"firecracker": "firecracker"},
+      "executables": {
+        "firecracker": "firecracker"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-x86_64.tgz", "sha256": "59450b9171ff2ebdf2f9a25be3a248a7ba79fb6371aec51a9d6d8eefca7b4faf", "archive": "tar.gz", "members": {"release-v1.13.1-x86_64/firecracker-v1.13.1-x86_64": "firecracker"}, "checksums": {"url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-x86_64.tgz.sha256.txt", "name": "firecracker-v1.13.1-x86_64.tgz"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-aarch64.tgz", "sha256": "3ae4006ccb33a068f41d93a9c488cad17356bb9c22418e3c7efc7ca2256a6e84", "archive": "tar.gz", "members": {"release-v1.13.1-aarch64/firecracker-v1.13.1-aarch64": "firecracker"}, "checksums": {"url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-aarch64.tgz.sha256.txt", "name": "firecracker-v1.13.1-aarch64.tgz"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-x86_64.tgz",
+          "sha256": "59450b9171ff2ebdf2f9a25be3a248a7ba79fb6371aec51a9d6d8eefca7b4faf",
+          "archive": "tar.gz",
+          "members": {
+            "release-v1.13.1-x86_64/firecracker-v1.13.1-x86_64": "firecracker"
+          },
+          "checksums": {
+            "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-x86_64.tgz.sha256.txt",
+            "name": "firecracker-v1.13.1-x86_64.tgz"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-aarch64.tgz",
+          "sha256": "3ae4006ccb33a068f41d93a9c488cad17356bb9c22418e3c7efc7ca2256a6e84",
+          "archive": "tar.gz",
+          "members": {
+            "release-v1.13.1-aarch64/firecracker-v1.13.1-aarch64": "firecracker"
+          },
+          "checksums": {
+            "url": "https://github.com/firecracker-microvm/firecracker/releases/download/v1.13.1/firecracker-v1.13.1-aarch64.tgz.sha256.txt",
+            "name": "firecracker-v1.13.1-aarch64.tgz"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "7980e9cef61bed899dfc06a4e9ff530c03d482a95645bc9aae65090ab9d3da1e", "rawBytes": 3284984, "zstdBytes": 1127003},
-        "linux/arm64": {"treeSha256": "f425e3a3cac72e14c2cf09c2c5d3151586f9fce59df94b5f8da8accb0168cdcc", "rawBytes": 2866368, "zstdBytes": 1006897}
+        "linux/amd64": {
+          "treeSha256": "7980e9cef61bed899dfc06a4e9ff530c03d482a95645bc9aae65090ab9d3da1e",
+          "rawBytes": 3284984,
+          "zstdBytes": 1127003
+        },
+        "linux/arm64": {
+          "treeSha256": "f425e3a3cac72e14c2cf09c2c5d3151586f9fce59df94b5f8da8accb0168cdcc",
+          "rawBytes": 2866368,
+          "zstdBytes": 1006897
+        }
       }
     },
     "vfkit": {
       "version": "v0.6.4",
       "source": "github.com/crc-org/vfkit release v0.6.4, the file named vfkit (a universal x86_64+arm64 Mach-O), shipped as is",
       "verify": "sha256 pinned here, equal to the digest GitHub shows for the release asset; the file carries the Red Hat Developer ID signature (Developer ID Application: Red Hat, Inc. (HYSCB8KRL2), hardened runtime, entitlement com.apple.security.virtualization), codesign --verify --strict passes and spctl accepts it as Notarized Developer ID (read on macOS 27.2)",
-      "executables": {"vfkit": "vfkit"},
+      "executables": {
+        "vfkit": "vfkit"
+      },
       "fetch": {
-        "darwin/arm64": {"kind": "file", "url": "https://github.com/crc-org/vfkit/releases/download/v0.6.4/vfkit", "sha256": "0ed83fc8ca7aa708598835480dba1362406aa7cd1dab3b27464eb76327d9652d", "archive": "raw", "members": {"vfkit": "vfkit"}}
+        "darwin/arm64": {
+          "kind": "file",
+          "url": "https://github.com/crc-org/vfkit/releases/download/v0.6.4/vfkit",
+          "sha256": "0ed83fc8ca7aa708598835480dba1362406aa7cd1dab3b27464eb76327d9652d",
+          "archive": "raw",
+          "members": {
+            "vfkit": "vfkit"
+          }
+        }
       },
       "platforms": {
-        "darwin/arm64": {"treeSha256": "28d3b7e32c0ed9833135064a0d9fff6867d426ab876facd4edf3f7bf810c5653", "rawBytes": 66431936, "zstdBytes": 29401851}
+        "darwin/arm64": {
+          "treeSha256": "28d3b7e32c0ed9833135064a0d9fff6867d426ab876facd4edf3f7bf810c5653",
+          "rawBytes": 66431936,
+          "zstdBytes": 29401851
+        }
       }
     },
     "deno": {
       "version": "v2.9.3",
       "source": "github.com/denoland/deno release v2.9.3",
       "verify": "sha256 pinned here and matched against the release's .zip.sha256sum; upstream publishes no signature",
-      "executables": {"deno": "deno"},
+      "executables": {
+        "deno": "deno"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "file", "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-x86_64-unknown-linux-gnu.zip", "sha256": "8101865641cbede56f08ad19c0a67a87df84bce127fee0d3e3e1f7467717ffa6", "archive": "zip", "members": {"deno": "deno"}, "checksums": {"url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-x86_64-unknown-linux-gnu.zip.sha256sum", "name": "deno-x86_64-unknown-linux-gnu.zip"}},
-        "linux/arm64": {"kind": "file", "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-aarch64-unknown-linux-gnu.zip", "sha256": "753937db98a4b56cbbbd26e8f00eb4b789191a229afec93f74bcfa4e79bc2c8b", "archive": "zip", "members": {"deno": "deno"}, "checksums": {"url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-aarch64-unknown-linux-gnu.zip.sha256sum", "name": "deno-aarch64-unknown-linux-gnu.zip"}}
+        "linux/amd64": {
+          "kind": "file",
+          "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-x86_64-unknown-linux-gnu.zip",
+          "sha256": "8101865641cbede56f08ad19c0a67a87df84bce127fee0d3e3e1f7467717ffa6",
+          "archive": "zip",
+          "members": {
+            "deno": "deno"
+          },
+          "checksums": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-x86_64-unknown-linux-gnu.zip.sha256sum",
+            "name": "deno-x86_64-unknown-linux-gnu.zip"
+          }
+        },
+        "linux/arm64": {
+          "kind": "file",
+          "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-aarch64-unknown-linux-gnu.zip",
+          "sha256": "753937db98a4b56cbbbd26e8f00eb4b789191a229afec93f74bcfa4e79bc2c8b",
+          "archive": "zip",
+          "members": {
+            "deno": "deno"
+          },
+          "checksums": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-aarch64-unknown-linux-gnu.zip.sha256sum",
+            "name": "deno-aarch64-unknown-linux-gnu.zip"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "b42656d8d2c9953fa1262bb4d3f2b3b8c88f5dead84b9d40e2afe2b947da2eb9", "rawBytes": 106313392, "zstdBytes": 33594680},
-        "linux/arm64": {"treeSha256": "6dc45bc88f827379c0221fcfc5166cce10726355e3f675135a28690c69cfdec0", "rawBytes": 96245208, "zstdBytes": 33221115}
+        "linux/amd64": {
+          "treeSha256": "b42656d8d2c9953fa1262bb4d3f2b3b8c88f5dead84b9d40e2afe2b947da2eb9",
+          "rawBytes": 106313392,
+          "zstdBytes": 33594680
+        },
+        "linux/arm64": {
+          "treeSha256": "6dc45bc88f827379c0221fcfc5166cce10726355e3f675135a28690c69cfdec0",
+          "rawBytes": 96245208,
+          "zstdBytes": 33221115
+        }
       }
     },
     "pasta": {
       "version": "0.0~git20260120.386b5f5-1",
       "source": "the passt package of Ubuntu 26.04 resolute universe (release pocket); passt.top publishes only an unversioned latest/ build",
       "verify": "the Ubuntu archive key (fingerprint pinned here) verifies resolute InRelease, whose SHA256 names universe Packages.xz, whose stanza names the deb's sha256, which is also pinned here",
-      "executables": {"pasta": "pasta"},
+      "executables": {
+        "pasta": "pasta"
+      },
       "glibcFloor": "2.38",
       "repos": {
-        "ubuntu": {"key": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6ECB3762474EDA9D21B7022871920D1991BC93C", "fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C", "base": {"linux/amd64": "https://archive.ubuntu.com/ubuntu/", "linux/arm64": "https://ports.ubuntu.com/ubuntu-ports/"}, "suites": ["resolute"], "component": "universe"}
+        "ubuntu": {
+          "key": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6ECB3762474EDA9D21B7022871920D1991BC93C",
+          "fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C",
+          "base": {
+            "linux/amd64": "https://archive.ubuntu.com/ubuntu/",
+            "linux/arm64": "https://ports.ubuntu.com/ubuntu-ports/"
+          },
+          "suites": [
+            "resolute"
+          ],
+          "component": "universe"
+        }
       },
       "debs": [
-        {"package": "passt", "version": "0.0~git20260120.386b5f5-1", "repo": "ubuntu", "pool": "pool/universe/p/passt/", "sha256": {"linux/amd64": "49eaf773c120432bdf439d26d3de4d9867116580a819e6eba815b600c45b9840", "linux/arm64": "286241bcb83670aab48764820c4633b848c33d17ff56e20039b7ac52355930e4"}}
+        {
+          "package": "passt",
+          "version": "0.0~git20260120.386b5f5-1",
+          "repo": "ubuntu",
+          "pool": "pool/universe/p/passt/",
+          "sha256": {
+            "linux/amd64": "49eaf773c120432bdf439d26d3de4d9867116580a819e6eba815b600c45b9840",
+            "linux/arm64": "286241bcb83670aab48764820c4633b848c33d17ff56e20039b7ac52355930e4"
+          }
+        }
       ],
       "fetch": {
-        "linux/amd64": {"kind": "debs", "layout": "members", "members": {"usr/bin/pasta": "pasta", "usr/bin/pasta.avx2": "pasta.avx2"}},
-        "linux/arm64": {"kind": "debs", "layout": "members", "members": {"usr/bin/pasta": "pasta"}}
+        "linux/amd64": {
+          "kind": "debs",
+          "layout": "members",
+          "members": {
+            "usr/bin/pasta": "pasta",
+            "usr/bin/pasta.avx2": "pasta.avx2"
+          }
+        },
+        "linux/arm64": {
+          "kind": "debs",
+          "layout": "members",
+          "members": {
+            "usr/bin/pasta": "pasta"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "276c641e34ba2df6a48e4e817c267c6da8910ea6d8bbc4561279be5f2bbfb235", "rawBytes": 596368, "zstdBytes": 222931},
-        "linux/arm64": {"treeSha256": "fc21816c6a91f24e4ed4e4f5595bc1de2256e0c102816b8c250d2604eca9e8ac", "rawBytes": 273472, "zstdBytes": 118434}
+        "linux/amd64": {
+          "treeSha256": "276c641e34ba2df6a48e4e817c267c6da8910ea6d8bbc4561279be5f2bbfb235",
+          "rawBytes": 596368,
+          "zstdBytes": 222931
+        },
+        "linux/arm64": {
+          "treeSha256": "fc21816c6a91f24e4ed4e4f5595bc1de2256e0c102816b8c250d2604eca9e8ac",
+          "rawBytes": 273472,
+          "zstdBytes": 118434
+        }
       }
     },
     "postgres": {
       "version": "18.6",
       "source": "PGDG official debs (apt.postgresql.org jammy-pgdg 18.6-1.pgdg22.04+2: postgresql-18, postgresql-client-18, libpq5) plus their Ubuntu 22.04 shared-library closure (44 debs from jammy, jammy-updates, jammy-security), extracted without root into <root>/usr/lib/postgresql/18/{bin,lib}, <root>/usr/share/postgresql/18, <root>/usr/lib/sys (docs/research/2026-10-11-vm-lifecycle/pg-source.md)",
       "verify": "the PGDG key and the Ubuntu archive key (fingerprints pinned here) verify each suite's InRelease, whose SHA256 names Packages, whose stanza names each deb's sha256, which is also pinned here",
-      "executables": {"postgres": "usr/lib/postgresql/18/bin/postgres", "initdb": "usr/lib/postgresql/18/bin/initdb", "pg_dump": "usr/lib/postgresql/18/bin/pg_dump"},
+      "executables": {
+        "postgres": "usr/lib/postgresql/18/bin/postgres",
+        "initdb": "usr/lib/postgresql/18/bin/initdb",
+        "pg_dump": "usr/lib/postgresql/18/bin/pg_dump"
+      },
       "libraryPath": "usr/lib/sys",
       "glibcFloor": "2.35",
       "icu": "70.1 (unicode collversion 153.112; unused: initdb --locale-provider=builtin --builtin-locale=C.UTF-8, datcollversion 1)",
       "invariant": "Relocatable ONLY with the deb layout kept and LD_LIBRARY_PATH=<root>/usr/lib/sys set on the postgres/initdb/pg_dump exec alone, never on the core. Timezone files are the HOST's /usr/share/zoneinfo. postgres REFUSES -p 0. Runs as non-root only. Any Ubuntu jammy security update changes the closure pins.",
       "repos": {
-        "pgdg": {"key": "https://www.postgresql.org/media/keys/ACCC4CF8.asc", "fingerprint": "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8", "base": {"linux/amd64": "https://apt.postgresql.org/pub/repos/apt/", "linux/arm64": "https://apt.postgresql.org/pub/repos/apt/"}, "suites": ["jammy-pgdg"], "component": "main"},
-        "ubuntu": {"key": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6ECB3762474EDA9D21B7022871920D1991BC93C", "fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C", "base": {"linux/amd64": "https://archive.ubuntu.com/ubuntu/", "linux/arm64": "https://ports.ubuntu.com/ubuntu-ports/"}, "suites": ["jammy", "jammy-updates", "jammy-security"], "component": "main"}
+        "pgdg": {
+          "key": "https://www.postgresql.org/media/keys/ACCC4CF8.asc",
+          "fingerprint": "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8",
+          "base": {
+            "linux/amd64": "https://apt.postgresql.org/pub/repos/apt/",
+            "linux/arm64": "https://apt.postgresql.org/pub/repos/apt/"
+          },
+          "suites": [
+            "jammy-pgdg"
+          ],
+          "component": "main"
+        },
+        "ubuntu": {
+          "key": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF6ECB3762474EDA9D21B7022871920D1991BC93C",
+          "fingerprint": "F6ECB3762474EDA9D21B7022871920D1991BC93C",
+          "base": {
+            "linux/amd64": "https://archive.ubuntu.com/ubuntu/",
+            "linux/arm64": "https://ports.ubuntu.com/ubuntu-ports/"
+          },
+          "suites": [
+            "jammy",
+            "jammy-updates",
+            "jammy-security"
+          ],
+          "component": "main"
+        }
       },
       "debs": [
-        {"package": "postgresql-18", "version": "18.6-1.pgdg22.04+2", "repo": "pgdg", "pool": "pool/main/p/postgresql-18/", "sha256": {"linux/amd64": "2aab00b13babd3d9abc257bc5f6b00efa1f7c27cda071413f358d2e0cdb84420", "linux/arm64": "8a379f0684b480b60e79657ac8178e8b00c835e7575e85ae746c091d336563d3"}},
-        {"package": "postgresql-client-18", "version": "18.6-1.pgdg22.04+2", "repo": "pgdg", "pool": "pool/main/p/postgresql-18/", "sha256": {"linux/amd64": "ad4e491adceaf1453162c62691473ace78ed81ab20f50d11b344a793d13ed4bd", "linux/arm64": "21f1b418621fc9c90785b18ec2d7fe4fd8ff111cc607fc3b3625464fc6e7886b"}},
-        {"package": "libpq5", "version": "18.6-1.pgdg22.04+2", "repo": "pgdg", "pool": "pool/main/p/postgresql-18/", "sha256": {"linux/amd64": "8af0b458834e219f3aa7c904fa1237ea484950486e3165a3a90204878e060530", "linux/arm64": "fc0d787c9da82bd0146e5e365989f3c92dbb3d73c3a32c62a2e4d56ab90933a6"}},
-        {"package": "libaudit-common", "version": "1:3.0.7-1ubuntu0.1", "repo": "ubuntu", "pool": "pool/main/a/audit/", "sha256": {"linux/amd64": "3e4e8586db5f57f431954a9125556fe6df86610592c0cf46ba1127fae8871e3f", "linux/arm64": "3e4e8586db5f57f431954a9125556fe6df86610592c0cf46ba1127fae8871e3f"}},
-        {"package": "libaudit1", "version": "1:3.0.7-1ubuntu0.1", "repo": "ubuntu", "pool": "pool/main/a/audit/", "sha256": {"linux/amd64": "00d7eb086dedc85bd5b9cbde650a1c71460499cb62e439acb761bc7bcb4eaaac", "linux/arm64": "963474b42258e8caa15eec1db61d8424fd6b7ef717ca4e371b3240506854b3fe"}},
-        {"package": "libcap-ng0", "version": "0.7.9-2.2build3", "repo": "ubuntu", "pool": "pool/main/libc/libcap-ng/", "sha256": {"linux/amd64": "124d0c8748a841f279e996298ef8aac69a249e294792f4b5e16dc00496f1d3ac", "linux/arm64": "884c8bc87da241abaa2b0ca80162486cf66eff67dfc545bea56622e1170e9ee5"}},
-        {"package": "libcap2", "version": "1:2.44-1ubuntu0.22.04.3", "repo": "ubuntu", "pool": "pool/main/libc/libcap2/", "sha256": {"linux/amd64": "c497efb7fa3cd19a7ff297d95c7c5d678063c80c9fc230c9d034a8ee02ca8446", "linux/arm64": "7a8eb6549355a16f327ede574f12e6ebed983b52ab38ce4a618e6e9274b9d4f5"}},
-        {"package": "libcom-err2", "version": "1.46.5-2ubuntu1.2", "repo": "ubuntu", "pool": "pool/main/e/e2fsprogs/", "sha256": {"linux/amd64": "552bc8169451cfdcf174a8da845b13ced0a55777149af5cf47491193161ed791", "linux/arm64": "3a7b6a2b34c2171b7c8f9ddae58c93b6e416fcd9ac4fa8eb5a15a1a8f3f99afa"}},
-        {"package": "libdb5.3", "version": "5.3.28+dfsg1-0.8ubuntu3", "repo": "ubuntu", "pool": "pool/main/d/db5.3/", "sha256": {"linux/amd64": "ce60e446c9cb0e94bb4b4d0fe4f969e772edec250deb186bacf955e4d196548b", "linux/arm64": "e5b672aeaca690b3b7ee97b03dbc07ddb49be7b6ea0a770fa6707666ca1cef59"}},
-        {"package": "libffi8", "version": "3.4.2-4", "repo": "ubuntu", "pool": "pool/main/libf/libffi/", "sha256": {"linux/amd64": "b4f88c91fa6f4c942097be6abfc365fb133c5e147640168cbb7704fd855eac10", "linux/arm64": "a0cdf938e8da19bd2252c681f80268609a32d06496a1f8d0ebe1fa41debec697"}},
-        {"package": "libgcc-s1", "version": "12.3.0-1ubuntu1~22.04.3", "repo": "ubuntu", "pool": "pool/main/g/gcc-12/", "sha256": {"linux/amd64": "d383e642d83263147f7b4b69fb92cf1036e5246c6be3accf10b77f986684589a", "linux/arm64": "46626e1af6b159061e055f843654ee1f0f1e65fa280331ed47ee76ba1b1f6045"}},
-        {"package": "libgcrypt20", "version": "1.9.4-3ubuntu3.3", "repo": "ubuntu", "pool": "pool/main/libg/libgcrypt20/", "sha256": {"linux/amd64": "8f16329a0aabf4900271a3687890721bbef307e60983acae5b92eeff12e799b3", "linux/arm64": "bd98a709641e7e61c8798bb84030886a96fd56424b053a6e9996a8391ce20597"}},
-        {"package": "libgmp10", "version": "2:6.2.1+dfsg-3ubuntu1", "repo": "ubuntu", "pool": "pool/main/g/gmp/", "sha256": {"linux/amd64": "d199a77e11701d4d620dd4f62e05740e3072dce893856ea3bbaa6ae9fa19fef1", "linux/arm64": "32233a3bf7c8b19e86ef3629334f0bece716bb163605d12e0d3a443d57a401d7"}},
-        {"package": "libgnutls30", "version": "3.7.3-4ubuntu1.9", "repo": "ubuntu", "pool": "pool/main/g/gnutls28/", "sha256": {"linux/amd64": "65e08f0b5d1e620cc5cc9478cd1035f83ea752a6fae23141afd2d111a8f6c555", "linux/arm64": "cce4bf33fa79446ddee42a992e569f12a57c1a6f8916a2e8349249be0f7ad655"}},
-        {"package": "libgpg-error0", "version": "1.43-3", "repo": "ubuntu", "pool": "pool/main/libg/libgpg-error/", "sha256": {"linux/amd64": "1fbacdf9bd1e431cee874a697b339f6f925182bc79bba5a112b53669b33265c5", "linux/arm64": "ffa9029cdeb2786e0db1f614f3d2205f75f466a66b25e22aa89ecdf814491875"}},
-        {"package": "libgssapi-krb5-2", "version": "1.19.2-2ubuntu0.10", "repo": "ubuntu", "pool": "pool/main/k/krb5/", "sha256": {"linux/amd64": "08e98a3dc74361cdb13c0d68bc73e0352552490546c1ad3ce5bff5426f6a2dfe", "linux/arm64": "e1001bffd91dd306498ec1824a8330014399a0e0889a562069003726348d7f55"}},
-        {"package": "libhogweed6", "version": "3.7.3-1build2", "repo": "ubuntu", "pool": "pool/main/n/nettle/", "sha256": {"linux/amd64": "2402ac51ebc760799b01f3fd4933126c5eb446e5b043832601fb589f5e50c363", "linux/arm64": "844e5d093dd3982a85c134d47a9e22b129123fb817eb3eea96e936805b0f5170"}},
-        {"package": "libicu70", "version": "70.1-2", "repo": "ubuntu", "pool": "pool/main/i/icu/", "sha256": {"linux/amd64": "58a154f6307289813da2276f900498ef536ae7c0522d2cf31a3c3c5cf62dfd9a", "linux/arm64": "ac68372cf4a976e6a206858fd9b28c68e49d37d650b9b8653270038a6e7bc174"}},
-        {"package": "libidn2-0", "version": "2.3.2-2build1", "repo": "ubuntu", "pool": "pool/main/libi/libidn2/", "sha256": {"linux/amd64": "bc935e1871aa4a75d3f4ff549af32b7316aecfbea2200d85055878767b8398c8", "linux/arm64": "aeb29cc8deedc0710a97e44088ef0271dfe1197e77c0a0fc0c5602e14aeb938f"}},
-        {"package": "libk5crypto3", "version": "1.19.2-2ubuntu0.10", "repo": "ubuntu", "pool": "pool/main/k/krb5/", "sha256": {"linux/amd64": "40429c0099678fbc35045f0c63a10bc3490251d80cf1006095eaa0272c8d5e27", "linux/arm64": "e51d72b346813b57f26c09827f96eb856adb9b553814fbc61a5e8c8a25d292a3"}},
-        {"package": "libkeyutils1", "version": "1.6.1-2ubuntu3", "repo": "ubuntu", "pool": "pool/main/k/keyutils/", "sha256": {"linux/amd64": "940daf78ee0229549b4eabc92ffd79dd038ed96a44e2e912305a23540cf22a0a", "linux/arm64": "fc26b34c487ea5187585ee0f2c67c738b97e8bae434cca4b546d86743b9e6c80"}},
-        {"package": "libkrb5-3", "version": "1.19.2-2ubuntu0.10", "repo": "ubuntu", "pool": "pool/main/k/krb5/", "sha256": {"linux/amd64": "0da3e0df7d6314615160a42f65ff345986783be02cd65a6ce797cfbacc7bcb0d", "linux/arm64": "8de066e35be457bf0c53c995f8baa270ad61566dcd892d0a7cc3c0438ff513b7"}},
-        {"package": "libkrb5support0", "version": "1.19.2-2ubuntu0.10", "repo": "ubuntu", "pool": "pool/main/k/krb5/", "sha256": {"linux/amd64": "0406052ac2d267f05088ada6d36df61aaa338cbe8d5e13fb1d7f79da560817ed", "linux/arm64": "c535d5ccf5ea99fb63d86b33082c5ed553a6aa8c7cbf3fed1ef0dac1d7b7dcd6"}},
-        {"package": "libldap-2.5-0", "version": "2.5.20+dfsg-0ubuntu0.22.04.1", "repo": "ubuntu", "pool": "pool/main/o/openldap/", "sha256": {"linux/amd64": "a3ee4ac116a2c50c9ddfe9de91c0781a50704244771474334340cdce02f5cd4f", "linux/arm64": "305ec2bf85ad8e8a6309b1a48e601f172503a267ca90d511ccbb098cdf009d6b"}},
-        {"package": "liblz4-1", "version": "1.9.3-2build2", "repo": "ubuntu", "pool": "pool/main/l/lz4/", "sha256": {"linux/amd64": "ac9b54d0feb840345060c74fb687675c5e1eb2b195effafae38c5f9991041e98", "linux/arm64": "3e2274893e0963c758f0d18ba80d033736909373247a7deb211e9ff590a09133"}},
-        {"package": "liblzma5", "version": "5.2.5-2ubuntu1.2", "repo": "ubuntu", "pool": "pool/main/x/xz-utils/", "sha256": {"linux/amd64": "a88fca7506963c443c42a578db6c35424336ae28abcdaa60c89f06d30aeb625b", "linux/arm64": "e98ef4ff8c23c34fd2fd13a341d69fd1240a0af790682c3afb93dac6c87d995a"}},
-        {"package": "libnettle8", "version": "3.7.3-1build2", "repo": "ubuntu", "pool": "pool/main/n/nettle/", "sha256": {"linux/amd64": "6da09e685e5587f8873f662b007de45f75424fb33d2c4a51837380e683d33c7e", "linux/arm64": "bcd667d9a51c2474f7ffc52807ab4a24f8b877b6da1a6f5b75e50e48ec4d634a"}},
-        {"package": "libnuma1", "version": "2.0.14-3ubuntu2", "repo": "ubuntu", "pool": "pool/main/n/numactl/", "sha256": {"linux/amd64": "0721c89001fbbd1ada23e89da5d60e762763c1a7b3dc814a2e9a518480a8043d", "linux/arm64": "ca67a774b20ed639361715ef0981d236f294ff2987579b3d18faede67c3a9152"}},
-        {"package": "libp11-kit0", "version": "0.24.0-6ubuntu0.1", "repo": "ubuntu", "pool": "pool/main/p/p11-kit/", "sha256": {"linux/amd64": "9d949950970a062a81051a78ec4075b8dba608f063afaa5c8752a612d139a9b5", "linux/arm64": "0cfad0790be90ccb56de67e6c58a67d73e4769028eb19a2c0d799fa19478c2ff"}},
-        {"package": "libpam0g", "version": "1.4.0-11ubuntu2.8", "repo": "ubuntu", "pool": "pool/main/p/pam/", "sha256": {"linux/amd64": "faaf4b6d1bfb33a7fc4e195448439c202869d67c8de17c4ecd29b7719e0ac4d6", "linux/arm64": "f61ae0342dfba2b6c6b61f3d46925371434a4719a251f7585f9baa1341fcc9e2"}},
-        {"package": "libpcre2-8-0", "version": "10.39-3ubuntu0.1", "repo": "ubuntu", "pool": "pool/main/p/pcre2/", "sha256": {"linux/amd64": "01a5a74f3d305cad32fffffdc200c2a92fd8e5a01bff97de76ac598fb444d53e", "linux/arm64": "b85beefd54108f1c34a89cb26688eb1b2eeaa099e4995091295a1d39f9c67a91"}},
-        {"package": "libreadline8", "version": "8.1.2-1", "repo": "ubuntu", "pool": "pool/main/r/readline/", "sha256": {"linux/amd64": "51fd16f608efa710c987e4b071ffba0bec63a9ac8e55eddd5770f5e5252edc09", "linux/arm64": "54291f2dd185d3a759227b31b7de4269e495a084fdad89e24a9cc4d0d20888a7"}},
-        {"package": "libsasl2-2", "version": "2.1.27+dfsg2-3ubuntu1.2", "repo": "ubuntu", "pool": "pool/main/c/cyrus-sasl2/", "sha256": {"linux/amd64": "391cb48d7e601d5bb590da8d426750acf6c987241ba280a36227873b94f20cee", "linux/arm64": "d4f60677a0024f2b888a563f1d396a1f43fe22097e01d0a7048695c3c1ef8e18"}},
-        {"package": "libsasl2-modules-db", "version": "2.1.27+dfsg2-3ubuntu1.2", "repo": "ubuntu", "pool": "pool/main/c/cyrus-sasl2/", "sha256": {"linux/amd64": "0e222c26d70c2cfd132c8de035bcf9673067b6cbfea0a7421dced7b6256ae774", "linux/arm64": "438df2296b2f828ab05287fadbf1a29f2e3bc0d618807b01128829313be91895"}},
-        {"package": "libselinux1", "version": "3.3-1build2", "repo": "ubuntu", "pool": "pool/main/libs/libselinux/", "sha256": {"linux/amd64": "b96c6b40ee2388bd51341cb11c0f1d5bcca29b9180b6e3a77a06b881f2913f7e", "linux/arm64": "3a0726b2174a40fa28e74712867aa6e40d3d725543e8f668af9e9e59a28c817c"}},
-        {"package": "libssl3", "version": "3.0.2-0ubuntu1.30", "repo": "ubuntu", "pool": "pool/main/o/openssl/", "sha256": {"linux/amd64": "d1b4636e32ac6d3b95d583ac05ac548b1aa248414bae1c51b14f54be0f8fd7bc", "linux/arm64": "1c4b8cc736eed8a0caafc385f854fa6852382221d84be4795f1d19a52b9fec53"}},
-        {"package": "libstdc++6", "version": "12.3.0-1ubuntu1~22.04.3", "repo": "ubuntu", "pool": "pool/main/g/gcc-12/", "sha256": {"linux/amd64": "29ef3d289b272704b75141906c8f683db0f2bdb0942061366691333bfb289bdc", "linux/arm64": "59d244119e6129c7e9c0897491c0e210e925d15881b2dedcf8965ceb4fbf1aa3"}},
-        {"package": "libsystemd0", "version": "249.11-0ubuntu3.23", "repo": "ubuntu", "pool": "pool/main/s/systemd/", "sha256": {"linux/amd64": "ff02a85ba73f850cf7958d2867b34947c67a1072e2b2d1c108a8c6e23715624d", "linux/arm64": "a50379fcab4a6b974c5ee983ab2abd4341768a857715f2e8b855d3610dd73389"}},
-        {"package": "libtasn1-6", "version": "4.18.0-4ubuntu0.2", "repo": "ubuntu", "pool": "pool/main/libt/libtasn1-6/", "sha256": {"linux/amd64": "a0903b4fae3ac2548a22d8822382e6d23586e42196d83ff67e82df36cd39fc6c", "linux/arm64": "d9f0ed3ca0cb86f6116bb59388aea92b021c05797b4fba7451a2fed594cb1e1e"}},
-        {"package": "libtinfo6", "version": "6.3-2ubuntu0.3", "repo": "ubuntu", "pool": "pool/main/n/ncurses/", "sha256": {"linux/amd64": "3b8dff43a31168f5020928f2ab9a97324c5b47ae708311781f6bd01306c96214", "linux/arm64": "971b5fd1cf8f7d68ba00f40d8eec6474fae6a6adbe19883aa42dd2b74c672e4a"}},
-        {"package": "libunistring2", "version": "1.0-1", "repo": "ubuntu", "pool": "pool/main/libu/libunistring/", "sha256": {"linux/amd64": "988fb59de6a0a313844277e8a6e45d3dc16f5ea75a603a46b16b936426f0ac65", "linux/arm64": "59e4af5c1fac70d1fbc19f3c732331ace8449f1f7112887e7b56b8370bd8942b"}},
-        {"package": "liburing2", "version": "2.1-2build1", "repo": "ubuntu", "pool": "pool/main/libu/liburing/", "sha256": {"linux/amd64": "f6e9bdf50c9683cd9a74ad92d51dde085f40baf0a5fcd8a56fc68425c1bd3c5f", "linux/arm64": "a9221f0d47fd32819558f7a91677e97c72bd88646d38d369ffa70720ac49c27d"}},
-        {"package": "libuuid1", "version": "2.37.2-4ubuntu3.6", "repo": "ubuntu", "pool": "pool/main/u/util-linux/", "sha256": {"linux/amd64": "97eaa1090c2e7ddaad55d58f9d0d7907d64b70f89228405d68a7ce7d56a89d67", "linux/arm64": "2478ccd8df956d8e5cf087bff1471bcd9991838be9c7999e5737d092034c492d"}},
-        {"package": "libxml2", "version": "2.9.13+dfsg-1ubuntu0.14", "repo": "ubuntu", "pool": "pool/main/libx/libxml2/", "sha256": {"linux/amd64": "16e395b2c52d6ab232053468febc69f0876956ec2fae357a941a2a8dab36574f", "linux/arm64": "1e85b731baabd51331d70a6392c652bc39fa2c231ff784555bd6a61631009387"}},
-        {"package": "libxslt1.1", "version": "1.1.34-4ubuntu0.22.04.5", "repo": "ubuntu", "pool": "pool/main/libx/libxslt/", "sha256": {"linux/amd64": "5e50bc83e9365942cf63272d8a45ce71170aaf4a1a4e3c4b30f591f6194d77ef", "linux/arm64": "dd533b9980918ca64531254ccbdfd5efc492bbef37c70f0b5559b3b8f306b626"}},
-        {"package": "libzstd1", "version": "1.4.8+dfsg-3build1", "repo": "ubuntu", "pool": "pool/main/libz/libzstd/", "sha256": {"linux/amd64": "ae7db00ce8b093e50c994518b90203544e063b4bc574836a048bb142b950b2c9", "linux/arm64": "0102eb80384c2432c4be819663341a1c4e511d05f13ec1467643696531ec6491"}},
-        {"package": "zlib1g", "version": "1:1.2.11.dfsg-2ubuntu9.2", "repo": "ubuntu", "pool": "pool/main/z/zlib/", "sha256": {"linux/amd64": "9dc17e51a1be2d9ed63b7b84ef0e4e29c5abe6f1bc62cb03e7181483cce8a2f2", "linux/arm64": "cfd99d1ca41e710fdd3f68bfdc4d36dd24e14377656764f00b215b89cf6976e8"}}
+        {
+          "package": "postgresql-18",
+          "version": "18.6-1.pgdg22.04+2",
+          "repo": "pgdg",
+          "pool": "pool/main/p/postgresql-18/",
+          "sha256": {
+            "linux/amd64": "2aab00b13babd3d9abc257bc5f6b00efa1f7c27cda071413f358d2e0cdb84420",
+            "linux/arm64": "8a379f0684b480b60e79657ac8178e8b00c835e7575e85ae746c091d336563d3"
+          }
+        },
+        {
+          "package": "postgresql-client-18",
+          "version": "18.6-1.pgdg22.04+2",
+          "repo": "pgdg",
+          "pool": "pool/main/p/postgresql-18/",
+          "sha256": {
+            "linux/amd64": "ad4e491adceaf1453162c62691473ace78ed81ab20f50d11b344a793d13ed4bd",
+            "linux/arm64": "21f1b418621fc9c90785b18ec2d7fe4fd8ff111cc607fc3b3625464fc6e7886b"
+          }
+        },
+        {
+          "package": "libpq5",
+          "version": "18.6-1.pgdg22.04+2",
+          "repo": "pgdg",
+          "pool": "pool/main/p/postgresql-18/",
+          "sha256": {
+            "linux/amd64": "8af0b458834e219f3aa7c904fa1237ea484950486e3165a3a90204878e060530",
+            "linux/arm64": "fc0d787c9da82bd0146e5e365989f3c92dbb3d73c3a32c62a2e4d56ab90933a6"
+          }
+        },
+        {
+          "package": "libaudit-common",
+          "version": "1:3.0.7-1ubuntu0.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/a/audit/",
+          "sha256": {
+            "linux/amd64": "3e4e8586db5f57f431954a9125556fe6df86610592c0cf46ba1127fae8871e3f",
+            "linux/arm64": "3e4e8586db5f57f431954a9125556fe6df86610592c0cf46ba1127fae8871e3f"
+          }
+        },
+        {
+          "package": "libaudit1",
+          "version": "1:3.0.7-1ubuntu0.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/a/audit/",
+          "sha256": {
+            "linux/amd64": "00d7eb086dedc85bd5b9cbde650a1c71460499cb62e439acb761bc7bcb4eaaac",
+            "linux/arm64": "963474b42258e8caa15eec1db61d8424fd6b7ef717ca4e371b3240506854b3fe"
+          }
+        },
+        {
+          "package": "libcap-ng0",
+          "version": "0.7.9-2.2build3",
+          "repo": "ubuntu",
+          "pool": "pool/main/libc/libcap-ng/",
+          "sha256": {
+            "linux/amd64": "124d0c8748a841f279e996298ef8aac69a249e294792f4b5e16dc00496f1d3ac",
+            "linux/arm64": "884c8bc87da241abaa2b0ca80162486cf66eff67dfc545bea56622e1170e9ee5"
+          }
+        },
+        {
+          "package": "libcap2",
+          "version": "1:2.44-1ubuntu0.22.04.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/libc/libcap2/",
+          "sha256": {
+            "linux/amd64": "c497efb7fa3cd19a7ff297d95c7c5d678063c80c9fc230c9d034a8ee02ca8446",
+            "linux/arm64": "7a8eb6549355a16f327ede574f12e6ebed983b52ab38ce4a618e6e9274b9d4f5"
+          }
+        },
+        {
+          "package": "libcom-err2",
+          "version": "1.46.5-2ubuntu1.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/e/e2fsprogs/",
+          "sha256": {
+            "linux/amd64": "552bc8169451cfdcf174a8da845b13ced0a55777149af5cf47491193161ed791",
+            "linux/arm64": "3a7b6a2b34c2171b7c8f9ddae58c93b6e416fcd9ac4fa8eb5a15a1a8f3f99afa"
+          }
+        },
+        {
+          "package": "libdb5.3",
+          "version": "5.3.28+dfsg1-0.8ubuntu3",
+          "repo": "ubuntu",
+          "pool": "pool/main/d/db5.3/",
+          "sha256": {
+            "linux/amd64": "ce60e446c9cb0e94bb4b4d0fe4f969e772edec250deb186bacf955e4d196548b",
+            "linux/arm64": "e5b672aeaca690b3b7ee97b03dbc07ddb49be7b6ea0a770fa6707666ca1cef59"
+          }
+        },
+        {
+          "package": "libffi8",
+          "version": "3.4.2-4",
+          "repo": "ubuntu",
+          "pool": "pool/main/libf/libffi/",
+          "sha256": {
+            "linux/amd64": "b4f88c91fa6f4c942097be6abfc365fb133c5e147640168cbb7704fd855eac10",
+            "linux/arm64": "a0cdf938e8da19bd2252c681f80268609a32d06496a1f8d0ebe1fa41debec697"
+          }
+        },
+        {
+          "package": "libgcc-s1",
+          "version": "12.3.0-1ubuntu1~22.04.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gcc-12/",
+          "sha256": {
+            "linux/amd64": "d383e642d83263147f7b4b69fb92cf1036e5246c6be3accf10b77f986684589a",
+            "linux/arm64": "46626e1af6b159061e055f843654ee1f0f1e65fa280331ed47ee76ba1b1f6045"
+          }
+        },
+        {
+          "package": "libgcrypt20",
+          "version": "1.9.4-3ubuntu3.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/libg/libgcrypt20/",
+          "sha256": {
+            "linux/amd64": "8f16329a0aabf4900271a3687890721bbef307e60983acae5b92eeff12e799b3",
+            "linux/arm64": "bd98a709641e7e61c8798bb84030886a96fd56424b053a6e9996a8391ce20597"
+          }
+        },
+        {
+          "package": "libgmp10",
+          "version": "2:6.2.1+dfsg-3ubuntu1",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gmp/",
+          "sha256": {
+            "linux/amd64": "d199a77e11701d4d620dd4f62e05740e3072dce893856ea3bbaa6ae9fa19fef1",
+            "linux/arm64": "32233a3bf7c8b19e86ef3629334f0bece716bb163605d12e0d3a443d57a401d7"
+          }
+        },
+        {
+          "package": "libgnutls30",
+          "version": "3.7.3-4ubuntu1.9",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gnutls28/",
+          "sha256": {
+            "linux/amd64": "65e08f0b5d1e620cc5cc9478cd1035f83ea752a6fae23141afd2d111a8f6c555",
+            "linux/arm64": "cce4bf33fa79446ddee42a992e569f12a57c1a6f8916a2e8349249be0f7ad655"
+          }
+        },
+        {
+          "package": "libgpg-error0",
+          "version": "1.43-3",
+          "repo": "ubuntu",
+          "pool": "pool/main/libg/libgpg-error/",
+          "sha256": {
+            "linux/amd64": "1fbacdf9bd1e431cee874a697b339f6f925182bc79bba5a112b53669b33265c5",
+            "linux/arm64": "ffa9029cdeb2786e0db1f614f3d2205f75f466a66b25e22aa89ecdf814491875"
+          }
+        },
+        {
+          "package": "libgssapi-krb5-2",
+          "version": "1.19.2-2ubuntu0.10",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/krb5/",
+          "sha256": {
+            "linux/amd64": "08e98a3dc74361cdb13c0d68bc73e0352552490546c1ad3ce5bff5426f6a2dfe",
+            "linux/arm64": "e1001bffd91dd306498ec1824a8330014399a0e0889a562069003726348d7f55"
+          }
+        },
+        {
+          "package": "libhogweed6",
+          "version": "3.7.3-1build2",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/nettle/",
+          "sha256": {
+            "linux/amd64": "2402ac51ebc760799b01f3fd4933126c5eb446e5b043832601fb589f5e50c363",
+            "linux/arm64": "844e5d093dd3982a85c134d47a9e22b129123fb817eb3eea96e936805b0f5170"
+          }
+        },
+        {
+          "package": "libicu70",
+          "version": "70.1-2",
+          "repo": "ubuntu",
+          "pool": "pool/main/i/icu/",
+          "sha256": {
+            "linux/amd64": "58a154f6307289813da2276f900498ef536ae7c0522d2cf31a3c3c5cf62dfd9a",
+            "linux/arm64": "ac68372cf4a976e6a206858fd9b28c68e49d37d650b9b8653270038a6e7bc174"
+          }
+        },
+        {
+          "package": "libidn2-0",
+          "version": "2.3.2-2build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libi/libidn2/",
+          "sha256": {
+            "linux/amd64": "bc935e1871aa4a75d3f4ff549af32b7316aecfbea2200d85055878767b8398c8",
+            "linux/arm64": "aeb29cc8deedc0710a97e44088ef0271dfe1197e77c0a0fc0c5602e14aeb938f"
+          }
+        },
+        {
+          "package": "libk5crypto3",
+          "version": "1.19.2-2ubuntu0.10",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/krb5/",
+          "sha256": {
+            "linux/amd64": "40429c0099678fbc35045f0c63a10bc3490251d80cf1006095eaa0272c8d5e27",
+            "linux/arm64": "e51d72b346813b57f26c09827f96eb856adb9b553814fbc61a5e8c8a25d292a3"
+          }
+        },
+        {
+          "package": "libkeyutils1",
+          "version": "1.6.1-2ubuntu3",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/keyutils/",
+          "sha256": {
+            "linux/amd64": "940daf78ee0229549b4eabc92ffd79dd038ed96a44e2e912305a23540cf22a0a",
+            "linux/arm64": "fc26b34c487ea5187585ee0f2c67c738b97e8bae434cca4b546d86743b9e6c80"
+          }
+        },
+        {
+          "package": "libkrb5-3",
+          "version": "1.19.2-2ubuntu0.10",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/krb5/",
+          "sha256": {
+            "linux/amd64": "0da3e0df7d6314615160a42f65ff345986783be02cd65a6ce797cfbacc7bcb0d",
+            "linux/arm64": "8de066e35be457bf0c53c995f8baa270ad61566dcd892d0a7cc3c0438ff513b7"
+          }
+        },
+        {
+          "package": "libkrb5support0",
+          "version": "1.19.2-2ubuntu0.10",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/krb5/",
+          "sha256": {
+            "linux/amd64": "0406052ac2d267f05088ada6d36df61aaa338cbe8d5e13fb1d7f79da560817ed",
+            "linux/arm64": "c535d5ccf5ea99fb63d86b33082c5ed553a6aa8c7cbf3fed1ef0dac1d7b7dcd6"
+          }
+        },
+        {
+          "package": "libldap-2.5-0",
+          "version": "2.5.20+dfsg-0ubuntu0.22.04.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/o/openldap/",
+          "sha256": {
+            "linux/amd64": "a3ee4ac116a2c50c9ddfe9de91c0781a50704244771474334340cdce02f5cd4f",
+            "linux/arm64": "305ec2bf85ad8e8a6309b1a48e601f172503a267ca90d511ccbb098cdf009d6b"
+          }
+        },
+        {
+          "package": "liblz4-1",
+          "version": "1.9.3-2build2",
+          "repo": "ubuntu",
+          "pool": "pool/main/l/lz4/",
+          "sha256": {
+            "linux/amd64": "ac9b54d0feb840345060c74fb687675c5e1eb2b195effafae38c5f9991041e98",
+            "linux/arm64": "3e2274893e0963c758f0d18ba80d033736909373247a7deb211e9ff590a09133"
+          }
+        },
+        {
+          "package": "liblzma5",
+          "version": "5.2.5-2ubuntu1.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/x/xz-utils/",
+          "sha256": {
+            "linux/amd64": "a88fca7506963c443c42a578db6c35424336ae28abcdaa60c89f06d30aeb625b",
+            "linux/arm64": "e98ef4ff8c23c34fd2fd13a341d69fd1240a0af790682c3afb93dac6c87d995a"
+          }
+        },
+        {
+          "package": "libnettle8",
+          "version": "3.7.3-1build2",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/nettle/",
+          "sha256": {
+            "linux/amd64": "6da09e685e5587f8873f662b007de45f75424fb33d2c4a51837380e683d33c7e",
+            "linux/arm64": "bcd667d9a51c2474f7ffc52807ab4a24f8b877b6da1a6f5b75e50e48ec4d634a"
+          }
+        },
+        {
+          "package": "libnuma1",
+          "version": "2.0.14-3ubuntu2",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/numactl/",
+          "sha256": {
+            "linux/amd64": "0721c89001fbbd1ada23e89da5d60e762763c1a7b3dc814a2e9a518480a8043d",
+            "linux/arm64": "ca67a774b20ed639361715ef0981d236f294ff2987579b3d18faede67c3a9152"
+          }
+        },
+        {
+          "package": "libp11-kit0",
+          "version": "0.24.0-6ubuntu0.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/p11-kit/",
+          "sha256": {
+            "linux/amd64": "9d949950970a062a81051a78ec4075b8dba608f063afaa5c8752a612d139a9b5",
+            "linux/arm64": "0cfad0790be90ccb56de67e6c58a67d73e4769028eb19a2c0d799fa19478c2ff"
+          }
+        },
+        {
+          "package": "libpam0g",
+          "version": "1.4.0-11ubuntu2.8",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/pam/",
+          "sha256": {
+            "linux/amd64": "faaf4b6d1bfb33a7fc4e195448439c202869d67c8de17c4ecd29b7719e0ac4d6",
+            "linux/arm64": "f61ae0342dfba2b6c6b61f3d46925371434a4719a251f7585f9baa1341fcc9e2"
+          }
+        },
+        {
+          "package": "libpcre2-8-0",
+          "version": "10.39-3ubuntu0.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/pcre2/",
+          "sha256": {
+            "linux/amd64": "01a5a74f3d305cad32fffffdc200c2a92fd8e5a01bff97de76ac598fb444d53e",
+            "linux/arm64": "b85beefd54108f1c34a89cb26688eb1b2eeaa099e4995091295a1d39f9c67a91"
+          }
+        },
+        {
+          "package": "libreadline8",
+          "version": "8.1.2-1",
+          "repo": "ubuntu",
+          "pool": "pool/main/r/readline/",
+          "sha256": {
+            "linux/amd64": "51fd16f608efa710c987e4b071ffba0bec63a9ac8e55eddd5770f5e5252edc09",
+            "linux/arm64": "54291f2dd185d3a759227b31b7de4269e495a084fdad89e24a9cc4d0d20888a7"
+          }
+        },
+        {
+          "package": "libsasl2-2",
+          "version": "2.1.27+dfsg2-3ubuntu1.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/c/cyrus-sasl2/",
+          "sha256": {
+            "linux/amd64": "391cb48d7e601d5bb590da8d426750acf6c987241ba280a36227873b94f20cee",
+            "linux/arm64": "d4f60677a0024f2b888a563f1d396a1f43fe22097e01d0a7048695c3c1ef8e18"
+          }
+        },
+        {
+          "package": "libsasl2-modules-db",
+          "version": "2.1.27+dfsg2-3ubuntu1.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/c/cyrus-sasl2/",
+          "sha256": {
+            "linux/amd64": "0e222c26d70c2cfd132c8de035bcf9673067b6cbfea0a7421dced7b6256ae774",
+            "linux/arm64": "438df2296b2f828ab05287fadbf1a29f2e3bc0d618807b01128829313be91895"
+          }
+        },
+        {
+          "package": "libselinux1",
+          "version": "3.3-1build2",
+          "repo": "ubuntu",
+          "pool": "pool/main/libs/libselinux/",
+          "sha256": {
+            "linux/amd64": "b96c6b40ee2388bd51341cb11c0f1d5bcca29b9180b6e3a77a06b881f2913f7e",
+            "linux/arm64": "3a0726b2174a40fa28e74712867aa6e40d3d725543e8f668af9e9e59a28c817c"
+          }
+        },
+        {
+          "package": "libssl3",
+          "version": "3.0.2-0ubuntu1.30",
+          "repo": "ubuntu",
+          "pool": "pool/main/o/openssl/",
+          "sha256": {
+            "linux/amd64": "d1b4636e32ac6d3b95d583ac05ac548b1aa248414bae1c51b14f54be0f8fd7bc",
+            "linux/arm64": "1c4b8cc736eed8a0caafc385f854fa6852382221d84be4795f1d19a52b9fec53"
+          }
+        },
+        {
+          "package": "libstdc++6",
+          "version": "12.3.0-1ubuntu1~22.04.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gcc-12/",
+          "sha256": {
+            "linux/amd64": "29ef3d289b272704b75141906c8f683db0f2bdb0942061366691333bfb289bdc",
+            "linux/arm64": "59d244119e6129c7e9c0897491c0e210e925d15881b2dedcf8965ceb4fbf1aa3"
+          }
+        },
+        {
+          "package": "libsystemd0",
+          "version": "249.11-0ubuntu3.23",
+          "repo": "ubuntu",
+          "pool": "pool/main/s/systemd/",
+          "sha256": {
+            "linux/amd64": "ff02a85ba73f850cf7958d2867b34947c67a1072e2b2d1c108a8c6e23715624d",
+            "linux/arm64": "a50379fcab4a6b974c5ee983ab2abd4341768a857715f2e8b855d3610dd73389"
+          }
+        },
+        {
+          "package": "libtasn1-6",
+          "version": "4.18.0-4ubuntu0.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/libt/libtasn1-6/",
+          "sha256": {
+            "linux/amd64": "a0903b4fae3ac2548a22d8822382e6d23586e42196d83ff67e82df36cd39fc6c",
+            "linux/arm64": "d9f0ed3ca0cb86f6116bb59388aea92b021c05797b4fba7451a2fed594cb1e1e"
+          }
+        },
+        {
+          "package": "libtinfo6",
+          "version": "6.3-2ubuntu0.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/ncurses/",
+          "sha256": {
+            "linux/amd64": "3b8dff43a31168f5020928f2ab9a97324c5b47ae708311781f6bd01306c96214",
+            "linux/arm64": "971b5fd1cf8f7d68ba00f40d8eec6474fae6a6adbe19883aa42dd2b74c672e4a"
+          }
+        },
+        {
+          "package": "libunistring2",
+          "version": "1.0-1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libu/libunistring/",
+          "sha256": {
+            "linux/amd64": "988fb59de6a0a313844277e8a6e45d3dc16f5ea75a603a46b16b936426f0ac65",
+            "linux/arm64": "59e4af5c1fac70d1fbc19f3c732331ace8449f1f7112887e7b56b8370bd8942b"
+          }
+        },
+        {
+          "package": "liburing2",
+          "version": "2.1-2build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libu/liburing/",
+          "sha256": {
+            "linux/amd64": "f6e9bdf50c9683cd9a74ad92d51dde085f40baf0a5fcd8a56fc68425c1bd3c5f",
+            "linux/arm64": "a9221f0d47fd32819558f7a91677e97c72bd88646d38d369ffa70720ac49c27d"
+          }
+        },
+        {
+          "package": "libuuid1",
+          "version": "2.37.2-4ubuntu3.6",
+          "repo": "ubuntu",
+          "pool": "pool/main/u/util-linux/",
+          "sha256": {
+            "linux/amd64": "97eaa1090c2e7ddaad55d58f9d0d7907d64b70f89228405d68a7ce7d56a89d67",
+            "linux/arm64": "2478ccd8df956d8e5cf087bff1471bcd9991838be9c7999e5737d092034c492d"
+          }
+        },
+        {
+          "package": "libxml2",
+          "version": "2.9.13+dfsg-1ubuntu0.14",
+          "repo": "ubuntu",
+          "pool": "pool/main/libx/libxml2/",
+          "sha256": {
+            "linux/amd64": "16e395b2c52d6ab232053468febc69f0876956ec2fae357a941a2a8dab36574f",
+            "linux/arm64": "1e85b731baabd51331d70a6392c652bc39fa2c231ff784555bd6a61631009387"
+          }
+        },
+        {
+          "package": "libxslt1.1",
+          "version": "1.1.34-4ubuntu0.22.04.5",
+          "repo": "ubuntu",
+          "pool": "pool/main/libx/libxslt/",
+          "sha256": {
+            "linux/amd64": "5e50bc83e9365942cf63272d8a45ce71170aaf4a1a4e3c4b30f591f6194d77ef",
+            "linux/arm64": "dd533b9980918ca64531254ccbdfd5efc492bbef37c70f0b5559b3b8f306b626"
+          }
+        },
+        {
+          "package": "libzstd1",
+          "version": "1.4.8+dfsg-3build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libz/libzstd/",
+          "sha256": {
+            "linux/amd64": "ae7db00ce8b093e50c994518b90203544e063b4bc574836a048bb142b950b2c9",
+            "linux/arm64": "0102eb80384c2432c4be819663341a1c4e511d05f13ec1467643696531ec6491"
+          }
+        },
+        {
+          "package": "zlib1g",
+          "version": "1:1.2.11.dfsg-2ubuntu9.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/z/zlib/",
+          "sha256": {
+            "linux/amd64": "9dc17e51a1be2d9ed63b7b84ef0e4e29c5abe6f1bc62cb03e7181483cce8a2f2",
+            "linux/arm64": "cfd99d1ca41e710fdd3f68bfdc4d36dd24e14377656764f00b215b89cf6976e8"
+          }
+        }
       ],
       "fetch": {
-        "linux/amd64": {"kind": "debs", "layout": "pgdg-tree"},
-        "linux/arm64": {"kind": "debs", "layout": "pgdg-tree"}
+        "linux/amd64": {
+          "kind": "debs",
+          "layout": "pgdg-tree"
+        },
+        "linux/arm64": {
+          "kind": "debs",
+          "layout": "pgdg-tree"
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "1d824f885e376efd64742bff433f3ec4aeb5485722470852a2aacbae0e92473f", "rawBytes": 84341750, "zstdBytes": 25252912},
-        "linux/arm64": {"treeSha256": "c92089af63c7f97ae8457a378aee8aab58eaef0192d17241eb224292f5de9843", "rawBytes": 81911526, "zstdBytes": 24680608}
+        "linux/amd64": {
+          "treeSha256": "1d824f885e376efd64742bff433f3ec4aeb5485722470852a2aacbae0e92473f",
+          "rawBytes": 84341750,
+          "zstdBytes": 25252912
+        },
+        "linux/arm64": {
+          "treeSha256": "c92089af63c7f97ae8457a378aee8aab58eaef0192d17241eb224292f5de9843",
+          "rawBytes": 81911526,
+          "zstdBytes": 24680608
+        }
       }
     },
     "socialweb-vmexec": {
       "version": "this module",
       "source": "cmd/socialweb-vmexec of this module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
       "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-vmexec or internal/guestnet re-pins it",
-      "executables": {"socialweb-vmexec": "socialweb-vmexec"},
+      "executables": {
+        "socialweb-vmexec": "socialweb-vmexec"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "go", "package": "./cmd/socialweb-vmexec", "members": {"socialweb-vmexec": "socialweb-vmexec"}},
-        "linux/arm64": {"kind": "go", "package": "./cmd/socialweb-vmexec", "members": {"socialweb-vmexec": "socialweb-vmexec"}}
+        "linux/amd64": {
+          "kind": "go",
+          "package": "./cmd/socialweb-vmexec",
+          "members": {
+            "socialweb-vmexec": "socialweb-vmexec"
+          }
+        },
+        "linux/arm64": {
+          "kind": "go",
+          "package": "./cmd/socialweb-vmexec",
+          "members": {
+            "socialweb-vmexec": "socialweb-vmexec"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "de4e964fa7fef494317f40466a5831547887840589094840305385f689f8be2c", "rawBytes": 2637950, "zstdBytes": 981829},
-        "linux/arm64": {"treeSha256": "7b52766bfd88216de42a5a9579365daed21acf6d5952f90020c6ae180b2f738b", "rawBytes": 2621566, "zstdBytes": 879257}
+        "linux/amd64": {
+          "treeSha256": "de4e964fa7fef494317f40466a5831547887840589094840305385f689f8be2c",
+          "rawBytes": 2637950,
+          "zstdBytes": 981829
+        },
+        "linux/arm64": {
+          "treeSha256": "7b52766bfd88216de42a5a9579365daed21acf6d5952f90020c6ae180b2f738b",
+          "rawBytes": 2621566,
+          "zstdBytes": 879257
+        }
       }
     },
     "openbao-plugin-auth-atproto": {
       "version": "this repository, on github.com/openbao/openbao/sdk/v2 v2.6.2 (the SDK release of the pinned bao v2.6.2)",
       "source": "cmd/openbao-plugin-auth-atproto, its own Go module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
       "verify": "rebuilt from this commit; the binary must equal the fetch sha256 pin (the sha256 the OpenBao plugin catalog registers) and the unpacked tree the treeSha256 pin, so a change to cmd/openbao-plugin-auth-atproto re-pins it; moves together with the bao asset",
-      "executables": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"},
+      "executables": {
+        "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "7ea0bd7c18b78f11a89a1cb29e75956615b457ba34ec4ebdd3a70e0580a84feb", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}},
-        "linux/arm64": {"kind": "go", "module": "cmd/openbao-plugin-auth-atproto", "package": ".", "sha256": "586a34668d7fed2a8f5d1b3618b21439b887cdcd31a1aca753bf338d8622ea9c", "members": {"openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"}}
+        "linux/amd64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-atproto",
+          "package": ".",
+          "sha256": "7ea0bd7c18b78f11a89a1cb29e75956615b457ba34ec4ebdd3a70e0580a84feb",
+          "members": {
+            "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
+          }
+        },
+        "linux/arm64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-atproto",
+          "package": ".",
+          "sha256": "586a34668d7fed2a8f5d1b3618b21439b887cdcd31a1aca753bf338d8622ea9c",
+          "members": {
+            "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
+          }
+        },
+        "darwin/arm64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-atproto",
+          "package": ".",
+          "sha256": "b5b2d1840b6a5cfa125a6045b65c00435d1b4496697584cfde64598c8430985c",
+          "members": {
+            "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "4fbb15064fd6075e23e82c7348cda0510ac7028aa5a2230e65337fde24d5c17c", "rawBytes": 16425086, "zstdBytes": 5157302},
-        "linux/arm64": {"treeSha256": "56c4a928b8b01ff4c7704bba7ab079a669fd007eac23e7dc201c074087bf9a43", "rawBytes": 15335550, "zstdBytes": 4589165}
+        "linux/amd64": {
+          "treeSha256": "4fbb15064fd6075e23e82c7348cda0510ac7028aa5a2230e65337fde24d5c17c",
+          "rawBytes": 16425086,
+          "zstdBytes": 5157302
+        },
+        "linux/arm64": {
+          "treeSha256": "56c4a928b8b01ff4c7704bba7ab079a669fd007eac23e7dc201c074087bf9a43",
+          "rawBytes": 15335550,
+          "zstdBytes": 4589165
+        },
+        "darwin/arm64": {
+          "treeSha256": "103721b8a0985135d19c262f30c13d69803c30e0bee82409e3fb47e9ccb3b1cf",
+          "rawBytes": 16328546,
+          "zstdBytes": 4987737,
+          "binarySha256": "b5b2d1840b6a5cfa125a6045b65c00435d1b4496697584cfde64598c8430985c"
+        }
       }
     },
     "openbao-plugin-auth-sshsig": {
       "version": "this repository, on github.com/openbao/openbao/sdk/v2 v2.6.2 (the SDK release of the pinned bao v2.6.2)",
       "source": "cmd/openbao-plugin-auth-sshsig, its own Go module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
       "verify": "rebuilt from this commit; the binary must equal the fetch sha256 pin (the sha256 the OpenBao plugin catalog registers) and the unpacked tree the treeSha256 pin, so a change to cmd/openbao-plugin-auth-sshsig re-pins it; moves together with the bao asset",
-      "executables": {"openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"},
+      "executables": {
+        "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "go", "module": "cmd/openbao-plugin-auth-sshsig", "package": ".", "sha256": "62b84df545733353fb478d5b2e4aded9158f0a0a1bb258288e00679a44a60ea8", "members": {"openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"}},
-        "linux/arm64": {"kind": "go", "module": "cmd/openbao-plugin-auth-sshsig", "package": ".", "sha256": "f40a63039dcf6d7441806c961a3c9b863eaf3fcf65fe2ce221ce2a962cd45cd1", "members": {"openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"}}
+        "linux/amd64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-sshsig",
+          "package": ".",
+          "sha256": "62b84df545733353fb478d5b2e4aded9158f0a0a1bb258288e00679a44a60ea8",
+          "members": {
+            "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
+          }
+        },
+        "linux/arm64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-sshsig",
+          "package": ".",
+          "sha256": "f40a63039dcf6d7441806c961a3c9b863eaf3fcf65fe2ce221ce2a962cd45cd1",
+          "members": {
+            "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
+          }
+        },
+        "darwin/arm64": {
+          "kind": "go",
+          "module": "cmd/openbao-plugin-auth-sshsig",
+          "package": ".",
+          "sha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499",
+          "members": {
+            "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "330dbd48ca4fd731d104ba2d361ec754520b9b4668367d4bd2a36f213ceee75a", "rawBytes": 16228478, "zstdBytes": 5093784},
-        "linux/arm64": {"treeSha256": "a03e44b8460a5a54a4577e3c083e9184e6164eb10a3696feb1f10543c35836be", "rawBytes": 15204478, "zstdBytes": 4532474}
+        "linux/amd64": {
+          "treeSha256": "330dbd48ca4fd731d104ba2d361ec754520b9b4668367d4bd2a36f213ceee75a",
+          "rawBytes": 16228478,
+          "zstdBytes": 5093784
+        },
+        "linux/arm64": {
+          "treeSha256": "a03e44b8460a5a54a4577e3c083e9184e6164eb10a3696feb1f10543c35836be",
+          "rawBytes": 15204478,
+          "zstdBytes": 4532474
+        },
+        "darwin/arm64": {
+          "treeSha256": "eaa7c8fb8fb56754e7617ca485fa9bfa4156a6b59ba2ab4f3e0f79321504f154",
+          "rawBytes": 16146018,
+          "zstdBytes": 4930055,
+          "binarySha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499"
+        }
       }
     },
     "swc-userns-stage": {
       "version": "this module",
       "source": "deploy/swc-userns-stage/stage.c of this module, built by scripts/build-userns-stage.sh in the pinned guest builder image (gcc, static, libc-free, no build id); byte-reproducible, linux/amd64 sha256 d15e47035b9f5d5b970017f7051dd82eabeb2c3176fb2a0a3655c9a49e100332",
       "verify": "rebuilt from this commit; the sha256 must equal the pin; linux/amd64 only until stage.c gains an aarch64 entry stub",
-      "executables": {"swc-userns-stage": "swc-userns-stage"},
+      "executables": {
+        "swc-userns-stage": "swc-userns-stage"
+      },
       "fetch": {
-        "linux/amd64": {"kind": "script", "script": "scripts/build-userns-stage.sh", "sha256": "d15e47035b9f5d5b970017f7051dd82eabeb2c3176fb2a0a3655c9a49e100332", "members": {"swc-userns-stage": "swc-userns-stage"}}
+        "linux/amd64": {
+          "kind": "script",
+          "script": "scripts/build-userns-stage.sh",
+          "sha256": "d15e47035b9f5d5b970017f7051dd82eabeb2c3176fb2a0a3655c9a49e100332",
+          "members": {
+            "swc-userns-stage": "swc-userns-stage"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "99e3ed4cbb177d456dc4c64fd4f79cbea69b40c977f30c166f9b62e1a4e66653", "rawBytes": 8928, "zstdBytes": 1344}
+        "linux/amd64": {
+          "treeSha256": "99e3ed4cbb177d456dc4c64fd4f79cbea69b40c977f30c166f9b62e1a4e66653",
+          "rawBytes": 8928,
+          "zstdBytes": 1344
+        }
       }
     },
     "socialweb-computer-k8s-downloads": {
       "version": "this module",
       "source": "the pinned downloads the socialweb-computer-k8s web app serves at /downloads/<sha256>/<name>, built by scripts/build-web-app-downloads.sh: socialweb-meshd-x86_64 and socialweb-meshd-aarch64 by rust/build.sh (static musl, rustc of rust/rust-toolchain.toml in a mount namespace with fixed paths, zig cc and zig ar of the zig that rust/build.sh pins, and the toolchain's rust-lld), and socialweb-node-x86_64 and socialweb-node-aarch64 by go build from cmd/socialweb-node for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests and the users that download them are not the gateway's platform",
       "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to rust/ or cmd/socialweb-node re-pins it; the web app refuses a sidecar that does not hash its file",
-      "executables": {"socialweb-computer-k8s-downloads": "."},
+      "executables": {
+        "socialweb-computer-k8s-downloads": "."
+      },
       "fetch": {
-        "linux/amd64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}},
-        "linux/arm64": {"kind": "script", "script": "scripts/build-web-app-downloads.sh", "members": {"socialweb-meshd-x86_64": "socialweb-meshd-x86_64", "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256", "socialweb-meshd-aarch64": "socialweb-meshd-aarch64", "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256", "socialweb-node-x86_64": "socialweb-node-x86_64", "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256", "socialweb-node-aarch64": "socialweb-node-aarch64", "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"}}
+        "linux/amd64": {
+          "kind": "script",
+          "script": "scripts/build-web-app-downloads.sh",
+          "members": {
+            "socialweb-meshd-x86_64": "socialweb-meshd-x86_64",
+            "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256",
+            "socialweb-meshd-aarch64": "socialweb-meshd-aarch64",
+            "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256",
+            "socialweb-node-x86_64": "socialweb-node-x86_64",
+            "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256",
+            "socialweb-node-aarch64": "socialweb-node-aarch64",
+            "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"
+          }
+        },
+        "linux/arm64": {
+          "kind": "script",
+          "script": "scripts/build-web-app-downloads.sh",
+          "members": {
+            "socialweb-meshd-x86_64": "socialweb-meshd-x86_64",
+            "socialweb-meshd-x86_64.sha256": "socialweb-meshd-x86_64.sha256",
+            "socialweb-meshd-aarch64": "socialweb-meshd-aarch64",
+            "socialweb-meshd-aarch64.sha256": "socialweb-meshd-aarch64.sha256",
+            "socialweb-node-x86_64": "socialweb-node-x86_64",
+            "socialweb-node-x86_64.sha256": "socialweb-node-x86_64.sha256",
+            "socialweb-node-aarch64": "socialweb-node-aarch64",
+            "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "33e9c54695b440493c97cea86d1ca1471464cf2d72637c8fcc59c9c7c6aab7c6", "rawBytes": 40526224, "zstdBytes": 12283042},
-        "linux/arm64": {"treeSha256": "33e9c54695b440493c97cea86d1ca1471464cf2d72637c8fcc59c9c7c6aab7c6", "rawBytes": 40526224, "zstdBytes": 12283042}
+        "linux/amd64": {
+          "treeSha256": "33e9c54695b440493c97cea86d1ca1471464cf2d72637c8fcc59c9c7c6aab7c6",
+          "rawBytes": 40526224,
+          "zstdBytes": 12283042
+        },
+        "linux/arm64": {
+          "treeSha256": "33e9c54695b440493c97cea86d1ca1471464cf2d72637c8fcc59c9c7c6aab7c6",
+          "rawBytes": 40526224,
+          "zstdBytes": 12283042
+        }
       }
     },
     "socialweb-guest-downloads": {
       "version": "this module",
       "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), wootty-x86_64 and wootty-aarch64, the wootty member of the guestDownloads.files.wootty image layers (each layer blob fetched from its registry and checked against its sha256 pin before tar extracts the member), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
       "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent, to the assets.opentunnel pins or to the guestDownloads.files.wootty pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
-      "executables": {"socialweb-guest-downloads": "."},
+      "executables": {
+        "socialweb-guest-downloads": "."
+      },
       "fetch": {
-        "linux/amd64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "wootty-x86_64": "wootty-x86_64", "wootty-x86_64.sha256": "wootty-x86_64.sha256", "wootty-aarch64": "wootty-aarch64", "wootty-aarch64.sha256": "wootty-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}},
-        "linux/arm64": {"kind": "script", "script": "scripts/build-guest-downloads.sh", "members": {"opentunnel-x86_64": "opentunnel-x86_64", "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256", "opentunnel-aarch64": "opentunnel-aarch64", "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256", "wootty-x86_64": "wootty-x86_64", "wootty-x86_64.sha256": "wootty-x86_64.sha256", "wootty-aarch64": "wootty-aarch64", "wootty-aarch64.sha256": "wootty-aarch64.sha256", "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64", "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256", "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64", "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"}}
+        "linux/amd64": {
+          "kind": "script",
+          "script": "scripts/build-guest-downloads.sh",
+          "members": {
+            "opentunnel-x86_64": "opentunnel-x86_64",
+            "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256",
+            "opentunnel-aarch64": "opentunnel-aarch64",
+            "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256",
+            "wootty-x86_64": "wootty-x86_64",
+            "wootty-x86_64.sha256": "wootty-x86_64.sha256",
+            "wootty-aarch64": "wootty-aarch64",
+            "wootty-aarch64.sha256": "wootty-aarch64.sha256",
+            "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64",
+            "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256",
+            "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64",
+            "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"
+          }
+        },
+        "linux/arm64": {
+          "kind": "script",
+          "script": "scripts/build-guest-downloads.sh",
+          "members": {
+            "opentunnel-x86_64": "opentunnel-x86_64",
+            "opentunnel-x86_64.sha256": "opentunnel-x86_64.sha256",
+            "opentunnel-aarch64": "opentunnel-aarch64",
+            "opentunnel-aarch64.sha256": "opentunnel-aarch64.sha256",
+            "wootty-x86_64": "wootty-x86_64",
+            "wootty-x86_64.sha256": "wootty-x86_64.sha256",
+            "wootty-aarch64": "wootty-aarch64",
+            "wootty-aarch64.sha256": "wootty-aarch64.sha256",
+            "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64",
+            "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256",
+            "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64",
+            "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"
+          }
+        }
       },
       "platforms": {
-        "linux/amd64": {"treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627", "rawBytes": 56979255, "zstdBytes": 20453933},
-        "linux/arm64": {"treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627", "rawBytes": 56979255, "zstdBytes": 20453933}
+        "linux/amd64": {
+          "treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627",
+          "rawBytes": 56979255,
+          "zstdBytes": 20453933
+        },
+        "linux/arm64": {
+          "treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627",
+          "rawBytes": 56979255,
+          "zstdBytes": 20453933
+        }
       }
     }
   },
   "kcpCompat": [
-    {"from": "v0.33.0", "to": "v0.33.0-162-g74e9fb9c03f778", "storageCompatible": false, "diffSHA256": "67c62fd4fc1a86aab2a71d9a2cc61d322ec8204c96d359c69b63db3326cd2e30"},
-    {"from": "v0.33.1", "to": "v0.33.0-162-g74e9fb9c03f778", "storageCompatible": false, "diffSHA256": "15dfc6be717f3e1dd3b4a9298b05ef7528f0289e4e00c1248a5970253037701a"},
-    {"from": "v0.33.0", "to": "v0.33.1", "storageCompatible": true, "diffSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
-    {"from": "v0.32.5", "to": "v0.33.0", "storageCompatible": false, "diffSHA256": "490da758445c62e6bcd5bd8e5d6e0affe39cd023051c73ce86848d572a1ac58e"}
+    {
+      "from": "v0.33.0",
+      "to": "v0.33.0-162-g74e9fb9c03f778",
+      "storageCompatible": false,
+      "diffSHA256": "67c62fd4fc1a86aab2a71d9a2cc61d322ec8204c96d359c69b63db3326cd2e30"
+    },
+    {
+      "from": "v0.33.1",
+      "to": "v0.33.0-162-g74e9fb9c03f778",
+      "storageCompatible": false,
+      "diffSHA256": "15dfc6be717f3e1dd3b4a9298b05ef7528f0289e4e00c1248a5970253037701a"
+    },
+    {
+      "from": "v0.33.0",
+      "to": "v0.33.1",
+      "storageCompatible": true,
+      "diffSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "from": "v0.32.5",
+      "to": "v0.33.0",
+      "storageCompatible": false,
+      "diffSHA256": "490da758445c62e6bcd5bd8e5d6e0affe39cd023051c73ce86848d572a1ac58e"
+    }
   ],
   "vmStop": {
     "graceSeconds": 100,
@@ -478,16 +1600,38 @@
         "platform": "linux/amd64",
         "kernelConfig": "deploy/guest-kernel/firecracker-x86_64.config",
         "bootArgsWhy": "acpi=off: firecracker v1.13 describes its devices in an ACPI DSDT that upstream 6.1 fails to load (ACPI Error AE_BAD_PARAMETER During Region initialization, measured on this image), after which the virtio-mmio devices from the command line register but fail to probe (-22) and the guest waits for /dev/vda forever; with ACPI off the kernel takes firecracker's MP table (CONFIG_X86_MPPARSE=y; without it acpi=off leaves the guest with no local APIC, one CPU, the 8259 PIC and the PIT, and its vCPU thread burns a host core while the guest is idle) and the virtio_mmio.device= arguments firecracker appends (CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES)",
-        "bootArgs": ["console=ttyS0", "reboot=k", "panic=1", "pci=off", "acpi=off", "i8042.noaux", "i8042.nomux", "i8042.dumbkbd", "root=/dev/vda", "rw", "rootfstype=ext4", "rootwait"],
+        "bootArgs": [
+          "console=ttyS0",
+          "reboot=k",
+          "panic=1",
+          "pci=off",
+          "acpi=off",
+          "i8042.noaux",
+          "i8042.nomux",
+          "i8042.dumbkbd",
+          "root=/dev/vda",
+          "rw",
+          "rootfstype=ext4",
+          "rootwait"
+        ],
         "base": {
           "url": "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-amd64-root.tar.xz",
           "sha256": "820311e238ea34d76a8ca2643d6c01065212e9417109e7397d70472a236df261"
         },
         "sourceDateEpoch": 1790380800,
         "outputs": {
-          "vmlinux": {"sha256": "a7ba816b712c4dc4f52c943f8b51460bc0bd799fe50762dd44f605afd82eace8", "bytes": 43742872},
-          "rootfs.ext4": {"sha256": "f2096748f2f7de32f56dd90c2ba85a5e0688a5918ca86fa6ea9c1040c7922584", "bytes": 1543503872},
-          "image.json": {"sha256": "bddc484c610e956fb7e198281cf4a19dc8c95fc441c0575f49d2a33de0c74021", "bytes": 5822}
+          "vmlinux": {
+            "sha256": "a7ba816b712c4dc4f52c943f8b51460bc0bd799fe50762dd44f605afd82eace8",
+            "bytes": 43742872
+          },
+          "rootfs.ext4": {
+            "sha256": "f2096748f2f7de32f56dd90c2ba85a5e0688a5918ca86fa6ea9c1040c7922584",
+            "bytes": 1543503872
+          },
+          "image.json": {
+            "sha256": "bddc484c610e956fb7e198281cf4a19dc8c95fc441c0575f49d2a33de0c74021",
+            "bytes": 5822
+          }
         }
       },
       "firecracker-aarch64": {
@@ -495,16 +1639,34 @@
         "arch": "aarch64",
         "platform": "linux/arm64",
         "kernelConfig": "deploy/guest-kernel/firecracker-aarch64.config",
-        "bootArgs": ["keep_bootcon", "console=ttyS0", "reboot=k", "panic=1", "root=/dev/vda", "rw", "rootfstype=ext4", "rootwait"],
+        "bootArgs": [
+          "keep_bootcon",
+          "console=ttyS0",
+          "reboot=k",
+          "panic=1",
+          "root=/dev/vda",
+          "rw",
+          "rootfstype=ext4",
+          "rootwait"
+        ],
         "base": {
           "url": "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64-root.tar.xz",
           "sha256": "2ef46c9c86debfe5b1f30460d5469c61216f7bb708f1a40652bf8e63df4a5f2e"
         },
         "sourceDateEpoch": 1790380800,
         "outputs": {
-          "vmlinux": {"sha256": "70fb64c9b54af357f8db915c80ad25f547d87f877139d979cdfce366c29d18bd", "bytes": 17420800},
-          "rootfs.ext4": {"sha256": "2094d5f25dc6735824f0a6c078f499f360347251f7d46e62afb73533e2e69420", "bytes": 1610612736},
-          "image.json": {"sha256": "54996591408083f3d5e782ae67061fafc7cda3251bac537c15de73edc266af9f", "bytes": 5850}
+          "vmlinux": {
+            "sha256": "70fb64c9b54af357f8db915c80ad25f547d87f877139d979cdfce366c29d18bd",
+            "bytes": 17420800
+          },
+          "rootfs.ext4": {
+            "sha256": "2094d5f25dc6735824f0a6c078f499f360347251f7d46e62afb73533e2e69420",
+            "bytes": 1610612736
+          },
+          "image.json": {
+            "sha256": "54996591408083f3d5e782ae67061fafc7cda3251bac537c15de73edc266af9f",
+            "bytes": 5850
+          }
         }
       }
     },

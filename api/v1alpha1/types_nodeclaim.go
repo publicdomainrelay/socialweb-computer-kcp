@@ -65,6 +65,18 @@ const (
 	NodeClaimAdopting NodeClaimPhase = "Adopting"
 )
 
+type ContractSandbox struct {
+	ExitCode int `json:"exitCode"`
+
+	TimedOut bool `json:"timedOut,omitempty"`
+
+	Stdout string `json:"stdout,omitempty"`
+
+	Stderr string `json:"stderr,omitempty"`
+
+	ObservedAt string `json:"observedAt,omitempty"`
+}
+
 type NodeClaimContract struct {
 	VMURI string `json:"vmUri,omitempty"`
 
@@ -117,6 +129,8 @@ type NodeClaimContract struct {
 	Termination *ContractTermination `json:"termination,omitempty"`
 
 	HostKeys *ContractHostKeys `json:"hostKeys,omitempty"`
+
+	Sandbox *ContractSandbox `json:"sandbox,omitempty"`
 
 	SecretsRequested *ContractSecretsRequested `json:"secretsRequested,omitempty"`
 

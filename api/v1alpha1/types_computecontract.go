@@ -32,6 +32,8 @@ type ComputeContractTemplate struct {
 
 	UserData string `json:"userData,omitempty"`
 
+	ComputeKind ComputeKind `json:"computeKind,omitempty" apigen:"default=vm,enum=vm|deno"`
+
 	Policy string `json:"policy,omitempty"`
 
 	PolicyArgs string `json:"policyArgs,omitempty"`
@@ -130,6 +132,14 @@ type ComputeContractTunnel struct {
 type ComputeContractShell struct {
 	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/wootty/wootty.env"`
 }
+
+type ComputeKind string
+
+const (
+	ComputeKindVM ComputeKind = "vm"
+
+	ComputeKindDeno ComputeKind = "deno"
+)
 
 type TunnelTransport string
 

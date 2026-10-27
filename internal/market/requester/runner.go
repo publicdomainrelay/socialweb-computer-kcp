@@ -323,8 +323,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.step(ctx, "preparing", 1)
 
 	if state.Payload == nil || state.Payload.URI == "" {
-		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem,
-			Disk: DefaultComputeDisk, UserData: userData, CreatedAt: q.nowISO()})
+		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
+			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, CreatedAt: q.nowISO()})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)
 		}
@@ -951,6 +951,13 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			applyTermination(state, parsed.Termination, r.q.nowISO())
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 			return true
+		case market.ComputeEventsVMSandboxNSID:
+			if parsed.Sandbox == nil {
+				return false
+			}
+			state.Sandbox = parsed.Sandbox
+			r.log().Info("requester_guest_sandbox", "exit", parsed.Sandbox.ExitCode, "timedOut", parsed.Sandbox.TimedOut,
+				"stdout", parsed.Sandbox.Stdout, "stderr", parsed.Sandbox.Stderr)
 		case market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
 			if !applySecretsEvent(state, parsed) {
 				return false
@@ -976,6 +983,9 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		if state.VMAddress != "" && state.HostKeys != nil {
 			return nil
 		}
+		if sandboxAddress(state.VMAddress) && state.Sandbox != nil {
+			return nil
+		}
 		if r.released() {
 			return nil
 		}
@@ -983,8 +993,11 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			state.Outcome = v1alpha1.ContractOutcomeNetworkTimeout
 			return fmt.Errorf("the guest did not come on network within %s", DefaultVMReadyTimeout)
 		}
-		if state.VMAddress != "" && state.HostKeys == nil && hostKeysLate {
+		if state.VMAddress != "" && state.HostKeys == nil && !sandboxAddress(state.VMAddress) && hostKeysLate {
 			return fmt.Errorf("the guest reported no ssh host keys within %s", DefaultHostKeysTimeout)
+		}
+		if sandboxAddress(state.VMAddress) && state.Sandbox == nil && addressLate {
+			return fmt.Errorf("the sandbox reported no result within %s", DefaultVMReadyTimeout)
 		}
 		select {
 		case <-ctx.Done():

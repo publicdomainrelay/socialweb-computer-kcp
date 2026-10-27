@@ -77,6 +77,8 @@ type SpecInput struct {
 	Options []v1alpha1.ApplicationOption
 
 	GuestNetwork *v1alpha1.GuestNetworkOptions
+
+	ComputeKinds []string
 }
 
 func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
@@ -90,7 +92,8 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 			return v1alpha1.MarketBidderSpec{}, err
 		}
 	}
-	if in.Kcp == nil {
+	kinds := computeKinds(in.ComputeKinds)
+	if in.Kcp == nil && slices.Contains(kinds, string(v1alpha1.ComputeKindVM)) {
 		return v1alpha1.MarketBidderSpec{}, errors.New("bidder: the bidder's provider is compute-provider-kcp and needs its guest image source (--guest-image-source)")
 	}
 	n := in.Network
@@ -110,7 +113,23 @@ func Spec(in SpecInput) (v1alpha1.MarketBidderSpec, error) {
 		}
 	}
 	return v1alpha1.MarketBidderSpec{Profile: in.Profile, Network: n, Ingress: ingress, Comms: in.Comms, Policy: in.Policy, Kcp: in.Kcp, Options: in.Options,
-		GuestNetwork: in.GuestNetwork, Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsURL: in.PdsUrl}}, nil
+		GuestNetwork: in.GuestNetwork, ComputeKinds: kinds, Identity: v1alpha1.ApplicationIdentity{Mode: mode, Handle: in.Handle, PdsURL: in.PdsUrl}}, nil
+}
+
+func computeKinds(in []string) []string {
+	var out []string
+	for _, k := range in {
+		switch k = strings.TrimSpace(k); k {
+		case string(v1alpha1.ComputeKindVM), string(v1alpha1.ComputeKindDeno):
+			if !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []string{string(v1alpha1.ComputeKindVM)}
+	}
+	return out
 }
 
 func CheckSignIn(spec v1alpha1.MarketBidderSpec, id *v1alpha1.MarketIdentity) error {

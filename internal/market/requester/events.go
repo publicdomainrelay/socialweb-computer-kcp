@@ -40,6 +40,8 @@ type GuestEvent struct {
 
 	Termination *v1alpha1.ContractTermination
 
+	Sandbox *v1alpha1.ContractSandbox
+
 	ObservedAt string
 }
 
@@ -58,7 +60,7 @@ func ValidateTicket(address string) (string, error) {
 func isGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID,
-		market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+		market.ComputeEventsVMSandboxNSID, market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
 		return true
 	}
 	return isContractEventNSID(nsid)
@@ -137,6 +139,11 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 			out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 		case kind == market.OnNetworkKindIroh:
 			return nil, fmt.Errorf("requester: the iroh address of %s names tag %q", event.Payload.URI, tag)
+		case kind == market.OnNetworkKindSandbox && tag == "":
+			if !strings.HasPrefix(address, "sandbox://") {
+				return nil, fmt.Errorf("requester: payload %s names the sandbox address %q", event.Payload.URI, address)
+			}
+			out.ObservedAt = stringOf(event.Payload.Value["createdAt"])
 		case tag == "":
 			return nil, fmt.Errorf("requester: the %s address of %s names no tag", kind, event.Payload.URI)
 		default:
@@ -184,6 +191,12 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 		}
 		out.HostKeys = keys
 		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
+	case market.ComputeEventsVMSandboxNSID:
+		sandbox := &v1alpha1.ContractSandbox{ExitCode: int(numberValue(event.Payload.Value["exitCode"])),
+			TimedOut: event.Payload.Value["timedOut"] == true, Stdout: stringOf(event.Payload.Value["stdout"]),
+			Stderr: stringOf(event.Payload.Value["stderr"]), ObservedAt: stringOf(event.Payload.Value["createdAt"])}
+		out.Sandbox = sandbox
+		out.ObservedAt = sandbox.ObservedAt
 	case market.ComputeEventsVMTerminatedNSID:
 		termination, err := reportedTermination(event)
 		if err != nil {
@@ -438,4 +451,8 @@ func hostKeyAlias(receiptURI string) string {
 		alias = alias[:128]
 	}
 	return alias
+}
+
+func sandboxAddress(address string) bool {
+	return strings.HasPrefix(address, "sandbox://")
 }
