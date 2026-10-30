@@ -194,7 +194,6 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err != nil {
 		return p.fail(err)
 	}
-	plan.Identity = compose.WithAssociationRefService(plan.Identity, compose.RequesterAssociate)
 	mount := plan.Vault.MountOr(RequesterVaultClient)
 	pdsAccountHandle := compose.PdsHandle(ws, "requester", o.Spec.Identity.Handle)
 	ingressSpec := compose.AppIngressOrDefault(o.Spec.Profile == RequesterProfileDefault, o.Spec.Ingress, o.Spec.Network)

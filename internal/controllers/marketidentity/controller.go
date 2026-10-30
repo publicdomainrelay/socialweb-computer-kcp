@@ -137,6 +137,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	atproto.Associate(object, watch, &status)
 	result, reconcileErr := c.accounts.Reconcile(ctx, req.Workspace, object, status)
 	refAfter, refErr := c.accounts.ApplyAssociationRef(ctx, object, &result.Status)
+	if errors.Is(refErr, atproto.ErrAssociationRefStale) && refAfter > 0 && refAfter <= ctlruntime.DefaultBackoffMax {
+		refErr = nil
+	}
 	reconcileErr = errors.Join(reconcileErr, refErr)
 	if refAfter > 0 && (result.RequeueAfter == 0 || refAfter < result.RequeueAfter) {
 		result.RequeueAfter = refAfter

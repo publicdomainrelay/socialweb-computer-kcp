@@ -283,13 +283,6 @@ func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator, service string) v1
 		s.AssociateWith, s.AssociationWatch = operator, AssociationWatch
 		s.AssociationService = service
 	}
-	return WithAssociationRefService(s, service)
-}
-
-func WithAssociationRefService(s v1alpha1.MarketIdentitySpec, service string) v1alpha1.MarketIdentitySpec {
-	if s.AssociationRef != nil {
-		s.AssociationService = service
-	}
 	return s
 }
 
