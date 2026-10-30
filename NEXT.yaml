@@ -964,3 +964,29 @@ paused_2026_10_19:
       teardown, so that job is lost, not failed. rc17 and rc19 were green twice; rc21 has no
       integration reading. Recreate the runner (scripts/dev-droplet.sh + scripts/ci-runner-install.sh,
       tunnel unit gl-runner-1-tunnel.service on hat-10) and run rc21 twice.
+  - id: PAGE-CONTRACT-PROFILE-LOSS
+    text: >
+      A page contract is orphaned when the browser profile changes mid-contract (2026-10-30, the
+      bidder released it). The page should release in-session or resume from a persisted contract
+      ref; drivers now use a persistent profile with in-session Release.
+  - id: CLI-TERMINATION-404
+    text: >
+      Requester-side termination POST returned 404 after the CLI process exited (rc118 baseline).
+      rc120 cli-agent-1793350170 released cleanly while the --hold process was still alive;
+      recheck the exit-first ordering.
+  - id: TENANT-CONTRACT-POLICY
+    text: >
+      Tenant-cluster contracts get no contract policy (spec.policy empty); they should inherit the
+      requester-tangled-vouch default.
+  - id: REQUESTER-OPEN-WINNER
+    text: >
+      --policy open is not fully open on the requester winner check. Separately, the full winner
+      policy run is skipped for free bids (internal/market/requester/runner.go policyRef != nil
+      && !winner.Free), so free winners get the scope run only. Owner to decide whether free
+      winners also get the full run.
+  - id: PAGE-EVENTSTREAM-LINK-DENIED
+    text: >
+      The page logs "bus: link denied EventStream watch-einfra-<infra> -> EventSource
+      watch-einfra-<infra> capability=events.subscribe{computer.socialweb.ephemeralInfra,...}"
+      and retries (39x on the :8090 page on 2026-10-30, predates plan 0037). Triage the
+      capability grant for the infra watch.
