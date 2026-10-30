@@ -763,6 +763,15 @@ open:
       exits 1 ("waiting for the ComputeContract within 3m0s") because it waits for
       status.contract.release, which such a contract never gets (seen 2026-10-24/25). Close when release
       of a VM-less contract returns at once with exit 0.
+  - id: PAGE-REQUESTER-DEFAULT-POLICY
+    text: >
+      Page requester default after the fenced sandbox (wasm option C, kcp-wasm plan 0037; owner wasm,
+      then linux-kcp). The CLI's `run request` defaults contract.policy to requester-tangled-vouch
+      (cmd/socialweb-computer/request.go, requestRun.passthrough, requester.DefaultPolicyWorkflow); the
+      page builds its own ComputeContracts and keeps its requester policy, because kcp.wasm's
+      sandbox.Runner is not Fenced (internal/sandbox/worker/worker.go) and every verdict would be Deny.
+      Close when the page's policy engine reports Fenced and Ready and a page request under
+      requester-tangled-vouch gets a bid from a vouched bidder.
 
 execution_order:
   written: "2026-10-12, third fold of plans 0006-0008 (user request (i)); waves computed from depends_on across plans 0005-0012 (no unresolved id, no cycle). Re-derived after the fifth fold (multi-server-to-kcp.md + the user's section-7 answers): still no unresolved id or cycle; critical path unchanged. Advisory: depends_on governs; re-derive after every merge."

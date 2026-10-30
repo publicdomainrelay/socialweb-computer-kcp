@@ -89,6 +89,32 @@ operator DID and the `Requester` child reports `spec.operatorDID` with it.
 Without that, every bid is denied by `requester-tangled-vouch` even though
 bidder policy runs succeed.
 
+## Bidder policy: bidder-tangled-vouch on every prod bidder
+
+Every prod bidder runs `bidder-tangled-vouch`. It is the MarketBidder default
+when `spec.policy` is unset, and `install bidder` writes it to `config.json` as
+`bidder-policy`. `open` runs only when an operator sets it explicitly
+(`--bidder-policy open` or `spec.policy: open`); it is never acceptable on a
+prod bidder. The bidder bids only for a requester in its operator's vouch
+graph, so the acceptance requester alice (`did:plc:lpfuqerea3deuoyrn7ojser4`)
+must be vouched by the bidder operator: bob (`did:plc:ocnuqjlzgohypj3zoznermms`)
+and john (`did:plc:5svqtrhheairglgiiyvutzik`) each hold an
+`sh.tangled.graph.vouch` record with rkey alice's DID. The CLI requester's
+default `requester-tangled-vouch` needs the other direction: alice vouches bob
+and john.
+
+```bash
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.policy}{\"\n\"}'"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.policy}{\"\n\"}'"
+sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
+  kubectl get bidders.socialweb.computer bidder -o jsonpath='{.spec.policy}{"\n"}'
+for OP in did:plc:ocnuqjlzgohypj3zoznermms did:plc:5svqtrhheairglgiiyvutzik; do
+  goat get "at://$OP/sh.tangled.graph.vouch/did:plc:lpfuqerea3deuoyrn7ojser4" | jq -r .kind
+done
+```
+
+Each Bidder prints `bidder-tangled-vouch`, and each vouch prints `vouch`.
+
 ## Service auth for the gateway
 
 The gateway XRPC calls are authenticated as the Alice operator account.

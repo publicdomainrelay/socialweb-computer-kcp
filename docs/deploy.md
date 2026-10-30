@@ -38,6 +38,8 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
   CONFIG_PATH_SOCIALWEB_COMPUTER=/var/lib/socialweb-computer/swc-bidder/config.json $R upgrade --binary $R --sha256 $SHA
 ```
 
+Every prod bidder runs the policy `bidder-tangled-vouch`: it is the MarketBidder default when `spec.policy` is unset, and `install bidder` writes `bidder-policy` to config.json (`bidder-tangled-vouch` unless `--bidder-policy` names another), which `upgrade` and restarts keep. `open` is insecure and runs only when set explicitly (`--bidder-policy open` or `spec.policy: open`); never on a prod bidder. A requester gets bids only when the bidder operator vouches it (`sh.tangled.graph.vouch`, rkey the requester's DID): bob and john vouch alice, the acceptance requester (docs/acceptance/0001-auth-modes.md, Bidder policy).
+
 Verify the deployment by scaling a tenant cluster from zero and back:
 
 ```bash

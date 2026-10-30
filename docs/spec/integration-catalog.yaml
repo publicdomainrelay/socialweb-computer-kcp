@@ -1305,6 +1305,34 @@ entries:
       body; requestCrawl bodies are accepted by the relay; an expired ingress nonce is refused;
       OpenBao logins are shared by concurrent callers and renew before expiry.
 
+  - id: TestABidderPolicyDefaultTangledVouch
+    kind: integration
+    source: owner order 2026-10-30 (bidders default to bidder-tangled-vouch; open is opt-in only)
+    actors: [bidder, requester, policy engine, kcp]
+    setup: >
+      Own network: --bidders 1, no gateway, --app-values with a bidder entry that names no policy
+      (the market network profile otherwise sets policy open explicitly). One run request
+      --network <inst> from a requester outside the bidder operator's vouch graph, then the same
+      with the bidder's spec.policy set to open.
+    asserts: >
+      With spec.policy unset the Bidder component's spec.policy is bidder-tangled-vouch, its
+      status.guestNetwork.hostUDPReason is "policy not only-me", and the bidder publishes no bid
+      for the unvouched requester (the scope policy denies it). With spec.policy open the same
+      request gets a bid. open never runs unless a spec or flag names it.
+    cleanup: Release the contract; dev down the network.
+
+  - id: prod-bidder-tangled-vouch
+    kind: acceptance
+    source: docs/acceptance/0001-auth-modes.md "Bidder policy"; docs/plans/0034-webrtc-guest-transport.yaml ACC34-UNCHANGED
+    actors: [hat-7, hat-9, this host, alice, bob, john]
+    asserts: >
+      Every prod bidder's Bidder reports spec.policy bidder-tangled-vouch and its config.json
+      names bidder-policy bidder-tangled-vouch. The acceptance requester alice
+      (did:plc:lpfuqerea3deuoyrn7ojser4) is vouched by the bidder operators bob
+      (did:plc:ocnuqjlzgohypj3zoznermms) and john (did:plc:5svqtrhheairglgiiyvutzik) with an
+      sh.tangled.graph.vouch record whose rkey is alice's DID, and alice vouches both; every
+      acceptance run request from alice gets a bid under that policy.
+
   - id: TestADeletedContractReleasesItsGuest
     kind: integration
     source: docs/plans/0028-computecontract-delete-releases.yaml ACC28-DIRECT-DELETE, ACC28-DELETE-BEFORE-ACCEPT, ACC28-DELETE-WHILE-STOPPED, ACC28-BOUND, ACC28-FORCED-REMOVAL

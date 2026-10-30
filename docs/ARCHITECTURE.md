@@ -654,6 +654,13 @@ application instance (section 0). Its guests are VM units of `internal/vmruntime
 user manager, born only from the cloud-init `user_data` of the RFP flow. There is no systemd system
 template unit per handle, no docker group account and no runner containers.
 
+A bidder's policy (MarketBidder `spec.policy`, `run bidder --bidder-policy`) defaults to
+`bidder-tangled-vouch` on every profile (user, 2026-10-30): the bidder bids only for a requester its
+operator vouches (`sh.tangled.graph.vouch`). `open` is insecure and runs only when a spec or flag
+names it; the market network profile names it for its own dev bidders (`dev up` default values).
+`install bidder` writes `bidder-policy` to config.json, so every prod bidder runs
+`bidder-tangled-vouch` across `upgrade` and restarts.
+
 ### Host processes and the VM lifecycle
 
 This subsection describes the design for host processes and the VM lifecycle. It is built
@@ -11427,6 +11434,21 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
     (`components.Requester.comms.jetstreamUrls`) pruned the us-west source and stream within 20 s and
     removing it brought them back; a deleted EventStream and a relabelled ComponentLink came back at
     once; a foreign `spec.acceptCopies` on the Requester was reverted (`ChildEditReverted`).
+
+### Bidders default to bidder-tangled-vouch; open is opt-in only (2026-10-30)
+
+User order: every prod bidder runs `bidder-tangled-vouch`, and `open` never runs unless the user
+configures it. Before, an unset MarketBidder `spec.policy` left the Bidder component with no scope
+policy, so any requester got a bid. Now an unset policy is `bidder-tangled-vouch`
+(`v1alpha1.BidderDefaultPolicy`) for the Bidder's scope policy, its PolicyEngine link and the infra
+values; `install bidder` persists `bidder-policy` in config.json. The market network profile sets
+`open` explicitly for its dev bidders, whose requesters are in no vouch graph. `hostUDP` still turns
+on by default only for `bidder-only-me`. `run request` without `--network` defaults
+`contract.policy` to `requester-tangled-vouch`; a market network run attaches no requester policy
+unless `--policy` names one. The browser page builds its own ComputeContracts and keeps its
+requester policy until its policy sandbox is fenced (NEXT.yaml). Read on prod before the change
+(lead, patched spec.policy): hat-7 bid for alice under `bidder-tangled-vouch`, Held in 27 s, ssh
+over webrtc, Released. alice is vouched by bob and john, and vouches both.
 
 ## 16. Vocabulary
 

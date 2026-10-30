@@ -553,7 +553,7 @@ types are in `api/v1alpha1/types_application.go`.
 | `name` | the child's name (`bidder-1`, `gateway`, an ssh gateway's name), a DNS label |
 | `kind` | `MarketBidder`, `MarketRequester`, `Gateway` or `SshGateway` |
 | `profile` | the child's profile |
-| `policy` | the bidder policy |
+| `policy` | the bidder policy; `dev up` sets `open` explicitly for its dev bidders, and unset means `bidder-tangled-vouch` |
 | `firecracker` | the FirecrackerProvider for a bidder |
 | `kcp` | the KcpProvider for a bidder (handle, vmHostBackend, guestImageSource, stopGraceSeconds) |
 | `options` | application options passed through to the root object |

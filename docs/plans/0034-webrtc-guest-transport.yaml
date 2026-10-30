@@ -429,7 +429,7 @@ items:
   - id: ACC34-UNCHANGED
     title: "iroh and https paths unchanged"
     depends_on: [W2-GUEST-EVENTS-OUT, W2-BIDDER-INSTALL-MODULE]
-    done_when: "A plain run request reaches Held with an iroh vmAddress; an https tunnel contract gets its opentunnel URL as onNetwork kind https; the rc acceptance doc passes with 0 FAIL."
+    done_when: "A plain run request reaches Held with an iroh vmAddress; an https tunnel contract gets its opentunnel URL as onNetwork kind https; the rc acceptance doc passes with 0 FAIL, with every prod bidder on bidder-tangled-vouch and the requester alice vouched by the bidder operators bob and john (docs/acceptance/0001-auth-modes.md, Bidder policy)."
     status: todo
 
   - id: W7-GUEST-FENCE

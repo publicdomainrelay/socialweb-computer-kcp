@@ -348,6 +348,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `scripts/deploy-atproto-relay.sh` (`--dry-run` prints the plan, preflight on 127.0.0.1:2585, rollback
   on a failed check); `--rollback` removes the drop-in and goes back to the deno relay, `--status` only
   reads. Caddy is not touched.
+- Every prod bidder runs the policy `bidder-tangled-vouch`, the default when MarketBidder
+  `spec.policy` is unset (`install bidder` writes `bidder-policy` to config.json); `open` is insecure
+  and runs only when set explicitly, never on prod. The acceptance requester alice must be vouched by
+  the bidder operators bob and john (`sh.tangled.graph.vouch`, docs/acceptance/0001-auth-modes.md).
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify
