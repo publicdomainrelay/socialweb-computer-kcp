@@ -1,6 +1,6 @@
 plan: "0036"
 title: "Record-based association: an operator marks a record (claim, association lexicon, bsky or delve post) that associates a requester or bidder repo DID, checked in both repos by the counterparty's policy trust, so agents without OAuth can declare requesters as theirs"
-status: planned
+status: doing
 source: >
   2026-10-30 atirc, the user's request (binding): mark a configurable record (any record type, e.g. a bsky
   post) as the method of association so agents which cannot do OAuth can declare requesters as theirs;
@@ -94,7 +94,7 @@ items:
     status: planned
   - id: A1
     title: "association lexicon + scopes (Go/TS mirrors)"
-    status: planned
+    status: done
   - id: A2
     title: "matcher framework: kinds claim, association, bskyPost, delvePost; config on MarketBidder/MarketRequester"
     status: planned

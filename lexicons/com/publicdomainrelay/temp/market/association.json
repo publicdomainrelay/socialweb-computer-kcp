@@ -1,0 +1,24 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.association",
+  "description": "The repository that holds this record associates the subject DID as its requester or bidder. Record key: <service>-<subject with : replaced by ->.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["subject", "service", "createdAt"],
+        "properties": {
+          "subject": { "type": "string", "format": "did", "description": "The associated requester or bidder repository DID." },
+          "service": { "type": "string", "knownValues": ["requester_associate", "bidder_associate"], "description": "The role the subject is associated for." },
+          "contract": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.accept of the contract this association is scoped to; requires expiresAt." },
+          "expiresAt": { "type": "string", "format": "datetime", "description": "The association is invalid after this time." },
+          "parent": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The association that associates this record's repository, for chains." },
+          "note": { "type": "string", "maxLength": 300 },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}
