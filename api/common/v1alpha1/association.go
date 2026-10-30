@@ -10,7 +10,7 @@ const (
 )
 
 type AssociationPolicy struct {
-	Kinds []string `json:"kinds,omitempty" apigen:"listType=set"`
+	Kinds []string `json:"kinds,omitempty" apigen:"listType=set,enum=claim|association|bskyPost|delvePost"`
 
 	PostTemplate string `json:"postTemplate,omitempty"`
 

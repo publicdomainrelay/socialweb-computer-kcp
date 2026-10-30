@@ -21,7 +21,7 @@ var APIResources = []APIResource{
 		{Name: "Engine", Type: "string", JSONPath: ".spec.engineRef"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "PolicyWorkflowRun", Plural: "policyworkflowruns", Revision: 2, Export: "policy", Object: PolicyWorkflowRun{}, PrinterColumns: []PrinterColumn{
+	{Kind: "PolicyWorkflowRun", Plural: "policyworkflowruns", Revision: 3, Export: "policy", Object: PolicyWorkflowRun{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Engine", Type: "string", JSONPath: ".spec.engineRef"},
 		{Name: "Exit", Type: "string", JSONPath: ".status.exitStatus"},

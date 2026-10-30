@@ -144,17 +144,23 @@ func (t fieldTag) apply(s *Schema) (*Schema, error) {
 	}
 	c := *s
 	if len(t.Enum) > 0 {
-		if c.Type != TypeString {
-			return nil, fmt.Errorf("enum applies to a string, the field is %s", c.Type)
+		target := &c
+		if c.Type == TypeArray && c.Items != nil && c.Items.Type == TypeString {
+			items := *c.Items
+			c.Items = &items
+			target = &items
 		}
-		if len(c.Enum) > 0 {
+		if target.Type != TypeString {
+			return nil, fmt.Errorf("enum applies to a string or a list of strings, the field is %s", c.Type)
+		}
+		if len(target.Enum) > 0 {
 			for _, v := range t.Enum {
-				if !contains(c.Enum, v) {
-					return nil, fmt.Errorf("enum value %q is not a constant of %s", v, c.Ref)
+				if !contains(target.Enum, v) {
+					return nil, fmt.Errorf("enum value %q is not a constant of %s", v, target.Ref)
 				}
 			}
 		}
-		c.Enum = t.Enum
+		target.Enum = t.Enum
 	}
 	if t.Minimum != nil || t.Maximum != nil {
 		if c.Type != TypeInteger {
