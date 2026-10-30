@@ -19,6 +19,7 @@ import (
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
@@ -30,6 +31,8 @@ const (
 	Export = "computecontracts"
 
 	RecordExport = "marketidentities"
+
+	RepoExport = "applications"
 
 	CollectionKind = "InfraCollection"
 
@@ -58,6 +61,8 @@ type Controller struct {
 	bound map[string]map[indexKey]string
 
 	pulls map[indexKey]pullNote
+
+	repos map[string]*binding.Table[struct{}]
 }
 
 func New(opts Options) *Controller {
@@ -66,7 +71,8 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
-		pulls: map[indexKey]pullNote{}}
+		pulls: map[indexKey]pullNote{}, repos: map[string]*binding.Table[struct{}]{
+			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -98,6 +104,11 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		}),
 		ctlruntime.WatchesIn(RecordExport, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
 			return append(labelled(obj, kind), c.watched(src.Cluster, kind, obj)...)
+		}),
+		ctlruntime.WatchesFiltered(RepoExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRepo]{Changed: func(old, new *v1alpha1.AtprotoRepo) bool {
+			return old.Status.DID != new.Status.DID
+		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
+			return c.repoUsers(kind, src.Workspace, obj.Name)
 		}),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) { c.forget(kind, req) })}
 	if scope != nil {
@@ -197,12 +208,19 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if v.spec.Record != nil {
 		rec, err = r.syncRecord(ctx, req, v, now)
 		if err != nil {
-			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, "RecordUnavailable", err.Error())
+			reason := "RecordUnavailable"
+			if errors.Is(err, ErrRepoNoDID) {
+				reason = "RepoPending"
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, reason, err.Error())
+			recordErr = err
+			if errors.Is(err, ErrRepoNoDID) {
+				recordErr = nil
+			}
 			if !Publishing(v.spec.Record) {
 				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-				return ctlruntime.Result{}, errors.Join(err, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+				return ctlruntime.Result{}, errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
 			}
-			recordErr = err
 		}
 	}
 	if rec != nil {

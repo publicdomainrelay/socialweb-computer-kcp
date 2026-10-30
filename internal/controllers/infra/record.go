@@ -24,10 +24,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const RepoKind = "AtprotoRepo"
+
+var ErrRepoNoDID = errors.New("reports no did yet")
 
 type recordSync struct {
 	action infra.Action
@@ -79,7 +82,7 @@ func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commo
 	}
 	did := strings.TrimSpace(repo.Status.DID)
 	if did == "" {
-		return "", nil, fmt.Errorf("infra: the AtprotoRepo %s reports no did yet", ref.String())
+		return "", nil, fmt.Errorf("infra: the AtprotoRepo %s %w", ref.String(), ErrRepoNoDID)
 	}
 	reader, err := bus.Resolve[atprotorepo.RecordReader](ctx, b, self, ref, bus.Capability{Name: atprotorepo.CapabilityRead, Scope: []string{nsid}})
 	if err != nil {
@@ -104,6 +107,7 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	if err != nil {
 		return nil, err
 	}
+	r.c.bindRepo(string(v.kind), req, repo)
 	did, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, nsid)
 	if err != nil {
 		return nil, err
@@ -425,11 +429,25 @@ func (c *Controller) index(kind string, req ctlruntime.Request, uri, cid string)
 }
 
 func (c *Controller) forget(kind string, req ctlruntime.Request) {
+	c.repos[kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	k := indexKey{kind: kind, cluster: req.Cluster, name: req.Name}
 	c.dropLocked(k)
 	delete(c.pulls, k)
+}
+
+func (c *Controller) bindRepo(kind string, req ctlruntime.Request, repo commonv1.ObjectRef) {
+	c.repos[kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, &struct{}{},
+		binding.Key(repo.Workspace, RepoKind, repo.Name))
+}
+
+func (c *Controller) repoUsers(kind, workspace, name string) []ctlruntime.Request {
+	var out []ctlruntime.Request
+	for _, t := range c.repos[kind].Users(binding.Key(workspace, RepoKind, name)) {
+		out = append(out, ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
+	}
+	return out
 }
 
 func (c *Controller) dropLocked(k indexKey) {
