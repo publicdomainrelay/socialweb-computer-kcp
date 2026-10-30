@@ -29,8 +29,8 @@ decisions:
     their own accounts; john's repo holds the operator claims for its associated subjects.
   subject: >
     A requester or bidder identity is a repo DID (RFPs and bids are records in it). A new requester
-    started by an agent (alice -> R2 in her VM) gets a repo: (pending owner) its own did:plc + Pds in
-    the VM with public ingress, or an account on a Pds alice runs.
+    started by an agent (alice -> R2 in her VM) gets a repo: its own did:plc + Pds in the VM (owner
+    2026-10-30), public ingress by default through xrpc.fedproxy.com (the did:key ingress).
   kinds: >
     claim: com.publicdomainrelay.temp.badgeBlueKeys (existing; keyId == subject, challenge ==
     authority, service == role) keeps today's operators and scripts/associate-bidder.ts working.
@@ -47,7 +47,8 @@ decisions:
   variants: >
     standing: no contract/expiresAt, valid until deleted or edited (cid pin; posts are not editable).
     contract-scoped: contract (the authority's market.accept for the VM running the subject) and/or
-    expiresAt; invalid after expiresAt or when the contract ref no longer resolves. The authority's
+    expiresAt; invalid after expiresAt, when the contract ref no longer resolves, or when that contract is no
+    longer Held (the verifier checks the contract state, owner 2026-10-30). The authority's
     requester writes it as an AtprotoRecord owned by its ComputeContract, so release deletes it.
   proof: >
     The subject's mirror badgeBlueKeys `association` record gains proof {uri, cid} (from
@@ -84,7 +85,7 @@ state_rules:
 items:
   - id: S1
     title: "Two-repo operator check in trust.go (security fix)"
-    detail: "ResolveOperatorDidFor requires the operator-side claim; paged listRecords; deterministic-rkey getRecord first; stop mirroring declared-only approvals as verified. Ships ahead of the rest (pending owner: rc119 or its own rc)."
+    detail: "ResolveOperatorDidFor requires the operator-side claim; paged listRecords; deterministic-rkey getRecord first; stop mirroring declared-only approvals as verified. Ships ahead of the rest (owner check 2026-10-30: prod bidders run no spec.policy and their operator claims exist, so it ships as soon as it lands)."
     status: planned
   - id: S2
     title: "listRecords paging and badge-binding cache TTL"
@@ -115,7 +116,4 @@ items:
     title: "acceptance: alice (app password) requests a VM whose CLI requester R2 is associated by a contract-scoped record; bidder-only-me allows R2; a forged self-claim is denied; deleting the record revokes"
     status: planned
 open_questions:
-  - "Q1 ship S1 in rc119 or its own rc?"
-  - "Q2 R2's repo: own did:plc + Pds in the VM (public ingress) or an account on a Pds alice runs?"
-  - "Q3 contract-scoped: is a resolving strongRef to the authority's accept enough, or must the bidder also see the contract still Held?"
   - "Q4 chains (later): does only-me compare the root authority or the immediate one; default maxDepth?"
