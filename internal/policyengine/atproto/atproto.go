@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,27 @@ type Record struct {
 	URI   string
 	CID   string
 	Value map[string]any
+}
+
+var ErrRecordNotFound = errors.New("record not found")
+
+type StatusError struct {
+	Code int
+	Body string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("status %d: %s", e.Code, e.Body)
+}
+
+func (e *StatusError) recordNotFound() bool {
+	if e.Code == http.StatusNotFound {
+		return true
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	return e.Code == http.StatusBadRequest && json.Unmarshal([]byte(e.Body), &body) == nil && body.Error == "RecordNotFound"
 }
 
 type Client struct {
@@ -133,6 +155,10 @@ func (c *Client) GetRecord(ctx context.Context, ref StrongRef) (map[string]any, 
 		Value map[string]any `json:"value"`
 	}
 	if err := c.getJSON(ctx, endpoint+"?"+query.Encode(), &response); err != nil {
+		var status *StatusError
+		if errors.As(err, &status) && status.recordNotFound() {
+			return nil, fmt.Errorf("getRecord %s: %w", ref.URI, ErrRecordNotFound)
+		}
 		return nil, fmt.Errorf("getRecord %s: %w", ref.URI, err)
 	}
 	if response.Value == nil {
@@ -203,7 +229,7 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, target any) error
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
-		return fmt.Errorf("status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return &StatusError{Code: response.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 8<<20))
 	return decoder.Decode(target)

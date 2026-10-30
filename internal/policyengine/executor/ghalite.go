@@ -97,11 +97,11 @@ func (g *GhaLite) Scope(ctx context.Context, record PolicyRecord, input ScopeInp
 		return Deny(refusal, PolicyGhaLiteNSID), true, nil
 	}
 	var host trust.Host
-	if input.ResolveOperatorDid != nil || input.GetVouchedDids != nil {
+	if input.ResolveOperatorDid != nil || input.Vouches != nil {
 		host = scopeHost{
 			resolveOperatorDid:    input.ResolveOperatorDid,
 			resolveOperatorDidFor: input.ResolveOperatorDidFor,
-			getVouchedDids:        input.GetVouchedDids,
+			vouches:               input.Vouches,
 		}
 	}
 	var snapshot *trust.Snapshot
@@ -353,7 +353,7 @@ func mustJSONString(value string) json.RawMessage {
 type scopeHost struct {
 	resolveOperatorDid    func(context.Context, string) (string, bool, error)
 	resolveOperatorDidFor func(context.Context, string, string) (string, bool, error)
-	getVouchedDids        func(context.Context, string) (map[string]bool, error)
+	vouches               func(context.Context, string, string) (bool, error)
 }
 
 func (h scopeHost) Resolve(ctx context.Context, ref atproto.StrongRef) (map[string]any, error) {
@@ -381,11 +381,11 @@ func snapshotServices(perspective Perspective) (string, string) {
 	return trust.BidderAssociate, trust.RequesterAssociate
 }
 
-func (h scopeHost) GetVouchedDids(ctx context.Context, did string) (map[string]bool, error) {
-	if h.getVouchedDids == nil {
-		return map[string]bool{}, nil
+func (h scopeHost) Vouches(ctx context.Context, voucher, subject string) (bool, error) {
+	if h.vouches == nil {
+		return false, nil
 	}
-	return h.getVouchedDids(ctx, did)
+	return h.vouches(ctx, voucher, subject)
 }
 
 func (h scopeHost) Log(level, msg string, meta map[string]any) {}

@@ -88,7 +88,7 @@ type ScopeInput struct {
 	Args                  map[string]any
 	ResolveOperatorDid    func(context.Context, string) (string, bool, error)
 	ResolveOperatorDidFor func(context.Context, string, string) (string, bool, error)
-	GetVouchedDids        func(context.Context, string) (map[string]bool, error)
+	Vouches               func(context.Context, string, string) (bool, error)
 }
 
 type Executor interface {

@@ -16,6 +16,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -80,7 +81,7 @@ func (c *Composer) ApplyOperatorVouch(ctx context.Context, r Root, ws, app, subj
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 
-const AssociationRecordName = "association"
+const AssociationRecordName = trust.MirrorRKey
 
 func (c *Composer) ApplyAssociationRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity, service string) error {
 	from := func(path string) map[string]any {
