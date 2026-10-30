@@ -65,6 +65,8 @@ type contractRunner struct {
 	secrets *secretsState
 
 	rbacRKey string
+
+	atircRevoke sync.Once
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -1394,6 +1396,9 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 	r.applyConditions(&status, contract.Generation, phase, message, state)
 	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
 		r.log().Warn("requester_contract_status_failed", "err", err)
+	}
+	if phase == v1alpha1.ComputeContractReleased {
+		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
 	}
 }
 
