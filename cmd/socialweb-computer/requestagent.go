@@ -28,6 +28,10 @@ func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {
 	if !strings.HasPrefix(envFile, "/") || strings.Contains(envFile, "/../") {
 		return nil, fmt.Errorf("the agent envFile %q is not an absolute path", envFile)
 	}
+	return withPlaceholder(bundle, envFile, atircTokenPlaceholder)
+}
+
+func withPlaceholder(bundle []byte, path, value string) ([]byte, error) {
 	entries := []map[string]any{}
 	if len(bundle) > 0 {
 		if err := json.Unmarshal(bundle, &entries); err != nil {
@@ -35,11 +39,11 @@ func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {
 		}
 	}
 	for _, e := range entries {
-		if path, _ := e["path"].(string); path == envFile {
+		if have, _ := e["path"].(string); have == path {
 			return bundle, nil
 		}
 	}
-	entries = append(entries, map[string]any{"path": envFile, "value": atircTokenPlaceholder, "mode": "0600"})
+	entries = append(entries, map[string]any{"path": path, "value": value, "mode": "0600"})
 	return json.Marshal(entries)
 }
 

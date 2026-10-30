@@ -43,6 +43,7 @@ const (
 	RootName                     = "app"
 	FieldManager                 = "socialweb-computer-run-request"
 	ReleaseFieldManager          = "socialweb.computer/run-request"
+	AssociateFieldManager        = "socialweb.computer/run-request-associate"
 	NetworkAppFieldManager       = "socialweb.computer/network-app"
 	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
 	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
@@ -370,6 +371,17 @@ func (k *Kcp) Release(ctx context.Context) error {
 	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
 		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true}}
 	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: ReleaseFieldManager, Force: true})
+	return err
+}
+
+func (k *Kcp) Associate(ctx context.Context, subject string) error {
+	contracts := k.dyn.Resource(compose.ComputeContractGVR)
+	if _, err := kube.Get[kube.Doc](ctx, contracts, marketrequester.RequesterContract); err != nil {
+		return err
+	}
+	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
+		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"association": map[string]any{"subject": subject}}}
+	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: AssociateFieldManager, Force: true})
 	return err
 }
 

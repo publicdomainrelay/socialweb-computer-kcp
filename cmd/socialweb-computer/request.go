@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -48,7 +49,7 @@ const (
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
-var requestCreateOptions = append(append([]string{}, requestOptions...), "identity")
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
 
 type requestRun struct {
 	a               *app
@@ -1095,6 +1096,14 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if r.contract.Agent != nil {
 		if bundle, err = withAgentPlaceholder(bundle, r.contract.Agent.EnvFile); err != nil {
 			return a.fail(exitRefused, "run request: --agent: %v", err)
+		}
+	}
+	if r.contract.Association, err = associateOf(vals.String("associate")); err != nil {
+		return a.fail(exitRefused, "run request: --associate: %v", err)
+	}
+	if r.contract.Association != nil {
+		if bundle, err = withPlaceholder(bundle, cloudinit.DefaultAssociationRefFile, ""); err != nil {
+			return a.fail(exitRefused, "run request: --associate: %v", err)
 		}
 	}
 	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC()}

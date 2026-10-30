@@ -58,6 +58,8 @@ type ComputeContractSpec struct {
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
 
+	Association *ComputeContractAssociation `json:"association,omitempty"`
+
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }
 
@@ -137,6 +139,12 @@ type ComputeContractShell struct {
 
 type ComputeContractAgent struct {
 	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/atirc/atirc.env"`
+}
+
+type ComputeContractAssociation struct {
+	Subject string `json:"subject"`
+
+	RefFile string `json:"refFile,omitempty" apigen:"userEndpoint,default=/etc/socialweb-computer/association-ref"`
 }
 
 type ComputeKind string
@@ -248,6 +256,8 @@ type ComputeContractStatus struct {
 	Release *ComputeContractRelease `json:"release,omitempty"`
 
 	PendingEvents []ComputeContractEvent `json:"pendingEvents,omitempty"`
+
+	Association *commonv1.StrongRef `json:"association,omitempty"`
 }
 
 const (

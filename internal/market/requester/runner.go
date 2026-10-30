@@ -67,6 +67,12 @@ type contractRunner struct {
 	rbacRKey string
 
 	atircRevoke sync.Once
+
+	association *contractAssociation
+
+	associationMu sync.Mutex
+
+	associating atomic.Bool
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -113,7 +119,9 @@ func (r *contractRunner) Update(contract v1alpha1.ComputeContract) {
 	r.mu.Unlock()
 	if contract.DeletionTimestamp != nil || contract.Spec.Release {
 		r.requestRelease()
+		return
 	}
+	r.associateLater(contract)
 }
 
 func (r *contractRunner) releaseStatus() *v1alpha1.ComputeContractRelease {
@@ -536,6 +544,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	state.Phase = v1alpha1.ContractAccepted
 	state.Timestamps.Accepted = q.nowISO()
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the accept is submitted; waiting for the receipt", state, allBids, chosen, "awaitingReceipt", 1)
+	r.ensureAssociation(ctx, state.Accept, state)
 
 	receipt, err := q.submitAcceptAndWait(ctx, winnerBidder, accept.URI, accept.CID, winner.DID)
 	if err != nil {
@@ -636,6 +645,7 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 	if err != nil {
 		return fmt.Errorf("read the recorded market.accept record: %w", err)
 	}
+	r.ensureAssociation(ctx, state.Accept, state)
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the accept is recorded; waiting for the receipt", state, r.currentBids(), r.currentChosen(), "awaitingReceipt", 1)
 	receipt, err := r.q.submitAcceptAndWait(ctx, bidder, acceptRef.URI, acceptRef.CID, bidderDID)
 	if err != nil {
@@ -703,6 +713,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if r.released() {
 		return r.releaseContract(ctx, state, bidderDID)
 	}
+	r.ensureAssociation(ctx, state.Accept, state)
 	receiptRef := market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID}
 	verified, err := r.verifyRecordedReceipt(ctx, state, receiptRef)
 	if err != nil {
@@ -1120,14 +1131,14 @@ func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.Node
 	r.setRelease(release)
 	r.log().Info("requester_released", "receipt", receiptURIOf(state), "attempts", release.Attempts, "message", message)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), "released", int32(release.Attempts))
-	r.deleteRBAC(ctx)
+	r.deleteContractRecords(ctx)
 }
 
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
 	q := r.q
 	if state == nil || state.Receipt == nil {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
-		r.deleteRBAC(ctx)
+		r.deleteContractRecords(ctx)
 		return nil
 	}
 	if state.Termination != nil {
@@ -1136,7 +1147,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 			state.Timestamps.Released = q.nowISO()
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
-		r.deleteRBAC(ctx)
+		r.deleteContractRecords(ctx)
 		return nil
 	}
 	if state.Release != nil && state.Release.OK {
@@ -1146,7 +1157,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 			r.setRelease(release)
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released", state, r.currentBids(), r.currentChosen(), "released", 1)
-		r.deleteRBAC(ctx)
+		r.deleteContractRecords(ctx)
 		return nil
 	}
 

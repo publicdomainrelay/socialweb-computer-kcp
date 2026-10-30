@@ -107,7 +107,7 @@ items:
     status: done
   - id: A5
     title: "authority write path: requester writes a contract-owned association record for a subject it starts (app password or OAuth)"
-    status: planned
+    status: doing
   - id: P1
     title: "page: associate-agent-DID action + Associated display (wasm)"
     status: planned

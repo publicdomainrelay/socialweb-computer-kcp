@@ -591,6 +591,10 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "associate": {
+      "type": "string",
+      "description": "run request and run request associate: the repo DID of a requester that the rented guest runs (spec.association.subject): after the accept, the requester writes a contract-scoped com.publicdomainrelay.temp.market.association record at rkey requester_associate-<did with : as -> in its own repo (contract = the market.accept, expiresAt = the accept time plus 24h), puts its at-uri#cid into the secrets bundle at /etc/socialweb-computer/association-ref and into status.association, and deletes it on release; run request associate <name> --associate <did> sets it on a running contract and prints the ref"
+    },
     "association-ref": {
       "type": "string",
       "bare": "/etc/socialweb-computer/association-ref",

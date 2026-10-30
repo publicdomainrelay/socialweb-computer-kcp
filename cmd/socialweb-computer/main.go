@@ -82,6 +82,7 @@ func builtVerbs() map[string]builtVerb {
 		"run request ssh":        {append(slices.Clone(requestOptions), "contract"), runRequestSSH},
 		"run request proxy":      {append(slices.Clone(requestOptions), "contract"), runRequestProxy},
 		"run request agent":      {append(slices.Clone(requestOptions), "contract"), runRequestAgent},
+		"run request associate":  {append(slices.Clone(requestOptions), "associate"), runRequestAssociate},
 		"manifests list":         {[]string{"json"}, runManifestsList},
 		"manifests render":       {renderOptions, runManifestsRender},
 		"install gateway":        {installOptions, runInstall(hostcontract.RoleGateway)},
