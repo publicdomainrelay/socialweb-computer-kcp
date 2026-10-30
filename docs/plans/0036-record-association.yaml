@@ -85,7 +85,7 @@ state_rules:
 items:
   - id: S1
     title: "Two-repo operator check in trust.go (security fix)"
-    detail: "ResolveOperatorDidFor requires the operator-side claim; paged listRecords; deterministic-rkey getRecord first; stop mirroring declared-only approvals as verified. Ships ahead of the rest (owner check 2026-10-30: prod bidders run no spec.policy and their operator claims exist, so it ships as soon as it lands)."
+    detail: "ResolveOperatorDidFor requires the operator-side claim; paged listRecords; deterministic-rkey getRecord first; stop mirroring declared-only approvals as verified. Ships ahead of the rest in the next rc. Prod bidders run bidder-tangled-vouch since 2026-10-30, so it changes live decisions; bob's localRepo bidders resolve to bob through the operator claim."
     status: done
   - id: S2
     title: "listRecords paging and badge-binding cache TTL"
