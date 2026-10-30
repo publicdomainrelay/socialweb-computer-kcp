@@ -50,6 +50,8 @@ type PolicyWorkflowRunSpec struct {
 
 	Accept *commonv1.StrongRef `json:"accept,omitempty"`
 
+	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
+
 	Cache PolicyCache `json:"cache,omitempty"`
 
 	Suspend bool `json:"suspend,omitempty"`

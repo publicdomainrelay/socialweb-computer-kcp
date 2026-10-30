@@ -55,6 +55,8 @@ type Client struct {
 
 	Parser Parser
 
+	Association *commonv1.AssociationPolicy
+
 	Now func() time.Time
 
 	counter atomic.Uint64
@@ -133,6 +135,7 @@ func (c *Client) Spec(req Request) policyv1alpha1.PolicyWorkflowRunSpec {
 		RFP:                     strongRef(input.RFP),
 		Bid:                     strongRef(input.Bid),
 		Accept:                  strongRef(input.Accept),
+		Association:             c.Association.DeepCopy(),
 		ActiveDeadlineSeconds:   &deadline,
 		TTLSecondsAfterFinished: &ttl,
 	}

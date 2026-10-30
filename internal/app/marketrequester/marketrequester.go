@@ -277,6 +277,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		OperatorDID:          compose.OperatorDID(o.Spec.Identity.ApprovedAssociations, id),
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
+		Association:          o.Spec.Association.DeepCopy(),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
 		Comms:                o.Spec.Comms,
 		Ingress:              o.Spec.RequesterIngress,

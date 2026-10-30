@@ -19,6 +19,10 @@ import (
 const (
 	VouchNSID            = "sh.tangled.graph.vouch"
 	BadgeBlueKeysNSID    = "com.publicdomainrelay.temp.badgeBlueKeys"
+	AssociationNSID      = "com.publicdomainrelay.temp.market.association"
+	BskyPostNSID         = "app.bsky.feed.post"
+	DelvePostNSID        = "town.delve.feed.post"
+	MentionFacetType     = "app.bsky.richtext.facet#mention"
 	MirrorRKey           = "association"
 	BidderAssociate      = "bidder_associate"
 	RequesterAssociate   = "requester_associate"
@@ -50,6 +54,7 @@ type ResolverOptions struct {
 type operatorKey struct {
 	did     string
 	service string
+	assoc   associationKey
 }
 
 type operatorEntry struct {
@@ -127,16 +132,21 @@ func (r *Resolver) ResolveOperatorDid(ctx context.Context, did string) (string, 
 }
 
 func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
+	return r.ResolveOperatorDidWith(ctx, did, service, Association{})
+}
+
+func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service string, assoc Association) (string, bool, error) {
 	did = strings.TrimSpace(did)
 	service = strings.TrimSpace(service)
 	if did == "" {
 		return "", false, nil
 	}
-	key := operatorKey{did: did, service: service}
+	akey := assoc.key()
+	key := operatorKey{did: did, service: service, assoc: akey}
 	if entry, ok := r.ops.Get(key); ok {
 		return entry.value, entry.found, nil
 	}
-	operator, found, err := r.operatorOf(ctx, did, service)
+	operator, found, err := r.operatorOf(ctx, did, service, akey)
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", false, ctx.Err()
@@ -147,20 +157,53 @@ func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service strin
 	return operator, found, nil
 }
 
-func (r *Resolver) operatorOf(ctx context.Context, did, service string) (string, bool, error) {
+func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc associationKey) (string, bool, error) {
 	mirror, ok, err := r.mirrorOf(ctx, did, service)
 	if err != nil || !ok {
 		return "", false, err
 	}
-	held, err := r.claimHeld(ctx, mirror)
-	if err != nil {
-		return "", false, err
+	if assoc.association {
+		held, err := r.associationHeld(ctx, mirror, assoc)
+		if err != nil {
+			return "", false, err
+		}
+		if held {
+			return mirror.operator, true, nil
+		}
 	}
-	if !held {
-		r.log("info", "resolveOperatorDid unclaimed mirror", map[string]any{"did": did, "operator": mirror.operator, "service": mirror.service})
-		return "", false, nil
+	if assoc.claim && !assoc.requireContract {
+		held, err := r.claimHeld(ctx, mirror)
+		if err != nil {
+			return "", false, err
+		}
+		if held {
+			return mirror.operator, true, nil
+		}
 	}
-	return mirror.operator, true, nil
+	r.log("info", "resolveOperatorDid unclaimed mirror", map[string]any{"did": did, "operator": mirror.operator, "service": mirror.service})
+	return "", false, nil
+}
+
+func (r *Resolver) associationHeld(ctx context.Context, want claim, assoc associationKey) (bool, error) {
+	value, err := r.getRecord(ctx, want.operator, AssociationNSID, ClaimRKey(want.service, want.subject))
+	if err != nil || value == nil {
+		return false, err
+	}
+	if !Matches(KindAssociation, value, want.operator, want.subject, want.service, assoc.template) {
+		r.log("info", "association record does not match", map[string]any{"did": want.subject, "operator": want.operator, "service": want.service})
+		return false, nil
+	}
+	return r.scopeHeld(ctx, value, want, assoc)
+}
+
+func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey) (bool, error) {
+	_, contract := value["contract"]
+	_, expires := value["expiresAt"]
+	if contract || expires || assoc.requireContract {
+		r.log("info", "association scope not verifiable", map[string]any{"did": want.subject, "operator": want.operator, "service": want.service})
+		return false, nil
+	}
+	return true, nil
 }
 
 func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (claim, bool, error) {
@@ -284,11 +327,19 @@ type ServiceOperatorResolver interface {
 	ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error)
 }
 
+type AssociationOperatorResolver interface {
+	ResolveOperatorDidWith(ctx context.Context, did, service string, assoc Association) (string, bool, error)
+}
+
 func BuildSnapshot(ctx context.Context, host Host, selfDid, counterpartyDid string) (Snapshot, error) {
 	return BuildSnapshotFor(ctx, host, selfDid, counterpartyDid, "", "")
 }
 
 func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string) (Snapshot, error) {
+	return BuildSnapshotWith(ctx, host, selfDid, counterpartyDid, selfService, counterpartyService, Association{})
+}
+
+func BuildSnapshotWith(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string, assoc Association) (Snapshot, error) {
 	snapshot := Snapshot{
 		OperatorOf:       make(map[string]string),
 		VouchedBy:        make(map[string][]string),
@@ -302,7 +353,16 @@ func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	roleResolver, _ := host.(ServiceOperatorResolver)
+	assocResolver, _ := host.(AssociationOperatorResolver)
+	selfAssoc := assoc
+	selfAssoc.RequireContract = false
 	resolve := func(did, service string) (string, bool, error) {
+		if assocResolver != nil {
+			if did == selfDid {
+				return assocResolver.ResolveOperatorDidWith(ctx, did, service, selfAssoc)
+			}
+			return assocResolver.ResolveOperatorDidWith(ctx, did, service, assoc)
+		}
 		if roleResolver != nil {
 			return roleResolver.ResolveOperatorDidFor(ctx, did, service)
 		}

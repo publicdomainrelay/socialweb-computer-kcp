@@ -691,13 +691,14 @@ func (q *Requester) loadKeys() error {
 
 func (q *Requester) policyRuns() *runs.Client {
 	return participant.NewPolicyRuns(participant.PolicyConfig{
-		Resolve: q.deps.Policy,
-		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: KindRequester, Name: q.cfg.Name, UID: q.cfg.UID},
-		Engine:  runs.EngineRef(q.cfg.Spec.PolicyEngineRef, q.cfg.Workspace),
-		Role:    "requester",
-		Prefix:  "requester-policy",
-		Timeout: q.cfg.PolicyTimeout,
-		Parser:  runs.Strict,
+		Resolve:     q.deps.Policy,
+		Owner:       policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: KindRequester, Name: q.cfg.Name, UID: q.cfg.UID},
+		Engine:      runs.EngineRef(q.cfg.Spec.PolicyEngineRef, q.cfg.Workspace),
+		Role:        "requester",
+		Prefix:      "requester-policy",
+		Timeout:     q.cfg.PolicyTimeout,
+		Parser:      runs.Strict,
+		Association: q.cfg.Spec.Association,
 	})
 }
 

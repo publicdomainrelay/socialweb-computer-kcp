@@ -424,6 +424,8 @@ type BidderSpec struct {
 
 	PolicyArgs string `json:"policyArgs,omitempty"`
 
+	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
+
 	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
@@ -638,6 +640,8 @@ type RequesterSpec struct {
 	DirectoryKeys *int32 `json:"directoryKeys,omitempty" apigen:"default=10000,minimum=1"`
 
 	PolicyTimeoutSeconds *int32 `json:"policyTimeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
+
+	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
 
 	OAuthScopes []string `json:"oauthScopes,omitempty"`
 

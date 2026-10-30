@@ -634,6 +634,8 @@ type MarketBidderSpec struct {
 
 	Policy string `json:"policy,omitempty"`
 
+	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
+
 	GuestNetwork *GuestNetworkOptions `json:"guestNetwork,omitempty"`
 
 	Firecracker *FirecrackerProvider `json:"firecracker,omitempty"`
@@ -688,6 +690,8 @@ type MarketRequesterSpec struct {
 	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
 
 	BidderDids []string `json:"bidderDids,omitempty"`
+
+	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
 
 	Options []ApplicationOption `json:"options,omitempty"`
 

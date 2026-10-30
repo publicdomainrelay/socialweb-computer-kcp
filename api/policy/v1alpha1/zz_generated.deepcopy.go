@@ -716,6 +716,11 @@ func (in *PolicyWorkflowRunSpec) DeepCopyInto(out *PolicyWorkflowRunSpec) {
 		*out = new(commonv1alpha1.StrongRef)
 		**out = **in
 	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(commonv1alpha1.AssociationPolicy)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Cache != nil {
 		in, out := &in.Cache, &out.Cache
 		*out = make(PolicyCache, len(*in))

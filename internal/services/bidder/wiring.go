@@ -325,14 +325,15 @@ func (s *Service) policyRuns() *runs.Client {
 		return nil
 	}
 	return participant.NewPolicyRuns(participant.PolicyConfig{
-		Resolve: s.resolvePolicyRunner,
-		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
-		Engine:  engine,
-		Role:    core.PerspectiveBidder,
-		Prefix:  "policy",
-		Args:    s.policyArgs,
-		Timeout: seconds(s.spec.PolicyTimeoutSeconds),
-		Parser:  runs.Lenient,
+		Resolve:     s.resolvePolicyRunner,
+		Owner:       policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
+		Engine:      engine,
+		Role:        core.PerspectiveBidder,
+		Prefix:      "policy",
+		Args:        s.policyArgs,
+		Timeout:     seconds(s.spec.PolicyTimeoutSeconds),
+		Parser:      runs.Lenient,
+		Association: s.spec.Association,
 	})
 }
 

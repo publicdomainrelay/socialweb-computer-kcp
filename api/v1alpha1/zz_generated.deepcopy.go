@@ -1114,6 +1114,11 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(commonv1alpha1.AssociationPolicy)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.GuestNetwork != nil {
 		in, out := &in.GuestNetwork, &out.GuestNetwork
 		*out = new(GuestNetworkOptions)
@@ -5763,6 +5768,11 @@ func (in *MarketBidderSpec) DeepCopyInto(out *MarketBidderSpec) {
 		*out = new(IngressConfig)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(commonv1alpha1.AssociationPolicy)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.GuestNetwork != nil {
 		in, out := &in.GuestNetwork, &out.GuestNetwork
 		*out = new(GuestNetworkOptions)
@@ -6445,6 +6455,11 @@ func (in *MarketRequesterSpec) DeepCopyInto(out *MarketRequesterSpec) {
 		in, out := &in.BidderDids, &out.BidderDids
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(commonv1alpha1.AssociationPolicy)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.Options != nil {
 		in, out := &in.Options, &out.Options
@@ -9324,6 +9339,11 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 		in, out := &in.PolicyTimeoutSeconds, &out.PolicyTimeoutSeconds
 		*out = new(int32)
 		**out = **in
+	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(commonv1alpha1.AssociationPolicy)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.OAuthScopes != nil {
 		in, out := &in.OAuthScopes, &out.OAuthScopes

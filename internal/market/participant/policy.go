@@ -82,6 +82,8 @@ type PolicyConfig struct {
 	Timeout time.Duration
 
 	Parser runs.Parser
+
+	Association *commonv1.AssociationPolicy
 }
 
 func NewPolicyRuns(cfg PolicyConfig) *runs.Client {
@@ -89,7 +91,7 @@ func NewPolicyRuns(cfg PolicyConfig) *runs.Client {
 		return nil
 	}
 	return &runs.Client{Resolve: cfg.Resolve, Owner: cfg.Owner, Engine: cfg.Engine, Role: cfg.Role, Prefix: cfg.Prefix,
-		Args: cfg.Args, Timeout: cfg.Timeout, Parser: cfg.Parser, Now: time.Now}
+		Args: cfg.Args, Timeout: cfg.Timeout, Parser: cfg.Parser, Association: cfg.Association.DeepCopy(), Now: time.Now}
 }
 
 func ParsePolicyArgs(raw string) (map[string]string, error) {

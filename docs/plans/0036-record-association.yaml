@@ -97,7 +97,7 @@ items:
     status: done
   - id: A2
     title: "matcher framework: kinds claim, association, bskyPost, delvePost; config on MarketBidder/MarketRequester"
-    status: planned
+    status: done
   - id: A3
     title: "mirror proof strongRef + trust.go proof verification (both lanes), contract/expiry checks"
     status: planned
