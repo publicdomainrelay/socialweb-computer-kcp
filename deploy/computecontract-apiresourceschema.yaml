@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-20.computecontracts.socialweb.computer
+  name: v1alpha1-21.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -88,6 +88,12 @@ spec:
                 x-kubernetes-list-type: map
                 x-kubernetes-list-map-keys:
                   - tag
+              agent:
+                type: object
+                properties:
+                  envFile:
+                    type: string
+                    default: /etc/atirc/atirc.env
               secretsRef:
                 type: object
                 properties:

@@ -45,7 +45,8 @@
           "type": "array",
           "items": { "type": "ref", "ref": "#tunnel" },
           "description": "Guest ports the requester reaches over a tunnel transport. Tags are unique within the contract."
-        }
+        },
+        "agent": { "type": "ref", "ref": "#agent" }
       }
     },
     "tunnel": {
@@ -68,6 +69,13 @@
       "description": "A web shell served on the tunnel's port; its token arrives through the contract's secrets bundle, never here.",
       "properties": {
         "envFile": { "type": "string", "maxLength": 256, "description": "The guest path of the shell's env file; absent means /etc/wootty/wootty.env." }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "description": "An atirc agent on the guest, started on demand; its token arrives through the contract's secrets bundle, never here.",
+      "properties": {
+        "envFile": { "type": "string", "maxLength": 256, "description": "The guest path of the agent's env file; absent means /etc/atirc/atirc.env." }
       }
     },
     "status": {

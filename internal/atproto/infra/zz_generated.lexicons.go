@@ -212,7 +212,32 @@ func (v *Infra) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type InfraAgent struct {
+	EnvFile string                     `json:"envFile,omitempty"`
+	Extra   map[string]json.RawMessage `json:"-"`
+	absent  map[string]json.RawMessage
+}
+
+func (v InfraAgent) MarshalJSON() ([]byte, error) {
+	type plain InfraAgent
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraAgent) UnmarshalJSON(b []byte) error {
+	type plain InfraAgent
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraAgent(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type InfraContract struct {
+	Agent             *InfraAgent                `json:"agent,omitempty"`
 	BidderDids        []string                   `json:"bidderDids,omitempty"`
 	ComputeKind       string                     `json:"computeKind,omitempty"`
 	DenyBidderDids    []string                   `json:"denyBidderDids,omitempty"`

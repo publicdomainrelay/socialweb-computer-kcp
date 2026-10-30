@@ -41,6 +41,8 @@ type ComputeContractTemplate struct {
 	VMReadyTimeoutSec int `json:"vmReadyTimeoutSec,omitempty"`
 
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
+
+	Agent *ComputeContractAgent `json:"agent,omitempty"`
 }
 
 type ComputeContractSpec struct {
@@ -131,6 +133,10 @@ type ComputeContractTunnel struct {
 
 type ComputeContractShell struct {
 	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/wootty/wootty.env"`
+}
+
+type ComputeContractAgent struct {
+	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/atirc/atirc.env"`
 }
 
 type ComputeKind string

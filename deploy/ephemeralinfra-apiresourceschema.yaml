@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-6.ephemeralinfras.socialweb.computer
+  name: v1alpha1-7.ephemeralinfras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -107,6 +107,12 @@ spec:
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys:
                         - tag
+                    agent:
+                      type: object
+                      properties:
+                        envFile:
+                          type: string
+                          default: /etc/atirc/atirc.env
                   required:
                     - name
               secrets:

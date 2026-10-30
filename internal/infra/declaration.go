@@ -75,6 +75,7 @@ func normalize(d Declaration) Declaration {
 		c.DenyBidderDids = nonEmpty(c.DenyBidderDids)
 		c.SshAuthorizedKeys = nonEmpty(c.SshAuthorizedKeys)
 		c.Tunnels = normalTunnels(c.Tunnels)
+		c.Agent = normalAgent(c.Agent)
 		out.Contracts = append(out.Contracts, c)
 	}
 	if out.TTLSeconds != 0 && out.EndWhen == "" {
@@ -113,6 +114,19 @@ func normalTunnels(in []v1alpha1.ComputeContractTunnel) []v1alpha1.ComputeContra
 
 const DefaultShellEnvFile = "/etc/wootty/wootty.env"
 
+func normalAgent(in *v1alpha1.ComputeContractAgent) *v1alpha1.ComputeContractAgent {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if out.EnvFile == "" {
+		out.EnvFile = DefaultAgentEnvFile
+	}
+	return &out
+}
+
+const DefaultAgentEnvFile = "/etc/atirc/atirc.env"
+
 func nonEmpty(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -125,7 +139,7 @@ func (d Declaration) Published() Declaration {
 	for _, c := range d.Contracts {
 		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
-				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels}})
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent}})
 	}
 	return normalize(out)
 }
