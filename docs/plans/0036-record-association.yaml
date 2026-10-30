@@ -83,6 +83,7 @@ state_rules:
   - "Nothing is associated without both records; a declared approval alone never produces a mirror a bidder accepts."
   - "A deleted or edited authority record revokes on the next trust refresh; the trust cache TTL bounds the delay (5 min today; wire ApplyEvent/Invalidate to the record watch)."
   - "PDS outage fails closed and is logged."
+  - "A standing operator claim (badgeBlueKeys) is an independent standing grant: it associates the subject even when a contract-scoped association for the same subject has expired or its contract is released. An operator that wants scope-only association for a subject must not also hold a standing claim for it (decided 2026-10-30 by linux-kcp, owner asleep; review 2 finding)."
 items:
   - id: S1
     title: "Two-repo operator check in trust.go (security fix)"
