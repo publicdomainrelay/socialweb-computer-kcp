@@ -4104,6 +4104,11 @@ fail, rather than the code read against this document alone.
   the rkey before createdAt. RELEASE-NO-CONTRACT-WAIT: releasing a VM-less contract waits 3 m and
   exits 1.
 
+- **Opened 2026-10-30 (stable rkeys; the text and closing instrument are in `NEXT.yaml`).**
+  LEGACY-TID-CLAIMS: the trust resolver reads the mirror, the operator claim and each vouch by one
+  getRecord at a stable rkey; only `trust.legacyClaimListed` still lists an operator repo, for the TID
+  claims did-key-associator wrote before it used putRecord (john holds 12, bob 1).
+
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
   cycles, 0 failed; 286 VM contracts, 21 failed around chaos; host OOM 0, MemAvailable 82 GB, swap 0.

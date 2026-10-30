@@ -772,6 +772,15 @@ open:
       sandbox.Runner is not Fenced (internal/sandbox/worker/worker.go) and every verdict would be Deny.
       Close when the page's policy engine reports Fenced and Ready and a page request under
       requester-tangled-vouch gets a bid from a vouched bidder.
+  - id: LEGACY-TID-CLAIMS
+    text: >
+      Re-write the legacy TID requester_associate and bidder_associate claims in the operator repos
+      (john did:plc:5svqtrhheairglgiiyvutzik holds 12, bob did:plc:ocnuqjlzgohypj3zoznermms holds 1) at
+      their stable rkeys `<service>-<did with : -> ->` (trust.ClaimRKey), then delete
+      trust.legacyClaimListed, the last listRecords of internal/policyengine/trust/trust.go (owner
+      linux-kcp; needs the operator's session). did-key-associator doRequesterAssociate and
+      doBidderAssociate now putRecord at that rkey, so no new TID claim is written. Close when no core
+      logs "resolveOperatorDid legacy claim listing" and the function is gone.
 
 execution_order:
   written: "2026-10-12, third fold of plans 0006-0008 (user request (i)); waves computed from depends_on across plans 0005-0012 (no unresolved id, no cycle). Re-derived after the fifth fold (multi-server-to-kcp.md + the user's section-7 answers): still no unresolved id or cycle; critical path unchanged. Advisory: depends_on governs; re-derive after every merge."
