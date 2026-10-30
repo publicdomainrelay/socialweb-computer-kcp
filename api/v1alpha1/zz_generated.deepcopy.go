@@ -6,7 +6,7 @@
 package v1alpha1
 
 import (
-	jsontext "encoding/json/jsontext"
+	json "encoding/json"
 
 	commonv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -361,7 +361,7 @@ func (in *AtprotoRecordSpec) DeepCopyInto(out *AtprotoRecordSpec) {
 	}
 	if in.Record != nil {
 		in, out := &in.Record, &out.Record
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	return
@@ -9769,7 +9769,7 @@ func (in *StateSyncSpec) DeepCopyInto(out *StateSyncSpec) {
 	out.Sink = in.Sink
 	if in.Payload != nil {
 		in, out := &in.Payload, &out.Payload
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	if in.Ack != nil {
@@ -10231,7 +10231,7 @@ func (in *WatchedRecord) DeepCopyInto(out *WatchedRecord) {
 	*out = *in
 	if in.Value != nil {
 		in, out := &in.Value, &out.Value
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	return

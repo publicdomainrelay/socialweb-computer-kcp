@@ -6,7 +6,7 @@
 package v1alpha1
 
 import (
-	jsontext "encoding/json/jsontext"
+	json "encoding/json"
 
 	commonv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,7 +17,7 @@ func (in *PolicyAction) DeepCopyInto(out *PolicyAction) {
 	*out = *in
 	if in.Spec != nil {
 		in, out := &in.Spec, &out.Spec
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	return
@@ -485,7 +485,7 @@ func (in *PolicyTriggerSpec) DeepCopyInto(out *PolicyTriggerSpec) {
 	*out = *in
 	if in.Workflow != nil {
 		in, out := &in.Workflow, &out.Workflow
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	in.Action.DeepCopyInto(&out.Action)
@@ -637,7 +637,7 @@ func (in *PolicyWorkflowRunSpec) DeepCopyInto(out *PolicyWorkflowRunSpec) {
 	*out = *in
 	if in.Workflow != nil {
 		in, out := &in.Workflow, &out.Workflow
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	if in.Inputs != nil {
@@ -714,14 +714,14 @@ func (in *PolicyWorkflowRunStatus) DeepCopyInto(out *PolicyWorkflowRunStatus) {
 	*out = *in
 	if in.Outputs != nil {
 		in, out := &in.Outputs, &out.Outputs
-		*out = make(map[string]jsontext.Value, len(*in))
+		*out = make(map[string]json.RawMessage, len(*in))
 		for key, val := range *in {
 			var outVal []byte
 			if val == nil {
 				(*out)[key] = nil
 			} else {
 				in, out := &val, &outVal
-				*out = make(jsontext.Value, len(*in))
+				*out = make(json.RawMessage, len(*in))
 				copy(*out, *in)
 			}
 			(*out)[key] = outVal
@@ -746,14 +746,14 @@ func (in *PolicyWorkflowRunStatus) DeepCopyInto(out *PolicyWorkflowRunStatus) {
 	}
 	if in.Annotations != nil {
 		in, out := &in.Annotations, &out.Annotations
-		*out = make(map[string]jsontext.Value, len(*in))
+		*out = make(map[string]json.RawMessage, len(*in))
 		for key, val := range *in {
 			var outVal []byte
 			if val == nil {
 				(*out)[key] = nil
 			} else {
 				in, out := &val, &outVal
-				*out = make(jsontext.Value, len(*in))
+				*out = make(json.RawMessage, len(*in))
 				copy(*out, *in)
 			}
 			(*out)[key] = outVal
@@ -792,7 +792,7 @@ func (in *PolicyWorkflowSpec) DeepCopyInto(out *PolicyWorkflowSpec) {
 	*out = *in
 	if in.Workflow != nil {
 		in, out := &in.Workflow, &out.Workflow
-		*out = make(jsontext.Value, len(*in))
+		*out = make(json.RawMessage, len(*in))
 		copy(*out, *in)
 	}
 	if in.RecordRef != nil {
