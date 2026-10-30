@@ -548,6 +548,58 @@ func BidRKey(bidderDID, rfpURI, rfpCID string) string {
 	return "bid-" + hex.EncodeToString(sum[:])[:20]
 }
 
+func TerminationKey(receiptURI string) string {
+	return "terminated:" + receiptURI
+}
+
+func EventRKeys(key string) (string, string) {
+	prefix := eventRKeyPrefix(key)
+	payload := sha256.Sum256([]byte(key))
+	event := sha256.Sum256([]byte("event:" + key))
+	return prefix + "-payload-" + hex.EncodeToString(payload[:16]), prefix + "-event-" + hex.EncodeToString(event[:16])
+}
+
+func eventRKeyPrefix(key string) string {
+	prefix := strings.TrimSpace(key)
+	if i := strings.IndexByte(prefix, ':'); i >= 0 {
+		prefix = prefix[:i]
+	}
+	var clean strings.Builder
+	for _, r := range strings.ToLower(prefix) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			clean.WriteRune(r)
+		}
+	}
+	switch prefix = clean.String(); prefix {
+	case "":
+		return "market"
+	case "terminated":
+		return "termination"
+	}
+	return prefix
+}
+
+const sessionRKeyAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
+
+func SessionRKey(label string, parts ...string) string {
+	h := sha256.New()
+	h.Write([]byte(label))
+	for _, part := range parts {
+		h.Write([]byte{0})
+		h.Write([]byte(part))
+	}
+	sum := h.Sum(nil)
+	out := make([]byte, 13)
+	for i := range out {
+		out[i] = sessionRKeyAlphabet[int(sum[i])%len(sessionRKeyAlphabet)]
+	}
+	return string(out)
+}
+
+func ReleasePayloadRKey(receiptURI string) string {
+	return SessionRKey("delete", receiptURI)
+}
+
 func CreateBid(ctx context.Context, w RecordWriter, repo string, opts BidOptions, signer *Signer) (SignedRecord, error) {
 	record, err := BuildBid(opts)
 	if err != nil {

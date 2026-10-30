@@ -15,6 +15,7 @@
           "challenge": { "type": "string", "format": "did", "description": "The repository DID the key is bound to." },
           "service": { "type": "string", "description": "The service the key signs for." },
           "nonce": { "type": "string" },
+          "proof": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "On a subject's association mirror: the authority record that associates the subject." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

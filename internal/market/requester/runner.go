@@ -1306,7 +1306,7 @@ func (r *contractRunner) releaseEnvelope(ctx context.Context, state *v1alpha1.No
 }
 
 func (q *Requester) destroyEnvelope(ctx context.Context, receipt *commonv1.StrongRef, reason string) (market.SignedRecord, market.SignedRecord, error) {
-	payloadRKey := sessionRKey("delete", receipt.URI)
+	payloadRKey := market.ReleasePayloadRKey(receipt.URI)
 	payload, foundPayload, err := q.existingSignedRecord(ctx, market.ComputeEventsVMDeleteNSID, payloadRKey)
 	if err != nil {
 		return market.SignedRecord{}, market.SignedRecord{}, fmt.Errorf("read the destroy payload: %w", err)

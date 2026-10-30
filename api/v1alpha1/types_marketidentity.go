@@ -144,6 +144,8 @@ type MarketIdentityStatus struct {
 
 	Associations []string `json:"associations,omitempty"`
 
+	AssociationRef *commonv1.StrongRef `json:"associationRef,omitempty"`
+
 	SessionRef *commonv1.SecretRef `json:"sessionRef,omitempty"`
 
 	OAuthClientID string `json:"oauthClientID,omitempty"`

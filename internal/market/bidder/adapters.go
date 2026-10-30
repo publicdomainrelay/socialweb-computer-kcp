@@ -117,38 +117,8 @@ func decodeMarketEventPayload(raw json.RawMessage) (marketEventPayload, map[stri
 }
 
 func (p marketEventPayload) recordKeys(key string) (string, string) {
-	prefix := marketEventRKeyPrefix(key)
-	payloadRKey := strings.TrimSpace(p.PayloadRKey)
-	if payloadRKey == "" {
-		sum := sha256.Sum256([]byte(key))
-		payloadRKey = prefix + "-payload-" + hex.EncodeToString(sum[:16])
-	}
-	eventRKey := strings.TrimSpace(p.EventRKey)
-	if eventRKey == "" {
-		sum := sha256.Sum256([]byte("event:" + key))
-		eventRKey = prefix + "-event-" + hex.EncodeToString(sum[:16])
-	}
-	return payloadRKey, eventRKey
-}
-
-func marketEventRKeyPrefix(key string) string {
-	prefix := strings.TrimSpace(key)
-	if i := strings.IndexByte(prefix, ':'); i >= 0 {
-		prefix = prefix[:i]
-	}
-	var clean strings.Builder
-	for _, r := range strings.ToLower(prefix) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			clean.WriteRune(r)
-		}
-	}
-	switch prefix = clean.String(); prefix {
-	case "":
-		return "market"
-	case "terminated":
-		return "termination"
-	}
-	return prefix
+	payloadRKey, eventRKey := market.EventRKeys(key)
+	return cmp.Or(strings.TrimSpace(p.PayloadRKey), payloadRKey), cmp.Or(strings.TrimSpace(p.EventRKey), eventRKey)
 }
 
 func unsignedRecord(record map[string]any) map[string]any {
@@ -444,7 +414,7 @@ func (b *Bidder) observeProvision(_ context.Context, request participant.OutboxR
 	acceptMeta := map[string]string{"acceptUri": payload.Accept.URI, "acceptCid": payload.Accept.CID}
 	bid := b.bidForAcceptStatus(payload.Accept.URI, payload.Accept.CID)
 	if bid != nil && bid.Status.Terminated != nil {
-		return b.settledObservation("terminated:"+bid.Status.Terminated.ReceiptURI, request, acceptMeta), nil
+		return b.settledObservation(market.TerminationKey(bid.Status.Terminated.ReceiptURI), request, acceptMeta), nil
 	}
 	var vm *v1alpha1.ComputeVM
 	if bid != nil && bid.Status.ComputeVM != "" {
@@ -591,7 +561,7 @@ func (b *Bidder) acceptContract(ctx context.Context, request participant.OutboxR
 		if bid.Status.Accept == nil || bid.Status.Accept.URI != payload.Accept.URI || bid.Status.Accept.CID != payload.Accept.CID {
 			return out, nil, errors.New("bidder: the bid's contract was released")
 		}
-		settled := b.settledObservation("terminated:"+terminated.ReceiptURI, request,
+		settled := b.settledObservation(market.TerminationKey(terminated.ReceiptURI), request,
 			map[string]string{"acceptUri": payload.Accept.URI, "acceptCid": payload.Accept.CID})
 		return out, &settled, nil
 	}

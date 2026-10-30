@@ -57,6 +57,8 @@ type AtprotoValueFrom struct {
 	Workspace string `json:"workspace,omitempty"`
 
 	Namespace string `json:"namespace,omitempty"`
+
+	Optional bool `json:"optional,omitempty"`
 }
 
 type AtprotoRecordWatchSource struct {

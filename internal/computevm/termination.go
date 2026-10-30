@@ -85,7 +85,7 @@ func TerminationStateSync(o *v1alpha1.ComputeVM, workspace, reason, observedAt s
 			Sink:           v1alpha1.StateSyncSink{Adapter: TerminationSyncAdapter},
 			Direction:      v1alpha1.StateSyncDirectionOutbound,
 			Payload:        raw,
-			IdempotencyKey: "terminated:" + contract.Receipt.URI,
+			IdempotencyKey: market.TerminationKey(contract.Receipt.URI),
 			ConflictPolicy: v1alpha1.StateSyncConflictSourceWins,
 			DeletionPolicy: v1alpha1.StateSyncDeletionRetain,
 		},

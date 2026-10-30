@@ -1,8 +1,14 @@
 package trust
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 )
 
 const (
@@ -139,4 +145,157 @@ func postMatches(value map[string]any, subject, template string) bool {
 		}
 	}
 	return mentions == 1 && matched
+}
+
+func strongRefOf(value any) (*atproto.StrongRef, bool) {
+	fields, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	uri, _ := fields["uri"].(string)
+	cid, _ := fields["cid"].(string)
+	if !strings.HasPrefix(uri, "at://") || cid == "" {
+		return nil, false
+	}
+	return &atproto.StrongRef{URI: uri, CID: cid}, true
+}
+
+func (r *Resolver) pinnedRecord(ctx context.Context, ref atproto.StrongRef) (map[string]any, string, error) {
+	record, err := r.client.GetRecordAt(ctx, ref)
+	if errors.Is(err, atproto.ErrRecordNotFound) {
+		return nil, "the record no longer resolves", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if record.CID != ref.CID {
+		return nil, "the record cid changed", nil
+	}
+	return record.Value, "", nil
+}
+
+func (r *Resolver) deny(reason string, want claim, meta map[string]any) (bool, error) {
+	fields := map[string]any{"did": want.subject, "operator": want.operator, "service": want.service, "reason": reason}
+	for key, value := range meta {
+		fields[key] = value
+	}
+	r.log("info", "association denied", fields)
+	return false, nil
+}
+
+func (r *Resolver) proofHeld(ctx context.Context, want claim, proof atproto.StrongRef, assoc associationKey) (bool, error) {
+	repo, collection, _ := atproto.SplitURI(proof.URI)
+	kind := KindOfCollection(collection)
+	meta := map[string]any{"proof": proof.URI, "cid": proof.CID}
+	switch {
+	case repo != want.operator:
+		return r.deny("the proof is not in the authority repo", want, meta)
+	case kind == "" || !assoc.allows(kind):
+		return r.deny("the proof kind is not accepted", want, meta)
+	}
+	value, reason, err := r.pinnedRecord(ctx, proof)
+	if err != nil || reason != "" {
+		if err != nil {
+			return false, err
+		}
+		return r.deny("proof: "+reason, want, meta)
+	}
+	if !Matches(kind, value, want.operator, want.subject, want.service, assoc.template) {
+		return r.deny("the proof does not match", want, meta)
+	}
+	if kind == KindBskyPost || kind == KindDelvePost {
+		if assoc.requireContract {
+			return r.deny("a post carries no contract", want, meta)
+		}
+		return true, nil
+	}
+	return r.scopeHeld(ctx, value, want, assoc)
+}
+
+func (r *Resolver) associationHeld(ctx context.Context, want claim, assoc associationKey) (bool, error) {
+	value, err := r.getRecord(ctx, want.operator, AssociationNSID, ClaimRKey(want.service, want.subject))
+	if err != nil || value == nil {
+		return false, err
+	}
+	if !Matches(KindAssociation, value, want.operator, want.subject, want.service, assoc.template) {
+		return r.deny("the association record does not match", want, nil)
+	}
+	return r.scopeHeld(ctx, value, want, assoc)
+}
+
+func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey) (bool, error) {
+	rawContract, scoped := value["contract"]
+	rawExpires, expiring := value["expiresAt"]
+	expiresAt, _ := rawExpires.(string)
+	switch {
+	case scoped && expiresAt == "":
+		return r.deny("a contract-scoped association has no expiresAt", want, nil)
+	case assoc.requireContract && !scoped:
+		return r.deny("the verifier requires a contract-scoped association", want, nil)
+	}
+	if expiring {
+		deadline, err := time.Parse(time.RFC3339Nano, expiresAt)
+		if err != nil {
+			return r.deny("the expiresAt is not a datetime", want, map[string]any{"expiresAt": expiresAt})
+		}
+		if !r.now().Before(deadline) {
+			return r.deny("the association expired", want, map[string]any{"expiresAt": expiresAt})
+		}
+	}
+	if !scoped {
+		return true, nil
+	}
+	contract, ok := strongRefOf(rawContract)
+	if !ok {
+		return r.deny("the contract is not a strongRef", want, nil)
+	}
+	return r.contractHeld(ctx, *contract, want)
+}
+
+func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef, want claim) (bool, error) {
+	meta := map[string]any{"contract": contract.URI, "cid": contract.CID}
+	repo, collection, _ := atproto.SplitURI(contract.URI)
+	if repo != want.operator || collection != market.AcceptNSID {
+		return r.deny("the contract is not a market.accept of the authority", want, meta)
+	}
+	accept, reason, err := r.pinnedRecord(ctx, contract)
+	if err != nil || reason != "" {
+		if err != nil {
+			return false, err
+		}
+		return r.deny("contract: "+reason, want, meta)
+	}
+	bid, ok := strongRefOf(accept["bid"])
+	if !ok {
+		return r.deny("the contract names no bid", want, meta)
+	}
+	bidder := atproto.RepoFromURI(bid.URI)
+	receiptRKey := market.ReceiptRKey(contract.URI, contract.CID)
+	receipt, err := r.getRecord(ctx, bidder, market.ReceiptNSID, receiptRKey)
+	if err != nil {
+		return false, err
+	}
+	if receipt == nil {
+		return r.deny("the contract has no receipt", want, meta)
+	}
+	if answered, ok := strongRefOf(receipt["accept"]); !ok || *answered != contract {
+		return r.deny("the receipt does not answer the contract", want, meta)
+	}
+	receiptURI := "at://" + bidder + "/" + market.ReceiptNSID + "/" + receiptRKey
+	released, err := r.getRecord(ctx, want.operator, market.ComputeEventsVMDeleteNSID, market.ReleasePayloadRKey(receiptURI))
+	if err != nil {
+		return false, err
+	}
+	if released != nil {
+		return r.deny("the contract was released", want, meta)
+	}
+	terminationRKey, _ := market.EventRKeys(market.TerminationKey(receiptURI))
+	terminated, err := r.getRecord(ctx, bidder, market.ComputeEventsVMTerminatedNSID, terminationRKey)
+	if err != nil {
+		return false, err
+	}
+	if terminated != nil {
+		return r.deny("the contract was terminated", want, meta)
+	}
+	return true, nil
 }

@@ -353,21 +353,8 @@ func heldContractName(did, name string) string {
 	return "ssh-" + hex.EncodeToString(sum[:10])
 }
 
-const sessionRKeyAlphabet = "234567abcdefghijklmnopqrstuvwxyz"
-
 func sessionRKey(label string, parts ...string) string {
-	h := sha256.New()
-	h.Write([]byte(label))
-	for _, part := range parts {
-		h.Write([]byte{0})
-		h.Write([]byte(part))
-	}
-	sum := h.Sum(nil)
-	out := make([]byte, 13)
-	for i := range out {
-		out[i] = sessionRKeyAlphabet[int(sum[i])%len(sessionRKeyAlphabet)]
-	}
-	return string(out)
+	return market.SessionRKey(label, parts...)
 }
 
 func (q *Requester) existingSignedRecord(ctx context.Context, collection, rkey string) (market.SignedRecord, bool, error) {

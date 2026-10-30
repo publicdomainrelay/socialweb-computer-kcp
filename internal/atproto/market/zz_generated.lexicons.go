@@ -311,6 +311,7 @@ type BadgeBlueKeys struct {
 	KeyID     string                     `json:"keyId"`
 	Name      string                     `json:"name,omitempty"`
 	Nonce     string                     `json:"nonce,omitempty"`
+	Proof     *StrongRef                 `json:"proof,omitempty"`
 	Service   string                     `json:"service"`
 	Extra     map[string]json.RawMessage `json:"-"`
 	absent    map[string]json.RawMessage

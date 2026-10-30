@@ -138,13 +138,21 @@ func decodeEndpoint(raw json.RawMessage) string {
 }
 
 func (c *Client) GetRecord(ctx context.Context, ref StrongRef) (map[string]any, error) {
+	record, err := c.GetRecordAt(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return record.Value, nil
+}
+
+func (c *Client) GetRecordAt(ctx context.Context, ref StrongRef) (Record, error) {
 	repo, collection, rkey := SplitURI(ref.URI)
 	if repo == "" || collection == "" || rkey == "" {
-		return nil, fmt.Errorf("invalid at uri %q", ref.URI)
+		return Record{}, fmt.Errorf("invalid at uri %q", ref.URI)
 	}
 	pds, err := c.ResolvePDS(ctx, repo)
 	if err != nil {
-		return nil, err
+		return Record{}, err
 	}
 	endpoint := pds + "/xrpc/com.atproto.repo.getRecord"
 	query := url.Values{}
@@ -152,19 +160,21 @@ func (c *Client) GetRecord(ctx context.Context, ref StrongRef) (map[string]any, 
 	query.Set("collection", collection)
 	query.Set("rkey", rkey)
 	var response struct {
+		URI   string         `json:"uri"`
+		CID   string         `json:"cid"`
 		Value map[string]any `json:"value"`
 	}
 	if err := c.getJSON(ctx, endpoint+"?"+query.Encode(), &response); err != nil {
 		var status *StatusError
 		if errors.As(err, &status) && status.recordNotFound() {
-			return nil, fmt.Errorf("getRecord %s: %w", ref.URI, ErrRecordNotFound)
+			return Record{}, fmt.Errorf("getRecord %s: %w", ref.URI, ErrRecordNotFound)
 		}
-		return nil, fmt.Errorf("getRecord %s: %w", ref.URI, err)
+		return Record{}, fmt.Errorf("getRecord %s: %w", ref.URI, err)
 	}
 	if response.Value == nil {
 		response.Value = map[string]any{}
 	}
-	return response.Value, nil
+	return Record{URI: response.URI, CID: response.CID, Value: response.Value}, nil
 }
 
 func (c *Client) ListRecords(ctx context.Context, repo, collection string, limit int) ([]Record, error) {

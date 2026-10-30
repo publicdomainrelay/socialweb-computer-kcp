@@ -6014,6 +6014,11 @@ func (in *MarketIdentityStatus) DeepCopyInto(out *MarketIdentityStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.AssociationRef != nil {
+		in, out := &in.AssociationRef, &out.AssociationRef
+		*out = new(commonv1alpha1.StrongRef)
+		**out = **in
+	}
 	if in.SessionRef != nil {
 		in, out := &in.SessionRef, &out.SessionRef
 		*out = new(commonv1alpha1.SecretRef)

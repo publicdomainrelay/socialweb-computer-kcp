@@ -100,7 +100,7 @@ items:
     status: done
   - id: A3
     title: "mirror proof strongRef + trust.go proof verification (both lanes), contract/expiry checks"
-    status: planned
+    status: done
   - id: A4
     title: "MarketIdentity spec.associationRef + CLI --association-ref + bundle path; pinned-getRecord bootstrap"
     status: planned

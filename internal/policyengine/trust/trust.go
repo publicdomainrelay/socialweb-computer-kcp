@@ -77,6 +77,7 @@ type Resolver struct {
 	client *atproto.Client
 	store  *cache.Store
 	log    func(level, msg string, meta map[string]any)
+	now    func() time.Time
 	ops    *ttlcache.Cache[operatorKey, operatorEntry]
 	legacy *ttlcache.Cache[string, map[claim]bool]
 	vouch  *ttlcache.Cache[vouchKey, bool]
@@ -97,6 +98,7 @@ func NewResolver(opts ResolverOptions) *Resolver {
 		client: client,
 		store:  opts.Store,
 		log:    log,
+		now:    time.Now,
 		ops:    ttlcache.New[operatorKey, operatorEntry](ttlcache.Options{TTL: ttl}),
 		legacy: ttlcache.New[string, map[claim]bool](ttlcache.Options{TTL: ttl}),
 		vouch:  ttlcache.New[vouchKey, bool](ttlcache.Options{TTL: ttl}),
@@ -158,9 +160,18 @@ func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service stri
 }
 
 func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc associationKey) (string, bool, error) {
-	mirror, ok, err := r.mirrorOf(ctx, did, service)
+	mirror, proof, ok, err := r.mirrorOf(ctx, did, service)
 	if err != nil || !ok {
 		return "", false, err
+	}
+	if proof != nil {
+		held, err := r.proofHeld(ctx, mirror, *proof, assoc)
+		if err != nil {
+			return "", false, err
+		}
+		if held {
+			return mirror.operator, true, nil
+		}
 	}
 	if assoc.association {
 		held, err := r.associationHeld(ctx, mirror, assoc)
@@ -184,35 +195,14 @@ func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc as
 	return "", false, nil
 }
 
-func (r *Resolver) associationHeld(ctx context.Context, want claim, assoc associationKey) (bool, error) {
-	value, err := r.getRecord(ctx, want.operator, AssociationNSID, ClaimRKey(want.service, want.subject))
-	if err != nil || value == nil {
-		return false, err
-	}
-	if !Matches(KindAssociation, value, want.operator, want.subject, want.service, assoc.template) {
-		r.log("info", "association record does not match", map[string]any{"did": want.subject, "operator": want.operator, "service": want.service})
-		return false, nil
-	}
-	return r.scopeHeld(ctx, value, want, assoc)
-}
-
-func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey) (bool, error) {
-	_, contract := value["contract"]
-	_, expires := value["expiresAt"]
-	if contract || expires || assoc.requireContract {
-		r.log("info", "association scope not verifiable", map[string]any{"did": want.subject, "operator": want.operator, "service": want.service})
-		return false, nil
-	}
-	return true, nil
-}
-
-func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (claim, bool, error) {
+func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (claim, *atproto.StrongRef, bool, error) {
 	value, err := r.getRecord(ctx, did, BadgeBlueKeysNSID, MirrorRKey)
 	if err != nil || value == nil {
-		return claim{}, false, err
+		return claim{}, nil, false, err
 	}
 	mirror, ok := claimOf(value)
-	return mirror, ok && mirror.subject == did && mirror.operator != did && associationService(mirror.service, service), nil
+	proof, _ := strongRefOf(value["proof"])
+	return mirror, proof, ok && mirror.subject == did && mirror.operator != did && associationService(mirror.service, service), nil
 }
 
 func ClaimRKey(service, subject string) string {

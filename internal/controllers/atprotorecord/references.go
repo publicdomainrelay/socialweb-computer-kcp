@@ -24,6 +24,8 @@ type fieldStep struct {
 	indexes []int
 }
 
+type absentValue struct{}
+
 func resolveReferences(ctx context.Context, refs References, raw json.RawMessage) (json.RawMessage, []string, error) {
 	var value any
 	if len(raw) == 0 {
@@ -35,6 +37,9 @@ func resolveReferences(ctx context.Context, refs References, raw json.RawMessage
 	resolved, missing := resolveValue(ctx, refs, value)
 	if len(missing) > 0 {
 		return nil, missing, nil
+	}
+	if _, absent := resolved.(absentValue); absent {
+		return nil, []string{"the record is an absent optional reference"}, nil
 	}
 	out, err := json.Marshal(resolved)
 	if err != nil {
@@ -63,19 +68,25 @@ func resolveValue(ctx context.Context, refs References, value any) (any, []strin
 				missing = append(missing, bad...)
 				continue
 			}
+			if _, absent := resolved.(absentValue); absent {
+				continue
+			}
 			out[key] = resolved
 		}
 		return out, missing
 	case []any:
-		out := make([]any, len(typed))
+		out := make([]any, 0, len(typed))
 		var missing []string
-		for i, child := range typed {
+		for _, child := range typed {
 			resolved, bad := resolveValue(ctx, refs, child)
 			if len(bad) > 0 {
 				missing = append(missing, bad...)
 				continue
 			}
-			out[i] = resolved
+			if _, absent := resolved.(absentValue); absent {
+				continue
+			}
+			out = append(out, resolved)
 		}
 		return out, missing
 	default:
@@ -109,6 +120,9 @@ func resolveReference(ctx context.Context, refs References, from v1alpha1.Atprot
 		return nil, []string{label + ": " + err.Error()}
 	}
 	value, ok := fieldValue(object, path)
+	if !ok && from.Optional {
+		return absentValue{}, nil
+	}
 	if !ok {
 		return nil, []string{label + ": the field " + from.FieldPath + " is missing"}
 	}
