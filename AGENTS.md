@@ -195,7 +195,7 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     linux/amd64 only.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
-  (`internal/guestseed`), which fetches opentunnel, wootty or socialweb-guest-agent from its own
+  (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own
   GuestControlPlane `GET /v1/downloads/<sha256>/<name>` at `http://192.0.2.1:<port>` (a local
   Exposure), checks the sha256 and installs to `/usr/local/bin`. The binaries are the release asset
   `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`, which takes wootty from its pinned

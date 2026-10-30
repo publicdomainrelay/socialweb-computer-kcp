@@ -12,6 +12,7 @@ Builds the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads
 (the socialweb-guest-downloads asset of internal/versions/versions.json) into DIR:
   opentunnel-x86_64, opentunnel-aarch64                       the assets.opentunnel release tarballs, sha256 verified
   wootty-x86_64, wootty-aarch64                               the guestDownloads.files.wootty image layers, sha256 verified
+  atirc-x86_64                                                the guestDownloads.files.atirc binary, sha256 verified (linux/amd64 only)
   socialweb-guest-agent-x86_64, socialweb-guest-agent-aarch64 cmd/socialweb-guest-agent (linux, CGO disabled)
 each with a sha256sum-format <name>.sha256 sidecar. The tarballs and layers are kept in
 \$GUEST_DOWNLOADS_CACHE by their sha256 when it is set.
@@ -109,6 +110,19 @@ for pair in x86_64:amd64 aarch64:arm64; do
   fi
   echo "build-guest-downloads: wootty-$arch from $registry/$repository layer sha256:$sum member $member" >&2
   extract_member "wootty-$arch" "$layer" "$member"
+
+  pin="$(jq -c --arg p "linux/$goarch" '.guestDownloads.files.atirc.fetch[$p]' "$versions")"
+  if [ "$pin" = null ]; then
+    [ "$goarch" != amd64 ] || { echo "build-guest-downloads: guestDownloads.files.atirc pins nothing for linux/amd64" >&2; exit 1; }
+    echo "build-guest-downloads: no atirc-$arch: guestDownloads.files.atirc pins nothing for linux/$goarch (atirc is linux/amd64 only)" >&2
+  else
+    [ "$(echo "$pin" | jq -r .kind)" = binary ] || { echo "build-guest-downloads: the atirc linux/$goarch pin is not a binary" >&2; exit 1; }
+    bin="$(fetch_pinned "$(echo "$pin" | jq -r .url)" "$(echo "$pin" | jq -r .sha256)")"
+    echo "build-guest-downloads: atirc-$arch from $(echo "$pin" | jq -r .url)" >&2
+    cp "$bin" "$out/atirc-$arch"
+    chmod 0755 "$out/atirc-$arch"
+    (cd "$out" && sha256sum "atirc-$arch" >"atirc-$arch.sha256")
+  fi
 
   echo "build-guest-downloads: building socialweb-guest-agent-$arch" >&2
   (cd "$root" && CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -trimpath -buildvcs=false \

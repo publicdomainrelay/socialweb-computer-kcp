@@ -1447,8 +1447,8 @@
     },
     "socialweb-guest-downloads": {
       "version": "this module",
-      "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), wootty-x86_64 and wootty-aarch64, the wootty member of the guestDownloads.files.wootty image layers (each layer blob fetched from its registry and checked against its sha256 pin before tar extracts the member), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent, to the assets.opentunnel pins or to the guestDownloads.files.wootty pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
+      "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), wootty-x86_64 and wootty-aarch64, the wootty member of the guestDownloads.files.wootty image layers (each layer blob fetched from its registry and checked against its sha256 pin before tar extracts the member), atirc-x86_64, the guestDownloads.files.atirc binary checked against its sha256 pin (linux/amd64 only), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
+      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent, to the assets.opentunnel pins or to the guestDownloads.files pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
       "executables": {
         "socialweb-guest-downloads": "."
       },
@@ -1465,6 +1465,8 @@
             "wootty-x86_64.sha256": "wootty-x86_64.sha256",
             "wootty-aarch64": "wootty-aarch64",
             "wootty-aarch64.sha256": "wootty-aarch64.sha256",
+            "atirc-x86_64": "atirc-x86_64",
+            "atirc-x86_64.sha256": "atirc-x86_64.sha256",
             "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64",
             "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256",
             "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64",
@@ -1483,6 +1485,8 @@
             "wootty-x86_64.sha256": "wootty-x86_64.sha256",
             "wootty-aarch64": "wootty-aarch64",
             "wootty-aarch64.sha256": "wootty-aarch64.sha256",
+            "atirc-x86_64": "atirc-x86_64",
+            "atirc-x86_64.sha256": "atirc-x86_64.sha256",
             "socialweb-guest-agent-x86_64": "socialweb-guest-agent-x86_64",
             "socialweb-guest-agent-x86_64.sha256": "socialweb-guest-agent-x86_64.sha256",
             "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64",
@@ -1492,14 +1496,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627",
-          "rawBytes": 56979255,
-          "zstdBytes": 20453933
+          "treeSha256": "a6e7a65578e6a7538d44a006cfd7a79b4c48ea94702319ffb0de72fcab997fb9",
+          "rawBytes": 96362478,
+          "zstdBytes": 29209037
         },
         "linux/arm64": {
-          "treeSha256": "4b165f09fb39b837a12a849321fa76052e302f1869a3e962f1bdc8ea7f606627",
-          "rawBytes": 56979255,
-          "zstdBytes": 20453933
+          "treeSha256": "a6e7a65578e6a7538d44a006cfd7a79b4c48ea94702319ffb0de72fcab997fb9",
+          "rawBytes": 96362478,
+          "zstdBytes": 29209037
         }
       }
     }
@@ -1557,6 +1561,19 @@
             "sha256": "9111f13dfe48d49f0df703f9a5bf9806549c20d58eee423469ab1b229388ec1a",
             "bytes": 5826987,
             "member": "usr/local/bin/wootty"
+          }
+        }
+      },
+      "atirc": {
+        "version": "0.1.0-9459165",
+        "source": "the immutable versioned atirc linux/amd64 release binary that atirc-dev publishes at https://irc.fedfork.com/dl/v0.1.0-9459165 (the binary of the irc.fedfork.com server at that version), run on the guest as atirc agent run by atirc-agent.service (plan 0035); linux/arm64 is out of scope, so build-guest-downloads.sh makes no atirc-aarch64",
+        "verify": "the sha256 of the binary, checked by scripts/build-guest-downloads.sh after the download; never irc.fedfork.com/dl/<arch>, which serves whatever binary the server runs",
+        "fetch": {
+          "linux/amd64": {
+            "kind": "binary",
+            "url": "https://irc.fedfork.com/dl/v0.1.0-9459165",
+            "sha256": "9eab39c20ec84d0df9f45b085fcb77eebd65f341b115a5f5db6ef2b595e67491",
+            "bytes": 39379048
           }
         }
       }
