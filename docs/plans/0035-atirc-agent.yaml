@@ -1,0 +1,161 @@
+plan: "0035"
+title: "A requester can ask for an atirc agent on its guest: spec.agent, a long atirc token minted at the RFP into the secrets bundle, an atirc-agent.service unit, and a requester-originated guest.agentStart event"
+status: planned
+source: >
+  2026-10-29 and 2026-10-30, the user's decisions (binding), design rev 6 of the kcp-wasm page plan
+  docs/plans/0035-atirc-agent.md (johnandersen777/kcp, branch kcp-wasm-memory-storage-1). The page
+  and the CLI request a VM from the socialweb market and give it an atirc agent: a long atirc token
+  named <handle-nick>-<rfp-rkey>, minted by the requester when the VM request creates its RFP,
+  delivered through the requester-vault secrets bundle as ATIRC_TOKEN, and a guest systemd unit that
+  runs the atirc README's root/new-account block and `atirc agent run`. It follows the wootty shell
+  pattern of plan 0032 (internal/atproto/cloudinit/tunnels.go) end to end: opt-in per contract, a
+  cloud-init module from contractModules, the binary from socialweb-guest-downloads through
+  setup-guest-binaries.service, the token only in the secrets bundle. Option B (user, 2026-10-29):
+  user_data installs the unit but does not start it; a requester-originated
+  com.publicdomainrelay.temp.compute.events.guest.agentStart starts it, so no harness spend until
+  the user asks. atirc deployment https://irc.fedfork.com (did:web:irc.fedfork.com, service #atirc).
+  linux/arm64 is out of scope (user).
+principle: >
+  The agent is opt-in per ComputeContract (spec.agent). Only opted-in contracts mint: a long atirc
+  token is not revocable. The token lives only in the requester's OpenBao bundle and the guest file
+  0600, never in user_data, spec, status, a record, a ContractEvent or a log line. The bidder installs
+  the atirc binary from its own downloads; the guest never fetches it from irc.fedfork.com or the
+  internet. The unit starts only on a guest.agentStart the requester publishes; the bidder refuses
+  that event from a guest.
+decisions:
+  scope: >
+    internal/atproto/oauth/scope.go: RequesterOAuthScope gains
+    rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc (exact aud, linux-kcp and atirc-dev
+    2026-10-30); the requester calls getServiceAuth with aud did:web:irc.fedfork.com#atirc and lxm
+    chat.atirc.mint (the same string; atirc accepts it and the bare DID). Fall back to aud=* only if
+    the PDS refuses. typescript-helpers lib/oauth-scope/mod.ts mirrors the Go scope token for token.
+    The unused OAuthScopeLocalhost constant goes.
+  api: >
+    ComputeContractSpec.Agent *ComputeContractAgent {EnvFile, apigen userEndpoint, default
+    /etc/atirc/atirc.env}. spec.agent without spec.secretsRef fails the contract before the RFP
+    ("an agent needs its token in spec.secretsRef"). The Infra and EphemeralInfra contract templates
+    carry it as they carry tunnels.
+  mint: >
+    The requester (internal/market/requester) mints after the RFP is submitted and on resume:
+    ensureAtircToken skips without spec.agent, spec.secretsRef, a handle or deps.ServiceAuth (no
+    identity-mode gate: OAuth and PDS-account identities alike), and when the bundle entry at
+    spec.agent.envFile already has a non-empty ATIRC_TOKEN. Subhandle <label>-<rfp rkey>.<handle>
+    (label: the handle's first dot-label, lowercased, at most 14 characters). It POSTs
+    <AtircURL>/xrpc/chat.atirc.mint with a chat.atirc.mint service-auth token for
+    did:web:irc.fedfork.com#atirc and merges ATIRC_TOKEN=<token> (mode 0600) into the bundle by path
+    with a vault write (services/requester resolves vault.CapabilityWrite; the grant covers
+    <mount>/contracts/*). Every failure logs and returns; the placeholder stays. Logs
+    requester_atirc_minted or requester_atirc_mint_failed, never the token.
+  guest_unit: >
+    cloudinit.AgentModule(AgentOptions{EnvFile}) writes /etc/systemd/system/atirc-agent.service
+    (After and Wants setup-guest-binaries.service and the secrets ready units, Restart=always),
+    /usr/local/bin/atirc-agent-run.sh (waits for the secrets ready file, the binary and a non-empty
+    ATIRC_TOKEN; creates the nick user in wheel; exec runuser -u <nick> -- atirc agent run) and
+    /etc/socialweb-guest-agent/agent.json {"unit": "atirc-agent.service"}; runcmd only
+    daemon-reload. guestseed installs socialweb-guest-agent and atirc when agent.json is in
+    write_files.
+  agent_start: >
+    Lexicon com.publicdomainrelay.temp.compute.events.guest.agentStart (createdAt, signatures),
+    requester-originated only (market.IsRequesterGuestEventNSID), checked in CheckGuestEvent, in the
+    ContractEvent NSID enum. The requester refuses an outbound agentStart for a contract without
+    spec.agent. The guest agent reads agent.json and on agentStart runs systemctl start --no-block
+    <unit>; without agent.json it ignores the event. No reply event.
+  downloads: >
+    versions.json guestDownloads.files.atirc pins the immutable atirc linux/amd64 binary
+    https://irc.fedfork.com/dl/v0.1.0-9459165 (sha256
+    9eab39c20ec84d0df9f45b085fcb77eebd65f341b115a5f5db6ef2b595e67491, 39379048 bytes);
+    scripts/build-guest-downloads.sh adds atirc-x86_64 and skips aarch64 with a log line.
+  cli: >
+    run request --agent[=<envFile>] sets spec.agent and merges an ATIRC_TOKEN= placeholder entry
+    (mode 0600) into the --secrets bundle (a one-entry bundle without --secrets). run request agent
+    <name> creates the outbound guest.agentStart ContractEvent for the invocation's contract
+    (ContractSignaling.PublishAgentStart) and waits for Published or the refusal.
+state_rules:
+  - Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses.
+  - No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs below.
+  - Schema changes bump the Revision in api/v1alpha1/resources.go and run go generate; generated
+    output is never hand-merged.
+items:
+  - id: A-SCOPE
+    title: "chat.atirc.mint in the requester OAuth scope"
+    depends_on: []
+    files:
+      - internal/atproto/oauth/scope.go
+      - typescript-helpers lib/oauth-scope/mod.ts
+    done_when: "RequesterOAuthScope holds rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc; mod.ts matches."
+    status: todo
+
+  - id: B-API
+    title: "spec.agent on ComputeContract and the infra templates"
+    depends_on: []
+    files:
+      - api/v1alpha1/types_computecontract.go
+      - api/v1alpha1/resources.go
+      - internal/market/requester/secrets.go
+    done_when: "go generate ./... leaves no diff; a contract with spec.agent and no secretsRef fails before the RFP."
+    status: todo
+
+  - id: C-MODULE
+    title: "cloudinit.AgentModule and the guestseed atirc need"
+    depends_on: [B-API]
+    files:
+      - internal/atproto/cloudinit/agent.go
+      - internal/market/requester/secrets.go
+      - internal/guestseed/binaries.go
+    done_when: "The rendered user_data of a spec.agent contract holds the unit, the run script and agent.json; runcmd has no start."
+    status: todo
+
+  - id: D-AGENT-START
+    title: "The requester-originated guest.agentStart event"
+    depends_on: [B-API, C-MODULE]
+    files:
+      - lexicons/com/publicdomainrelay/temp/compute/events/guest/agentStart.json
+      - internal/atproto/market/guest.go
+      - internal/guestidentity/guestrecord.go
+      - api/v1alpha1/types_contractevent.go
+      - internal/market/requester/contractevents.go
+      - internal/guestagent
+      - AGENTS.md
+    done_when: "An outbound agentStart reaches the guest agent, which starts atirc-agent.service; the bidder refuses it from a guest."
+    status: todo
+
+  - id: E-MINT
+    title: "Mint the atirc token at the RFP into the secrets bundle"
+    depends_on: [A-SCOPE, B-API]
+    files:
+      - internal/market/requester/atirc.go
+      - internal/market/requester/runner.go
+      - internal/market/requester/requester.go
+      - internal/services/requester/wiring.go
+    done_when: "A spec.agent request logs requester_atirc_minted and the bundle entry carries a non-empty ATIRC_TOKEN."
+    status: todo
+
+  - id: F-DOWNLOADS
+    title: "atirc in socialweb-guest-downloads"
+    depends_on: []
+    files:
+      - internal/versions/versions.json
+      - scripts/build-guest-downloads.sh
+    done_when: "build-guest-downloads.sh writes atirc-x86_64 with the pinned sha256 and logs the aarch64 skip."
+    status: todo
+
+  - id: G-CLI
+    title: "run request --agent and run request agent <name>"
+    depends_on: [B-API, D-AGENT-START]
+    files:
+      - cmd/socialweb-computer/request.go
+      - cmd/socialweb-computer/main.go
+      - internal/stack/request/webrtc.go
+      - deploy/apps/option-map.yaml
+    done_when: "run request --agent --hold reaches Held with a minted token; run request agent <name> publishes the event."
+    status: todo
+
+  - id: ACC35-AGENT
+    title: "An agent contract runs atirc agent run on its guest after agentStart"
+    depends_on: [C-MODULE, D-AGENT-START, E-MINT, F-DOWNLOADS, G-CLI]
+    done_when: >
+      run request --agent --hold logs requester_atirc_minted; after Held atirc-agent.service is
+      inactive; run request agent <name> publishes the event, the unit is active, the nick is on the
+      atirc channel; /etc/atirc/atirc.env is root 0600; the token is in no kcp object and no log.
+      Without --agent: no mint, no unit, no atirc binary.
+    status: todo
