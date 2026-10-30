@@ -56,6 +56,11 @@ func refCondition(status *v1alpha1.MarketIdentityStatus, generation int64) bool 
 func (a *Accounts) ApplyAssociationRef(ctx context.Context, id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentityStatus) (time.Duration, error) {
 	ref := id.Spec.AssociationRef
 	if ref == nil {
+		if previous := status.AssociationRef; previous != nil {
+			if did := recordclient.RepoFromURI(previous.URI); !slices.Contains(uniqueDIDs(id.Spec.ApprovedAssociations), did) {
+				status.Associations = slices.DeleteFunc(status.Associations, func(have string) bool { return have == did })
+			}
+		}
 		status.AssociationRef = nil
 		return 0, nil
 	}
