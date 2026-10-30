@@ -1,0 +1,121 @@
+plan: "0036"
+title: "Record-based association: an operator marks a record (claim, association lexicon, bsky or delve post) that associates a requester or bidder repo DID, checked in both repos by the counterparty's policy trust, so agents without OAuth can declare requesters as theirs"
+status: planned
+source: >
+  2026-10-30 atirc, the user's request (binding): mark a configurable record (any record type, e.g. a bsky
+  post) as the method of association so agents which cannot do OAuth can declare requesters as theirs;
+  this is the foundation for subagents in the association pattern. Owner answers 07:27Z: both a
+  contract-scoped and a standing-until-deleted variant; record types: a dedicated lexicon,
+  app.bsky.feed.post and town.delve.feed.post (context: delve.town thread
+  at://johnandersen777.bsky.social/.../3mxndop7gnk2n, pure-social agents can only post). Research:
+  linux-kcp-assoc (socialweb), wasm-assoc (kcp-wasm page, kcp docs/plans/0036-wasm-research.md),
+  atirc-dev-assoc (atirc). Lead and plan owner: linux-kcp.
+principle: >
+  The authority is always the repo in the record's at-uri; never a record field and never an issuer
+  claim. The subject is always the counterparty's repo DID; its RFP or bid signature by a key bound to
+  that DID is the possession proof. An association counts only when both repos agree: the authority's
+  record and the subject's mirror. Matchers are exact, never substrings. Association logic is plain Go
+  (trust, discovery, MarketIdentity), never only a policy action, because the page's policy engine is
+  not fenced. Reads are pinned getRecord by strongRef where possible; listRecords pages with a cursor.
+decisions:
+  security_first: >
+    Verified hole: internal/policyengine/trust/trust.go:115-134 ResolveOperatorDidFor takes the
+    counterparty's own badgeBlueKeys mirror as its operator and never reads the operator repo, so any
+    DID can claim any operator and pass bidder-only-me / requester-only-me and borrow the victim's
+    vouches. Fix: return an operator only when the operator repo also holds the matching claim
+    (deterministic rkey <service>-<did> getRecord, else paged listRecords; did-key-associator writes TID
+    rkeys), the rule requester/discovery.go:103 operatedBy already uses. Declared spec.approvedAssociations
+    (association.go:15) stop being mirrored as if verified. Prod check 2026-10-30: bob and alice run as
+    their own accounts; john's repo holds the operator claims for its associated subjects.
+  subject: >
+    A requester or bidder identity is a repo DID (RFPs and bids are records in it). A new requester
+    started by an agent (alice -> R2 in her VM) gets a repo: (pending owner) its own did:plc + Pds in
+    the VM with public ingress, or an account on a Pds alice runs.
+  kinds: >
+    claim: com.publicdomainrelay.temp.badgeBlueKeys (existing; keyId == subject, challenge ==
+    authority, service == role) keeps today's operators and scripts/associate-bidder.ts working.
+    association: new lexicon com.publicdomainrelay.temp.market.association {subject did, service
+    requester_associate|bidder_associate, contract? strongRef, expiresAt? datetime, parent? strongRef,
+    note?, createdAt}, rkey <service>-<subject with : -> ->; consider the shape of the existing
+    market.bidderAssociation. bskyPost (app.bsky.feed.post) and delvePost (town.delve.feed.post): text
+    equals the template (default "associate {did}", trimmed) AND one mention facet
+    (app.bsky.richtext.facet#mention) whose did == subject; delve uses the same facet shape (atirc-dev-assoc).
+  config: >
+    Per verifier (MarketBidder for requesters, MarketRequester for bidders): association {kinds,
+    postTemplate, maxDepth, requireContract}. Default kinds [claim, association]; posts are opt-in.
+    v1 maxDepth 1; the parent field is in the format for chains.
+  variants: >
+    standing: no contract/expiresAt, valid until deleted or edited (cid pin; posts are not editable).
+    contract-scoped: contract (the authority's market.accept for the VM running the subject) and/or
+    expiresAt; invalid after expiresAt or when the contract ref no longer resolves. The authority's
+    requester writes it as an AtprotoRecord owned by its ComputeContract, so release deletes it.
+  proof: >
+    The subject's mirror badgeBlueKeys `association` record gains proof {uri, cid} (from
+    MarketIdentity status). trust.go reads the mirror, then getRecord(proof) in the challenge repo:
+    cid equal, kind matcher, expiry, contract; else the claim lookup. This covers the scope lane
+    (bids.go:249, DIDs only) and the full lane. An optional association strongRef in market.rfp is a
+    later addition, not v1.
+  bootstrap: >
+    The subject starts from a pinned ref, not the record watch (the watch is stream-triggered and
+    misses a record written before it exists): `run request --association-ref at://...#<cid>` and the
+    same through the 0035 secrets bundle; MarketIdentity spec.associationRef {uri, cid} verified by one
+    getRecord, then status.associations / associationRef and the mirror with proof. The CLI no longer
+    forces Skip for a new identity that carries a ref (request.go:170).
+  page: >
+    The page is the operator side only: an "associate agent DID" action that writes the record (claim
+    or association; posts are made from any client and pasted as an at-uri, no feed.post scope) and
+    prints its at-uri, plus a display of MarketIdentity Associated / status.associations. No page
+    localRepo requester mode in v1. trust.go/discovery.go reach the page from the socialweb mirror; the
+    overlays compose/identity.go and app/marketrequester.go need the 3-way merge for new fields.
+  atirc: >
+    atirc-dev side (adopted): agentOperator gains optional assoc {uri, cid}; Owners::lookup follows it
+    with the same exact matcher (uri repo == owner DID, cid pinned); mint accepts an assoc strongRef
+    and embeds it; contract-scoped clamps the token exp to expiresAt; revoke via chat.atirc.revoke or
+    record delete (60 s owner cache). Token exp + revoke ships first as a 0035 follow-up.
+  scopes: >
+    The association lexicon adds create/update/delete to RequesterOAuthScope and BidderOAuthScope,
+    mirrored token for token in typescript-helpers lib/oauth-scope/mod.ts, did-key-associator
+    generated/oauth-scope.js and kcp-wasm scripts/serve-public.ts; prod sessions re-sign in. App
+    password agents need no scope.
+state_rules:
+  - "Nothing is associated without both records; a declared approval alone never produces a mirror a bidder accepts."
+  - "A deleted or edited authority record revokes on the next trust refresh; the trust cache TTL bounds the delay (5 min today; wire ApplyEvent/Invalidate to the record watch)."
+  - "PDS outage fails closed and is logged."
+items:
+  - id: S1
+    title: "Two-repo operator check in trust.go (security fix)"
+    detail: "ResolveOperatorDidFor requires the operator-side claim; paged listRecords; deterministic-rkey getRecord first; stop mirroring declared-only approvals as verified. Ships ahead of the rest (pending owner: rc119 or its own rc)."
+    status: planned
+  - id: S2
+    title: "listRecords paging and badge-binding cache TTL"
+    detail: "trust.go:115/:160 and badgeblue.go read 100 records without a cursor; alice's repo holds ~85 per-run market_requester key bindings and grows. Page with a cursor, add a TTL to BadgeBlueKeyBinding, and GC stale per-run key bindings."
+    status: planned
+  - id: A1
+    title: "association lexicon + scopes (Go/TS mirrors)"
+    status: planned
+  - id: A2
+    title: "matcher framework: kinds claim, association, bskyPost, delvePost; config on MarketBidder/MarketRequester"
+    status: planned
+  - id: A3
+    title: "mirror proof strongRef + trust.go proof verification (both lanes), contract/expiry checks"
+    status: planned
+  - id: A4
+    title: "MarketIdentity spec.associationRef + CLI --association-ref + bundle path; pinned-getRecord bootstrap"
+    status: planned
+  - id: A5
+    title: "authority write path: requester writes a contract-owned association record for a subject it starts (app password or OAuth)"
+    status: planned
+  - id: P1
+    title: "page: associate-agent-DID action + Associated display (wasm)"
+    status: planned
+  - id: R1
+    title: "atirc: agentOperator.assoc, mint embeds assoc, exp clamp (atirc-dev)"
+    status: planned
+  - id: V1
+    title: "acceptance: alice (app password) requests a VM whose CLI requester R2 is associated by a contract-scoped record; bidder-only-me allows R2; a forged self-claim is denied; deleting the record revokes"
+    status: planned
+open_questions:
+  - "Q1 ship S1 in rc119 or its own rc?"
+  - "Q2 R2's repo: own did:plc + Pds in the VM (public ingress) or an account on a Pds alice runs?"
+  - "Q3 contract-scoped: is a resolving strongRef to the authority's accept enough, or must the bidder also see the contract still Held?"
+  - "Q4 chains (later): does only-me compare the root authority or the immediate one; default maxDepth?"
