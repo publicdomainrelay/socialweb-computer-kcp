@@ -46,8 +46,9 @@ decisions:
     v1 maxDepth 1; the parent field is in the format for chains.
   variants: >
     standing: no contract/expiresAt, valid until deleted or edited (cid pin; posts are not editable).
-    contract-scoped: contract (the authority's market.accept for the VM running the subject) and/or
-    expiresAt; invalid after expiresAt, when the contract ref no longer resolves, or when that contract is no
+    contract-scoped: contract (the authority's market.accept for the VM running the subject) and
+    always expiresAt (the contract deadline; atirc rejects a contract ref without it and clamps a
+    minted token's exp to it); invalid after expiresAt, when the contract ref no longer resolves, or when that contract is no
     longer Held (the verifier checks the contract state, owner 2026-10-30). The authority's
     requester writes it as an AtprotoRecord owned by its ComputeContract, so release deletes it.
   proof: >
