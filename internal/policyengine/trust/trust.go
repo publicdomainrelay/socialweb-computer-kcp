@@ -160,21 +160,23 @@ func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service stri
 }
 
 func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc associationKey) (string, bool, error) {
-	mirror, proof, ok, err := r.mirrorOf(ctx, did, service)
+	mirror, ok, err := r.mirrorOf(ctx, did, service)
 	if err != nil || !ok {
 		return "", false, err
 	}
-	if proof != nil {
-		held, err := r.proofHeld(ctx, mirror, *proof, assoc)
-		if err != nil {
+	if mirror.hasProof {
+		if mirror.proof == nil {
+			_, err := r.deny("the mirror proof is not a strongRef", mirror.claim, nil)
 			return "", false, err
 		}
-		if held {
-			return mirror.operator, true, nil
+		held, err := r.proofHeld(ctx, mirror.claim, *mirror.proof, assoc)
+		if err != nil || !held {
+			return "", false, err
 		}
+		return mirror.operator, true, nil
 	}
 	if assoc.association {
-		held, err := r.associationHeld(ctx, mirror, assoc)
+		held, err := r.associationHeld(ctx, mirror.claim, assoc)
 		if err != nil {
 			return "", false, err
 		}
@@ -183,7 +185,7 @@ func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc as
 		}
 	}
 	if assoc.claim && !assoc.requireContract {
-		held, err := r.claimHeld(ctx, mirror)
+		held, err := r.claimHeld(ctx, mirror.claim)
 		if err != nil {
 			return "", false, err
 		}
@@ -195,14 +197,22 @@ func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc as
 	return "", false, nil
 }
 
-func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (claim, *atproto.StrongRef, bool, error) {
+type mirrorRecord struct {
+	claim
+	proof    *atproto.StrongRef
+	hasProof bool
+}
+
+func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (mirrorRecord, bool, error) {
 	value, err := r.getRecord(ctx, did, BadgeBlueKeysNSID, MirrorRKey)
 	if err != nil || value == nil {
-		return claim{}, nil, false, err
+		return mirrorRecord{}, false, err
 	}
-	mirror, ok := claimOf(value)
-	proof, _ := strongRefOf(value["proof"])
-	return mirror, proof, ok && mirror.subject == did && mirror.operator != did && associationService(mirror.service, service), nil
+	held, ok := claimOf(value)
+	rawProof, hasProof := value["proof"]
+	proof, _ := strongRefOf(rawProof)
+	mirror := mirrorRecord{claim: held, proof: proof, hasProof: hasProof}
+	return mirror, ok && mirror.subject == did && mirror.operator != did && associationService(mirror.service, service), nil
 }
 
 func ClaimRKey(service, subject string) string {
