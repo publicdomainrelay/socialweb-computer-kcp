@@ -29,6 +29,7 @@ const (
 	CollectionGuestSecrets          = "com.publicdomainrelay.temp.compute.events.guest.secrets"
 	CollectionGuestSecretsApplied   = "com.publicdomainrelay.temp.compute.events.guest.secretsApplied"
 	CollectionGuestSecretsRequested = "com.publicdomainrelay.temp.compute.events.guest.secretsRequested"
+	CollectionGuestAgentStart       = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
 	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
@@ -50,6 +51,7 @@ const (
 	RPCClusterUp         = "rpc:com.publicdomainrelay.temp.cluster.controlPlaneUp?aud=*"
 	RPCClusterDown       = "rpc:com.publicdomainrelay.temp.cluster.controlPlaneDown?aud=*"
 	RPCClusterDelete     = "rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*"
+	RPCAtircMint         = "rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc"
 )
 
 var (
@@ -58,11 +60,12 @@ var (
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
-			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionGuestAgentStart, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
+		[]string{RPCAtircMint},
 	)
 
 	BidderOAuthScope = dedupeScopes(
@@ -119,8 +122,6 @@ var (
 		K8sOAuthScope,
 	)
 )
-
-const OAuthScopeLocalhost = "atproto repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create,update,delete rpc:com.publicdomainrelay.temp.requester.associateConfirm?aud=*"
 
 func ScopeString(scopes []string) string {
 	return strings.Join(scopes, " ")
