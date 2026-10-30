@@ -32,11 +32,11 @@ func associationSubject(contract v1alpha1.ComputeContract) string {
 	return strings.TrimSpace(contract.Spec.Association.Subject)
 }
 
-func associationRefFile(contract v1alpha1.ComputeContract) string {
-	if contract.Spec.Association == nil || strings.TrimSpace(contract.Spec.Association.RefFile) == "" {
-		return cloudinit.DefaultAssociationRefFile
+func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
+	if contract.Spec.Association == nil {
+		return cloudinit.DefaultAssociationRefFile, nil
 	}
-	return strings.TrimSpace(contract.Spec.Association.RefFile)
+	return cloudinit.AssociationRefPath(contract.Spec.Association.RefFile)
 }
 
 func (r *contractRunner) associationWritten(subject string) bool {
@@ -93,6 +93,11 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 		fail("subject", fmt.Errorf("spec.association.subject %q is not a DID other than the requester's", subject))
 		return
 	}
+	refFile, err := associationRefFile(contract)
+	if err != nil {
+		fail("refFile", err)
+		return
+	}
 	acceptedAt, err := associationTimes(contract, state)
 	if err != nil {
 		fail("deadline", err)
@@ -106,9 +111,6 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	r.mu.Lock()
 	previous := r.association
 	r.mu.Unlock()
-	if previous != nil && previous.subject != subject {
-		r.deleteAssociationRecord(ctx, previous.subject)
-	}
 	record := map[string]any{
 		"$type":     market.AssociationNSID,
 		"subject":   subject,
@@ -125,7 +127,7 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	}
 	ref := commonv1.StrongRef{URI: written.URI, CID: written.CID}
 	if contract.Spec.SecretsRef != nil {
-		if err := r.writeAssociationRef(ctx, contract, ref); err != nil {
+		if err := r.writeAssociationRef(ctx, contract, refFile, ref); err != nil {
 			fail("write the bundle entry", err)
 			return
 		}
@@ -137,14 +139,13 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	r.mu.Lock()
 	r.association = &contractAssociation{subject: subject, ref: ref}
 	r.mu.Unlock()
+	if previous != nil && previous.subject != subject {
+		r.deleteAssociationRecord(ctx, previous.subject)
+	}
 	r.log().Info("requester_association_written", "subject", subject, "uri", ref.URI, "cid", ref.CID, "expiresAt", market.FormatTime(expiresAt))
 }
 
-func (r *contractRunner) writeAssociationRef(ctx context.Context, contract v1alpha1.ComputeContract, ref commonv1.StrongRef) error {
-	path := associationRefFile(contract)
-	if !strings.HasPrefix(path, "/") || strings.Contains(path, "/../") {
-		return fmt.Errorf("spec.association.refFile %q is not an absolute path", path)
-	}
+func (r *contractRunner) writeAssociationRef(ctx context.Context, contract v1alpha1.ComputeContract, path string, ref commonv1.StrongRef) error {
 	bundleRef := *contract.Spec.SecretsRef
 	kv, data, entries, err := r.readAtircBundle(ctx, bundleRef)
 	if err != nil {

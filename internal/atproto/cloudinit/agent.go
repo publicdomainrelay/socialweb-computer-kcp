@@ -3,13 +3,17 @@ package cloudinit
 import (
 	"encoding/json"
 	"fmt"
+	"path"
+	"slices"
 	"strings"
 )
 
 const (
 	DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 
-	DefaultAssociationRefFile = "/etc/socialweb-computer/association-ref"
+	AssociationRefDir = "/etc/socialweb-computer"
+
+	DefaultAssociationRefFile = AssociationRefDir + "/association-ref"
 
 	AgentUnit = "atirc-agent.service"
 
@@ -108,3 +112,15 @@ chmod 440 /etc/sudoers.d/wheel
 id "${nick}" >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash "${nick}"
 exec runuser -u "${nick}" -- ` + AtircBinary + ` agent run
 `
+
+func AssociationRefPath(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultAssociationRefFile, nil
+	}
+	clean := path.Clean(raw)
+	if !strings.HasPrefix(raw, "/") || slices.Contains(strings.Split(raw, "/"), "..") || !strings.HasPrefix(clean, AssociationRefDir+"/") {
+		return "", fmt.Errorf("cloudinit association: refFile %q is not an absolute path under %s/ without a .. segment", raw, AssociationRefDir)
+	}
+	return clean, nil
+}
