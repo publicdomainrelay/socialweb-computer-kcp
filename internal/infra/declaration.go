@@ -76,6 +76,7 @@ func normalize(d Declaration) Declaration {
 		c.SshAuthorizedKeys = nonEmpty(c.SshAuthorizedKeys)
 		c.Tunnels = normalTunnels(c.Tunnels)
 		c.Agent = normalAgent(c.Agent)
+		c.Association = normalAssociation(c.Association)
 		out.Contracts = append(out.Contracts, c)
 	}
 	if out.TTLSeconds != 0 && out.EndWhen == "" {
@@ -127,6 +128,19 @@ func normalAgent(in *v1alpha1.ComputeContractAgent) *v1alpha1.ComputeContractAge
 
 const DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 
+const DefaultAssociationRefFile = "/etc/socialweb-computer/association-ref"
+
+func normalAssociation(in *v1alpha1.ComputeContractAssociation) *v1alpha1.ComputeContractAssociation {
+	if in == nil || in.Subject == "" {
+		return nil
+	}
+	out := *in
+	if out.RefFile == "" {
+		out.RefFile = DefaultAssociationRefFile
+	}
+	return &out
+}
+
 func nonEmpty(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -139,7 +153,7 @@ func (d Declaration) Published() Declaration {
 	for _, c := range d.Contracts {
 		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
-				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent}})
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association}})
 	}
 	return normalize(out)
 }
