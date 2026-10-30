@@ -70,6 +70,8 @@ type contractRunner struct {
 
 	association *contractAssociation
 
+	associationSubjects map[string]bool
+
 	associationMu sync.Mutex
 
 	associating atomic.Bool

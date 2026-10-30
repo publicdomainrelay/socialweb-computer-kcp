@@ -125,6 +125,12 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 		fail("write the market.association record", err)
 		return
 	}
+	r.mu.Lock()
+	if r.associationSubjects == nil {
+		r.associationSubjects = map[string]bool{}
+	}
+	r.associationSubjects[subject] = true
+	r.mu.Unlock()
 	ref := commonv1.StrongRef{URI: written.URI, CID: written.CID}
 	if contract.Spec.SecretsRef != nil {
 		if err := r.writeAssociationRef(ctx, contract, refFile, ref); err != nil {
@@ -191,16 +197,21 @@ func (r *contractRunner) addSecretEntries(entries ...SecretEntry) {
 }
 
 func (r *contractRunner) deleteAssociation(ctx context.Context) {
-	subject := associationSubject(r.snapshot())
+	subjects := map[string]bool{}
+	if subject := associationSubject(r.snapshot()); subject != "" {
+		subjects[subject] = true
+	}
 	r.mu.Lock()
 	if r.association != nil {
-		subject = r.association.subject
+		subjects[r.association.subject] = true
+	}
+	for subject := range r.associationSubjects {
+		subjects[subject] = true
 	}
 	r.mu.Unlock()
-	if subject == "" {
-		return
+	for subject := range subjects {
+		r.deleteAssociationRecord(ctx, subject)
 	}
-	r.deleteAssociationRecord(ctx, subject)
 }
 
 func (r *contractRunner) deleteAssociationRecord(ctx context.Context, subject string) {
@@ -218,6 +229,7 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, subject st
 	if r.association != nil && r.association.subject == subject {
 		r.association = nil
 	}
+	delete(r.associationSubjects, subject)
 	r.mu.Unlock()
 	r.log().Info("requester_association_deleted", "subject", subject, "rkey", rkey)
 }
