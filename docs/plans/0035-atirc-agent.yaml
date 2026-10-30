@@ -83,7 +83,7 @@ items:
       - internal/atproto/oauth/scope.go
       - typescript-helpers lib/oauth-scope/mod.ts
     done_when: "RequesterOAuthScope holds rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc; mod.ts matches."
-    status: todo
+    status: done
 
   - id: B-API
     title: "spec.agent on ComputeContract and the infra templates"
@@ -128,7 +128,7 @@ items:
       - internal/market/requester/requester.go
       - internal/services/requester/wiring.go
     done_when: "A spec.agent request logs requester_atirc_minted and the bundle entry carries a non-empty ATIRC_TOKEN."
-    status: todo
+    status: doing
 
   - id: F-DOWNLOADS
     title: "atirc in socialweb-guest-downloads"
@@ -137,7 +137,7 @@ items:
       - internal/versions/versions.json
       - scripts/build-guest-downloads.sh
     done_when: "build-guest-downloads.sh writes atirc-x86_64 with the pinned sha256 and logs the aarch64 skip."
-    status: todo
+    status: done
 
   - id: G-CLI
     title: "run request --agent and run request agent <name>"
