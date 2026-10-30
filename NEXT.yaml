@@ -696,19 +696,6 @@ open:
       one hour with the cluster idle, for a healthy cluster and for a cluster whose apiserver is stopped;
       and the count of sockets in the ephemeral range (`ss -tan | wc -l` against
       `net.ipv4.ip_local_port_range`) shows headroom while a cluster is deleted and recreated.
-  - id: RELAY-SSH-ROUTE
-    text: >
-      fedproxy's atprp-ssh-relay (atproto-reverse-proxy src/golang/cmd/atprp-ssh-relay) lets a dead
-      `-R <name>` session take over the Caddy route of a live one (last writer wins) and, when the dead
-      session is finally reaped by tcp_retries2 (~16.5 min), its cleanup deletes the live session's
-      route unconditionally; its keepalive is a SendRequest with no reply timeout, so a TCP-dead client
-      is never noticed. Seen 2026-10-25 as kcpwasm--johnandersen777-bsky-social.fedproxy.com dropping
-      every 15-30 min (drops 11:11, 11:28, 11:45 UTC) while a second client (the old peer Mac) still ran
-      its tunnel loop. Fix in progress on branch fix/ssh-session-drop (owner-only route changes with
-      fallback, keepalive reply timeout that closes the conn). Closed when the relay with the fix serves
-      the page URL for 2 h with no "reconciled missing route" for kcpwasm and two concurrent clients, one
-      SIGSTOPped, no longer take the route from each other. Deploy restarts the relay and drops every
-      user's tunnels: needs the user's OK.
   - id: PAGE-CONTRACT-ALLOC
     text: >
       The browser page (kcp-wasm 637670b72 on socialweb 674abaeb) still allocates ~1.3 GB over the two
