@@ -146,7 +146,7 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	for _, t := range a.cfg.Tunnels {
 		tags = append(tags, t.Tag)
 	}
-	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
+	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "agentUnit", a.cfg.AgentUnit, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
 		"forwardedUDPPort", a.mux != nil)
 	for _, t := range a.cfg.Tunnels {
 		a.wg.Go(func() { a.announce(ctx, t.Tag) })

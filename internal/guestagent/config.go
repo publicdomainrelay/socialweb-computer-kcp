@@ -22,6 +22,8 @@ const (
 
 	SecretsFile = "secrets.json"
 
+	AgentFile = "agent.json"
+
 	SecretsReadyFile = "secrets.ready"
 
 	SecretsRequestFile = "secrets.request"
@@ -80,6 +82,8 @@ type Config struct {
 
 	Secrets *Secrets
 
+	AgentUnit string
+
 	Bidder Bidder
 
 	Accept AcceptRef
@@ -115,6 +119,14 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 	case secrets.Fallback != "":
 		return cfg, fmt.Errorf("%w: %s fallback %q is not %s", ErrConfig, SecretsFile, secrets.Fallback, secretsFallbackSealed)
 	}
+	var agent AgentUnit
+	if err := readOptionalJSON(filepath.Join(configDir, AgentFile), &agent); err != nil {
+		return cfg, err
+	}
+	if agent.Unit != "" && !agentUnitRE.MatchString(agent.Unit) {
+		return cfg, fmt.Errorf("%w: %s unit %q is not a systemd service name of [a-z0-9-]", ErrConfig, AgentFile, agent.Unit)
+	}
+	cfg.AgentUnit = agent.Unit
 	seen := map[string]bool{}
 	for _, t := range tunnels.Tunnels {
 		switch {
@@ -130,8 +142,8 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		seen[t.Tag] = true
 		cfg.Tunnels = append(cfg.Tunnels, t)
 	}
-	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil {
-		return cfg, fmt.Errorf("%w: neither %s names a tunnel nor %s asks for the sealed secrets fallback", ErrConfig, TunnelsFile, SecretsFile)
+	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil && cfg.AgentUnit == "" {
+		return cfg, fmt.Errorf("%w: %s names no tunnel, %s asks for no sealed secrets fallback and %s names no unit", ErrConfig, TunnelsFile, SecretsFile, AgentFile)
 	}
 	if err := readJSON(filepath.Join(configDir, BidderFile), &cfg.Bidder); err != nil {
 		return cfg, err

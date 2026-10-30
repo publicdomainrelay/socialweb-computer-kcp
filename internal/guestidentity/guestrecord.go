@@ -440,6 +440,14 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
 			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
 		}
+	case market.ComputeEventsGuestAgentStartNSID:
+		r, err := market.ParseComputeEventsGuestAgentStart(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
 	case market.ComputeEventsGuestSecretsAppliedNSID:
 		r, err := market.ParseComputeEventsGuestSecretsApplied(record)
 		if err != nil {

@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.agentStart",
+  "description": "The requester asks the guest agent to start the guest's agent unit (the contract's spec.agent); sent as the payload of a market.event. Requester-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

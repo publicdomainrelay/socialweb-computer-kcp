@@ -186,6 +186,13 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     comes only in the secrets bundle, and the unit waits for `setup-guest-binaries.service` and the
     secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
     older `<tag>:<port>:<envFile>`) asks for one.
+  - The atirc agent (plan 0035): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`) needs
+    `spec.secretsRef`. The requester mints a long atirc token after the RFP (only for spec.agent) and
+    writes `ATIRC_TOKEN` into the bundle entry at envFile; user_data installs `atirc-agent.service`
+    and `/etc/socialweb-guest-agent/agent.json` but never starts the unit. A requester-originated
+    `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
+    `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
+    linux/amd64 only.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty or socialweb-guest-agent from its own
@@ -196,8 +203,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
   `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,
-  guest.secretsApplied; never guest.secrets) and the bidder signs and
-  publishes them; requester events to the guest reach it through the bidder's per-ComputeVM queue
+  guest.secretsApplied; never guest.secrets or guest.agentStart) and the bidder signs and
+  publishes them; requester events to the guest (guest.publicKey, guest.signalWebRTC, guest.secrets,
+  guest.agentStart) reach it through the bidder's per-ComputeVM queue
   and the XRPC subscription `com.publicdomainrelay.temp.compute.guest.subscribeEvents` (WebSocket,
   `cursor`, JSON text frames, an empty binary keepalive every 25 s). The guest bearer is the
   `Authorization` header only. The bidder routes by NSID prefix and never opens a sealed body.

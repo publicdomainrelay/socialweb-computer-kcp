@@ -131,7 +131,7 @@ var APIResources = []APIResource{
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ContractEvent", Plural: "contractevents", Revision: 2, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ContractEvent", Plural: "contractevents", Revision: 3, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
 		{Name: "Contract", Type: "string", JSONPath: ".spec.contractRef.name"},
 		{Name: "Direction", Type: "string", JSONPath: ".spec.direction"},
 		{Name: "NSID", Type: "string", JSONPath: ".spec.nsid"},

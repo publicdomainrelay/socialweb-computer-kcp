@@ -67,6 +67,12 @@ func validateGuestFields(nsid, kind, tag, key, ciphertext string) error {
 		}
 		return nil
 	}
+	if nsid == market.ComputeEventsGuestAgentStartNSID {
+		if kind != "" || tag != "" || key != "" || ciphertext != "" {
+			return errors.New("an agentStart event carries no kind, tag, key or ciphertext")
+		}
+		return nil
+	}
 	if !networkTagRE.MatchString(tag) {
 		return fmt.Errorf("tag %q is not a DNS label of at most 32 characters", tag)
 	}
@@ -258,6 +264,9 @@ func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1al
 	if contract.DeletionTimestamp != nil {
 		return fail("the ComputeContract " + name + " is being deleted")
 	}
+	if spec.NSID == market.ComputeEventsGuestAgentStartNSID && contract.Spec.Agent == nil {
+		return fail("the ComputeContract " + name + " has no spec.agent; an agentStart starts nothing")
+	}
 	state := contract.Status.Contract
 	switch contract.Status.Phase {
 	case v1alpha1.ComputeContractReleased, v1alpha1.ComputeContractFailed:
@@ -361,6 +370,8 @@ func (q *Requester) contractEventRecord(event v1alpha1.ContractEvent) (map[strin
 		return market.EncodeRecord(market.ComputeEventsGuestSignalWebRTC{Kind: spec.Kind, Tag: spec.Tag, Ciphertext: spec.Ciphertext, CreatedAt: q.nowISO()})
 	case market.ComputeEventsGuestSecretsNSID:
 		return market.EncodeRecord(market.ComputeEventsGuestSecrets{Ciphertext: spec.Ciphertext, CreatedAt: q.nowISO()})
+	case market.ComputeEventsGuestAgentStartNSID:
+		return market.EncodeRecord(market.ComputeEventsGuestAgentStart{CreatedAt: q.nowISO()})
 	}
 	return nil, fmt.Errorf("nsid %q is not a guest event", spec.NSID)
 }

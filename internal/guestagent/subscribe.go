@@ -170,6 +170,8 @@ func (a *Agent) receive(frame eventFrame) {
 		a.sealedSecrets(a.ctx, frame.Seq, record.Ciphertext)
 	case record.Type == PublicKeyNSID:
 		a.log.Debug("requester publicKey for tag "+record.Tag, "seq", frame.Seq, "tag", record.Tag, "known", known)
+	case record.Type == AgentStartNSID:
+		a.startAgent(frame.Seq)
 	case record.Type != SignalWebRTCNSID:
 		a.log.Debug("a guest event of another collection", "seq", frame.Seq, "collection", record.Type)
 	case !known:

@@ -15,6 +15,8 @@ const (
 
 	SecretsRequestedNSID = nsidPrefix + "events.guest.secretsRequested"
 
+	AgentStartNSID = nsidPrefix + "events.guest.agentStart"
+
 	secretsViaGetSecrets = "getSecrets"
 
 	secretsViaSealed = "sealed"

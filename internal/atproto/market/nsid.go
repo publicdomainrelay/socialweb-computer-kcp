@@ -48,6 +48,7 @@ const (
 	ComputeEventsGuestSecretsNSID          = GuestEventNSIDPrefix + "secrets"
 	ComputeEventsGuestSecretsAppliedNSID   = GuestEventNSIDPrefix + "secretsApplied"
 	ComputeEventsGuestSecretsRequestedNSID = GuestEventNSIDPrefix + "secretsRequested"
+	ComputeEventsGuestAgentStartNSID       = GuestEventNSIDPrefix + "agentStart"
 	ComputeGuestSubscribeEventsNSID        = "com.publicdomainrelay.temp.compute.guest.subscribeEvents"
 
 	IngressWebRTCNSID = "com.publicdomainrelay.temp.ingress.webRTC"

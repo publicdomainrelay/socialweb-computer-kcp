@@ -41,7 +41,8 @@ func IsGuestEventNSID(nsid string) bool {
 
 func IsRequesterGuestEventNSID(nsid string) bool {
 	switch nsid {
-	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID:
+	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID,
+		ComputeEventsGuestAgentStartNSID:
 		return true
 	}
 	return false

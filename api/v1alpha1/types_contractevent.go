@@ -35,6 +35,8 @@ const (
 	ContractEventNSIDGuestSignalWebRTC = "com.publicdomainrelay.temp.compute.events.guest.signalWebRTC"
 
 	ContractEventNSIDGuestSecrets = "com.publicdomainrelay.temp.compute.events.guest.secrets"
+
+	ContractEventNSIDGuestAgentStart = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
 )
 
 type ContractEventSpec struct {
@@ -42,7 +44,7 @@ type ContractEventSpec struct {
 
 	Direction ContractEventDirection `json:"direction,omitempty" apigen:"default=outbound,enum=outbound|inbound"`
 
-	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC|com.publicdomainrelay.temp.compute.events.guest.secrets"`
+	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC|com.publicdomainrelay.temp.compute.events.guest.secrets|com.publicdomainrelay.temp.compute.events.guest.agentStart"`
 
 	Kind string `json:"kind,omitempty" apigen:"maxLength=32"`
 

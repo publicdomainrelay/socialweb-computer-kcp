@@ -438,6 +438,47 @@ func (v *BidsX402) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsGuestAgentStart struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestAgentStart) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.agentStart"
+}
+
+func ParseComputeEventsGuestAgentStart(value map[string]any) (*ComputeEventsGuestAgentStart, error) {
+	var out ComputeEventsGuestAgentStart
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.agentStart", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestAgentStart) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestAgentStart
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestAgentStart) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestAgentStart
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestAgentStart(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsGuestPublicKey struct {
 	Type       string                     `json:"$type"`
 	CreatedAt  string                     `json:"createdAt"`
