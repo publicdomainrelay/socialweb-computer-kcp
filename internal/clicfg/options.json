@@ -496,7 +496,7 @@
     },
     "bidder-policy": {
       "type": "string",
-      "description": "run bidder: the policy that gates which RFPs the bidder answers (MarketBidder spec.policy), for an installed bidder whose unit passes no hono-bidder options; a --policy after -- wins. Unset: the profile default (open). Set it in config.json for every prod bidder",
+      "description": "run bidder: the policy that gates which RFPs the bidder answers (MarketBidder spec.policy), for an installed bidder whose unit passes no hono-bidder options; a --policy after -- wins. Unset: bidder-tangled-vouch; open runs only when set explicitly. install bidder writes it to config.json (bidder-tangled-vouch unless this flag names another)",
       "env": "SOCIALWEB_BIDDER_POLICY"
     },
     "bidder-policy-args": {

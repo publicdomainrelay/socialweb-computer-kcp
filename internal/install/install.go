@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
@@ -155,11 +156,12 @@ const (
 	OptNetworkTimeout = "network-timeout"
 	OptNoGuestLANUDP  = "no-guest-lan-udp"
 	OptGuestHostUDP   = "guest-host-udp"
+	OptBidderPolicy   = "bidder-policy"
 )
 
 var GatewayListen = map[string]string{OptKcpFront: "127.0.0.1:6443", OptTLSFront: "127.0.0.1:8443", OptCertFront: "127.0.0.1:8444"}
 
-var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase, OptNoGuestLANUDP, OptGuestHostUDP}
+var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase, OptNoGuestLANUDP, OptGuestHostUDP, OptBidderPolicy}
 
 func Rooted(root string) bool { return root != "" && filepath.Clean(root) != "/" }
 
@@ -949,6 +951,9 @@ func (in *installer) config() error {
 	if in.o.Role == hostcontract.RoleBidder {
 		if s, _ := cfg["profile"].(string); s == "" {
 			cfg["profile"] = BidderProfile
+		}
+		if s, _ := cfg[OptBidderPolicy].(string); strings.TrimSpace(s) == "" {
+			cfg[OptBidderPolicy] = v1alpha1.BidderDefaultPolicy
 		}
 	}
 	if in.o.Role == hostcontract.RoleGateway {

@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
 )
@@ -471,6 +472,9 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		default:
 			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
 		}
+	}
+	if !network {
+		r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
 	}
 	if nvSet || !network {
 		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")

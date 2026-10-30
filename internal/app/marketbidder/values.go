@@ -157,7 +157,7 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 func (p *pass) infraValues() *manifests.MarketBidder {
 	o, c := p.o, p.c
 	stateRoot := c.StateRoot()
-	values := &manifests.MarketBidder{StateDir: stateRoot, Policy: o.Spec.Policy}
+	values := &manifests.MarketBidder{StateDir: stateRoot, Policy: cmp.Or(o.Spec.Policy, DefaultPolicy)}
 	if o.Spec.Kcp != nil {
 		guestStateDir := compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGuestControlPlane, GuestComponent)
 		if built, err := BidderValues(o.Spec, stateRoot, guestStateDir, BidderKcp{Server: c.KcpServer(), Workspace: c.Workspace()}); err == nil {

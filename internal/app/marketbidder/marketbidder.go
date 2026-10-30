@@ -32,7 +32,7 @@ const (
 	BidderAccount         = "bidder"
 	BidderVaultServer     = "bidder"
 	BidderVaultClient     = "bidder"
-	DefaultPolicy         = "open"
+	DefaultPolicy         = v1alpha1.BidderDefaultPolicy
 	BidderProfileProdQr   = "prod-qr"
 	BidderProfileNetwork  = "market-network"
 	BidderProfileDevLocal = "dev-local"
@@ -393,7 +393,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Kcp:                  kcp,
 		ComputeKinds:         append([]string(nil), o.Spec.ComputeKinds...),
 		Operator:             o.Spec.Operator,
-		Policy:               o.Spec.Policy,
+		Policy:               cmp.Or(strings.TrimSpace(o.Spec.Policy), DefaultPolicy),
 		PolicyArgs:           compose.OptionValue(o.Spec.Options, "policy-args"),
 		GuestNetwork:         o.Spec.GuestNetwork,
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),

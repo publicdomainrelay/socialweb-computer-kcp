@@ -83,7 +83,9 @@ const (
 )
 
 const (
-	BidderOnlyMePolicy = "bidder-only-me"
+	BidderOnlyMePolicy       = "bidder-only-me"
+	BidderTangledVouchPolicy = "bidder-tangled-vouch"
+	BidderDefaultPolicy      = BidderTangledVouchPolicy
 
 	HostUDPReasonSpec      = "spec"
 	HostUDPReasonOnlyMe    = "policy only-me"
