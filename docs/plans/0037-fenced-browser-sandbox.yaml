@@ -42,7 +42,7 @@ items:
   - id: W0-PROBE
     title: "Step 0: iPhone and headless Chrome feasibility probe (srcdoc iframe, module Worker from blob: then data:); go/no-go for option (a), else plan QuickJS-ng"
     owner: wasm
-    status: planned
+    status: done
   - id: W1-RUNNER
     title: "socialweb-wasm/internal/browsersandbox: js/wasm runner (sandbox.Runner + sandbox.Prober, Kind browser) and the !js stub"
     owner: wasm
