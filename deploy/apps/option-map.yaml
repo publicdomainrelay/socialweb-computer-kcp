@@ -223,6 +223,7 @@ apps:
       - {name: policy-args, to: contract.policyArgs}
       - {name: vm-ready-timeout-sec, to: contract.vmReadyTimeoutSec}
       - {name: secrets, to: contract.secretsRef}
+      - {name: agent, to: contract.agent}
       - {name: secrets-fallback, to: spec.secretsFallback}
       - {name: tunnel, to: contract.tunnels}
       - {name: guest-host-aliases, to: options}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -35,11 +36,15 @@ func (k *Kcp) Signaling() *ContractSignaling {
 	return &ContractSignaling{k: k, contract: k.ContractName(), session: hex.EncodeToString(b[:])}
 }
 
+func (s *ContractSignaling) eventName(suffix string) string {
+	return contractEventPrefix + s.session + "-" + suffix
+}
+
 func (s *ContractSignaling) create(ctx context.Context, suffix string, spec v1alpha1.ContractEventSpec) error {
 	spec.ContractRef = commonv1.LocalObjectRef{Name: s.contract}
 	spec.Direction = v1alpha1.ContractEventOutbound
 	event := v1alpha1.ContractEvent{TypeMeta: typeMeta("ContractEvent"),
-		ObjectMeta: metav1.ObjectMeta{Name: contractEventPrefix + s.session + "-" + suffix}, Spec: spec}
+		ObjectMeta: metav1.ObjectMeta{Name: s.eventName(suffix)}, Spec: spec}
 	body, err := kube.ApplyBody(&event, false)
 	if err != nil {
 		return err
@@ -56,6 +61,16 @@ func (s *ContractSignaling) PublishKey(ctx context.Context, tag, key string) err
 func (s *ContractSignaling) PublishOffer(ctx context.Context, tag, ciphertext string) error {
 	return s.create(ctx, "offer", v1alpha1.ContractEventSpec{NSID: v1alpha1.ContractEventNSIDGuestSignalWebRTC,
 		Kind: market.GuestSignalKindOffer, Tag: tag, Ciphertext: ciphertext})
+}
+
+func (s *ContractSignaling) PublishAgentStart(ctx context.Context) (string, error) {
+	return s.eventName("agent"), s.create(ctx, "agent", v1alpha1.ContractEventSpec{NSID: v1alpha1.ContractEventNSIDGuestAgentStart})
+}
+
+func (k *Kcp) WaitContractEvent(ctx context.Context, name string, timeout time.Duration, done func(*v1alpha1.ContractEvent) bool) (*v1alpha1.ContractEvent, error) {
+	return kube.Await(ctx, k.dyn.Resource(v1alpha1.ContractEventGVR), name, timeout, func(e *v1alpha1.ContractEvent) (bool, error) {
+		return e != nil && done(e), nil
+	})
 }
 
 func (s *ContractSignaling) inbound(e v1alpha1.ContractEvent, nsid, kind, tag string) bool {

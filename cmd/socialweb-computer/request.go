@@ -44,7 +44,7 @@ const (
 	sshConnectionFailed = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity")
@@ -306,6 +306,7 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	if r.contract.Tunnels, err = parseTunnels(vals.String("tunnel")); err != nil {
 		return nil, fmt.Errorf("tunnel: %w", err)
 	}
+	r.contract.Agent = agentOf(vals.String("agent"))
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
 	}
@@ -459,6 +460,8 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.contract.VMReadyTimeoutSec = n
 		case p.To == "contract.secretsRef":
 			r.secrets = p.Value
+		case p.To == "contract.agent":
+			r.contract.Agent = agentOf(p.Value)
 		case p.To == "contract.tunnels":
 			tunnels, err := parseTunnels(p.Value)
 			if err != nil {
@@ -1067,6 +1070,11 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if r.secrets != "" {
 		if bundle, err = readSecrets(r.secrets); err != nil {
 			return a.fail(exitRefused, "run request: --secrets: %v", err)
+		}
+	}
+	if r.contract.Agent != nil {
+		if bundle, err = withAgentPlaceholder(bundle, r.contract.Agent.EnvFile); err != nil {
+			return a.fail(exitRefused, "run request: --agent: %v", err)
 		}
 	}
 	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC()}

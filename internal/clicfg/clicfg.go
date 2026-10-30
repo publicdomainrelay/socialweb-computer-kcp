@@ -38,6 +38,7 @@ type Option struct {
 	Env         string `json:"env,omitempty"`
 	Default     any    `json:"default,omitempty"`
 	Build       string `json:"build,omitempty"`
+	Bare        string `json:"bare,omitempty"`
 }
 
 const BuildDev = "dev"
@@ -81,6 +82,9 @@ func Parse(b []byte) (Spec, error) {
 		}
 		if o.Type == TypeBoolean && o.Default != nil {
 			return Spec{}, fmt.Errorf("clicfg: boolean option %s carries a default; a boolean is a flag", name)
+		}
+		if o.Bare != "" && o.Type != TypeString {
+			return Spec{}, fmt.Errorf("clicfg: option %s has a bare value and type %s; only a string takes --%s alone", name, o.Type, name)
 		}
 	}
 	return s, nil
@@ -156,13 +160,19 @@ func (v Values) Bool(name string) bool {
 }
 
 type stringFlag struct {
-	set bool
-	val string
+	set  bool
+	val  string
+	bare string
 }
 
 func (f *stringFlag) String() string { return f.val }
 
+func (f *stringFlag) IsBoolFlag() bool { return f.bare != "" }
+
 func (f *stringFlag) Set(s string) error {
+	if f.bare != "" && s == "true" {
+		s = f.bare
+	}
 	f.set, f.val = true, s
 	return nil
 }
@@ -218,7 +228,7 @@ func (s Spec) Resolve(command string, names []string, args []string, env Env, co
 			bools[name] = fs.Bool(name, false, usage)
 			continue
 		}
-		strs[name] = &stringFlag{}
+		strs[name] = &stringFlag{bare: o.Bare}
 		fs.Var(strs[name], name, usage)
 	}
 	fs.Usage = func() {
