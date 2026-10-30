@@ -27,6 +27,7 @@ const (
 	BidderAssociate      = "bidder_associate"
 	RequesterAssociate   = "requester_associate"
 	defaultTrustCacheTTL = 5 * time.Minute
+	trustErrorTTL        = 5 * time.Second
 
 	maxLegacyListedRecords = 2000
 )
@@ -154,6 +155,8 @@ func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service stri
 			return "", false, ctx.Err()
 		}
 		r.log("warn", "resolveOperatorDid failed", map[string]any{"did": did, "service": service, "error": err.Error()})
+		r.ops.SetTTL(key, operatorEntry{}, trustErrorTTL)
+		return "", false, nil
 	}
 	r.ops.Set(key, operatorEntry{value: operator, found: found})
 	return operator, found, nil
