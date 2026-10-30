@@ -1,6 +1,6 @@
 plan: "0035"
 title: "A requester can ask for an atirc agent on its guest: spec.agent, a long atirc token minted at the RFP into the secrets bundle, an atirc-agent.service unit, and a requester-originated guest.agentStart event"
-status: planned
+status: done
 source: >
   2026-10-29 and 2026-10-30, the user's decisions (binding), design rev 6 of the kcp-wasm page plan
   docs/plans/0035-atirc-agent.md (johnandersen777/kcp, branch kcp-wasm-memory-storage-1). The page
@@ -93,7 +93,7 @@ items:
       - api/v1alpha1/resources.go
       - internal/market/requester/secrets.go
     done_when: "go generate ./... leaves no diff; a contract with spec.agent and no secretsRef fails before the RFP."
-    status: todo
+    status: done
 
   - id: C-MODULE
     title: "cloudinit.AgentModule and the guestseed atirc need"
@@ -103,7 +103,7 @@ items:
       - internal/market/requester/secrets.go
       - internal/guestseed/binaries.go
     done_when: "The rendered user_data of a spec.agent contract holds the unit, the run script and agent.json; runcmd has no start."
-    status: todo
+    status: done
 
   - id: D-AGENT-START
     title: "The requester-originated guest.agentStart event"
@@ -117,7 +117,7 @@ items:
       - internal/guestagent
       - AGENTS.md
     done_when: "An outbound agentStart reaches the guest agent, which starts atirc-agent.service; the bidder refuses it from a guest."
-    status: todo
+    status: done
 
   - id: E-MINT
     title: "Mint the atirc token at the RFP into the secrets bundle"
@@ -128,7 +128,7 @@ items:
       - internal/market/requester/requester.go
       - internal/services/requester/wiring.go
     done_when: "A spec.agent request logs requester_atirc_minted and the bundle entry carries a non-empty ATIRC_TOKEN."
-    status: doing
+    status: done
 
   - id: F-DOWNLOADS
     title: "atirc in socialweb-guest-downloads"
@@ -148,7 +148,7 @@ items:
       - internal/stack/request/webrtc.go
       - deploy/apps/option-map.yaml
     done_when: "run request --agent --hold reaches Held with a minted token; run request agent <name> publishes the event."
-    status: todo
+    status: done
 
   - id: ACC35-AGENT
     title: "An agent contract runs atirc agent run on its guest after agentStart"
@@ -158,4 +158,4 @@ items:
       inactive; run request agent <name> publishes the event, the unit is active, the nick is on the
       atirc channel; /etc/atirc/atirc.env is root 0600; the token is in no kcp object and no log.
       Without --agent: no mint, no unit, no atirc binary.
-    status: todo
+    status: done
