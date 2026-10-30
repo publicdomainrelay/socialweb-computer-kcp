@@ -25,6 +25,7 @@ import (
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
@@ -52,6 +53,8 @@ type Controller struct {
 	dynamic kube.Factory
 
 	log *slog.Logger
+
+	repos map[string]*binding.Table[struct{}]
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -68,7 +71,8 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name)}
+	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), repos: map[string]*binding.Table[struct{}]{
+		infractl.CollectionKind: binding.New[struct{}](), infractl.EphemeralCollectionKind: binding.New[struct{}]()}}
 	if err := register[*v1alpha1.InfraCollection, *v1alpha1.Infra](m, c, Name, infraOps, opts.Scope); err != nil {
 		return nil, err
 	}
@@ -87,6 +91,14 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 				return nil
 			}
 			return []ctlruntime.Request{{Name: labels[v1alpha1.InfraNameLabel]}}
+		}),
+		ctlruntime.WatchesFiltered(infractl.RepoExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRepo]{Changed: func(old, new *v1alpha1.AtprotoRepo) bool {
+			return old.Status.DID != new.Status.DID
+		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
+			return c.repoUsers(ops.kind, src.Workspace, obj.Name)
+		}),
+		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
+			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 		})}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -95,6 +107,19 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		return fmt.Errorf("infracollection: registering the %s controller: %w", ops.kind, err)
 	}
 	return nil
+}
+
+func (c *Controller) bindRepo(kind string, req ctlruntime.Request, repo commonv1.ObjectRef) {
+	c.repos[kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, &struct{}{},
+		binding.Key(repo.Workspace, infractl.RepoKind, repo.Name))
+}
+
+func (c *Controller) repoUsers(kind, workspace, name string) []ctlruntime.Request {
+	var out []ctlruntime.Request
+	for _, t := range c.repos[kind].Users(binding.Key(workspace, infractl.RepoKind, name)) {
+		out = append(out, ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
+	}
+	return out
 }
 
 type child struct {
@@ -200,13 +225,18 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		Children: previous.Children, Conditions: slices.Clone(previous.Conditions)}
 	fail := func(err error) (ctlruntime.Result, error) {
 		status.Message = err.Error()
-		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, "ListFailed", err.Error())
-		return ctlruntime.Result{}, errors.Join(err, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
+		reason, retry := "ListFailed", err
+		if errors.Is(err, infractl.ErrRepoNoDID) {
+			reason, retry = "RepoPending", nil
+		}
+		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, reason, err.Error())
+		return ctlruntime.Result{}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
 	}
 	repo, err := infractl.RepoRef(req.Workspace, spec.RepoRef)
 	if err != nil {
 		return fail(err)
 	}
+	r.c.bindRepo(r.ops.kind, req, repo)
 	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: r.ops.kind, Name: req.Name, Workspace: req.Workspace}
 	did, reader, err := infractl.Repo(ctx, r.c.bus, r.c.dynamic, self, repo, nsid)
 	if err != nil {
