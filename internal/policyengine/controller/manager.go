@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 )
@@ -22,6 +23,7 @@ type EngineFactory func(ctx context.Context, engine *policyv1alpha1.PolicyEngine
 type managedEngine struct {
 	engine *Engine
 	hash   string
+	fence  *sandbox.Fence
 }
 
 type EngineManager struct {
@@ -36,8 +38,44 @@ func NewEngineManager(factory EngineFactory) *EngineManager {
 
 func NewDefaultEngineFactory(base Config) EngineFactory {
 	return func(ctx context.Context, engineCR *policyv1alpha1.PolicyEngine) (*Engine, error) {
-		return NewEngine(EngineConfigFromCR(engineCR, base)), nil
+		config := EngineConfigFromCR(engineCR, base)
+		var spec *policyv1alpha1.PolicySandboxConfig
+		if engineCR != nil {
+			spec = engineCR.Spec.Sandbox
+		}
+		switch {
+		case base.OpenSandbox != nil:
+			runner, err := base.OpenSandbox(ctx, spec)
+			if err != nil {
+				return nil, fmt.Errorf("opening the %s policy sandbox: %w", spec.ProviderName(), err)
+			}
+			config.Sandbox = runner
+		case spec.ProviderName() != policyv1alpha1.PolicySandboxProviderDeno:
+			return nil, fmt.Errorf("the %s policy sandbox is not available on this host", spec.ProviderName())
+		}
+		return NewEngine(config), nil
 	}
+}
+
+func probeFence(ctx context.Context, runner sandbox.Runner) *sandbox.Fence {
+	prober, ok := runner.(sandbox.Prober)
+	if !ok {
+		return nil
+	}
+	if !runner.Available() {
+		return &sandbox.Fence{Reason: policyv1alpha1.PolicyEngineFencedNotProbed, Message: fmt.Sprintf("the %s sandbox runtime is unavailable", runner.Kind())}
+	}
+	fence, err := prober.Probe(ctx)
+	if err != nil {
+		return &sandbox.Fence{Reason: policyv1alpha1.PolicyEngineFencedProbeFailed, Message: err.Error()}
+	}
+	if fence.Reason == "" {
+		fence.Reason = policyv1alpha1.PolicyEngineFencedProbeFailed
+		if fence.Fenced {
+			fence.Reason = policyv1alpha1.PolicyEngineFencedProbePassed
+		}
+	}
+	return &fence
 }
 
 func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, engineCR *policyv1alpha1.PolicyEngine) (EngineReconcileState, error) {
@@ -96,8 +134,9 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, e
 		if startErr := engine.Start(context.WithoutCancel(ctx)); startErr != nil {
 			return EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}, startErr
 		}
+		fence := probeFence(ctx, engine.Sandbox())
 		m.mu.Lock()
-		m.engines[key] = &managedEngine{engine: engine, hash: hash}
+		m.engines[key] = &managedEngine{engine: engine, hash: hash, fence: fence}
 		managed = m.engines[key]
 		stored := *managed
 		m.mu.Unlock()
@@ -110,6 +149,18 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, e
 
 func reconcileState(managed *managedEngine) EngineReconcileState {
 	state := EngineReconcileState{ActiveRuns: managed.engine.ActiveRuns()}
+	if fence := managed.fence; fence != nil {
+		status := metav1.ConditionFalse
+		if fence.Fenced {
+			status = metav1.ConditionTrue
+		}
+		meta.SetStatusCondition(&state.Conditions, metav1.Condition{
+			Type:    policyv1alpha1.PolicyEngineConditionFenced,
+			Status:  status,
+			Reason:  fence.Reason,
+			Message: fence.Message,
+		})
+	}
 	if managed.engine.Ready() {
 		state.Phase = policyv1alpha1.PolicyEngineRunning
 		state.Ready = true
@@ -122,12 +173,20 @@ func reconcileState(managed *managedEngine) EngineReconcileState {
 		return state
 	}
 	state.Phase = policyv1alpha1.PolicyEnginePending
-	meta.SetStatusCondition(&state.Conditions, metav1.Condition{
+	notReady := metav1.Condition{
 		Type:    policyengine.ConditionReady,
 		Status:  metav1.ConditionFalse,
 		Reason:  "RuntimeUnavailable",
 		Message: "the embedded or system deno runtime is unavailable",
-	})
+	}
+	if fence := managed.fence; fence != nil {
+		notReady.Message = fmt.Sprintf("the %s sandbox runtime is unavailable", managed.engine.Sandbox().Kind())
+		if !fence.Fenced {
+			notReady.Reason = fence.Reason
+			notReady.Message = fence.Message
+		}
+	}
+	meta.SetStatusCondition(&state.Conditions, notReady)
 	return state
 }
 

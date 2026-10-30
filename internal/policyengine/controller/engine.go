@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -39,6 +40,7 @@ type Limits struct {
 type Config struct {
 	Limits           Limits
 	Sandbox          sandbox.Runner
+	OpenSandbox      func(ctx context.Context, spec *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error)
 	ResolveAction    workflow.ActionResolver
 	Host             trust.Host
 	DisableActions   bool
@@ -163,6 +165,10 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 
 func (e *Engine) Ready() bool {
 	return e.config.Sandbox != nil && e.config.Sandbox.Available() && e.config.Sandbox.Fenced()
+}
+
+func (e *Engine) Sandbox() sandbox.Runner {
+	return e.config.Sandbox
 }
 
 func (e *Engine) ActiveRuns() int32 {

@@ -36,3 +36,15 @@ type Runner interface {
 
 	Kind() string
 }
+
+type Fence struct {
+	Fenced bool
+
+	Reason string
+
+	Message string
+}
+
+type Prober interface {
+	Probe(ctx context.Context) (Fence, error)
+}

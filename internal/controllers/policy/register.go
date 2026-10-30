@@ -8,6 +8,7 @@ import (
 	"time"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/policyengine"
@@ -34,6 +35,8 @@ type Options struct {
 	DefaultRunTTL time.Duration
 
 	Sandbox sandbox.Runner
+
+	OpenSandbox func(ctx context.Context, spec *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error)
 
 	Disabled bool
 
@@ -76,7 +79,7 @@ func Register(m *ctlruntime.Manager, opts Options) error {
 	records := pecontroller.NewRecordResolver(func(ctx context.Context, ref commonv1.StrongRef) (map[string]any, error) {
 		return host.Resolve(ctx, atproto.StrongRef{URI: ref.URI, CID: ref.CID})
 	}, policies)
-	engines := pecontroller.NewEngineManager(pecontroller.NewDefaultEngineFactory(pecontroller.Config{Sandbox: opts.Sandbox, Host: host, Log: logf}))
+	engines := pecontroller.NewEngineManager(pecontroller.NewDefaultEngineFactory(pecontroller.Config{Sandbox: opts.Sandbox, OpenSandbox: opts.OpenSandbox, Host: host, Log: logf}))
 	if _, err := policyengine.Register(m, policyengine.Options{Bus: opts.Bus, Engines: engines, Log: log}); err != nil {
 		return err
 	}
