@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const OperatorKeysPath = "identity/operator/keys"
@@ -179,7 +180,7 @@ func (c *Composer) WriteClaim(ctx context.Context, r Root, o Operator, id *v1alp
 	if err != nil {
 		return "", err
 	}
-	rkey := service + "-" + strings.ReplaceAll(didText, ":", "-")
+	rkey := trust.ClaimRKey(service, didText)
 	if held, err := repo.GetRecord(ctx, operator, BadgeBlueKeysNSID, rkey); err == nil {
 		var value map[string]any
 		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator, didText, service) {

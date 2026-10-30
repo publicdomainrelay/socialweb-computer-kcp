@@ -142,19 +142,21 @@ func (c *Client) GetRecord(ctx context.Context, ref StrongRef) (map[string]any, 
 }
 
 func (c *Client) ListRecords(ctx context.Context, repo, collection string, limit int) ([]Record, error) {
-	limit = min(opt.Positive(limit, 100), 100)
+	limit = opt.Positive(limit, 100)
+	page := min(limit, 100)
 	pds, err := c.ResolvePDS(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
 	endpoint := pds + "/xrpc/com.atproto.repo.listRecords"
-	records := make([]Record, 0, limit)
+	records := make([]Record, 0, page)
 	cursor := ""
+	seen := map[string]bool{}
 	for len(records) < limit {
 		query := url.Values{}
 		query.Set("repo", repo)
 		query.Set("collection", collection)
-		query.Set("limit", fmt.Sprintf("%d", limit))
+		query.Set("limit", fmt.Sprintf("%d", page))
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
@@ -175,9 +177,10 @@ func (c *Client) ListRecords(ctx context.Context, repo, collection string, limit
 				break
 			}
 		}
-		if response.Cursor == "" || len(response.Records) == 0 {
+		if response.Cursor == "" || len(response.Records) == 0 || seen[response.Cursor] {
 			break
 		}
+		seen[response.Cursor] = true
 		cursor = response.Cursor
 	}
 	return records, nil

@@ -20,6 +20,9 @@ const (
 	BidderAssociate      = "bidder_associate"
 	RequesterAssociate   = "requester_associate"
 	defaultTrustCacheTTL = 5 * time.Minute
+
+	maxListedRecords      = 2000
+	maxOperatorCandidates = 8
 )
 
 type Host interface {
@@ -52,11 +55,18 @@ type operatorEntry struct {
 	found bool
 }
 
+type claim struct {
+	operator string
+	subject  string
+	service  string
+}
+
 type Resolver struct {
 	client *atproto.Client
 	store  *cache.Store
 	log    func(level, msg string, meta map[string]any)
 	ops    *ttlcache.Cache[operatorKey, operatorEntry]
+	claims *ttlcache.Cache[string, map[claim]bool]
 	vouch  *ttlcache.Cache[string, map[string]bool]
 }
 
@@ -76,6 +86,7 @@ func NewResolver(opts ResolverOptions) *Resolver {
 		store:  opts.Store,
 		log:    log,
 		ops:    ttlcache.New[operatorKey, operatorEntry](ttlcache.Options{TTL: ttl}),
+		claims: ttlcache.New[string, map[claim]bool](ttlcache.Options{TTL: ttl}),
 		vouch:  ttlcache.New[string, map[string]bool](ttlcache.Options{TTL: ttl}),
 	}
 }
@@ -112,29 +123,90 @@ func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service strin
 	}
 	operator := ""
 	found := false
-	records, err := r.client.ListRecords(ctx, did, BadgeBlueKeysNSID, 100)
+	records, err := r.client.ListRecords(ctx, did, BadgeBlueKeysNSID, maxListedRecords)
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", false, ctx.Err()
 		}
 		r.log("warn", "resolveOperatorDid failed", map[string]any{"did": did, "error": err.Error()})
-	} else {
-		for _, record := range records {
-			recordService, _ := record.Value["service"].(string)
-			if !associationService(recordService, service) {
-				continue
+	}
+	for _, mirror := range mirroredClaims(records, did, service) {
+		held, err := r.claimHeld(ctx, mirror)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", false, ctx.Err()
 			}
-			keyID, _ := record.Value["keyId"].(string)
-			challenge, _ := record.Value["challenge"].(string)
-			if keyID == did && strings.HasPrefix(challenge, "did:") {
-				operator = challenge
-				found = true
-				break
-			}
+			r.log("warn", "resolveOperatorDid operator repo failed", map[string]any{"did": did, "operator": mirror.operator, "service": mirror.service, "error": err.Error()})
+			continue
 		}
+		if !held {
+			r.log("info", "resolveOperatorDid unclaimed mirror", map[string]any{"did": did, "operator": mirror.operator, "service": mirror.service})
+			continue
+		}
+		operator = mirror.operator
+		found = true
+		break
 	}
 	r.ops.Set(key, operatorEntry{value: operator, found: found})
 	return operator, found, nil
+}
+
+func ClaimRKey(service, subject string) string {
+	return service + "-" + strings.ReplaceAll(subject, ":", "-")
+}
+
+func mirroredClaims(records []atproto.Record, subject, service string) []claim {
+	seen := make(map[claim]bool)
+	var out []claim
+	for _, record := range records {
+		mirror, ok := claimOf(record.Value)
+		if !ok || mirror.subject != subject || mirror.operator == subject || seen[mirror] || !associationService(mirror.service, service) {
+			continue
+		}
+		seen[mirror] = true
+		out = append(out, mirror)
+		if len(out) == maxOperatorCandidates {
+			break
+		}
+	}
+	return out
+}
+
+func (r *Resolver) claimHeld(ctx context.Context, want claim) (bool, error) {
+	ref := atproto.StrongRef{URI: "at://" + want.operator + "/" + BadgeBlueKeysNSID + "/" + ClaimRKey(want.service, want.subject)}
+	if value, err := r.client.GetRecord(ctx, ref); err == nil {
+		if held, ok := claimOf(value); ok && held == want {
+			return true, nil
+		}
+	} else if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if claims, ok := r.claims.Get(want.operator); ok {
+		return claims[want], nil
+	}
+	records, err := r.client.ListRecords(ctx, want.operator, BadgeBlueKeysNSID, maxListedRecords)
+	if err != nil {
+		return false, err
+	}
+	claims := make(map[claim]bool)
+	for _, record := range records {
+		if atproto.RepoFromURI(record.URI) != want.operator {
+			continue
+		}
+		if held, ok := claimOf(record.Value); ok && held.operator == want.operator && held.subject != want.operator && associationService(held.service, "") {
+			claims[held] = true
+		}
+	}
+	r.claims.Set(want.operator, claims)
+	return claims[want], nil
+}
+
+func claimOf(value map[string]any) (claim, bool) {
+	service, _ := value["service"].(string)
+	subject, _ := value["keyId"].(string)
+	operator, _ := value["challenge"].(string)
+	c := claim{operator: strings.TrimSpace(operator), subject: strings.TrimSpace(subject), service: strings.TrimSpace(service)}
+	return c, strings.HasPrefix(c.operator, "did:") && strings.HasPrefix(c.subject, "did:")
 }
 
 func associationService(recordService, want string) bool {
@@ -157,7 +229,7 @@ func (r *Resolver) GetVouchedDids(ctx context.Context, did string) (map[string]b
 		return out, nil
 	}
 	vouched := make(map[string]bool)
-	records, err := r.client.ListRecords(ctx, did, VouchNSID, 100)
+	records, err := r.client.ListRecords(ctx, did, VouchNSID, maxListedRecords)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -193,6 +265,7 @@ func (r *Resolver) Log(level, msg string, meta map[string]any) {
 
 func (r *Resolver) ApplyEvent(did, rkey string) {
 	r.ops.DeleteKeys(func(key operatorKey) bool { return key.did == did })
+	r.claims.Delete(did)
 	for _, other := range []string{did, rkey} {
 		if other == "" {
 			continue
@@ -203,6 +276,7 @@ func (r *Resolver) ApplyEvent(did, rkey string) {
 
 func (r *Resolver) Invalidate() {
 	r.ops.DeleteKeys(func(operatorKey) bool { return true })
+	r.claims.DeleteKeys(func(string) bool { return true })
 	r.vouch.DeleteKeys(func(string) bool { return true })
 }
 
