@@ -1,0 +1,60 @@
+plan: "0037"
+title: "Fenced browser policy sandbox: a browser provider on PolicyEngine spec.sandbox, a Fenced condition from a sandbox.Prober, and the page's opaque-origin iframe + per-run Worker runner, wired like the WebRTC ingress"
+status: doing
+source: >
+  2026-10-30 atirc, owner-approved plan rev 2 (atirc seq 836): the full design is the kcp-wasm plan
+  docs/plans/0037-fenced-browser-sandbox.md on branch kcp-wasm-memory-storage-1 (commit cca1013e9) of
+  github.com/johnandersen777/kcp. Option C of plan 0036 section 2: evaluate socialweb policy (e.g.
+  requester-tangled-vouch) inside the page's kcp.wasm. Socialweb owner: linux-kcp; kcp-wasm owner: wasm.
+principle: >
+  Follow the WebRTC ingress pattern: the API value is declared here and only the wasm build
+  instantiates it; a contract interface with a native and a js/wasm implementation; the page half is
+  reached through one __socialwebSandbox bridge; state is in resource status. A native host never
+  pretends to run the browser sandbox. The browser enforces the fence by origin isolation, as deno
+  enforces it with permission flags; the probe proves it before Ready.
+decisions:
+  api: >
+    PolicyEngineSpec.Sandbox *PolicySandboxConfig {Provider deno|browser (empty = deno), Browser
+    *PolicyBrowserSandboxConfig {TimeoutSeconds default 120, minimum 1}}. Status has no new field:
+    PolicyEngineStatus.Conditions gets the Fenced condition type (reasons ProbePassed, ProbeFailed,
+    NotProbed). No new kind.
+  contract: >
+    internal/contract/sandbox gains Fence {Fenced, Reason, Message} and the optional Prober
+    {Probe(ctx) (Fence, error)}, type-asserted, so the deno runner and every caller stay unchanged.
+    policyengine/controller Config.OpenSandbox(ctx, *PolicySandboxConfig) (sandbox.Runner, error) is the
+    counterpart of requester Deps.OpenIngress: the default factory uses it when set, else
+    Config.Sandbox; a browser provider without OpenSandbox fails the factory (Ready=False CreateFailed).
+    The manager probes a Prober runner when the engine is created, writes Fenced, and uses the probe
+    reason when not ready. Engine.Ready() stays Available() && Fenced(). controllers/policy.Options
+    passes OpenSandbox through.
+state_rules:
+  - "Fenced=True only after the probe passed on this engine; any probe error is Fenced=False, Ready=False, Deny."
+  - "Network is allowed to policy code, as --allow-net on Linux; the page's own authority (storage, channels, DOM) is what the fence denies."
+items:
+  - id: S1-API
+    title: "API: PolicyEngineSpec.Sandbox (PolicySandboxConfig, PolicyBrowserSandboxConfig), Fenced condition type, schema revision 2"
+    owner: linux-kcp
+    status: done
+  - id: S2-CONTRACT
+    title: "Contract: sandbox.Fence and sandbox.Prober; controller Config.OpenSandbox and the Fenced/Ready conditions; policy.Options.OpenSandbox"
+    owner: linux-kcp
+    status: done
+  - id: W0-PROBE
+    title: "Step 0: iPhone and headless Chrome feasibility probe (srcdoc iframe, module Worker from blob: then data:); go/no-go for option (a), else plan QuickJS-ng"
+    owner: wasm
+    status: planned
+  - id: W1-RUNNER
+    title: "socialweb-wasm/internal/browsersandbox: js/wasm runner (sandbox.Runner + sandbox.Prober, Kind browser) and the !js stub"
+    owner: wasm
+    depends_on: [S1-API, S2-CONTRACT, W0-PROBE]
+    status: planned
+  - id: W2-BRIDGE
+    title: "Page half: scripts/browser/policy_sandbox.js (opaque iframe relay, per-run Worker, BOOTSTRAP/FOOTER), kcp_worker.js __socialwebSandbox bridge, app.js MessageChannel"
+    owner: wasm
+    depends_on: [W0-PROBE]
+    status: planned
+  - id: W3-WIRING
+    title: "Page wiring: orchestrator uses controllers/policy.Register with OpenSandbox: browsersandbox.Open; requester overlay sets Sandbox {Provider: browser}; PolicyEngine in the status feed; dev server rejects Origin null on /debug/*"
+    owner: wasm
+    depends_on: [W1-RUNNER, W2-BRIDGE]
+    status: planned
