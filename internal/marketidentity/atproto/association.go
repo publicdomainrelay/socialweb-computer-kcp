@@ -98,6 +98,9 @@ func associatedTrue(status *v1alpha1.MarketIdentityStatus) bool {
 }
 
 func setAssociated(status *v1alpha1.MarketIdentityStatus, generation int64, mode v1alpha1.AssociationMode) {
+	if refCondition(status, generation) {
+		return
+	}
 	if mode == v1alpha1.AssociationSkip {
 		conds.Set(&status.Conditions, generation, v1alpha1.ConditionAssociated, true, "AssociationSkipped", "the association is skipped")
 		return

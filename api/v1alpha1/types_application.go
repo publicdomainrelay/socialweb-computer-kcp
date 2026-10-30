@@ -150,6 +150,8 @@ type ApplicationIdentity struct {
 
 	ApprovedAssociations []string `json:"approvedAssociations,omitempty" apigen:"listType=set"`
 
+	AssociationRef *commonv1.StrongRef `json:"associationRef,omitempty"`
+
 	OAuthClientID string `json:"oauthClientID,omitempty" apigen:"userEndpoint"`
 
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`

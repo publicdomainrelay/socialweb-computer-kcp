@@ -104,7 +104,7 @@ items:
     status: done
   - id: A4
     title: "MarketIdentity spec.associationRef + CLI --association-ref + bundle path; pinned-getRecord bootstrap"
-    status: planned
+    status: done
   - id: A5
     title: "authority write path: requester writes a contract-owned association record for a subject it starts (app password or OAuth)"
     status: planned

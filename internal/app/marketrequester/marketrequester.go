@@ -194,6 +194,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err != nil {
 		return p.fail(err)
 	}
+	plan.Identity = compose.WithAssociationRefService(plan.Identity, compose.RequesterAssociate)
 	mount := plan.Vault.MountOr(RequesterVaultClient)
 	pdsAccountHandle := compose.PdsHandle(ws, "requester", o.Spec.Identity.Handle)
 	ingressSpec := compose.AppIngressOrDefault(o.Spec.Profile == RequesterProfileDefault, o.Spec.Ingress, o.Spec.Network)
@@ -531,6 +532,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	}
 	if err := c.ApplyLocalAccount(ctx, r, ws, acct); err != nil {
 		return ctlruntime.Result{}, err
+	}
+	if plan.Identity.AssociationRef != nil {
+		if err := c.ApplyAssociationRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate); err != nil {
+			return ctlruntime.Result{}, err
+		}
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, RequesterComponent)
 	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), pdsStateDir, did, requesterDir)

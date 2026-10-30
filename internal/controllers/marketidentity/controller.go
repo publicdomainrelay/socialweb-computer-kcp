@@ -52,6 +52,10 @@ type Options struct {
 
 	OAuth atproto.OAuthOptions
 
+	PLCURL string
+
+	RecordHTTP *http.Client
+
 	Log *slog.Logger
 }
 
@@ -90,7 +94,7 @@ func New(opts Options) *Controller {
 		return pool.PublicClientConfig(nil), nil
 	}
 	accounts := atproto.New(atproto.Config{Endpoints: opts.Endpoints, Vault: opts.Vault, Resolver: opts.Resolver, HTTPClient: opts.HTTPClient,
-		TLS: trust, Sessions: sessions(opts.Bus), OAuth: opts.OAuth, Log: log})
+		TLS: trust, Sessions: sessions(opts.Bus), OAuth: opts.OAuth, PLCURL: opts.PLCURL, RecordHTTP: opts.RecordHTTP, Log: log})
 	return &Controller{accounts: accounts, roots: roots, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer)}
 }
 
@@ -132,6 +136,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	atproto.Associate(object, watch, &status)
 	result, reconcileErr := c.accounts.Reconcile(ctx, req.Workspace, object, status)
+	refAfter, refErr := c.accounts.ApplyAssociationRef(ctx, object, &result.Status)
+	reconcileErr = errors.Join(reconcileErr, refErr)
+	if refAfter > 0 && (result.RequeueAfter == 0 || refAfter < result.RequeueAfter) {
+		result.RequeueAfter = refAfter
+	}
 	next := object.DeepCopy()
 	next.Status = result.Status
 	if err := req.ApplyStatus(ctx, next); err != nil {

@@ -45,7 +45,7 @@ const (
 	sshConnectionFailed = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity")
@@ -144,8 +144,11 @@ func (r *requestRun) openIdentity(name string) error {
 			return fail(fmt.Errorf("the identity %s has association %q", idName, id.Association))
 		}
 		r.root.Identity.ApprovedAssociations = append([]string(nil), id.ApprovedAssociations...)
-		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 {
-			return fail(fmt.Errorf("the identity %s is RequireApproval with no approved operator; this CLI does not verify claims, so use --skip-qr to create a skip identity", idName))
+		if r.root.Identity.Association == v1alpha1.AssociationSkip && r.root.Identity.AssociationRef != nil {
+			return fail(fmt.Errorf("the identity %s has association Skip; --association-ref needs a RequireApproval identity", idName))
+		}
+		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 && r.root.Identity.AssociationRef == nil {
+			return fail(fmt.Errorf("the identity %s is RequireApproval with no approved operator; pass --association-ref at://<authority>/<collection>/<rkey>#<cid>, or use --skip-qr to create a skip identity", idName))
 		}
 		if id.PLCDirectoryURL != "" && r.root.Network != nil && r.root.Network.PLCDirectoryURL != "" &&
 			!strings.EqualFold(strings.TrimRight(id.PLCDirectoryURL, "/"), strings.TrimRight(r.root.Network.PLCDirectoryURL, "/")) {
@@ -168,10 +171,14 @@ func (r *requestRun) openIdentity(name string) error {
 		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fail(err)
 		}
-		if r.root.Identity.Association != v1alpha1.AssociationSkip {
-			return fail(fmt.Errorf("a new identity needs -- --skip-qr; this CLI cannot bootstrap operator approval"))
+		association := v1alpha1.AssociationSkip
+		if r.root.Identity.AssociationRef != nil {
+			association = v1alpha1.AssociationRequireApproval
+		} else if r.root.Identity.Association != v1alpha1.AssociationSkip {
+			return fail(fmt.Errorf("a new identity needs -- --skip-qr or --association-ref at://<authority>/<collection>/<rkey>#<cid>"))
 		}
-		r.identityState = &request.Identity{Schema: request.IdentitySchema, Name: idName, Mode: "localRepo", Association: string(v1alpha1.AssociationSkip)}
+		r.root.Identity.Association = association
+		r.identityState = &request.Identity{Schema: request.IdentitySchema, Name: idName, Mode: "localRepo", Association: string(association)}
 	}
 	if err := store.EnsureDirs(); err != nil {
 		return fail(err)
@@ -763,6 +770,9 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 			if !untilAssociated && obj != nil && obj.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
 				return true, nil
 			}
+			if err := associationRefRefused(obj); err != nil {
+				return false, err
+			}
 			if waitsOnPerson(obj) && deadline.Stop() {
 				r.log("run request: the requester identity waits on a person (a QR scan, a browser sign-in or the operator's association); waiting without a deadline until it is Ready, Ctrl-C stops and keeps the invocation's state",
 					"identity", name, "phase", string(obj.Status.Phase))
@@ -804,6 +814,9 @@ func (r *requestRun) identityHint(obj *v1alpha1.MarketIdentity) string {
 		return ""
 	}
 	did := cmp.Or(obj.Status.Did, "<the requester DID above>")
+	if obj.Spec.AssociationRef != nil {
+		return associationRefHint(obj, did)
+	}
 	return strings.Join([]string{
 		"The requester's DID " + did + " is a new localRepo DID with association RequireApproval. No bidder accepts it",
 		"until the operator's verified association claim names it. The operator writes that claim from a checkout",
@@ -1063,6 +1076,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	network := vals.String("network")
 	if err := r.passthrough(pass, network != ""); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
+	}
+	if err := r.associationRef(network != ""); err != nil {
+		return a.fail(exitRefused, "run request: --association-ref: %v", err)
 	}
 	if r.contract.ComputeKind == v1alpha1.ComputeKindDeno {
 		r.skipSSH = true

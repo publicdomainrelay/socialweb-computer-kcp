@@ -134,7 +134,7 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 		plan.Local = true
 		plan.ComponentMode = "local"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL, Association: association,
-			ApprovedAssociations: approved}
+			ApprovedAssociations: approved, AssociationRef: id.AssociationRef.DeepCopy()}
 		plan.KeysPath = ""
 		return plan, nil
 	case v1alpha1.MarketIdentityModePdsAccount:
@@ -143,7 +143,8 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 			KeysRef:              &commonv1.SecretRef{Mount: mount, Path: keysPath},
 			SessionRef:           &commonv1.SecretRef{Mount: mount, Path: sessionPath},
 			Association:          association,
-			ApprovedAssociations: approved}
+			ApprovedAssociations: approved,
+			AssociationRef:       id.AssociationRef.DeepCopy()}
 		u, remote, err := c.resolveAccountPds(ctx, ws, id)
 		if err != nil {
 			return AccountPlan{}, err
@@ -158,7 +159,8 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
 		plan.ComponentMode = "oauth"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL,
-			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, Association: association, ApprovedAssociations: approved}
+			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, Association: association, ApprovedAssociations: approved,
+			AssociationRef: id.AssociationRef.DeepCopy()}
 		plan.PdsURL = strings.TrimSpace(id.PdsURL)
 		remote, err := c.remotePDSRef(ctx, ws, id.PdsRef)
 		if err != nil {
@@ -281,6 +283,13 @@ func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator, service string) v1
 		s.AssociateWith, s.AssociationWatch = operator, AssociationWatch
 		s.AssociationService = service
 	}
+	return WithAssociationRefService(s, service)
+}
+
+func WithAssociationRefService(s v1alpha1.MarketIdentitySpec, service string) v1alpha1.MarketIdentitySpec {
+	if s.AssociationRef != nil {
+		s.AssociationService = service
+	}
 	return s
 }
 
@@ -361,18 +370,43 @@ func AssociatedClaim(id *v1alpha1.MarketIdentity) bool {
 	return false
 }
 
+func associatedMessage(id *v1alpha1.MarketIdentity) string {
+	for _, cond := range id.Status.Conditions {
+		if cond.Type == v1alpha1.ConditionAssociated {
+			return cond.Reason + ": " + cond.Message
+		}
+	}
+	return "no Associated condition yet"
+}
+
 func associationRequired(plan AccountPlan, id *v1alpha1.MarketIdentity) bool {
-	if plan.Mode != v1alpha1.MarketIdentityModeLocalRepo || plan.Identity.Association == v1alpha1.AssociationSkip || id == nil {
+	if id == nil {
+		return false
+	}
+	if plan.Identity.AssociationRef != nil {
+		return true
+	}
+	if plan.Mode != v1alpha1.MarketIdentityModeLocalRepo || plan.Identity.Association == v1alpha1.AssociationSkip {
 		return false
 	}
 	return strings.TrimSpace(id.Spec.AssociationWatch) != "" || strings.TrimSpace(id.Spec.AssociateWith) != ""
 }
 
 func AssociationWait(plan AccountPlan, id *v1alpha1.MarketIdentity, service string) string {
-	if !associationRequired(plan, id) || len(plan.Identity.ApprovedAssociations) > 0 {
+	if !associationRequired(plan, id) {
 		return ""
 	}
-	if id != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseReady && (AssociatedClaim(id) || len(id.Status.Associations) > 0) {
+	if ref := plan.Identity.AssociationRef; ref != nil {
+		if id.Spec.AssociationRef == nil || *id.Spec.AssociationRef != *ref || id.Status.AssociationRef == nil || *id.Status.AssociationRef != *ref ||
+			!AssociatedClaim(id) || id.Status.Phase != v1alpha1.MarketIdentityPhaseReady {
+			return "waiting for the MarketIdentity to verify the association record " + ref.URI + " (cid " + ref.CID + "): " + associatedMessage(id)
+		}
+		return ""
+	}
+	if len(plan.Identity.ApprovedAssociations) > 0 {
+		return ""
+	}
+	if id.Status.Phase == v1alpha1.MarketIdentityPhaseReady && (AssociatedClaim(id) || len(id.Status.Associations) > 0) {
 		return ""
 	}
 	keyID := "the requester DID"

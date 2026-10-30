@@ -591,6 +591,11 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "association-ref": {
+      "type": "string",
+      "bare": "/etc/socialweb-computer/association-ref",
+      "description": "run request: --association-ref[=<at-uri>#<cid> or <file>] bootstraps the requester's association from one pinned record (spec.identity.associationRef): a market.association, a badgeBlueKeys claim or a post in the authority's repo that names this requester's DID for requester_associate; the MarketIdentity verifies it by one getRecord (cid, subject, service, expiresAt), mirrors it as the association proof and the invocation waits until it is verified. An absolute path reads the ref from that file (default /etc/socialweb-computer/association-ref, the secrets bundle entry a requester writes for a subject it starts); standalone only"
+    },
     "tunnel": {
       "type": "string",
       "description": "run request: guest tunnels to open, a comma list of <tag>:<port>[:<transport>][:shell[=<envFile>]] or <tag>:<port>:<envFile> (spec.tunnels; transport opentunnel, the default, or webrtc): opentunnel serves the guest's 127.0.0.1:<port> at an https URL that comes back in status.contract.networks, and webrtc bridges a datachannel to it; shell (opentunnel only) makes it a wootty browser shell, the fallback to ssh over webrtc, whose WOOTTY_AUTH_TOKEN (32 or more characters) the --secrets bundle writes to the envFile (default /etc/wootty/wootty.env)"

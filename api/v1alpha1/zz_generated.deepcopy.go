@@ -41,6 +41,11 @@ func (in *ApplicationIdentity) DeepCopyInto(out *ApplicationIdentity) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.AssociationRef != nil {
+		in, out := &in.AssociationRef, &out.AssociationRef
+		*out = new(commonv1alpha1.StrongRef)
+		**out = **in
+	}
 	return
 }
 
@@ -5972,6 +5977,11 @@ func (in *MarketIdentitySpec) DeepCopyInto(out *MarketIdentitySpec) {
 		in, out := &in.RejectedAssociations, &out.RejectedAssociations
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.AssociationRef != nil {
+		in, out := &in.AssociationRef, &out.AssociationRef
+		*out = new(commonv1alpha1.StrongRef)
+		**out = **in
 	}
 	if in.KeysRef != nil {
 		in, out := &in.KeysRef, &out.KeysRef

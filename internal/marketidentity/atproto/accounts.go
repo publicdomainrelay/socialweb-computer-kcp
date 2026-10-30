@@ -1,6 +1,7 @@
 package atproto
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
+	recordclient "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 )
 
 const (
@@ -54,6 +56,10 @@ type Config struct {
 
 	OAuth OAuthOptions
 
+	PLCURL string
+
+	RecordHTTP *http.Client
+
 	Log *slog.Logger
 }
 
@@ -87,6 +93,10 @@ type Accounts struct {
 	browser *ttlcache.Cache[string, browserIssue]
 
 	held heldAccounts
+
+	records *recordclient.Client
+
+	refs *ttlcache.Cache[refKey, refVerdict]
 }
 
 func New(cfg Config) *Accounts {
@@ -106,8 +116,12 @@ func New(cfg Config) *Accounts {
 	if states == nil {
 		states = &oauthclient.MemoryStateStore{}
 	}
+	records := recordclient.NewClient()
+	records.HTTP = cmp.Or(cfg.RecordHTTP, records.HTTP)
+	records.PLCURL = cmp.Or(strings.TrimSpace(cfg.PLCURL), records.PLCURL)
 	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, sessions: cfg.Sessions, oauth: cfg.OAuth,
-		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{})}
+		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{}),
+		records: records, refs: newRefCache()}
 }
 
 func (a *Accounts) reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {

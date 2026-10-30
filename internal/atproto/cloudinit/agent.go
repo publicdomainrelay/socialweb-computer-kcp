@@ -9,6 +9,8 @@ import (
 const (
 	DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 
+	DefaultAssociationRefFile = "/etc/socialweb-computer/association-ref"
+
 	AgentUnit = "atirc-agent.service"
 
 	AgentRunPath = "/usr/local/bin/atirc-agent-run.sh"
