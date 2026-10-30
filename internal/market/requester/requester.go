@@ -104,6 +104,8 @@ type Placement struct {
 type Config struct {
 	Spec v1alpha1.RequesterSpec
 
+	AtircURL string
+
 	Placement
 
 	IdentityMode IdentityMode
@@ -166,6 +168,8 @@ type Deps struct {
 
 	Vault func(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error)
 
+	VaultWrite func(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error)
+
 	ServiceAuth func(ctx context.Context, identity commonv1.ObjectRef, did string) (pds.ServiceAuth, error)
 
 	Guests Guests
@@ -221,6 +225,8 @@ type Requester struct {
 	identityRef commonv1.ObjectRef
 
 	ownerServiceAuth ServiceAuthSource
+
+	serviceAuth ServiceAuthSource
 
 	market MarketClient
 
@@ -593,6 +599,7 @@ func (q *Requester) Start(ctx context.Context) error {
 	case !q.cfg.LocalSigner && q.ownerServiceAuth != nil:
 		serviceAuth = q.ownerServiceAuth
 	}
+	q.serviceAuth = serviceAuth
 	q.log.Info("requester_service_auth", "identityMode", q.cfg.IdentityMode, "localSigner", q.cfg.LocalSigner,
 		"signing", serviceAuthName(serviceAuth))
 	q.market = &HTTPMarket{

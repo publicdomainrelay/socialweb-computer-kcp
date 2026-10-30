@@ -107,6 +107,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		AwaitRepo:      s.awaitRepo,
 		Policy:         runner,
 		Vault:          s.secretsVault,
+		VaultWrite:     s.secretsVaultWrite,
 		ServiceAuth:    s.openServiceAuth,
 		Guests:         guests{},
 		ContractEvents: events,
@@ -192,12 +193,20 @@ func (s *Service) openServiceAuth(ctx context.Context, identity commonv1.ObjectR
 }
 
 func (s *Service) secretsVault(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error) {
+	return s.openSecretsVault(ctx, ref, vault.CapabilityRead)
+}
+
+func (s *Service) secretsVaultWrite(ctx context.Context, ref commonv1.SecretRef) (vault.KV, error) {
+	return s.openSecretsVault(ctx, ref, vault.CapabilityWrite)
+}
+
+func (s *Service) openSecretsVault(ctx context.Context, ref commonv1.SecretRef, capability string) (vault.KV, error) {
 	vaultRef := s.spec.VaultRef
 	if vaultRef == nil || vaultRef.Name == "" {
 		return nil, fmt.Errorf("requester: the contract names a secrets bundle and the component names no OpenBaoServer")
 	}
 	target := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Vault", Name: vaultRef.Name, Workspace: cmp.Or(vaultRef.Workspace, s.deps.Self.Workspace)}
-	kv, err := bus.Resolve[vault.KV](s.deps.Caller(ctx), s.deps.Bus, s.deps.Self, target, bus.Capability{Name: vault.CapabilityRead, Scope: []string{ref.Mount + "/" + ref.Path}})
+	kv, err := bus.Resolve[vault.KV](s.deps.Caller(ctx), s.deps.Bus, s.deps.Self, target, bus.Capability{Name: capability, Scope: []string{ref.Mount + "/" + ref.Path}})
 	if err != nil {
 		return nil, fmt.Errorf("requester: the vault client: %w", err)
 	}
