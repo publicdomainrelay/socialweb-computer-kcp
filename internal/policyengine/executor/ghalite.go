@@ -369,7 +369,7 @@ func (h scopeHost) ResolveOperatorDid(ctx context.Context, did string) (string, 
 
 func (h scopeHost) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
 	if h.resolveOperatorDidFor == nil {
-		return h.ResolveOperatorDid(ctx, did)
+		return "", false, nil
 	}
 	return h.resolveOperatorDidFor(ctx, did, service)
 }

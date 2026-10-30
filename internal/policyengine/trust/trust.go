@@ -144,6 +144,10 @@ func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service stri
 	if did == "" {
 		return "", false, nil
 	}
+	if !associationRole(service) {
+		r.log("info", "resolveOperatorDid needs a role", map[string]any{"did": did, "service": service})
+		return "", false, nil
+	}
 	akey := assoc.key()
 	key := operatorKey{did: did, service: service, assoc: akey}
 	if entry, ok := r.ops.Get(key); ok {
@@ -247,7 +251,7 @@ func (r *Resolver) legacyClaimListed(ctx context.Context, want claim) (bool, err
 		if atproto.RepoFromURI(record.URI) != want.operator {
 			continue
 		}
-		if held, ok := claimOf(record.Value); ok && held.operator == want.operator && held.subject != want.operator && associationService(held.service, "") {
+		if held, ok := claimOf(record.Value); ok && held.operator == want.operator && held.subject != want.operator && associationRole(held.service) {
 			claims[held] = true
 		}
 	}
@@ -263,11 +267,12 @@ func claimOf(value map[string]any) (claim, bool) {
 	return c, strings.HasPrefix(c.operator, "did:") && strings.HasPrefix(c.subject, "did:")
 }
 
+func associationRole(service string) bool {
+	return service == BidderAssociate || service == RequesterAssociate
+}
+
 func associationService(recordService, want string) bool {
-	if recordService != BidderAssociate && recordService != RequesterAssociate {
-		return false
-	}
-	return want == "" || recordService == want
+	return associationRole(want) && recordService == want
 }
 
 func (r *Resolver) Vouches(ctx context.Context, voucher, subject string) (bool, error) {
@@ -334,10 +339,6 @@ type AssociationOperatorResolver interface {
 	ResolveOperatorDidWith(ctx context.Context, did, service string, assoc Association) (string, bool, error)
 }
 
-func BuildSnapshot(ctx context.Context, host Host, selfDid, counterpartyDid string) (Snapshot, error) {
-	return BuildSnapshotFor(ctx, host, selfDid, counterpartyDid, "", "")
-}
-
 func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string) (Snapshot, error) {
 	return BuildSnapshotWith(ctx, host, selfDid, counterpartyDid, selfService, counterpartyService, Association{})
 }
@@ -369,7 +370,7 @@ func BuildSnapshotWith(ctx context.Context, host Host, selfDid, counterpartyDid,
 		if roleResolver != nil {
 			return roleResolver.ResolveOperatorDidFor(ctx, did, service)
 		}
-		return host.ResolveOperatorDid(ctx, did)
+		return "", false, nil
 	}
 	dids := []string{selfDid}
 	if counterpartyDid != "" && counterpartyDid != selfDid {
