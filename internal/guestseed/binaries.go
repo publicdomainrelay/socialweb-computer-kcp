@@ -24,6 +24,8 @@ const (
 
 	GuestBinaryWootty = "wootty"
 
+	GuestBinaryAtirc = "atirc"
+
 	GuestAgentUnit = "socialweb-guest-agent.service"
 
 	GuestSecretsUnit = cloudinit.GuestSecretsUnit
@@ -62,6 +64,8 @@ type GuestBinaryNeeds struct {
 
 	Wootty bool
 
+	Atirc bool
+
 	Secrets bool
 
 	WebRTC bool
@@ -90,7 +94,7 @@ func GuestDownloadName(name, arch string) string {
 }
 
 func (n GuestBinaryNeeds) Any() bool {
-	return n.OpenTunnel || n.Agent || n.Wootty
+	return n.OpenTunnel || n.Agent || n.Wootty || n.Atirc
 }
 
 func (n GuestBinaryNeeds) Names() []string {
@@ -100,6 +104,9 @@ func (n GuestBinaryNeeds) Names() []string {
 	}
 	if n.Wootty {
 		out = append(out, GuestBinaryWootty)
+	}
+	if n.Atirc {
+		out = append(out, GuestBinaryAtirc)
 	}
 	if n.Agent {
 		out = append(out, GuestBinaryAgent)
@@ -118,6 +125,10 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		case p == cloudinit.GuestAgentSecretsPath:
 			out.Agent = true
 			out.Secrets = true
+		case p == cloudinit.GuestAgentAgentPath:
+			out.Agent = true
+			out.Atirc = true
+			out.Units = append(out.Units, cloudinit.AgentUnit)
 		case strings.HasPrefix(p, unitDir+"guest-tunnel-") && !strings.HasPrefix(p, unitDir+"guest-tunnel-report-") && strings.HasSuffix(p, ".service"):
 			out.OpenTunnel = true
 			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))
@@ -280,12 +291,13 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *W
 	}
 	unit := strings.Join([]string{
 		"[Unit]",
-		"Description=socialweb guest agent: the webrtc tunnels and the sealed secrets fallback of the guest",
+		"Description=socialweb guest agent: the webrtc tunnels, the sealed secrets fallback and the agent start of the guest",
 		"After=network-online.target " + GuestBinariesUnit,
 		"Wants=network-online.target",
 		"Requires=" + GuestBinariesUnit,
 		"ConditionPathExists=|" + cloudinit.GuestAgentTunnelsPath,
 		"ConditionPathExists=|" + cloudinit.GuestAgentSecretsPath,
+		"ConditionPathExists=|" + cloudinit.GuestAgentAgentPath,
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",

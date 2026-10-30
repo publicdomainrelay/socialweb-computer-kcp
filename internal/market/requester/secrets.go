@@ -438,8 +438,12 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 		}
 		modules = append(modules, cloudinit.TunnelsModule(opts))
 	}
-	if _, err := agentEnvFile(contract); err != nil {
+	envFile, err := agentEnvFile(contract)
+	if err != nil {
 		return "", fmt.Errorf("the contract's agent: %w", err)
+	}
+	if envFile != "" {
+		modules = append(modules, cloudinit.AgentModule(cloudinit.AgentOptions{EnvFile: envFile}))
 	}
 	if r.secrets != nil {
 		inbound := r.q.cfg.InboundXRPC()
