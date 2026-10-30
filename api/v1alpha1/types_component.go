@@ -270,6 +270,18 @@ type PolicyEngineSettings struct {
 	Trust *PolicyEngineTrustSettings `json:"trust,omitempty"`
 
 	Cache *PolicyEngineCacheSettings `json:"cache,omitempty"`
+
+	Sandbox *PolicyEngineSandboxSettings `json:"sandbox,omitempty"`
+}
+
+type PolicyEngineSandboxSettings struct {
+	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser"`
+
+	Browser *PolicyEngineBrowserSandboxSettings `json:"browser,omitempty"`
+}
+
+type PolicyEngineBrowserSandboxSettings struct {
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"minimum=1"`
 }
 
 type PolicyEngineLimitsSettings struct {
