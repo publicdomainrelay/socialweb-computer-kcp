@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,7 +30,35 @@ type PolicyEngineSpec struct {
 
 	BundledActionsEnabled bool `json:"bundledActionsEnabled,omitempty"`
 
+	Sandbox *PolicySandboxConfig `json:"sandbox,omitempty"`
+
 	Suspend bool `json:"suspend,omitempty"`
+}
+
+const (
+	PolicySandboxProviderDeno = "deno"
+
+	PolicySandboxProviderBrowser = "browser"
+)
+
+type PolicySandboxConfig struct {
+	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser"`
+
+	Browser *PolicyBrowserSandboxConfig `json:"browser,omitempty"`
+}
+
+type PolicyBrowserSandboxConfig struct {
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
+}
+
+func (c *PolicySandboxConfig) ProviderName() string {
+	if c == nil {
+		return PolicySandboxProviderDeno
+	}
+	if provider := strings.ToLower(strings.TrimSpace(c.Provider)); provider != "" {
+		return provider
+	}
+	return PolicySandboxProviderDeno
 }
 
 type PolicyEngineLimits struct {
@@ -67,6 +97,16 @@ const (
 	PolicyEngineRunning PolicyEnginePhase = "Running"
 
 	PolicyEngineFailed PolicyEnginePhase = "Failed"
+)
+
+const (
+	PolicyEngineConditionFenced = "Fenced"
+
+	PolicyEngineFencedProbePassed = "ProbePassed"
+
+	PolicyEngineFencedProbeFailed = "ProbeFailed"
+
+	PolicyEngineFencedNotProbed = "NotProbed"
 )
 
 type PolicyEngineStatus struct {

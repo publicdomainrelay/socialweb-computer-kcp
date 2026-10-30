@@ -9,7 +9,7 @@ type PrinterColumn = corev1alpha1.PrinterColumn
 type APIResource = corev1alpha1.APIResource
 
 var APIResources = []APIResource{
-	{Kind: "PolicyEngine", Plural: "policyengines", Revision: 1, Export: "policy", Object: PolicyEngine{}, PrinterColumns: []PrinterColumn{
+	{Kind: "PolicyEngine", Plural: "policyengines", Revision: 2, Export: "policy", Object: PolicyEngine{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Ready", Type: "boolean", JSONPath: ".status.ready"},
 		{Name: "Active", Type: "integer", JSONPath: ".status.activeRuns"},
