@@ -113,7 +113,7 @@ items:
     status: planned
   - id: R1
     title: "atirc: agentOperator.assoc, mint embeds assoc, exp clamp (atirc-dev)"
-    status: planned
+    status: done
   - id: V1
     title: "acceptance: alice (app password) requests a VM whose CLI requester R2 is associated by a contract-scoped record; bidder-only-me allows R2; a forged self-claim is denied; deleting the record revokes"
     status: planned
