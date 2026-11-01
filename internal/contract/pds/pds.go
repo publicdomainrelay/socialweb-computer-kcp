@@ -127,6 +127,10 @@ type ServiceAuth interface {
 	ServiceAuth(ctx context.Context, did, audience, lxm string, expires time.Time) (string, error)
 }
 
+type ScopeGrants interface {
+	GrantedScopes(did string) ([]string, bool)
+}
+
 type Sync interface {
 	LatestCommit(ctx context.Context, did string) (Commit, error)
 
