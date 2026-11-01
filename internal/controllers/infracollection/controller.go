@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +21,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
-	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
@@ -29,7 +28,6 @@ import (
 	infractl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/infra"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
@@ -40,12 +38,6 @@ const (
 	Name = "infracollection"
 
 	EphemeralName = "ephemeralinfracollection"
-
-	listPage = 100
-
-	maxListPages = 50
-
-	resyncFloor = 10 * time.Minute
 )
 
 type Options struct {
@@ -71,7 +63,7 @@ type Controller struct {
 
 	mu sync.Mutex
 
-	marks map[retryKey]*mark
+	over map[retryKey]map[string]bool
 }
 
 type retryKey struct {
@@ -96,7 +88,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), marks: map[retryKey]*mark{}, repos: map[string]*binding.Table[struct{}]{
+	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), over: map[retryKey]map[string]bool{}, repos: map[string]*binding.Table[struct{}]{
 		infractl.CollectionKind: binding.New[struct{}](), infractl.EphemeralCollectionKind: binding.New[struct{}]()}}
 	if err := register[*v1alpha1.InfraCollection, *v1alpha1.Infra](m, c, Name, infraOps, opts.Scope); err != nil {
 		return nil, err
@@ -127,7 +119,7 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
 			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 			c.retries.Reset(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name})
-			c.setMark(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name}, nil)
+			c.forget(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name})
 		})}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -252,11 +244,12 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	gen := obj.GetGeneration()
 	status := v1alpha1.InfraCollectionStatus{ObservedGeneration: gen, Collection: nsid, Did: previous.Did, Records: previous.Records,
 		Children: previous.Children, Conditions: slices.Clone(previous.Conditions)}
+	meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraCollectionConditionListed)
 	attrs := []any{"kind", r.ops.kind, "workspace", req.Workspace, "name", req.Name}
 	key := retryKey{kind: r.ops.kind, cluster: req.Cluster, name: req.Name}
 	fail := func(err error) (ctlruntime.Result, error) {
 		status.Message = err.Error()
-		reason, retry := "ListFailed", err
+		reason, retry := "IndexReadFailed", err
 		unresolvedReason, unresolved := infractl.Unresolved(err)
 		delay := infractl.ReadRetry(r.c.log, r.c.retries, key, err, attrs...)
 		switch {
@@ -269,7 +262,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			reason, retry = v1alpha1.InfraReasonRecordReadRetrying, nil
 			status.Message = v1alpha1.InfraMessageRecordReadRetrying
 		}
-		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, reason, status.Message)
+		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionIndexed, false, reason, status.Message)
 		return ctlruntime.Result{Backoff: unresolved, RequeueAfter: delay}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
 	}
 	repo, err := infractl.RepoRef(req.Workspace, spec.RepoRef)
@@ -278,7 +271,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	r.c.bindRepo(r.ops.kind, req, repo)
 	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: r.ops.kind, Name: req.Name, Workspace: req.Workspace}
-	did, reader, err := infractl.Repo(ctx, r.c.bus, r.c.dynamic, self, repo, nsid)
+	did, reader, err := infractl.Repo(ctx, r.c.bus, r.c.dynamic, self, repo, infra.KindInfra.NSID(), nsid)
 	if err != nil {
 		return fail(err)
 	}
@@ -287,51 +280,30 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	labels := map[string]string{v1alpha1.InfraKindLabel: r.ops.kind, v1alpha1.InfraNameLabel: req.Name}
 	watchName := infra.ChildName(r.ops.child, "coll", req.Name)
 	if err := infractl.EnsureWatch(ctx, r.c.dynamic, r.manager, req.Workspace, watchName, labels, owner,
-		repo, nsid, spec.EventSourceRefs); err != nil {
+		repo, infra.KindInfra.NSID(), []string{infra.ReservedRkey}, spec.EventSourceRefs); err != nil {
 		return fail(err)
 	}
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return fail(err)
 	}
-	f, err := readFeed(ctx, dyn, watchName, "at://"+did+"/"+nsid+"/")
+	raw, present, err := readIndex(ctx, dyn, reader, watchName, did)
 	if err != nil {
-		return fail(err)
+		return fail(infractl.ReadFailed(err))
 	}
-	m := r.c.markOf(key)
-	listed := (m != nil && m.did == did && m.gen == gen) || (listedAt(previous.Conditions, gen) && previous.Did == did)
-	gap, after := false, time.Duration(0)
-	if listed && m != nil && (m.resync || m.freshStream(f)) {
-		gap = true
-		if wait := resyncFloor - time.Since(m.resyncAt); wait > 0 {
-			gap, after = false, wait
-		}
-	}
-	var records []atprotorepo.Record
-	var next *mark
-	capped := false
-	if !listed || gap {
-		if gap {
-			r.c.log.Info("infra_collection_resync", attrs...)
-			r.c.flagResync(key)
-		}
-		records, capped, err = listAll(ctx, reader, did, nsid)
+	now := time.Now().UTC()
+	var live []infra.IndexEntry
+	invalid := ""
+	if present {
+		entries, err := infra.DecodeIndex(raw)
 		if err != nil {
-			return fail(infractl.ReadFailed(err))
+			invalid = err.Error()
 		}
-		next = f.baseline(true)
-		if gap {
-			next.resyncAt = time.Now()
+		for _, e := range entries {
+			if e.Collection == nsid && !e.Expired(now) {
+				live = append(live, e)
+			}
 		}
-	} else {
-		base := m
-		if base == nil {
-			base = f.baseline(true)
-			base.seen, base.records = nil, childRecords(previous.Children)
-		}
-		records = applyFeed(base, f)
-		next = f.baseline(false)
-		next.streams, next.resyncAt = base.streams, base.resyncAt
 	}
 	r.c.retries.Reset(key)
 	kids, err := r.ops.children(ctx, dyn)
@@ -348,15 +320,10 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	var children []v1alpha1.InfraCollectionChild
 	created := 0
-	for _, rec := range records {
-		rkey := rec.RKey
-		if rkey == "" {
-			if uri, err := syntax.ParseATURI(rec.URI); err == nil {
-				rkey = uri.RecordKey().String()
-			}
-		}
-		entry := v1alpha1.InfraCollectionChild{Rkey: rkey, URI: rec.URI, CID: rec.CID}
-		if k, ok := byURI[rec.URI]; ok {
+	for _, e := range live {
+		uri := "at://" + did + "/" + nsid + "/" + e.Rkey
+		entry := v1alpha1.InfraCollectionChild{Rkey: e.Rkey, URI: uri}
+		if k, ok := byURI[uri]; ok {
 			if ownedBy(k, obj.GetUID()) {
 				entry.Name = k.name
 			} else {
@@ -365,197 +332,107 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			children = append(children, entry)
 			continue
 		}
-		name := ChildName(rkey)
+		if r.c.ended(key, uri) {
+			entry.Message = "Ended: the record ended; it is kept and not adopted"
+			children = append(children, entry)
+			continue
+		}
+		name := ChildName(e.Rkey)
 		if k, ok := byName[name]; ok {
 			entry.Message = fmt.Sprintf("NameConflict: %s %s exists and binds no record of this collection", r.ops.child, k.name)
 			children = append(children, entry)
 			continue
 		}
+		got, err := reader.GetRecord(ctx, did, nsid, e.Rkey)
+		if errors.Is(err, atprotorepo.ErrNotFound) {
+			entry.Message = "NotFound: the index names a record the repo does not hold"
+			children = append(children, entry)
+			continue
+		}
+		if err != nil {
+			return fail(infractl.ReadFailed(fmt.Errorf("infracollection: reading %s: %w", uri, err)))
+		}
+		entry.CID = got.CID
+		decoded, derr := infra.Decode(r.ops.child, got.Value)
+		if errors.Is(derr, infra.ErrReserved) || decoded.Over(r.ops.child, now) {
+			r.c.noteEnded(key, uri)
+			entry.Message = "Ended: the record ended; it is kept and not adopted"
+			children = append(children, entry)
+			continue
+		}
 		meta := metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.InfraCollectionLabel: req.Name},
 			OwnerReferences: []metav1.OwnerReference{owner}}
-		binding := v1alpha1.InfraRecordBinding{RepoRef: spec.RepoRef, URI: rec.URI, EventSourceRefs: spec.EventSourceRefs}
+		binding := v1alpha1.InfraRecordBinding{RepoRef: spec.RepoRef, URI: uri, EventSourceRefs: spec.EventSourceRefs}
 		if err := req.Apply(ctx, r.ops.newChild(meta, binding)); err != nil {
-			return fail(fmt.Errorf("infracollection: creating %s %s for %s: %w", r.ops.child, name, rec.URI, err))
+			return fail(fmt.Errorf("infracollection: creating %s %s for %s: %w", r.ops.child, name, uri, err))
 		}
 		r.c.log.Info("infra_collection_child_created", "kind", r.ops.kind, "workspace", req.Workspace, "name", req.Name, "child", name,
-			"uri", rec.URI)
+			"uri", uri)
 		entry.Name = name
 		created++
 		children = append(children, entry)
 	}
-	status.Did, status.Records, status.Children = did, len(records), children
-	status.Message = fmt.Sprintf("%d %s record(s), %d child object(s) created this pass", len(records), nsid, created)
-	reason := "Listed"
-	if capped {
-		reason = "ListCapped"
-		status.Message += fmt.Sprintf("; the listing stopped at %d pages", maxListPages)
+	status.Did, status.Records, status.Children = did, len(live), children
+	reason := "Indexed"
+	status.Message = fmt.Sprintf("%d live %s entr(ies) in %s, %d child object(s) created this pass", len(live), nsid, infra.IndexURI(did), created)
+	switch {
+	case invalid != "":
+		reason, status.Message = "IndexInvalid", "the index record does not decode: "+invalid
+	case !present:
+		reason, status.Message = "IndexEmpty", "the repo holds no index at "+infra.IndexURI(did)
+	case len(live) == 0:
+		reason = "IndexEmpty"
 	}
-	conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, true, reason, status.Message)
+	conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionIndexed, invalid == "", reason, status.Message)
 	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	next.did, next.gen, next.records = did, gen, records
-	r.c.setMark(key, next)
-	return ctlruntime.Result{RequeueAfter: after}, nil
+	return ctlruntime.Result{}, nil
 }
 
-func listAll(ctx context.Context, reader atprotorepo.RecordReader, did, nsid string) ([]atprotorepo.Record, bool, error) {
-	var out []atprotorepo.Record
-	cursor := ""
-	for range maxListPages {
-		page, err := reader.ListRecords(ctx, did, nsid, atprotorepo.ListOptions{Limit: listPage, Cursor: cursor})
-		if err != nil {
-			return nil, false, fmt.Errorf("infracollection: listRecords %s of %s: %w", nsid, did, err)
-		}
-		out = append(out, page.Records...)
-		if page.Cursor == "" || page.Cursor == cursor || len(page.Records) == 0 {
-			return out, false, nil
-		}
-		cursor = page.Cursor
+func readIndex(ctx context.Context, dyn *kube.Client, reader atprotorepo.RecordReader, watchName, did string) (json.RawMessage, bool, error) {
+	uri := infra.IndexURI(did)
+	watch, err := kube.Get[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), watchName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, false, err
 	}
-	return out, true, nil
-}
-
-type feed struct {
-	present map[string]string
-
-	order []string
-
-	gone map[string]bool
-
-	streams map[types.UID]bool
-}
-
-type mark struct {
-	streams map[types.UID]bool
-
-	seen map[string]string
-
-	records []atprotorepo.Record
-
-	gone map[string]bool
-
-	resyncAt time.Time
-
-	resync bool
-
-	did string
-
-	gen int64
-}
-
-func listedAt(conditions []metav1.Condition, gen int64) bool {
-	listed := meta.FindStatusCondition(conditions, v1alpha1.InfraCollectionConditionListed)
-	return listed != nil && listed.Status == metav1.ConditionTrue && listed.ObservedGeneration == gen
-}
-
-func readFeed(ctx context.Context, dyn *kube.Client, name, prefix string) (feed, error) {
-	f := feed{present: map[string]string{}, gone: map[string]bool{}, streams: map[types.UID]bool{}}
-	watch, err := kube.Get[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), name)
-	if apierrors.IsNotFound(err) {
-		return f, nil
+	if err == nil {
+		if i := slices.IndexFunc(watch.Status.Records, func(rec v1alpha1.WatchedRecord) bool { return rec.URI == uri }); i >= 0 {
+			return watch.Status.Records[i].Value, true, nil
+		}
+		if slices.Contains(watch.Status.Deleted, uri) {
+			return nil, false, nil
+		}
+	}
+	got, err := reader.GetRecord(ctx, did, infra.KindInfra.NSID(), infra.ReservedRkey)
+	if errors.Is(err, atprotorepo.ErrNotFound) {
+		return nil, false, nil
 	}
 	if err != nil {
-		return f, err
+		return nil, false, fmt.Errorf("infracollection: reading %s: %w", uri, err)
 	}
-	for _, rec := range watch.Status.Records {
-		if strings.HasPrefix(rec.URI, prefix) {
-			f.present[rec.URI] = rec.Cid
-			f.order = append(f.order, rec.URI)
-		}
-	}
-	for _, uri := range watch.Status.Deleted {
-		if _, ok := f.present[uri]; !ok && strings.HasPrefix(uri, prefix) {
-			f.gone[uri] = true
-		}
-	}
-	streams, err := kube.List[eventsv1alpha1.EventStream](ctx, dyn.Resource(eventsv1alpha1.EventStreamGVR),
-		metav1.ListOptions{LabelSelector: eventstream.RecordWatchLabel + "=" + name})
-	if err != nil {
-		return f, err
-	}
-	for _, s := range streams {
-		f.streams[s.UID] = s.Status.Cursor > 0 || meta.IsStatusConditionTrue(s.Status.Conditions, eventsv1alpha1.EventStreamConditionReady)
-	}
-	return f, nil
+	return got.Value, true, nil
 }
 
-func (f feed) baseline(listing bool) *mark {
-	out := &mark{streams: map[types.UID]bool{}, seen: f.present, gone: f.gone}
-	for uid, resumable := range f.streams {
-		if resumable || !listing {
-			out.streams[uid] = true
-		}
-	}
-	return out
-}
-
-func (m *mark) freshStream(f feed) bool {
-	for uid, resumable := range f.streams {
-		if resumable && !m.streams[uid] {
-			return true
-		}
-	}
-	return false
-}
-
-func childRecords(children []v1alpha1.InfraCollectionChild) []atprotorepo.Record {
-	out := make([]atprotorepo.Record, 0, len(children))
-	for _, c := range children {
-		out = append(out, atprotorepo.Record{URI: c.URI, CID: c.CID, RKey: c.Rkey})
-	}
-	return out
-}
-
-func applyFeed(m *mark, f feed) []atprotorepo.Record {
-	out := make([]atprotorepo.Record, 0, len(m.records))
-	at := map[string]int{}
-	for _, rec := range m.records {
-		if f.gone[rec.URI] && !m.gone[rec.URI] {
-			continue
-		}
-		at[rec.URI] = len(out)
-		out = append(out, rec)
-	}
-	for _, uri := range f.order {
-		cid := f.present[uri]
-		if seen, ok := m.seen[uri]; ok && seen == cid {
-			continue
-		}
-		if i, ok := at[uri]; ok {
-			out[i].CID = cid
-			continue
-		}
-		at[uri] = len(out)
-		out = append(out, atprotorepo.Record{URI: uri, CID: cid})
-	}
-	return out
-}
-
-func (c *Controller) markOf(key retryKey) *mark {
+func (c *Controller) ended(key retryKey, uri string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.marks[key]
+	return c.over[key][uri]
 }
 
-func (c *Controller) flagResync(key retryKey) {
+func (c *Controller) noteEnded(key retryKey, uri string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if m := c.marks[key]; m != nil {
-		next := *m
-		next.resync = true
-		c.marks[key] = &next
+	if c.over[key] == nil {
+		c.over[key] = map[string]bool{}
 	}
+	c.over[key][uri] = true
 }
 
-func (c *Controller) setMark(key retryKey, m *mark) {
+func (c *Controller) forget(key retryKey) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if m == nil {
-		delete(c.marks, key)
-		return
-	}
-	c.marks[key] = m
+	delete(c.over, key)
 }
 
 func ownedBy(k child, uid types.UID) bool {

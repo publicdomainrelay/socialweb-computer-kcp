@@ -59,6 +59,8 @@ type Sink struct {
 	pending Pending
 
 	gone map[string]struct{}
+
+	rkeys map[string]struct{}
 }
 
 var _ events.Sink = (*Sink)(nil)
@@ -67,6 +69,53 @@ func (w *Watches) NewSink(name string, matches MatchesFunc, flushed func()) *Sin
 	s := &Sink{w: w, name: strings.TrimSpace(name), matches: matches, pending: newPending(), gone: map[string]struct{}{}}
 	s.flush = debounce.New(w.flushDelay, flushed)
 	return s
+}
+
+func (s *Sink) SetRkeys(rkeys []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rkeys = rkeySet(rkeys)
+}
+
+func (s *Sink) wants(rkey string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rkeys == nil {
+		return true
+	}
+	_, ok := s.rkeys[rkey]
+	return ok
+}
+
+func rkeySet(rkeys []string) map[string]struct{} {
+	var out map[string]struct{}
+	for _, r := range rkeys {
+		if r = strings.TrimSpace(r); r != "" {
+			if out == nil {
+				out = map[string]struct{}{}
+			}
+			out[r] = struct{}{}
+		}
+	}
+	return out
+}
+
+func KeepRkeys(status v1alpha1.AtprotoRecordWatchStatus, rkeys []string) v1alpha1.AtprotoRecordWatchStatus {
+	set := rkeySet(rkeys)
+	if set == nil {
+		return status
+	}
+	keep := func(uri string) bool {
+		parsed, err := syntax.ParseATURI(strings.TrimSpace(uri))
+		if err != nil {
+			return false
+		}
+		_, ok := set[parsed.RecordKey().String()]
+		return ok
+	}
+	status.Records = slices.DeleteFunc(slices.Clone(status.Records), func(r v1alpha1.WatchedRecord) bool { return !keep(r.URI) })
+	status.Deleted = slices.DeleteFunc(slices.Clone(status.Deleted), func(uri string) bool { return !keep(uri) })
+	return status
 }
 
 func (s *Sink) Deliver(ctx context.Context, event events.Event) error {
@@ -86,7 +135,7 @@ func (s *Sink) Deliver(ctx context.Context, event events.Event) error {
 	deletes := map[string]struct{}{}
 	for _, op := range event.Ops {
 		collection, rkey, ok := splitPath(op.Path)
-		if !ok {
+		if !ok || !s.wants(rkey) {
 			continue
 		}
 		uri := "at://" + event.Repo + "/" + collection + "/" + rkey

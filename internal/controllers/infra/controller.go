@@ -251,13 +251,17 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		Conditions: slices.Clone(v.status.Conditions)}
 	var ephemeral *v1alpha1.EphemeralInfraStatus
 	var end infra.End
-	if v.ephemeral != nil {
-		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, now)
+	ending := func(recorded infra.Decoded) {
+		if v.ephemeral == nil {
+			return
+		}
+		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, recorded, now)
 		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
 		if end.Ended {
 			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
 		}
 	}
+	ending(infra.Decoded{})
 	var rec *recordSync
 	var recordErr error
 	backoff := false
@@ -303,7 +307,13 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			}
 		}
 	}
+	frozen := v.spec.Record != nil && meta.IsStatusConditionTrue(v.status.Conditions, v1alpha1.InfraConditionRecordEnded)
 	if rec != nil {
+		ending(rec.recorded)
+		frozen = rec.action == infra.ActionEnded
+		if !frozen {
+			meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraConditionRecordEnded)
+		}
 		for _, cond := range rec.conditions {
 			conds.Set(&status.Conditions, status.ObservedGeneration, cond.Type, cond.Status == metav1.ConditionTrue, cond.Reason, cond.Message)
 		}
@@ -338,16 +348,23 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			}
 		}
 	}
-	statuses, left, err := r.contracts(ctx, req, v, contracts, end.Ended)
+	statuses, left, err := r.contracts(ctx, req, v, contracts, end.Ended || frozen)
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
 	status.Contracts = statuses
 	status.Phase = infra.Phase(statuses)
 	status.Message = summary(statuses)
-	if end.Ended {
+	switch {
+	case end.Ended:
 		status.Phase = v1alpha1.InfraPhaseEnding
 		status.Message = fmt.Sprintf("ended (%s); %d contract(s) releasing", end.Reason, left)
+	case frozen && left > 0:
+		status.Phase = v1alpha1.InfraPhaseEnding
+		status.Message = fmt.Sprintf("the record ended; %d contract(s) releasing", left)
+	case frozen:
+		status.Phase = v1alpha1.InfraPhaseEnded
+		status.Message = "the record ended; it is kept and this object drives nothing"
 	}
 	if rec != nil && rec.write {
 		observed := infra.Observed{Phase: status.Phase, Contracts: statuses}
@@ -481,32 +498,50 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Phase: v1alpha1.InfraPhaseDeleting, Contracts: statuses,
 		Record: v.status.Record, Conditions: slices.Clone(v.status.Conditions),
 		Message: fmt.Sprintf("%d ComputeContract(s) releasing", left)}
+	if left == 0 && len(v.status.Contracts) > 0 {
+		status.Contracts = v.status.Contracts
+	}
 	backoff := false
-	var retry time.Duration
+	var retry, giveUp, deadline time.Duration
 	if left == 0 && v.spec.Record != nil {
-		gone, err := r.deleteRecord(ctx, req, v)
+		done, err := r.finalWrite(ctx, req, v)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
 		retry = r.readRetry(req, v, err)
 		orphaned := RecordOrphaned(err)
+		giveUp = atprotorepo.RecordDeleteGiveUp - time.Since(v.object.GetDeletionTimestamp().Time)
 		switch {
-		case err != nil && (orphaned || time.Since(v.object.GetDeletionTimestamp().Time) > atprotorepo.RecordDeleteGiveUp):
+		case (err != nil || !done) && (orphaned || giveUp <= 0):
 			if !orphaned {
-				reason = "DeleteGaveUp"
+				reason = "FinalWriteGaveUp"
 			}
-			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordOrphaned, true, reason, err.Error())
-			status.Message = "the record is released without a delete: " + err.Error()
-			r.c.log.Warn("infra_record_orphaned", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", err.Error())
+			message := "the final record write gave up"
+			if err != nil {
+				message = err.Error()
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordOrphaned, true, reason, message)
+			status.Message = "the record is kept with its last status: " + message
+			r.c.log.Warn("infra_record_orphaned", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", message)
 		case isUnresolved || errors.Is(err, ErrRepoNoDID):
-			status.Message = "the record delete waits: " + err.Error()
+			status.Message = "the final record write waits: " + err.Error()
 			left, backoff = 1, true
 		case retry > 0:
-			status.Message = "the record delete waits: " + v1alpha1.InfraMessageRecordReadRetrying
+			status.Message = "the final record write waits: " + v1alpha1.InfraMessageRecordReadRetrying
 			left = 1
 		case err != nil:
 			return ctlruntime.Result{Waiting: true}, err
-		case !gone:
-			status.Message = "the record is being deleted"
+		case !done:
+			status.Message = "writing the record's final status; the record is kept"
+			left, deadline = 1, giveUp
+		}
+	}
+	if left == 0 && v.status.Record != nil {
+		gone, err := r.unbindRecord(ctx, req, v)
+		if err != nil {
+			return ctlruntime.Result{Waiting: true}, err
+		}
+		if !gone {
+			status.Message = "releasing the AtprotoRecord; the record is kept"
 			left = 1
 		}
 	}
@@ -514,7 +549,11 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		return ctlruntime.Result{Waiting: true}, err
 	}
 	if left > 0 {
-		return ctlruntime.Result{Waiting: true, Backoff: backoff, RequeueAfter: retry}, nil
+		after := retry
+		if after <= 0 {
+			after = deadline
+		}
+		return ctlruntime.Result{Waiting: true, Backoff: backoff, RequeueAfter: after}, nil
 	}
 	r.c.forget(string(v.kind), req)
 	r.c.log.Info("infra_released", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)

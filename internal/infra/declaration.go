@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -329,10 +330,52 @@ func Render(kind Kind, d Declaration, o Observed, createdAt time.Time) (json.Raw
 	return json.Marshal(value)
 }
 
+const ReservedRkey = "self"
+
+var ErrReserved = errors.New("infra: the record at rkey self is the account's index of live deployments, not a deployment")
+
 type Decoded struct {
 	Declaration Declaration
 
 	CreatedAt time.Time
+
+	TTLSeconds int32
+
+	EndedAt string
+
+	EndReason v1alpha1.EphemeralInfraEnd
+}
+
+func (d Decoded) Ended() bool {
+	return d.EndedAt != ""
+}
+
+func (d Decoded) Expired(kind Kind, now time.Time) bool {
+	if kind != KindEphemeralInfra || d.CreatedAt.IsZero() || d.TTLSeconds <= 0 {
+		return false
+	}
+	return !now.Before(d.CreatedAt.Add(time.Duration(d.TTLSeconds) * time.Second))
+}
+
+func (d Decoded) Over(kind Kind, now time.Time) bool {
+	return d.Ended() || d.Expired(kind, now)
+}
+
+var endReasons = map[string]v1alpha1.EphemeralInfraEnd{
+	"complete": v1alpha1.EphemeralInfraEndComplete,
+	"deadline": v1alpha1.EphemeralInfraEndDeadline,
+	"deleted":  v1alpha1.EphemeralInfraEndDeleted,
+}
+
+func endReason(raw string) v1alpha1.EphemeralInfraEnd {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if r, ok := endReasons[raw]; ok {
+		return r
+	}
+	if raw == "" {
+		return v1alpha1.EphemeralInfraEndDeleted
+	}
+	return v1alpha1.EphemeralInfraEnd(raw)
 }
 
 func Decode(kind Kind, raw json.RawMessage) (Decoded, error) {
@@ -340,20 +383,25 @@ func Decode(kind Kind, raw json.RawMessage) (Decoded, error) {
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
 		return Decoded{}, fmt.Errorf("%w: the record is not a JSON object", ErrInvalidDeclaration)
 	}
+	var out Decoded
 	var d Declaration
-	var created string
+	var created, ended, reason string
 	var contracts []record.InfraContract
+	var invalid error
 	if kind == KindEphemeralInfra {
 		r, err := record.ParseEphemeralInfra(value)
 		if err != nil {
 			return Decoded{}, err
 		}
 		d.Description, contracts, created = r.Description, r.Contracts, r.CreatedAt
+		if r.Status != nil {
+			ended, reason = strings.TrimSpace(r.Status.EndedAt), r.Status.EndReason
+		}
 		switch {
 		case r.TtlSeconds == 0:
 			d.TTLSeconds = DefaultTTL
 		case r.TtlSeconds < 60 || r.TtlSeconds > math.MaxInt32:
-			return Decoded{}, fmt.Errorf("%w: ttlSeconds %d is outside 60 to %d", ErrInvalidDeclaration, r.TtlSeconds, math.MaxInt32)
+			invalid = fmt.Errorf("%w: ttlSeconds %d is outside 60 to %d", ErrInvalidDeclaration, r.TtlSeconds, math.MaxInt32)
 		default:
 			d.TTLSeconds = int32(r.TtlSeconds)
 		}
@@ -363,29 +411,83 @@ func Decode(kind Kind, raw json.RawMessage) (Decoded, error) {
 		case "deadline":
 			d.EndWhen = v1alpha1.EphemeralInfraEndDeadline
 		default:
-			return Decoded{}, fmt.Errorf("%w: endWhen %q", ErrInvalidDeclaration, r.EndWhen)
+			invalid = cmp.Or(invalid, fmt.Errorf("%w: endWhen %q", ErrInvalidDeclaration, r.EndWhen))
 		}
 	} else {
 		r, err := record.ParseInfra(value)
 		if err != nil {
 			return Decoded{}, err
 		}
+		if r.Index != nil {
+			return Decoded{}, ErrReserved
+		}
 		d.Description, contracts, created = r.Description, r.Contracts, r.CreatedAt
+		if r.Status != nil {
+			ended, reason = strings.TrimSpace(r.Status.EndedAt), r.Status.EndReason
+		}
+	}
+	if t, err := time.Parse(time.RFC3339, created); err == nil {
+		out.CreatedAt = t
+	}
+	out.TTLSeconds = d.TTLSeconds
+	if ended != "" {
+		out.EndedAt, out.EndReason = ended, endReason(reason)
+	}
+	if invalid != nil {
+		return out, invalid
 	}
 	for _, c := range contracts {
 		kc, err := fromRecordContract(c)
 		if err != nil {
-			return Decoded{}, err
+			return out, err
 		}
 		d.Contracts = append(d.Contracts, kc)
 	}
 	d = normalize(d)
 	if err := d.Validate(); err != nil {
-		return Decoded{}, err
+		return out, err
 	}
-	out := Decoded{Declaration: d}
-	if t, err := time.Parse(time.RFC3339, created); err == nil {
-		out.CreatedAt = t
-	}
+	out.Declaration = d
 	return out, nil
+}
+
+func Final(kind Kind, raw json.RawMessage, o Observed) (json.RawMessage, error) {
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return nil, fmt.Errorf("%w: the record is not a JSON object", ErrInvalidDeclaration)
+	}
+	status, _ := value["status"].(map[string]any)
+	if status == nil {
+		status = map[string]any{}
+	}
+	status["phase"] = strings.ToLower(string(v1alpha1.InfraPhaseEnded))
+	status["endedAt"] = o.EndedAt
+	status["endReason"] = strings.ToLower(string(cmp.Or(o.EndReason, v1alpha1.EphemeralInfraEndDeleted)))
+	if len(o.Contracts) > 0 {
+		var contracts []any
+		b, err := json.Marshal(toRecordStatus(o).Contracts)
+		if err == nil {
+			err = json.Unmarshal(b, &contracts)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("infra: rendering the final contract status: %w", err)
+		}
+		status["contracts"] = contracts
+	}
+	if _, ok := status["expiresAt"]; !ok && kind == KindEphemeralInfra && o.ExpiresAt != "" {
+		status["expiresAt"] = o.ExpiresAt
+	}
+	value["status"] = status
+	if _, ok := value["$type"]; !ok {
+		value["$type"] = kind.NSID()
+	}
+	return json.Marshal(value)
+}
+
+func SuccessorRkey(name, uid string) string {
+	hex := strings.ReplaceAll(uid, "-", "")
+	if len(hex) > 8 {
+		hex = hex[:8]
+	}
+	return name + "-" + hex
 }

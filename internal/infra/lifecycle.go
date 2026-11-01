@@ -160,14 +160,23 @@ type End struct {
 	ExpiresAt time.Time
 }
 
-func Ending(created time.Time, d Declaration, previous v1alpha1.EphemeralInfraStatus, now time.Time) End {
+func Ending(created time.Time, d Declaration, previous v1alpha1.EphemeralInfraStatus, recorded Decoded, now time.Time) End {
+	if !recorded.CreatedAt.IsZero() && (created.IsZero() || recorded.CreatedAt.Before(created)) {
+		created = recorded.CreatedAt
+	}
 	ttl := d.TTLSeconds
 	if ttl <= 0 {
 		ttl = DefaultTTL
 	}
 	out := End{ExpiresAt: created.Add(time.Duration(ttl) * time.Second).UTC()}
+	if previous.EndedAt == "" && recorded.Ended() {
+		previous.EndedAt, previous.EndReason = recorded.EndedAt, recorded.EndReason
+	}
 	if previous.EndedAt != "" {
-		at, _ := time.Parse(time.RFC3339, previous.EndedAt)
+		at, err := time.Parse(time.RFC3339, previous.EndedAt)
+		if err != nil {
+			at = now.UTC()
+		}
 		out.Ended, out.Reason, out.At = true, previous.EndReason, at
 		return out
 	}
