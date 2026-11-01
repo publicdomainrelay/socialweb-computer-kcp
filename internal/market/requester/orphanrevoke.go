@@ -257,11 +257,14 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 		if !mine(m) || m.Revoked != 0 || !q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
-		if _, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle); err != nil {
+		result, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle)
+		if err != nil {
 			r.markMintedRevoked(ctx, entry.SecretsRef, cleared)
 			return false, fmt.Errorf("revoke %s: %w", m.Subhandle, err)
 		}
-		cleared = append(cleared, m)
+		if result == atircRevokeServer {
+			cleared = append(cleared, m)
+		}
 		revoked++
 	}
 	r.bundleMu.Lock()

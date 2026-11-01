@@ -987,11 +987,14 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 		if m.Revoked != 0 || !r.q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
-		if _, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle); err != nil {
+		result, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle)
+		if err != nil {
 			done = false
 			continue
 		}
-		cleared = append(cleared, m)
+		if result == atircRevokeServer {
+			cleared = append(cleared, m)
+		}
 	}
 	r.markMintedRevoked(ctx, *contract.Spec.SecretsRef, cleared)
 	if recorded {
@@ -1017,11 +1020,11 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 	if exp, ok := atircTokenExp(token, env); ok && !r.q.now().Before(exp) {
 		return true
 	}
-	revoked, err := r.revokeAtircSubhandle(ctx, token, subhandle, false)
+	result, err := r.revokeAtircSubhandle(ctx, token, subhandle, false)
 	if err != nil {
 		return false
 	}
-	if !revoked && derived {
+	if result == atircRevokeAlready && derived {
 		r.q.log.Warn("requester_atirc_revoke_unconfirmed", "contract", r.name, "path", path, "subhandle", subhandle,
 			"reason", "a derived subhandle answered 401; the token stays pending until it expires")
 		return false
@@ -1141,13 +1144,23 @@ func atircTokenSubhandle(token string) string {
 	return claims.Subhandle
 }
 
-func (r *contractRunner) revokeMinted(ctx context.Context, parent atircRevokeParent, token, subhandle string) (bool, error) {
+type atircRevokeResult int
+
+const (
+	atircRevokeAlready atircRevokeResult = iota
+
+	atircRevokeByLease
+
+	atircRevokeServer
+)
+
+func (r *contractRunner) revokeMinted(ctx context.Context, parent atircRevokeParent, token, subhandle string) (atircRevokeResult, error) {
 	if parent != nil {
 		if issuer, ok := parent(); ok && atircBelow(subhandle, issuer.base) && atircTokenSubhandle(token) == subhandle {
-			revoked, err := r.revokeAtircSubhandle(ctx, issuer.bearer, subhandle, true)
+			result, err := r.revokeAtircSubhandle(ctx, issuer.bearer, subhandle, true)
 			var xerr *atircError
 			if err == nil || !errors.As(err, &xerr) || (xerr.status != http.StatusUnauthorized && xerr.status != http.StatusForbidden) {
-				return revoked, err
+				return result, err
 			}
 			r.log().Warn("requester_atirc_revoke_parent_refused", "subhandle", subhandle, "parent", issuer.base, "err", err.Error())
 		}
@@ -1159,7 +1172,7 @@ func atircLeaseDead(e *atircError) bool {
 	return strings.Contains(strings.ToLower(e.name+" "+e.message), "lease is not alive")
 }
 
-func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, bearer, subhandle string, byParent bool) (bool, error) {
+func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, bearer, subhandle string, byParent bool) (atircRevokeResult, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
 	defer cancel()
 	var out struct {
@@ -1169,19 +1182,19 @@ func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, bearer, subha
 	var xerr *atircError
 	switch {
 	case err != nil && byParent:
-		return false, err
+		return atircRevokeAlready, err
 	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized && atircLeaseDead(xerr):
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "byLease", true)
-		return true, nil
+		return atircRevokeByLease, nil
 	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized:
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "already", true)
-		return false, nil
+		return atircRevokeAlready, nil
 	case err != nil:
 		r.log().Warn("requester_atirc_revoke_failed", "subhandle", subhandle, "step", "revoke", "err", err.Error())
-		return false, err
+		return atircRevokeAlready, err
 	}
 	r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "byParent", byParent, "revokedAt", time.Unix(out.RevokedAt, 0).UTC().Format(time.RFC3339))
-	return true, nil
+	return atircRevokeServer, nil
 }
 
 func (r *contractRunner) readAtircBundle(ctx context.Context, ref commonv1.SecretRef) (vault.KV, map[string]any, []SecretEntry, error) {
