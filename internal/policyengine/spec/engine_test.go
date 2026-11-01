@@ -37,9 +37,9 @@ func TestAlwaysRunOpen(t *testing.T) {
 			t.Run("always-run/engine/open/"+string(mode)+"/"+string(perspective), func(t *testing.T) {
 				t.Parallel()
 				h := policytest.New(t)
-				p := partiesFor(perspective)
+				p := policytest.PartiesFor(string(perspective))
 				before := h.Sandbox.Actions()
-				got := evaluate(t, h, "open", perspective, mode, p.self, p.cp, nil)
+				got := evaluate(t, h, "open", perspective, mode, p.Self, p.CP, nil)
 				ran := got.mustRun(t, "open")
 				actionRan(t, ran, "open", true)
 				if h.Sandbox.Actions() == before {
@@ -76,7 +76,7 @@ func TestWorkPolicies(t *testing.T) {
 		h := policytest.New(t)
 		uri := policytest.URI(policytest.Requester, market.RFPNSID, "rfp-cpus")
 		cid := h.World.Put(uri, map[string]any{"$type": market.RFPNSID, "payload": map[string]any{
-			"uri": policytest.URI(policytest.Requester, "computer.socialweb.temp.compute.vm", "vm-8"), "cid": "bafyunreadable"}})
+			"uri": policytest.URI(policytest.Requester, "computer.socialweb.temp.compute.vm", "vm-8"), "cid": "bafyreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy"}})
 		rfp := policytest.Ref{URI: uri, CID: cid}
 		got := evaluate(t, h, "under-4-cpus", bidderSide, full, policytest.Bidder, policytest.Requester, &rfp)
 		actionRan(t, got.mustRun(t, "under-4-cpus"), "under-4-cpus", false)

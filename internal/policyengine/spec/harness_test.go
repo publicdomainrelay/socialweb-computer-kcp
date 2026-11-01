@@ -115,18 +115,6 @@ func actionRan(t *testing.T, run *policytest.Run, policyName string, allow bool)
 	return policytest.ActionVerdict{}
 }
 
-type party struct {
-	self         string
-	counterparty string
-}
-
-func partiesOf(perspective side) party {
-	if perspective == requesterSide {
-		return party{self: policytest.Requester, counterparty: policytest.Bidder}
-	}
-	return party{self: policytest.Bidder, counterparty: policytest.Requester}
-}
-
 func evaluate(t *testing.T, h *policytest.Harness, workflow string, perspective side, mode lane, self, counterparty string, rfp *policytest.Ref) decision {
 	t.Helper()
 	input := runs.Input{Perspective: string(perspective), Mode: string(mode), SelfDid: self, CounterpartyDid: counterparty}

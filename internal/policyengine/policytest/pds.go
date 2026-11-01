@@ -3,8 +3,6 @@ package policytest
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +11,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
@@ -45,8 +46,11 @@ func URI(repo, collection, rkey string) string {
 
 func CIDOf(value map[string]any) string {
 	data, _ := json.Marshal(value)
-	sum := sha256.Sum256(data)
-	return "bafypolicytest" + hex.EncodeToString(sum[:12])
+	sum, err := multihash.Sum(data, multihash.SHA2_256, -1)
+	if err != nil {
+		panic(err)
+	}
+	return cid.NewCidV1(cid.DagCBOR, sum).String()
 }
 
 func (w *World) Put(uri string, value map[string]any) string {
