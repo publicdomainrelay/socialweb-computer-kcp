@@ -1,0 +1,100 @@
+account: alice
+role: requester
+handle: aliceoa.bsky.social
+did: did:plc:lpfuqerea3deuoyrn7ojser4
+pds: https://jellybaby.us-east.host.bsky.network
+repo: repo-did-plc-lpfuqerea3deuoyrn7ojser4
+labels:
+  socialweb.computer/testaccount: alice
+  socialweb.computer/declared-state: testaccounts
+apply:
+  kcp: the prod gateway kcp (socialweb.computer)
+  identity: the session-owner MarketIdentity of did (label apps.socialweb.computer/session-owner=true, mode oauthSessionProxy)
+  workspace: root:app
+  objects: kcp/
+  fieldManager: socialweb.computer/testaccounts
+counterparties:
+  bob: did:plc:ocnuqjlzgohypj3zoznermms
+  john: did:plc:5svqtrhheairglgiiyvutzik
+  gatewayRequester: did:plc:jjcsg5fg3ujd22ywuxg4lr72
+oauthScopes:
+  - name: requester
+    source: internal/atproto/oauth RequesterOAuthScope (page, iOS, run request)
+    scopes:
+      - atproto
+      - repo:com.publicdomainrelay.temp.compute.vm?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.rfp?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.accept?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.event?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.vm.delete?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.vm.onNetwork?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.publicKey?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.signalWebRTC?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.secrets?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.agentStart?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.secretsUpdated?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.r2Start?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.r2Release?action=create&action=update
+      - repo:computer.socialweb.temp.policy.ghalite?action=create&action=update
+      - repo:computer.socialweb.temp.policy.typescript?action=create&action=update
+      - repo:com.fedproxy.rbac?action=create&action=update&action=delete
+      - repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create&action=update&action=delete
+      - repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete
+      - repo:com.publicdomainrelay.temp.market.associationRequest?action=create&action=update&action=delete
+      - repo:computer.socialweb.infra?action=create&action=update&action=delete
+      - repo:computer.socialweb.ephemeralInfra?action=create&action=update&action=delete
+      - rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitBid?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitEvent?aud=*
+      - rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc
+      - rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc
+  - name: gateway
+    source: internal/app/compose GatewayAtprotoScope (the gateway web app session that backs the session-owner repo)
+    scopes:
+      - atproto
+      - repo:com.publicdomainrelay.temp.compute.vm?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.rfp?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.accept?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.event?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.vm.delete?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.vm.onNetwork?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.publicKey?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.signalWebRTC?action=create&action=update
+      - repo:com.publicdomainrelay.temp.compute.events.guest.secrets?action=create&action=update
+      - repo:com.fedproxy.rbac?action=create&action=update&action=delete
+      - repo:computer.socialweb.temp.policy.ghalite?action=create&action=update
+      - repo:computer.socialweb.temp.policy.typescript?action=create&action=update
+      - repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create&action=update&action=delete
+      - repo:com.publicdomainrelay.temp.market.heartbeat?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete
+      - repo:computer.socialweb.infra?action=create&action=update&action=delete
+      - repo:computer.socialweb.ephemeralInfra?action=create&action=update&action=delete
+      - rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitBid?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitEvent?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.createCluster?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.listClusters?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.getKubeconfig?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.controlPlaneUp?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.controlPlaneDown?aud=*
+      - rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*
+optionalScopes:
+  - rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc
+declared:
+  - {object: testaccount-alice-vouch-bob, collection: sh.tangled.graph.vouch, rkey: "did:plc:ocnuqjlzgohypj3zoznermms", cid: bafyreibevworfj6lrmonuxh726aq4grg4uzdkp2pekgnhxy3rfm4vnf7py, write: verify, readBy: requester-tangled-vouch (self vouches the bidder operator)}
+  - {object: testaccount-alice-vouch-john, collection: sh.tangled.graph.vouch, rkey: "did:plc:5svqtrhheairglgiiyvutzik", cid: bafyreic5ynbanwphikeasgml7jrib6ecrve7uhomcdzwbalh6xyjp5d4mq, write: verify, readBy: requester-tangled-vouch (self vouches the bidder operator)}
+  - {object: testaccount-alice-claim-requester-jjcsg5fg, collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72, cid: bafyreiam6lu7zjktk4ijyyglryxtrh5myvtxmfgman4qtrcktexpnb2wiu, write: oauth, readBy: trust operatorOf (the gateway requester's mirror names alice)}
+  - {object: testaccount-alice-profile-bsky, collection: app.bsky.actor.profile, rkey: self, cid: bafyreifs62pqrjhuouukzxxgx7qmk2jmph6e52whoiuocpokow7sglugza, write: verify, readBy: bsky and atirc display}
+  - {object: testaccount-alice-profile-tangled, collection: sh.tangled.actor.profile, rkey: self, cid: bafyreidzndhwkeman3qfnvlodj3nx4oenddhbpgfa27mlhwzls6yechrae, write: verify, readBy: tangled}
+  - {object: testaccount-alice-atirc-operator, collection: com.fedfork.irc.agentOperator, rkey: self, cid: bafyreigznemjf2nzivk5c7adebeii3sognnknidr56rrhgtzrek4gffbqi, write: verify, readBy: atirc mint (agent operator)}
+  - {object: testaccount-alice-bot-registration, collection: bot.did.registration, rkey: self, cid: bafyreiantydt7s4nvmfl4r76yv4axlwwtaimtelgq3svpv5j4hlfqxspay, write: verify, readBy: atirc agent registration}
+  - {object: testaccount-alice-rbacdid-allowself, collection: com.publicdomainrelay.temp.auth.allowlist.rbacDid, rkey: 00000mr1p4hyu000, cid: bafyreigksbkrmmyaxrvud4vtv4ve2vg3lg6x2eehatyvqdobmehmls7uue, write: verify, readBy: fedproxy account.auth allowSelf}
+runtimeOwned:
+  - {collection: com.publicdomainrelay.temp.badgeBlueKeys, rkeys: 32-character base58 BadgeBlueKeysRkey, writer: "internal/market/requester identity.go (one key claim per page, iOS or CLI requester key)"}
+  - {collection: com.publicdomainrelay.temp.market.association, rkeys: contract-scoped, writer: "internal/market/requester association.go (written after an accept, deleted at release)"}
+  - {collection: computer.socialweb.infra, rkeys: per Infra, writer: internal/controllers/infra}
+retentionKeep:
+  collections: [app.bsky.*, sh.tangled.*, org.tangled.*, town.delve.*, com.fedfork.irc.agentOperator, bot.did.registration, com.publicdomainrelay.temp.auth.allowlist.rbacDid, com.publicdomainrelay.temp.badgeBlueKeys, com.publicdomainrelay.temp.market.offering, com.publicdomainrelay.temp.market.heartbeat, com.publicdomainrelay.temp.market.association, computer.socialweb.infra]
+  rkeyPrefix: fixture-

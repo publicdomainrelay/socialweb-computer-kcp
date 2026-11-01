@@ -1,0 +1,28 @@
+apiVersion: exposure.socialweb.computer/v1alpha1
+kind: ComponentLink
+metadata:
+  name: testaccount-bob-records
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  from:
+    selector:
+      group: socialweb.computer
+      kind: AtprotoRecord
+      matchLabels:
+        socialweb.computer/testaccount: bob
+  to:
+    group: socialweb.computer
+    kind: AtprotoRepo
+    name: repo-did-plc-ocnuqjlzgohypj3zoznermms
+  capabilities:
+    - name: repo.write
+      scope:
+        - sh.tangled.graph.vouch
+        - com.publicdomainrelay.temp.badgeBlueKeys
+        - app.bsky.actor.profile
+        - sh.tangled.actor.profile
+        - com.fedfork.irc.agentOperator
+        - bot.did.registration
+        - com.publicdomainrelay.temp.auth.allowlist.rbacDid
