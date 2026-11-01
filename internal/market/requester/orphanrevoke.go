@@ -251,12 +251,19 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 		return false, err
 	}
 	revoked := 0
+	parent := r.revokeParent(ctx, contract)
+	var cleared []atircMinted
 	for _, m := range minted {
-		if !mine(m) || !q.now().Before(time.Unix(m.Exp, 0)) {
+		if !mine(m) || m.Revoked != 0 || !q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
-		if _, err := r.revokeAtircSubhandle(ctx, m.Token, m.Subhandle); err != nil {
+		result, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle)
+		if err != nil {
+			r.markMintedRevoked(ctx, entry.SecretsRef, cleared)
 			return false, fmt.Errorf("revoke %s: %w", m.Subhandle, err)
+		}
+		if result == atircRevokeServer {
+			cleared = append(cleared, m)
 		}
 		revoked++
 	}

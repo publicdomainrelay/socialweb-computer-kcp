@@ -239,9 +239,19 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     once that marker is written, stops with the requester and resumes after a restart from the marker;
     every mint is also recorded (path, subhandle, token, exp) under `atircMinted` in the bundle secret,
     and a minted subhandle counts as revoked only on a 200, a 401 for its own token, or its exp; a 401
-    counts for an unrecorded (rc126) token only for a subhandle read from the env file. The first
-    attempt runs before Released is written, or Failed when no guest can still run (no receipt, an
-    acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
+    counts for an unrecorded (rc126) token only for a subhandle read from the env file. Every revoke
+    of an `atircMinted` entry (release, orphan sweep, a refused mint) is sent with the minting
+    parent's bearer, the `spec.atircParentRef` long token, when the subhandle is below it and equals
+    the token's own `subhandle` claim exactly (the server answers 200 for any name in the caller's
+    scope); an entry revoked by a 200 is stamped `revoked` there and not revoked again, while a 401
+    counts as Done but leaves it unstamped; never a service auth for chat.atirc.revoke (the page's
+    OAuth scope grants only chat.atirc.mint). An env-file token, a claim mismatch, no parentRef (the
+    page), or a parent answered 401/403 uses the token itself; a leased token is revoked before
+    vm.delete, while its lease is alive, and a 401 saying the lease is not alive counts as revoked
+    (`requester_atirc_revoked` byLease). The first
+    attempt runs before vm.delete is recorded when the bundle holds a leased token (after the guest
+    requester's release), else before Released is written, or Failed when no guest can still run (no
+    receipt, an acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
     when every token path is revoked that way or never held a token; Pending while retries run;
     Abandoned after 24 h); only that first write and the retries set it, a later status write never
     does, and no token is minted once it is set. `run request` and `run request release` share one

@@ -525,6 +525,15 @@ func (q *Requester) registerEventSink(receiptURI string) (<-chan MarketEvent, []
 	return channel, pending, closeFn
 }
 
+func (q *Requester) dropUndelivered(receiptURI string) {
+	if receiptURI == "" {
+		return
+	}
+	q.eventMu.Lock()
+	delete(q.undelivered, receiptURI)
+	q.eventMu.Unlock()
+}
+
 func (q *Requester) dispatchEvent(receiptURI string, event MarketEvent) {
 	if receiptURI == "" {
 		return

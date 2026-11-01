@@ -1319,11 +1319,18 @@ func (r *contractRunner) applyReleaseBacklog(ctx context.Context, state *v1alpha
 		return
 	}
 	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
-	defer closeEvents()
+	var skipped []MarketEvent
+	defer func() {
+		closeEvents()
+		for _, event := range skipped {
+			r.q.dispatchEvent(receiptURI, event)
+		}
+	}()
 	apply := func(event MarketEvent) {
 		switch market.NSIDFromURI(event.Payload.URI) {
 		case market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsVMTerminatedNSID:
 		default:
+			skipped = append(skipped, event)
 			return
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
@@ -1414,6 +1421,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
 	r.releaseGuestRequester(ctx, state)
+	r.revokeBeforeDestroy(ctx)
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
 	for err != nil {
 		release.Attempts++
@@ -1656,6 +1664,9 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 	}
 	if startRevokes != nil {
 		startRevokes()
+	}
+	if phase == v1alpha1.ComputeContractReleased {
+		r.q.dropUndelivered(receiptURIOf(state))
 	}
 	return err
 }
