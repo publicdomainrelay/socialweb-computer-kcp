@@ -11530,6 +11530,28 @@ requester policy until its policy sandbox is fenced (NEXT.yaml). Read on prod be
 (lead, patched spec.policy): hat-7 bid for alice under `bidder-tangled-vouch`, Held in 27 s, ssh
 over webrtc, Released. alice is vouched by bob and john, and vouches both.
 
+### atirc agent tokens are leased to the contract and minted after the receipt (2026-10-30, rc130)
+
+Owner decision: an atirc agent or guest requester token dies when its contract ends, checked by the
+atirc server at use time, so a revoke needs no requester state (a memory-only browser page, a lost
+page). Before, the requester minted the agent token right after the RFP and the r2 token after the
+fromGuest association, and only the release revoke (and exp, 24h at most) ended them. Now the agent
+token is minted after the receipt is verified (`acceptReceipt`, `resumeReceipt`) and the r2 token
+needs a verified receipt too; every chat.atirc.mint carries `lease {receipt {uri, cid}, termination,
+association? {uri, cid}, contract?}`: the bidder's market.receipt, the at-uri of its vm.terminated
+record at `market.EventRKeys(market.TerminationKey(receiptURI))` (the rkey the policy engine reads),
+the requester_associate record for the r2 token, and the accept uri. The server appends it to the
+bearer's chain, so the signed claim `leases` is root to leaf; the requester accepts a token only when
+`leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
+mint. A token with no `leases` claim (an older server) or a 400 naming the lease (then a plain mint)
+is kept and logged once (`requester_atirc_lease_unsupported`). The agent envFile entry is withheld
+until its first mint attempt ends: getSecrets answers 503 TokenPending (setup-secrets retries every
+5 s) and no sealed bundle is sent; the first attempt ends the hold and reseals a pending sealed
+request. An entry with no minted token is never served; a later retry that mints it publishes
+guest.secretsUpdated so the guest fetches the bundle again. Index before mint, no mint after the
+release started, `atircMinted` and the release revoke are unchanged. UUID, manual and plain tokens
+are unchanged.
+
 ## 16. Vocabulary
 
 | | |

@@ -187,8 +187,11 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
     older `<tag>:<port>:<envFile>`) asks for one.
   - The atirc agent (plan 0035): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`) needs
-    `spec.secretsRef`. The requester mints a long atirc token after the RFP (only for spec.agent) and
-    writes `ATIRC_TOKEN` into the bundle entry at envFile; user_data installs `atirc-agent.service`
+    `spec.secretsRef`. The requester mints a long atirc token after the receipt is verified (only for
+    spec.agent), leased to the contract (chat.atirc.mint `lease`: the receipt and the bidder's
+    vm.terminated at-uri, plus the association for the r2 token), and writes `ATIRC_TOKEN` into the
+    bundle entry at envFile, which getSecrets and the sealed fallback withhold (503 TokenPending, no
+    seal) until that first mint attempt ends; user_data installs `atirc-agent.service`
     and `/etc/socialweb-guest-agent/agent.json` but never starts the unit. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
@@ -220,7 +223,7 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `status.associationMessage`. chat.atirc.mint never gets the association as `assoc` (atirc wants the
     standing rkey and the minting account as subject); every token is minted with an explicit exp
     (at most 24h, the parent token's exp and, for the guest requester, the association expiresAt). The
-    agent token is one token per subhandle minted after the RFP. Once a fromGuest association is
+    agent token is one token per subhandle (named after the RFP rkey) minted after the receipt. Once a fromGuest association is
     written, the requester also mints the guest requester its own child token, subhandle
     `r2-<accept rkey>.<the requester's handle or subhandle>`, into the bundle at
     `/etc/socialweb-computer/r2-atirc.env` (`ATIRC_TOKEN`, `ATIRC_SUBHANDLE`, `ATIRC_EXP`, mode 0600);
