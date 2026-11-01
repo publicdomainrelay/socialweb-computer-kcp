@@ -33,7 +33,11 @@ func (a *Accounts) pdsAccount(ctx context.Context, workspace string, id *v1alpha
 	}
 	credential, err := pdsAccountCredentialOf(ctx, vault, id)
 	if errors.Is(err, errVaultRead) {
-		return failed(status, generation, "MissingCredential", err.Error()), err
+		reason := ReasonVaultUnavailable
+		if errors.Is(err, ErrSecretNotFound) {
+			reason = ReasonWaitingForCredential
+		}
+		return pending(status, generation, reason, err.Error()), err
 	}
 	if err != nil {
 		return failed(status, generation, "MissingCredential", err.Error()), nil

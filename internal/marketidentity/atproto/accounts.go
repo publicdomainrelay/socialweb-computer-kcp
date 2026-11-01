@@ -30,6 +30,10 @@ const (
 
 	ReasonRevoked = "Revoked"
 
+	ReasonWaitingForCredential = "WaitingForCredential"
+
+	ReasonVaultUnavailable = "VaultUnavailable"
+
 	requestTimeout = 5 * time.Second
 
 	minRefreshAfter = time.Second

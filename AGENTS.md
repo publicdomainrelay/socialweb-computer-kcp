@@ -124,6 +124,11 @@ journald puts its user units' lines in the system journal (only root reads them:
 _SYSTEMD_USER_UNIT=<unit>`); `run requester signin <name>` prints the MarketIdentity's `pendingAction.url` from the
 requester's own kcp, and `install` prints both. A password never goes into requester.json:
   `run requester password <name>` reads one from stdin into `identity/requester/keys` of the requester's vault.
+  With `--atproto-identity-mode pdsAccount`, `run request` and `run requester` (standalone or `--network`, where the
+  network child takes only that mode, `--atproto-handle` and `--atproto-pds-url`, default the network's bob PDS) put
+  `ATPROTO_PASSWORD` from their own environment into that path before the sign-in; a missing or unreadable keysRef keeps
+  the MarketIdentity Pending (`WaitingForCredential`, `VaultUnavailable`), never Failed. A pdsAccount requester signs its
+  market callbacks with its PDS service auth (`signing: owner-identity`) and publishes its badge.blue signer key.
   `upgrade` takes the role from the install record. The same-account form is a kubectl-applied HostProcess
   (`examples/infra/requester-hostprocess.yaml`); no root prunes a HostProcess outside its set.
 - `run requester --with-gateway` (plan 0039 C-GATEWAY-COMPOSE, `cmd/socialweb-computer/requestergateway.go`,

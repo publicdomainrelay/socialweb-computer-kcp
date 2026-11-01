@@ -62,7 +62,14 @@ func parseRequesterSpec(args []string, verb string, verbOptions []string, networ
 		case "identity", "pds-state-dir", "expected-pds-url":
 			return root, fmt.Errorf("--%s is reserved; pass global flags before --", p.Name)
 		}
-		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
+		networkIdentity := network && slices.Contains(compose.NetworkRequesterIdentityOptions, p.Name)
+		if networkIdentity {
+			if p.Name == compose.OptionIdentityMode && v1alpha1.MarketIdentityMode(p.Value) != v1alpha1.MarketIdentityModePdsAccount {
+				return root, fmt.Errorf("--%s %s: a market network requester takes the identity mode %s only", p.Name, p.Value, v1alpha1.MarketIdentityModePdsAccount)
+			}
+			options = append(options, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
+		}
+		perApp := networkIdentity || p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
 		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return root, fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
@@ -163,6 +170,9 @@ func parseRequesterSpec(args []string, verb string, verbOptions []string, networ
 		if _, err := syntax.ParseHandle(strings.TrimSpace(root.Identity.Handle)); err != nil {
 			return root, fmt.Errorf("--expect-handle %q: %w", root.Identity.Handle, err)
 		}
+	}
+	if network && root.Identity.Mode == v1alpha1.MarketIdentityModePdsAccount && strings.TrimSpace(root.Identity.Handle) == "" {
+		return root, fmt.Errorf("--%s %s needs --atproto-handle naming the account", compose.OptionIdentityMode, v1alpha1.MarketIdentityModePdsAccount)
 	}
 	if nvSet || !network {
 		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")

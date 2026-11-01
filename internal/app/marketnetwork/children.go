@@ -194,6 +194,9 @@ func (ctl *Controller) placeChild(ctx context.Context, r compose.Root, ch child,
 	rec.Executables, rec.SourceRoot, rec.BaseWorkspace = parent.Executables, parent.SourceRoot, ctl.appWorkspace(ch.app.Name)
 	rec.SharedKcp, rec.AdminKubeconfig, rec.KcpURL, rec.KineURL, rec.Units = parent.Layout.StateDir, parent.AdminKubeconfig, parent.KcpURL, "", nil
 	rec.OpenBao, rec.Host, rec.Worktree = nil, false, ""
+	if ch.app.Kind == v1alpha1.ApplicationKindMarketRequester {
+		rec.Role = devinstance.RoleRequester
+	}
 	if rec.VM, err = ChildVM(ch.app, ch.layout, parent); err != nil {
 		return rec, err
 	}
@@ -664,7 +667,7 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 			BidderDids: append([]string(nil), bidderDids...), ComputeKinds: append([]string(nil), app.ComputeKinds...)}}
 	case v1alpha1.ApplicationKindMarketRequester:
 		root = &v1alpha1.MarketRequester{ObjectMeta: meta, Spec: v1alpha1.MarketRequesterSpec{Profile: app.Profile, Suspend: suspend, Network: &value,
-			Identity:   v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip},
+			Identity:   compose.NetworkRequesterIdentity(app.Options, pdsURL),
 			BidderDids: bidderDids, Options: app.Options, Quota: app.Quota, Comms: comms, Components: app.Components,
 			SecretsFallback: app.SecretsFallback, RequesterIngress: app.RequesterIngress}}
 	case v1alpha1.ApplicationKindSshGateway:

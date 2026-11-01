@@ -50,6 +50,20 @@ func (q *Requester) oauthServiceAuth() ServiceAuthSource {
 	}}
 }
 
+type ownerIdentityServiceAuth struct {
+	participant.PDSServiceAuth
+}
+
+func (q *Requester) ownerIdentityServiceAuth() ServiceAuthSource {
+	if q.deps.ServiceAuth == nil || q.did == "" || q.cfg.LocalSigner || q.cfg.IdentityMode != IdentityModeCallback || q.identityRef.Name == "" {
+		return nil
+	}
+	identity, did, open := q.identityRef, q.did, q.deps.ServiceAuth
+	return ownerIdentityServiceAuth{participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
+		return open(ctx, identity, did)
+	}}}
+}
+
 func (q *Requester) atircServiceAuth(market ServiceAuthSource) (ServiceAuthSource, string, string) {
 	if market != nil {
 		return market, serviceAuthName(market), ""
@@ -59,11 +73,6 @@ func (q *Requester) atircServiceAuth(market ServiceAuthSource) (ServiceAuthSourc
 	}
 	open, did := q.deps.ServiceAuth, q.did
 	switch pdsRef := q.cfg.Spec.PdsRef; {
-	case !q.cfg.LocalSigner && q.cfg.IdentityMode == IdentityModeCallback && q.identityRef.Name != "":
-		identity := q.identityRef
-		return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
-			return open(ctx, identity, did)
-		}}, "owner-identity", ""
 	case q.cfg.LocalSigner && pdsRef != nil && pdsRef.Name != "":
 		plcURL := ""
 		if network := q.cfg.Spec.Network; network != nil {
@@ -197,6 +206,8 @@ func serviceAuthName(source ServiceAuthSource) string {
 		return "local"
 	case participant.PDSServiceAuth:
 		return "oauth"
+	case ownerIdentityServiceAuth:
+		return "owner-identity"
 	case *ownerSessionServiceAuth:
 		return "owner-session"
 	}
