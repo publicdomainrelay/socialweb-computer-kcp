@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-30.computecontracts.socialweb.computer
+  name: v1alpha1-31.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -790,6 +790,18 @@ spec:
                   - Pending
                   - Done
                   - Abandoned
+              heldSession:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  guestKeyPath:
+                    type: string
+                  until:
+                    type: string
+                required:
+                  - name
+                  - until
       additionalPrinterColumns:
         - name: Phase
           type: string

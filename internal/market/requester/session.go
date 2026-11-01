@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -190,6 +191,8 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 type heldSession struct {
 	mu sync.Mutex
 
+	name string
+
 	vmName string
 
 	privateKeyPath string
@@ -212,6 +215,7 @@ func (h *heldSession) stopTimer() {
 }
 
 func (h *heldSession) clear() {
+	h.name = ""
 	h.target = nil
 	h.privateKeyPath = ""
 	h.contract = ""
@@ -229,16 +233,114 @@ func (q *Requester) heldSession(key string) *heldSession {
 }
 
 func (q *Requester) armHeldSession(key string, held *heldSession) {
+	q.armHeldSessionFor(key, held, q.cfg.SessionIdle)
+	held.mu.Lock()
+	contract, name, keyPath := held.contract, held.name, held.privateKeyPath
+	held.mu.Unlock()
+	if contract != "" {
+		q.recordHeld(contract, name, keyPath, q.cfg.SessionIdle)
+	}
+}
+
+func (q *Requester) armHeldSessionFor(key string, held *heldSession, after time.Duration) {
 	held.mu.Lock()
 	if held.timer != nil {
 		held.timer.Stop()
 	}
 	held.generation++
 	generation := held.generation
-	held.timer = time.AfterFunc(q.cfg.SessionIdle, func() {
+	held.timer = time.AfterFunc(after, func() {
 		q.releaseHeldSession(key, held, generation, "idle")
 	})
 	held.mu.Unlock()
+}
+
+func (q *Requester) recordHeld(contract, name, keyPath string, after time.Duration) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.runContext()), heldRecordTimeout)
+	defer cancel()
+	record := &v1alpha1.ComputeContractHeldSession{Name: name, GuestKeyPath: keyPath, Until: q.now().Add(after).UTC().Format(time.RFC3339)}
+	if err := q.deps.Intents.MergeComputeContractStatus(ctx, contract, v1alpha1.ComputeContractStatus{HeldSession: record}); err != nil {
+		q.log.Warn("requester_held_session_expiry_unrecorded", "contract", contract, "until", record.Until, "err", err)
+	}
+}
+
+func (q *Requester) keepHeldSessions(reason string) {
+	q.heldMu.Lock()
+	held := make([]*heldSession, 0, len(q.heldSessions))
+	for _, session := range q.heldSessions {
+		held = append(held, session)
+	}
+	q.heldMu.Unlock()
+	for _, session := range held {
+		session.mu.Lock()
+		session.stopTimer()
+		contract := session.contract
+		session.mu.Unlock()
+		if contract != "" {
+			q.log.Info("requester_held_session_kept", "contract", contract, "reason", reason)
+		}
+	}
+}
+
+func isHeldContractName(name string) bool {
+	rest, ok := strings.CutPrefix(name, heldContractPrefix)
+	if !ok || len(rest) != 20 || strings.HasPrefix(name, transientContractPrefix) {
+		return false
+	}
+	_, err := hex.DecodeString(rest)
+	return err == nil
+}
+
+func (q *Requester) sweepHeldContract(contract v1alpha1.ComputeContract) {
+	record := contract.Status.HeldSession
+	if record == nil {
+		record = &v1alpha1.ComputeContractHeldSession{}
+	}
+	until, err := time.Parse(time.RFC3339, record.Until)
+	name, keyPath := record.Name, record.GuestKeyPath
+	reason := ""
+	switch {
+	case err != nil:
+		reason = "the held session records no expiry"
+	case !q.now().Before(until):
+		reason = "the held session expired at " + until.UTC().Format(time.RFC3339)
+	case name == "" || keyPath == "":
+		reason = "the held session records no session name or guest key"
+	}
+	var target *SessionTarget
+	if reason == "" {
+		found, ready, terr := contractTarget(contract)
+		switch {
+		case terr != nil || !ready:
+			reason = "the held session has no guest address and host keys"
+		case !strings.HasPrefix(keyPath, q.guestKeyDir()+string(os.PathSeparator)):
+			reason = "the held session's guest key is outside the guest key dir"
+		default:
+			if _, serr := os.Stat(keyPath); serr != nil {
+				reason = "the held session's guest key is gone"
+			}
+			target = found
+		}
+	}
+	if reason != "" {
+		q.log.Info("requester_stale_session_release", "contract", contract.Name, "phase", contract.Status.Phase, "reason", reason)
+		q.releaseHeldContract(contract.Name)
+		if keyPath != "" && strings.HasPrefix(keyPath, q.guestKeyDir()+string(os.PathSeparator)) {
+			_ = sshtransport.RemoveGuestKeypair(keyPath)
+		}
+		return
+	}
+	key := strings.TrimSpace(contract.Spec.OwnerDid) + "\x00" + name
+	held := q.heldSession(key)
+	held.mu.Lock()
+	if held.target != nil {
+		held.mu.Unlock()
+		return
+	}
+	held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, target.VMName, keyPath, target, contract.Name
+	held.mu.Unlock()
+	q.armHeldSessionFor(key, held, until.Sub(q.now()))
+	q.log.Info("requester_held_session_adopted", "contract", contract.Name, "until", until.UTC().Format(time.RFC3339))
 }
 
 func (q *Requester) releaseHeldSession(key string, held *heldSession, generation uint64, reason string) {
@@ -266,20 +368,6 @@ func (q *Requester) releaseHeldSession(key string, held *heldSession, generation
 		q.log.Info("requester_held_session_released", "contract", contract, "reason", reason)
 	}
 	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
-}
-
-func (q *Requester) releaseAllHeldSessions(reason string) {
-	q.heldMu.Lock()
-	keys := make([]string, 0, len(q.heldSessions))
-	held := make([]*heldSession, 0, len(q.heldSessions))
-	for key, session := range q.heldSessions {
-		keys = append(keys, key)
-		held = append(held, session)
-	}
-	q.heldMu.Unlock()
-	for i := range keys {
-		q.releaseHeldSession(keys[i], held[i], 0, reason)
-	}
 }
 
 func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, io sshtransport.CommandIO) error {
@@ -355,7 +443,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 			return commandFailed(io, "provisioning failed: ", err)
 		}
 		contract = contractName
-		held.vmName, held.privateKeyPath, held.target, held.contract = vmName, privateKeyPath, target, contract
+		held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, vmName, privateKeyPath, target, contract
 	}
 	ready := false
 	if ticket, ticketErr := ValidateTicket(target.Address); ticketErr == nil {
@@ -371,7 +459,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 			return commandFailed(io, "provisioning failed: ", err)
 		}
 		contract = contractName
-		held.vmName, held.privateKeyPath, held.target, held.contract = vmName, privateKeyPath, target, contract
+		held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, vmName, privateKeyPath, target, contract
 		fresh = true
 		ticket, ticketErr := ValidateTicket(target.Address)
 		if ticketErr != nil {
@@ -397,6 +485,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		held.mu.Unlock()
 		return commandFailed(io, "guest session failed: ", err)
 	}
+	q.recordHeld(contract, name, privateKeyPath, q.cfg.SessionCap+q.cfg.SessionIdle)
 	code := func() int {
 		defer held.mu.Unlock()
 		return provider.RunSession(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), io, target.HostKeys)
@@ -455,10 +544,15 @@ func (q *Requester) releaseStaleTransient() {
 	started := q.startedAt.Load()
 	for _, contract := range q.contracts.List() {
 		switch {
-		case !strings.HasPrefix(contract.Name, transientContractPrefix), !q.ownsContract(contract),
+		case !q.ownsContract(contract),
 			contract.DeletionTimestamp != nil, contract.Spec.Release, contract.Labels[keepVMLabel] == "true",
 			contract.Status.Phase == v1alpha1.ComputeContractReleased, contract.Status.Phase == v1alpha1.ComputeContractFailed,
-			started != nil && !contract.CreationTimestamp.Time.Before(*started), q.transientLive(contract.Name):
+			started != nil && !contract.CreationTimestamp.Time.Before(*started):
+			continue
+		case isHeldContractName(contract.Name):
+			q.sweepHeldContract(contract)
+			continue
+		case !strings.HasPrefix(contract.Name, transientContractPrefix), q.transientLive(contract.Name):
 			continue
 		}
 		q.log.Info("requester_stale_session_release", "contract", contract.Name, "phase", contract.Status.Phase,
@@ -477,7 +571,7 @@ func (q *Requester) contractState(name string) *v1alpha1.NodeClaimContract {
 
 func heldContractName(did, name string) string {
 	sum := sha256.Sum256([]byte(did + "\x00" + name))
-	return "ssh-" + hex.EncodeToString(sum[:10])
+	return heldContractPrefix + hex.EncodeToString(sum[:10])
 }
 
 func sessionRKey(label string, parts ...string) string {

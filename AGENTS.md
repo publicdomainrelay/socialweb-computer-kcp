@@ -267,6 +267,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     Failed, already releasing, labelled `socialweb.computer/ssh-keep-vm` (`LC_KEEP_VM`), created
     after its start or held by a live session (`requester_stale_session_release`); a VM whose token
     could not be revoked then ends it through the token's vm.terminated lease.
+    A held `LC_SESSION` contract (`ssh-<hash>`) records `status.heldSession` {name, guestKeyPath
+    (in the requester state dir), until}: until is the session cap plus idle when a command starts
+    and the idle when it ends. Shutdown keeps held sessions (`requester_held_session_kept`); the first sync adopts
+    one whose recorded expiry is ahead, whose guest address and key are still there, with its idle
+    timer at the time left (`requester_held_session_adopted`), and releases the rest
+    (`requester_stale_session_release`), sparing `socialweb.computer/ssh-keep-vm`.
     The iroh dialer socket lives in the SshServer
     state dir, or in the instance runtime dir when that path is over 107 bytes; `run gateway ssh`
     refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root. A restart

@@ -282,6 +282,16 @@ type ComputeContractStatus struct {
 	AssociationMessage string `json:"associationMessage,omitempty"`
 
 	AtircRevokes AtircRevokesState `json:"atircRevokes,omitempty" apigen:"enum=Pending|Done|Abandoned"`
+
+	HeldSession *ComputeContractHeldSession `json:"heldSession,omitempty"`
+}
+
+type ComputeContractHeldSession struct {
+	Name string `json:"name"`
+
+	GuestKeyPath string `json:"guestKeyPath,omitempty"`
+
+	Until string `json:"until"`
 }
 
 const (
