@@ -1297,22 +1297,30 @@ func (r *contractRunner) readAtircBundle(ctx context.Context, ref commonv1.Secre
 }
 
 func (r *contractRunner) atircBase() string {
-	return strings.TrimRight(cmp.Or(strings.TrimSpace(r.q.cfg.AtircURL), DefaultAtircURL), "/")
+	return r.q.atircBase()
 }
 
 func (r *contractRunner) postAtirc(ctx context.Context, nsid, bearer string, in, out any) error {
+	return r.q.postAtirc(ctx, nsid, bearer, in, out)
+}
+
+func (q *Requester) atircBase() string {
+	return strings.TrimRight(cmp.Or(strings.TrimSpace(q.cfg.AtircURL), DefaultAtircURL), "/")
+}
+
+func (q *Requester) postAtirc(ctx context.Context, nsid, bearer string, in, out any) error {
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
-	base := r.atircBase()
+	base := q.atircBase()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/xrpc/"+nsid, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Content-Type", "application/json")
-	client := r.q.deps.HTTP
+	client := q.deps.HTTP
 	if client == nil {
 		client = http.DefaultClient
 	}
