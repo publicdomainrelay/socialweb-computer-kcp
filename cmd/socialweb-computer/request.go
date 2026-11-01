@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -354,7 +356,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	r.root = v1alpha1.MarketRequesterSpec{Profile: marketrequester.RequesterProfileDefault,
 		Identity: v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}}
 	var nv v1alpha1.MarketNetworkValue
-	nvSet := false
+	nvSet, expectHandle := false, false
 	for _, p := range parsed {
 		switch p.Name {
 		case "identity", "pds-state-dir", "expected-pds-url":
@@ -391,6 +393,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 		case p.To == "spec.identity.handle":
 			r.root.Identity.Handle = p.Value
+			expectHandle = expectHandle || p.Name == "expect-handle"
 		case p.To == "spec.identity.pdsUrl":
 			r.root.Identity.PdsURL = p.Value
 		case p.To == "spec.identity.association":
@@ -508,6 +511,16 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.contract.Tunnels = append(r.contract.Tunnels, tunnels...)
 		default:
 			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
+		}
+	}
+	if expectHandle {
+		switch r.root.Identity.Mode {
+		case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated:
+		default:
+			return fmt.Errorf("--expect-handle pins the account of an oauth sign-in; the identity mode %s signs in no existing account, add --atproto-oauth-qr", r.root.Identity.Mode)
+		}
+		if _, err := syntax.ParseHandle(strings.TrimSpace(r.root.Identity.Handle)); err != nil {
+			return fmt.Errorf("--expect-handle %q: %w", r.root.Identity.Handle, err)
 		}
 	}
 	r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)

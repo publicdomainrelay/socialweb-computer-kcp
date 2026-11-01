@@ -138,7 +138,10 @@ It prints the QR, then one line per sign-in URL on stderr,
 `identity requester pendingAction scanQr url https://qr.fedfork.com/... expiresAt <RFC 3339>`, and
 prints it again when the URL changes (a URL expires after 5 minutes). It waits for the scan without
 a deadline; Ctrl-C stops it before any contract is posted. The session stays in the invocation's
-OpenBao; the account is its own operator, so bidders vouched by it bid.
+OpenBao; the account is its own operator, so bidders vouched by it bid. Without an expected account
+the first sign-in that qr.fedfork.com verified at the account's PDS wins, and the CLI prints
+`signed in as <handle> (<did>)`; `-- --atproto-oauth-qr --expect-handle <handle>` refuses any other
+account and shows a new QR.
 
 The default identity (`localRepo`) makes a new did:plc per invocation with association
 `RequireApproval`. The standalone requester does not wire the operator's association watch, so a

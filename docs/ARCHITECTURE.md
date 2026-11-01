@@ -4128,6 +4128,21 @@ fail, rather than the code read against this document alone.
   revokes (A6) now run their first attempt before Released is written, the guest requester's token
   first, because a CLI requester stops its kcp right after Released (the rc126 V1 run lost the R2
   revoke this way). Open: live runs of all three.
+- **Opened 2026-10-30: QR-NO-EXPECTED-ACCOUNT, an oauthQr requester with no expected account takes the
+  first verified sign-in.** The device polls `com.fedfork.atprotoOauthQR` with the nonce in the
+  `x-oauth-qr-nonce` header (not the query), and qr.fedfork.com (aceed9c) returns `verifiedDid` after it
+  checked the posted session at the account's PDS. The MarketIdentity refuses a transfer whose
+  `verifiedDid` is empty or differs from `userDid` (reason `QRSessionUnverified`, a new QR URL), so
+  `checkAccount` compares a DID the PDS vouched for. A bidder in mode oauthQr must name its account
+  (`spec.identity.did` or `spec.identity.handle`, `run bidder --handle`); the composer fails the
+  MarketBidder otherwise, and hat-7 names `bobvmbuilder.bsky.social`. The CLI requester
+  (`run request -- --atproto-oauth-qr`) may name none: then `checkAccount` has nothing to compare, and
+  whoever completes a verified sign-in at the QR URL within its 5-minute window becomes the requester's
+  account. The CLI prints `signed in as <handle> (<did>)`, and `-- --expect-handle <handle>` sets
+  `spec.identity.handle` so `checkAccount` pins the account (`AccountMismatch` and a new QR otherwise).
+  Open: whether a requester with no expected account should stay allowed, given the QR URL is printed to
+  stderr and logs.
+
 - **Opened 2026-10-30 (plan 0036 V1): GUEST-SELF-BINARY, the socialweb-computer binary in a guest.** R2
   (`socialweb-computer run request` inside a guest) needs the CLI there; the release binary (~560 MB of
   embedded assets) is too big for `socialweb-guest-downloads`. Decision: `spec.guestTools: [socialweb-computer]`

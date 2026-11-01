@@ -172,6 +172,7 @@ apps:
       - {name: atproto-oauth, to: spec.identity.mode}
       - {name: atproto-oauth-qr, to: spec.identity.mode}
       - {name: atproto-handle, to: spec.identity.handle}
+      - {name: expect-handle, to: spec.identity.handle}
       - {name: atproto-pds-url, to: spec.identity.pdsUrl}
       - {name: skip-qr, to: spec.identity.association}
       - {name: market-identity-name, to: profile}

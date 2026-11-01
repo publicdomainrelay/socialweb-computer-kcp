@@ -958,3 +958,10 @@ paused_2026_10_19:
       watch-einfra-<infra> capability=events.subscribe{computer.socialweb.ephemeralInfra,...}"
       and retries (39x on the :8090 page on 2026-10-30, predates plan 0037). Triage the
       capability grant for the infra watch.
+  - id: QR-NO-EXPECTED-ACCOUNT
+    text: >
+      An oauthQr CLI requester (run request -- --atproto-oauth-qr) that names no did or handle
+      takes the first sign-in qr.fedfork.com verified at the account PDS within the 5-minute QR
+      window; the device refuses an empty or different verifiedDid, and -- --expect-handle pins
+      the account. Bidders in oauthQr must name their account. Decide whether a requester with no
+      expected account stays allowed (section 14).
