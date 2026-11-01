@@ -497,7 +497,13 @@ func withoutSharedRequester(desired []compose.Desired) []compose.Desired {
 	for _, d := range desired {
 		switch {
 		case d.Kind == compose.ComponentKindRequester && d.Name == marketrequester.RequesterComponent:
-		case compose.IsExposureKind(d.Kind) && strings.HasPrefix(d.Name, prefix):
+		case compose.IsExposureKind(d.Kind) && (d.Name == prefix || strings.HasPrefix(d.Name, prefix+"-")):
+		case d.Kind == compose.ComponentKindSshServer:
+			if spec, ok := d.Spec.(v1alpha1.SshServerSpec); ok {
+				spec.RequesterRef = nil
+				d.Spec = spec
+			}
+			out = append(out, d)
 		default:
 			out = append(out, d)
 		}
@@ -576,7 +582,7 @@ func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []
 		if err != nil && !apierrors.IsNotFound(err) {
 			return nil, nil, err
 		}
-		if id != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseSessionExpired {
+		if expiredForGood(id) {
 			c.Log().Info("the ssh gateway forgets an account whose session expired", "root", r.Owner(), "did", did)
 			continue
 		}
@@ -593,28 +599,51 @@ func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []
 	var links []compose.Link
 	for _, did := range keep {
 		owner := compose.SessionOwner{DID: did, Vault: SshGatewayVaultServer, Scope: compose.SshGatewayAtprotoScope()}
-		st, err := c.SessionOwnerState(ctx, ws, did)
-		if err != nil {
+		id, err := c.Identity(ctx, ws, compose.OwnerIdentityName(did))
+		if err != nil && !apierrors.IsNotFound(err) {
 			return nil, nil, err
 		}
-		links = append(links, compose.SessionOwnerLinks(r, ws, ws, owner, st.PdsURL)...)
-		if err := c.ApplySessionOwner(ctx, r, ws, owner, st.PdsURL); err != nil {
+		pdsURL := knownPdsURL(id, did)
+		if pdsURL == "" {
+			if pdsURL, err = c.SessionOwnerAppliedPdsURL(ctx, ws, did); err != nil {
+				return nil, nil, err
+			}
+		}
+		links = append(links, compose.SessionOwnerLinks(r, ws, ws, owner, pdsURL)...)
+		if err := c.ApplySessionOwner(ctx, r, ws, owner, pdsURL); err != nil {
 			return nil, nil, err
 		}
-		if !st.Ready || st.PdsURL == "" {
+		if id == nil || pdsURL == "" {
 			continue
 		}
-		id, err := c.Identity(ctx, ws, compose.OwnerIdentityName(did))
-		if err != nil {
-			return nil, nil, err
-		}
-		pdsRef, pdsDID := compose.SessionOwnerPds(st.PdsURL, "")
+		pdsRef, pdsDID := compose.SessionOwnerPds(pdsURL, "")
 		identityRef := compose.AppRef(compose.KindMarketIdentity, id.Name, ws)
 		out = append(out, accountRequester{did: did, identity: compose.ComponentIdentity(id, strings.TrimSpace(id.Status.Handle)), pdsRef: &pdsRef, pdsDID: pdsDID,
 			links: []compose.Link{compose.ServiceAuthLink(compose.AppRef(compose.ComponentKindRequester,
 				contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did), ws), identityRef, did)}})
 	}
 	return out, links, nil
+}
+
+var keptSessionReasons = []string{"invalid_client", "unauthorized_client", "use_dpop_nonce", "server_error", "temporarily_unavailable"}
+
+func expiredForGood(id *v1alpha1.MarketIdentity) bool {
+	if id == nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseSessionExpired {
+		return false
+	}
+	for _, reason := range keptSessionReasons {
+		if strings.Contains(id.Status.Message, reason) {
+			return false
+		}
+	}
+	return true
+}
+
+func knownPdsURL(id *v1alpha1.MarketIdentity, did string) string {
+	if id == nil || strings.TrimSpace(id.Status.Did) != strings.TrimSpace(did) {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(id.Status.PdsURL), "/")
 }
 
 func maxAccounts(spec v1alpha1.SshGatewaySpec) int {
@@ -632,11 +661,14 @@ func (p *pass) baseLinks(mount string) []compose.Link {
 	ws := p.r.Workspace
 	requester := compose.AppRef(compose.ComponentKindRequester, marketrequester.RequesterComponent, ws)
 	server := compose.AppRef(compose.ComponentKindSshServer, SshServerComponent, ws)
-	return []compose.Link{
-		compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...),
+	links := []compose.Link{
 		compose.VaultLink(server, SshGatewayVaultServer, false, mount+"/*"),
 		compose.RootVaultLink(p.r, SshGatewayVaultServer, mount+"/identity/*"),
 	}
+	if !perUserAccounts(p.o.Spec) {
+		links = append(links, compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...))
+	}
+	return links
 }
 
 func (p *pass) snapshot(ctx context.Context) (compose.Snapshot, error) {
@@ -669,22 +701,26 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.ApplyLinks(ctx, r, "root", links); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	record := c.Config().Record
+	if record == nil {
+		return p.fail(errors.New("sshgateway: the composer has no instance record"))
+	}
+	rec, err := record()
+	if err != nil {
+		return ctlruntime.Result{}, err
+	}
+	stateDir := compose.ComponentCRStateDir(stateRoot, compose.ComponentKindSshServer, SshServerComponent)
+	values, err := SshGatewayValues(o.Spec, stateDir, c.Config().Layout, rec)
+	if err != nil {
+		return p.fail(err)
+	}
+	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(SshGatewaySet, o.Spec.Profile, &values))
+	if err != nil {
+		return p.retry("its set workloads", err)
+	}
 	if !c.Applied(r) {
-		record := c.Config().Record
-		if record == nil {
-			return p.fail(errors.New("sshgateway: the composer has no instance record"))
-		}
-		rec, err := record()
-		if err != nil {
-			return ctlruntime.Result{}, err
-		}
-		stateDir := compose.ComponentCRStateDir(stateRoot, compose.ComponentKindSshServer, SshServerComponent)
-		values, err := SshGatewayValues(o.Spec, stateDir, c.Config().Layout, rec)
-		if err != nil {
-			return p.fail(err)
-		}
 		digest, digestErr := compose.InfraDigest(SshGatewaySet, o.Spec.Profile, &values, nil)
-		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.wait("applying its own OpenBaoServer, its iroh dialer and its workspace"); err != nil {

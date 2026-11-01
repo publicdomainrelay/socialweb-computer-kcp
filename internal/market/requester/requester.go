@@ -369,6 +369,11 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 		if err != nil {
 			return Config{}, err
 		}
+		if want := strings.TrimSpace(cfg.DID); want != "" {
+			if own, ok := owners[want]; ok {
+				did, handle = want, own.Identifier
+			}
+		}
 		session := owners[did]
 		if strings.TrimSpace(session.Service) == "" {
 			return Config{}, fmt.Errorf("requester: the owner session of %s names no service", did)

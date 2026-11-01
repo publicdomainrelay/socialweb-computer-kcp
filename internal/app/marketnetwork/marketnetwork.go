@@ -235,9 +235,16 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.ApplyVault(ctx, r, NetworkVaultServer); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	intact := true
+	if !r.Suspend {
+		var err error
+		if intact, err = c.CheckWorkloads(ctx, r)(c.PhaseWorkloads(NetworkSet, &manifests.MarketNetwork{}, "vault")); err != nil {
+			return p.retry(v1alpha1.ApplicationPhaseProvisioning, "its set workloads", err)
+		}
+	}
 	if !c.Applied(r) {
 		digest, digestErr := compose.PhasesDigest(NetworkSet, &manifests.MarketNetwork{}, nil, "vault")
-		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying the network's OpenBaoServer"); err != nil {

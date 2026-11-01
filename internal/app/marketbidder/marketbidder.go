@@ -283,15 +283,19 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.ApplyLinks(ctx, r, "root", links); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	var phases []string
+	if plan.UsesAssociation() {
+		phases = []string{"association-watch"}
+	}
+	values := p.infraValues()
+	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(BidderSet, o.Spec.Profile, values, phases...))
+	if err != nil {
+		return p.retry("its set workloads", err)
+	}
 	if !c.Applied(r) {
-		var phases []string
-		if plan.UsesAssociation() {
-			phases = []string{"association-watch"}
-		}
 		identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)
-		values := p.infraValues()
 		digest, digestErr := compose.InfraDigest(BidderSet, o.Spec.Profile, values, identity, phases...)
-		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its own OpenBaoServer and workspace"); err != nil {

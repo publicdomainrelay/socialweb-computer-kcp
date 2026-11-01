@@ -157,6 +157,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.setup(runCtx); err != nil {
 		return fail(err)
 	}
+	defer s.followVault(runCtx)()
 	key := s.deps.Key()
 	key.Kind = cmp.Or(key.Kind, Kind)
 	key.Name = cmp.Or(key.Name, "default")
@@ -251,9 +252,12 @@ func (s *Service) servePublic(ctx context.Context, ln net.Listener) {
 }
 
 func (s *Service) setup(ctx context.Context) error {
-	ref, err := s.requesterRef()
-	if err != nil {
-		return err
+	var ref commonv1.ObjectRef
+	if !s.perUser {
+		var err error
+		if ref, err = s.requesterRef(); err != nil {
+			return err
+		}
 	}
 	web, err := s.openSignIn(ctx)
 	if err != nil {
@@ -268,7 +272,7 @@ func (s *Service) setup(ctx context.Context) error {
 	var auth sshtransport.Authenticator = owners
 	var agents sshtransport.AgentProvider = owners
 	if web != nil {
-		auth, agents = web.auth, web.signIn
+		auth, agents = liveAuth{s}, liveAgents{s}
 	}
 	g, err := gateway.New(s.cfg, gateway.Deps{
 		Runner:    requester{service: s, ref: ref},
@@ -295,8 +299,10 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /connect.json", s.connect)
 	mux.HandleFunc("GET /.well-known/cocore-app.json", s.cocoreApp)
-	if s.web != nil {
-		s.web.oauth.Register(mux)
+	if s.currentWeb() != nil {
+		for _, route := range oauthRoutes {
+			mux.HandleFunc(route, s.oauthRoute)
+		}
 		mux.HandleFunc("GET /{$}", s.page)
 	}
 	s.gateway.Register(mux)

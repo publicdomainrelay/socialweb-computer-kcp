@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -52,6 +54,7 @@ func (b *backend) sessionRead(ctx context.Context, req *logical.Request, d *fram
 	if err != nil || s == nil {
 		return nil, err
 	}
+	b.revive(ctx, req.Storage, s)
 	return &logical.Response{Data: map[string]interface{}{
 		"did":           s.DID,
 		"handle":        s.Handle,
@@ -64,6 +67,66 @@ func (b *backend) sessionRead(ctx context.Context, req *logical.Request, d *fram
 		"created_at":    s.CreatedAt.Format(time.RFC3339),
 		"updated_at":    s.UpdatedAt.Format(time.RFC3339),
 	}}, nil
+}
+
+var keepActiveRefreshCodes = []string{"invalid_client", "invalid_client_metadata", "unauthorized_client", "use_dpop_nonce",
+	"server_error", "temporarily_unavailable"}
+
+func keepsSessionActive(oe *oauthError) bool {
+	if oe.Code == "" {
+		return oe.Status == http.StatusTooManyRequests || oe.Status >= http.StatusInternalServerError
+	}
+	return slices.Contains(keepActiveRefreshCodes, oe.Code)
+}
+
+func expiredForKeptReason(s *sessionEntry) bool {
+	if s.Status != statusExpired {
+		return false
+	}
+	for _, c := range keepActiveRefreshCodes {
+		if strings.Contains(s.StatusReason, " "+c) {
+			return true
+		}
+	}
+	return false
+}
+
+const reviveEvery = time.Minute
+
+type reviveLimit struct {
+	mu sync.Mutex
+
+	last map[string]time.Time
+}
+
+func newReviveLimit() *reviveLimit {
+	return &reviveLimit{last: map[string]time.Time{}}
+}
+
+func (l *reviveLimit) allow(did string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, at := range l.last {
+		if now.Sub(at) >= reviveEvery {
+			delete(l.last, key)
+		}
+	}
+	if at, ok := l.last[did]; ok && now.Sub(at) < reviveEvery {
+		return false
+	}
+	l.last[did] = now
+	return true
+}
+
+func (b *backend) revive(ctx context.Context, st logical.Storage, s *sessionEntry) {
+	if !expiredForKeptReason(s) || !b.revives.allow(s.DID, time.Now()) {
+		return
+	}
+	cfg, bad, err := requireConfig(ctx, st)
+	if bad != nil || err != nil {
+		return
+	}
+	_ = b.refreshSession(ctx, st, cfg, s)
 }
 
 func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *configEntry, s *sessionEntry) error {
@@ -92,9 +155,11 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 					return nil
 				}
 			}
-			s.Status, s.StatusReason = statusExpired, err.Error()
-			if perr := putSession(sctx, st, s); perr != nil {
-				return perr
+			if !keepsSessionActive(oe) {
+				s.Status, s.StatusReason = statusExpired, err.Error()
+				if perr := putSession(sctx, st, s); perr != nil {
+					return perr
+				}
 			}
 		}
 		return err
@@ -110,6 +175,7 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 		return errors.New("the refreshed grant does not include atproto; the session is rejected")
 	}
 	s.AccessToken, s.RefreshToken = tr.AccessToken, tr.RefreshToken
+	s.Status, s.StatusReason = statusActive, ""
 	s.ExpiresAt = time.Now().UTC().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	if tr.Scope != "" {
 		s.Scope = tr.Scope
@@ -145,6 +211,7 @@ func (b *backend) sessionProof(ctx context.Context, req *logical.Request, d *fra
 	if strings.ToLower(origin) != strings.ToLower(s.PDS) {
 		return logical.ErrorResponse(fmt.Sprintf("htu origin %s is not the PDS origin %s of the session; a proof is made only for requests to the PDS", origin, s.PDS)), nil
 	}
+	b.revive(ctx, req.Storage, s)
 	if s.Status != statusActive {
 		return nil, logical.CodedError(http.StatusConflict, fmt.Sprintf("the session of %s is %s: %s", did, s.Status, s.StatusReason))
 	}

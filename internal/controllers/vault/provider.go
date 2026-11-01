@@ -91,6 +91,8 @@ type Provider struct {
 	bindings map[vaultKey]Binding
 
 	remotes map[vaultKey]remoteLogin
+
+	bus *bus.Bus
 }
 
 func NewProvider(remote *openbao.Remote) *Provider {
@@ -104,9 +106,9 @@ func NewProvider(remote *openbao.Remote) *Provider {
 func (p *Provider) Bind(b Binding) bool {
 	key := keyOf(b.Vault)
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	old, ok := p.bindings[key]
 	if ok && old.fingerprint() == b.fingerprint() {
+		p.mu.Unlock()
 		return false
 	}
 	p.bindings[key] = b
@@ -114,6 +116,9 @@ func (p *Provider) Bind(b Binding) bool {
 	if ok && old.Backend.Name != "" {
 		p.logins.Forget(old.Backend.Workspace, old.Backend.Name)
 	}
+	notify := p.bus
+	p.mu.Unlock()
+	notify.NotifyBound(bus.Key{Workspace: b.Vault.Workspace, Kind: b.Vault.Kind, Name: b.Vault.Name})
 	return true
 }
 
@@ -220,6 +225,9 @@ func (p *Provider) open(_ context.Context, to commonv1.ObjectRef, scope []string
 }
 
 func (p *Provider) Register(b *bus.Bus) {
+	p.mu.Lock()
+	p.bus = b
+	p.mu.Unlock()
 	bus.Provide(b, VaultGroupKind, contractvault.CapabilityRead, func(ctx context.Context, to commonv1.ObjectRef, scope []string) (contractvault.KV, error) {
 		h, err := p.open(ctx, to, scope)
 		if err != nil {

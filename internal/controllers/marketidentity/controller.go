@@ -34,6 +34,8 @@ const (
 
 	VaultKind = "OpenBaoServer"
 
+	VaultObjectKind = "Vault"
+
 	eventBuffer = 256
 )
 
@@ -104,6 +106,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	}
 	ctl := New(opts)
 	ctl.Provide(opts.Bus)
+	ctl.wakeOnVault(opts.Bus)
 	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Events(ctl.events), ctlruntime.Gone(ctl.gone),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
 			return ctl.users(binding.Key(src.Workspace, RecordWatchKind, obj.Name))
@@ -237,6 +240,23 @@ func (c *Controller) users(ref string) []ctlruntime.Request {
 		out = append(out, ctlruntime.Request{Cluster: t.Cluster, Workspace: t.Workspace, Name: t.Name})
 	}
 	return out
+}
+
+func (c *Controller) wakeOnVault(b *bus.Bus) {
+	b.Subscribe(func(key bus.Key) {
+		if key.Kind != VaultObjectKind {
+			return
+		}
+		reqs := c.users(binding.Key(key.Workspace, VaultKind))
+		if len(reqs) == 0 {
+			return
+		}
+		go func() {
+			for _, r := range reqs {
+				c.events <- r
+			}
+		}()
+	})
 }
 
 func (c *Controller) enqueue(r ctlruntime.Request) {

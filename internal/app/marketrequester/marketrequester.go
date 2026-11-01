@@ -207,9 +207,13 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	p.links = append(p.links, p.baseLinks(mount)...)
+	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(RequesterSet, o.Spec.Profile, &manifests.MarketRequester{}))
+	if err != nil {
+		return p.retry("its set workloads", err)
+	}
 	if !c.Applied(r) {
 		digest, digestErr := compose.InfraDigest(RequesterSet, o.Spec.Profile, &manifests.MarketRequester{}, plan.Identity)
-		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its schemas, its own OpenBaoServer and its workspace"); err != nil {
