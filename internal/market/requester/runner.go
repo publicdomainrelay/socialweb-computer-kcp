@@ -1665,6 +1665,9 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 	if startRevokes != nil {
 		startRevokes()
 	}
+	if phase == v1alpha1.ComputeContractReleased {
+		r.q.dropUndelivered(receiptURIOf(state))
+	}
 	return err
 }
 
