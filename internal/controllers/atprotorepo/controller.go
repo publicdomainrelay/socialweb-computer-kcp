@@ -136,8 +136,9 @@ func (c *Controller) users(workspace, kind, name string) []ctlruntime.Request {
 }
 
 func (c *Controller) bind(req ctlruntime.Request, b *repoBinding, backend string) {
+	prior, held := c.bindings.Get(req.Workspace, req.Name)
 	c.bindings.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, b, backend)
-	if b != nil {
+	if b != nil && (!held || prior.self != b.self || prior.backend != b.backend || !maps.Equal(prior.labels, b.labels)) {
 		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
 	}
 }

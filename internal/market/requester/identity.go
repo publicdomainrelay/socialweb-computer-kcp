@@ -13,6 +13,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
@@ -51,6 +52,25 @@ func (q *Requester) oauthServiceAuth() ServiceAuthSource {
 	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
 		return open(ctx, identity, did)
 	}}
+}
+
+func (q *Requester) oauthGranted(ctx context.Context, scope string) (bool, error) {
+	if q.cfg.IdentityMode != IdentityModeOAuth || q.deps.ServiceAuth == nil {
+		return false, nil
+	}
+	handle, err := q.deps.ServiceAuth(ctx, q.identityRef, q.did)
+	if err != nil {
+		return false, err
+	}
+	grants, ok := handle.(pds.ScopeGrants)
+	if !ok {
+		return false, nil
+	}
+	granted, ok := grants.GrantedScopes(q.did)
+	if !ok || !atprotooauth.KnownGrant(granted) {
+		return false, nil
+	}
+	return len(atprotooauth.MissingScopes([]string{scope}, granted)) == 0, nil
 }
 
 func (q *Requester) authenticateOwnerSession(ctx context.Context) error {

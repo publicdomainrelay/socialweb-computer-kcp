@@ -117,6 +117,8 @@ const (
 	PendingActionSignInAgain PendingActionKind = "signInAgain"
 )
 
+const PendingActionReasonScopeUpgrade = "ScopeUpgrade"
+
 type MarketIdentityPendingAction struct {
 	Kind PendingActionKind `json:"kind"`
 
@@ -127,6 +129,12 @@ type MarketIdentityPendingAction struct {
 	Handle string `json:"handle,omitempty"`
 
 	ExpiresAt string `json:"expiresAt,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	Message string `json:"message,omitempty"`
+
+	MissingScopes []string `json:"missingScopes,omitempty"`
 }
 
 type MarketIdentityStatus struct {

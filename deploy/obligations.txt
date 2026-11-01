@@ -37,6 +37,8 @@ internal/controllers/vaultcertificate	controller.go:Controller.Reconcile	requeue
 internal/controllers/vaultcredential	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	reads KV metadata from OpenBao; no change stream, rotationDue is computed against the clock
 internal/marketidentity/atproto	oauth.go:Accounts.oauthBrowser	deadline	the pending authorization expiry	browser authorization expiry
 internal/marketidentity/atproto	oauth.go:Accounts.oauthBrowser	deadline	the pending authorization expiry	browser authorization expiry
+internal/marketidentity/atproto	oauth.go:Accounts.upgradeURL	deadline	the scope upgrade authorization expiry (browserPendingTTL 15m), only while a Ready session lacks an optional requested scope	scope upgrade sign-in url expiry
+internal/marketidentity/atproto	oauth.go:Accounts.upgradeURL	deadline	the scope upgrade authorization expiry (browserPendingTTL 15m), only while a Ready session lacks an optional requested scope	scope upgrade sign-in url expiry
 internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
 internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
 internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing

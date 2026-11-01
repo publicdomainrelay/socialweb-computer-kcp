@@ -59,6 +59,7 @@ type Proxy struct {
 var (
 	_ pds.Authenticator = (*Authenticator)(nil)
 	_ pds.ServiceAuth   = (*Authenticator)(nil)
+	_ pds.ScopeGrants   = (*Authenticator)(nil)
 )
 
 func NewOAuth() *Authenticator {
@@ -166,6 +167,17 @@ func (a *Authenticator) ServiceAuth(ctx context.Context, did, audience, lxm stri
 		return xrpc.GetServiceAuth(ctx, client, audience, lxm, expires)
 	}
 	return "", fmt.Errorf("%w for %s", ErrNotHeld, did)
+}
+
+func (a *Authenticator) GrantedScopes(did string) ([]string, bool) {
+	a.mu.Lock()
+	held, session := a.did, a.session
+	a.mu.Unlock()
+	if did != held || session == nil {
+		return nil, false
+	}
+	granted := session.Scopes()
+	return granted, len(granted) > 0
 }
 
 func (a *Authenticator) heldSession() (*oauthclient.Session, error) {

@@ -59,6 +59,7 @@ const (
 	RPCClusterDown       = "rpc:com.publicdomainrelay.temp.cluster.controlPlaneDown?aud=*"
 	RPCClusterDelete     = "rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*"
 	RPCAtircMint         = "rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc"
+	RPCAtircRevoke       = "rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc"
 )
 
 var (
@@ -75,7 +76,7 @@ var (
 		[]string{collectionScope(CollectionAssociationRequest, "create", "update", "delete")},
 		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
-		[]string{RPCAtircMint},
+		[]string{RPCAtircMint, RPCAtircRevoke},
 	)
 
 	BidderOAuthScope = dedupeScopes(
@@ -133,6 +134,18 @@ var (
 		K8sOAuthScope,
 	)
 )
+
+var OptionalScopes = []string{RPCAtircRevoke}
+
+func RequiredScopes(requested []string) []string {
+	out := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		if !slices.Contains(OptionalScopes, scope) {
+			out = append(out, scope)
+		}
+	}
+	return out
+}
 
 func ScopeString(scopes []string) string {
 	return strings.Join(scopes, " ")

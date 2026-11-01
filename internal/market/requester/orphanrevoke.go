@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -155,9 +156,17 @@ func (q *Requester) sweepOrphanRevokes() {
 	ref := q.atircMintedRef()
 	q.log.Info("requester_atirc_orphan_sweep", "index", ref.Mount+"/"+ref.Path)
 	for attempt := 1; ; attempt++ {
-		left, err := q.sweepOrphansOnce(stop)
-		if err == nil && left == 0 {
+		left, until, err := q.sweepOrphansOnce(stop)
+		if err == nil && left == 0 && until.IsZero() {
 			return
+		}
+		if err == nil && left == 0 {
+			q.log.Info("requester_atirc_orphan_sweep_unstamped", "until", until.UTC().Format(time.RFC3339))
+			if sleepCtx(stop, until.Sub(q.now())) != nil {
+				return
+			}
+			attempt = 0
+			continue
 		}
 		q.log.Warn("requester_atirc_orphan_sweep_retry", "attempt", attempt, "left", left, "err", fmt.Sprint(err))
 		if attempt >= orphanSweepAttempts || !sleepRetry(stop, attempt) {
@@ -171,27 +180,37 @@ func sleepRetry(stop context.Context, attempt int) bool {
 	return sleepCtx(stop, min(associationRetryFirst<<min(attempt-1, 10), associationRetryMax)) == nil
 }
 
-func (q *Requester) sweepOrphansOnce(stop context.Context) (int, error) {
+func (q *Requester) sweepOrphansOnce(stop context.Context) (int, time.Time, error) {
 	ctx, cancel := context.WithTimeout(stop, atircCallTimeout)
 	q.atircIndexMu.Lock()
 	_, _, entries, err := q.readAtircIndex(ctx)
 	q.atircIndexMu.Unlock()
 	cancel()
 	if err != nil {
-		return 1, fmt.Errorf("read the atirc minted index: %w", err)
+		return 1, time.Time{}, fmt.Errorf("read the atirc minted index: %w", err)
 	}
-	var done []atircIndexEntry
+	var (
+		done  []atircIndexEntry
+		until time.Time
+	)
 	left := 0
 	for _, entry := range entries {
 		if q.orphanOwnedByRunner(entry) {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(stop, 4*atircCallTimeout)
-		cleared, err := q.revokeOrphan(ctx, entry)
+		cleared, unstamped, err := q.revokeOrphan(ctx, entry)
 		cancel()
 		if (err != nil || !cleared) && entry.Exp > 0 && !q.now().Before(time.Unix(entry.Exp, 0)) {
 			q.log.Info("requester_atirc_orphan_expired", "contract", entry.Contract, "uid", entry.UID, "err", fmt.Sprint(err))
 			done = append(done, entry)
+			continue
+		}
+		if err == nil && !cleared && !unstamped.IsZero() {
+			q.log.Info("requester_atirc_orphan_unstamped", "contract", entry.Contract, "uid", entry.UID, "until", unstamped.UTC().Format(time.RFC3339))
+			if until.IsZero() || unstamped.Before(until) {
+				until = unstamped
+			}
 			continue
 		}
 		if err != nil || !cleared {
@@ -204,9 +223,9 @@ func (q *Requester) sweepOrphansOnce(stop context.Context) (int, error) {
 	ctx, cancel = context.WithTimeout(stop, atircCallTimeout)
 	defer cancel()
 	if err := q.dropIndexed(ctx, done); err != nil {
-		return left + len(done), fmt.Errorf("drop the cleared bundles from the atirc minted index: %w", err)
+		return left + len(done), until, fmt.Errorf("drop the cleared bundles from the atirc minted index: %w", err)
 	}
-	return left, nil
+	return left, until, nil
 }
 
 func (q *Requester) orphanOwnedByRunner(entry atircIndexEntry) bool {
@@ -221,7 +240,7 @@ func (q *Requester) orphanOwnedByRunner(entry atircIndexEntry) bool {
 	return state != v1alpha1.AtircRevokesDone && state != v1alpha1.AtircRevokesAbandoned
 }
 
-func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bool, error) {
+func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bool, time.Time, error) {
 	live, liveOK := q.contracts.Get(entry.Contract)
 	otherLive := liveOK && entry.UID != "" && string(live.UID) != entry.UID
 	mine := func(m atircMinted) bool {
@@ -232,7 +251,7 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 	r := newContractRunner(q, contract)
 	kv, err := q.deps.VaultWrite(ctx, entry.SecretsRef)
 	if err != nil {
-		return false, fmt.Errorf("the vault client of the bundle: %w", err)
+		return false, time.Time{}, fmt.Errorf("the vault client of the bundle: %w", err)
 	}
 	r.bundleMu.Lock()
 	data, err := kv.Read(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, 0)
@@ -240,52 +259,66 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 	switch {
 	case vaultPathGone(err):
 		q.log.Info("requester_atirc_orphan_cleared", "contract", entry.Contract, "uid", entry.UID, "reason", "the bundle is gone")
-		return true, nil
+		return true, time.Time{}, nil
 	case err != nil:
-		return false, fmt.Errorf("read the bundle: %w", err)
+		return false, time.Time{}, fmt.Errorf("read the bundle: %w", err)
 	case data == nil:
-		return false, fmt.Errorf("read the bundle: %w", errVaultNoData)
+		return false, time.Time{}, fmt.Errorf("read the bundle: %w", errVaultNoData)
 	}
 	minted, err := mintedOf(data)
 	if err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
 	revoked := 0
-	parent := r.revokeParent(ctx, contract)
+	by := r.revokers(ctx, contract)
 	var cleared []atircMinted
 	for _, m := range minted {
 		if !mine(m) || m.Revoked != 0 || !q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
-		result, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle)
+		result, err := r.revokeMinted(ctx, by, m.Token, m.Subhandle)
 		if err != nil {
 			r.markMintedRevoked(ctx, entry.SecretsRef, cleared)
-			return false, fmt.Errorf("revoke %s: %w", m.Subhandle, err)
+			return false, time.Time{}, fmt.Errorf("revoke %s: %w", m.Subhandle, err)
 		}
 		if result == atircRevokeServer {
 			cleared = append(cleared, m)
 		}
 		revoked++
 	}
+	stamped := func(m atircMinted) bool {
+		return m.Revoked != 0 || !q.now().Before(time.Unix(m.Exp, 0)) || slices.ContainsFunc(cleared, func(c atircMinted) bool {
+			return c.Token == m.Token && c.Subhandle == m.Subhandle
+		})
+	}
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	data, err = kv.Read(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, 0)
 	switch {
 	case vaultPathGone(err):
-		return true, nil
+		return true, time.Time{}, nil
 	case err != nil:
-		return false, fmt.Errorf("read the bundle again: %w", err)
+		return false, time.Time{}, fmt.Errorf("read the bundle again: %w", err)
 	case data == nil:
-		return false, fmt.Errorf("read the bundle again: %w", errVaultNoData)
+		return false, time.Time{}, fmt.Errorf("read the bundle again: %w", errVaultNoData)
 	}
 	current, err := mintedOf(data)
 	if err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
-	var kept []atircMinted
+	var (
+		kept      []atircMinted
+		unstamped time.Time
+	)
 	for _, m := range current {
-		if !mine(m) {
+		switch {
+		case !mine(m):
 			kept = append(kept, m)
+		case !stamped(m):
+			kept = append(kept, m)
+			if exp := time.Unix(m.Exp, 0); unstamped.IsZero() || exp.After(unstamped) {
+				unstamped = exp
+			}
 		}
 	}
 	next := make(map[string]any, len(data))
@@ -296,19 +329,22 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 	if len(kept) > 0 {
 		raw, err := json.Marshal(kept)
 		if err != nil {
-			return false, err
+			return false, time.Time{}, err
 		}
 		next[atircMintedKey] = string(raw)
 	}
-	if marker, err := markerIn(data); err == nil && marker != nil &&
+	if marker, err := markerIn(data); err == nil && marker != nil && unstamped.IsZero() &&
 		((entry.UID != "" && marker.UID == entry.UID) || (marker.UID == "" && !otherLive)) {
 		delete(next, atircReleaseKey)
 	}
 	if len(next) != len(data) || len(kept) != len(current) {
 		if err := kv.Write(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, next); err != nil {
-			return false, fmt.Errorf("clear the minted tokens: %w", err)
+			return false, time.Time{}, fmt.Errorf("clear the minted tokens: %w", err)
 		}
 	}
+	if !unstamped.IsZero() {
+		return false, unstamped, nil
+	}
 	q.log.Info("requester_atirc_orphan_cleared", "contract", entry.Contract, "uid", entry.UID, "revoked", revoked, "kept", len(kept))
-	return true, nil
+	return true, time.Time{}, nil
 }
