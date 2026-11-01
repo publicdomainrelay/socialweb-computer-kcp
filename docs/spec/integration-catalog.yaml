@@ -1616,7 +1616,7 @@ entries:
       A repeated decision still runs and is served from the verdict cache with the uncached verdict;
       another counterparty, another RFP or another policy body never hits; after a vouch is deleted
       and the trust cache invalidated the next decision denies; a deny stays a deny; a verdict older
-      than 30s is not served; a trust TTL of 2s expires a cached vouch.
+      than 30s is not served; a trust TTL of 10s serves a deleted vouch until it expires, then denies.
     cases:
       - "red on rc125: PT-5 full lane serves a stale allow after the vouch is gone"
     cleanup: none.

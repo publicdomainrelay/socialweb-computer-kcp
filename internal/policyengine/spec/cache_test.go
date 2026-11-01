@@ -9,7 +9,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 )
 
-const verdictTTL = 30 * time.Second
+const (
+	verdictTTL = 30 * time.Second
+	trustTTL   = 10 * time.Second
+)
 
 func TestEngineVerdictCache(t *testing.T) {
 	t.Parallel()
@@ -99,14 +102,14 @@ func TestEngineVerdictCache(t *testing.T) {
 		})
 		t.Run("cache/engine/"+workflow+"/scope/trust-ttl-expires", func(t *testing.T) {
 			t.Parallel()
-			h := policytest.NewWith(t, policytest.Options{TrustTTL: 2 * time.Second})
+			h := policytest.NewWith(t, policytest.Options{TrustTTL: trustTTL})
 			h.World.Vouch(p.Self, p.CP)
 			evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil).mustAllow(t)
 			h.World.Unvouch(p.Self, p.CP)
 			cached := evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil)
 			cached.mustRun(t, workflow)
 			cached.mustAllow(t)
-			time.Sleep(2500 * time.Millisecond)
+			time.Sleep(trustTTL + time.Second)
 			expired := evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil)
 			expired.mustRun(t, workflow)
 			expired.mustDeny(t, "")
