@@ -12,6 +12,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ipfs/go-cid"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
@@ -341,6 +342,9 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request, info
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid swapCommit")
 		return
 	}
+	if !requireScope(w, info, oauth.RepoScope(collection.String(), "create")) {
+		return
+	}
 	did, handle, err := s.writeRepo(ctx, info, req.Repo)
 	if err != nil {
 		s.writeRepoError(w, err)
@@ -398,6 +402,9 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request, info *a
 	swapRecord, err := parseCIDPtr(req.SwapRecord)
 	if err != nil {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid swapRecord")
+		return
+	}
+	if !requireScope(w, info, oauth.RepoScope(collection.String(), "create")) || !requireScope(w, info, oauth.RepoScope(collection.String(), "update")) {
 		return
 	}
 	did, handle, err := s.writeRepo(ctx, info, req.Repo)
@@ -463,6 +470,9 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request, info
 	swapRecord, err := parseCIDPtr(req.SwapRecord)
 	if err != nil {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid swapRecord")
+		return
+	}
+	if !requireScope(w, info, oauth.RepoScope(collection.String(), "delete")) {
 		return
 	}
 	_, handle, err := s.writeRepo(ctx, info, req.Repo)
@@ -571,6 +581,9 @@ func (s *Server) handleApplyWrites(w http.ResponseWriter, r *http.Request, info 
 		}
 		if action != repo.ActionDelete {
 			op.Record = recordType(write.Value, collection.String())
+		}
+		if !requireScope(w, info, oauth.RepoScope(collection.String(), string(kind))) {
+			return
 		}
 		writes = append(writes, op)
 		inputActions = append(inputActions, action)

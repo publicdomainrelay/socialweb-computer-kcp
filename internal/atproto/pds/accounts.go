@@ -374,8 +374,8 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request, info *
 
 func (s *Server) handleCreateAppPassword(w http.ResponseWriter, r *http.Request, info *authInfo) {
 	ctx := r.Context()
-	if info.AppPassword {
-		writeXRPCError(w, http.StatusForbidden, "Forbidden", "app passwords cannot manage app passwords")
+	if info.AppPassword || info.OAuth || info.Service {
+		writeXRPCError(w, http.StatusForbidden, "Forbidden", "only a password session can manage app passwords")
 		return
 	}
 	var req createAppPasswordRequest
@@ -430,8 +430,8 @@ func (s *Server) handleListAppPasswords(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleRevokeAppPassword(w http.ResponseWriter, r *http.Request, info *authInfo) {
 	ctx := r.Context()
-	if info.AppPassword {
-		writeXRPCError(w, http.StatusForbidden, "Forbidden", "app passwords cannot revoke app passwords")
+	if info.AppPassword || info.OAuth || info.Service {
+		writeXRPCError(w, http.StatusForbidden, "Forbidden", "only a password session can revoke app passwords")
 		return
 	}
 	var req revokeAppPasswordRequest
