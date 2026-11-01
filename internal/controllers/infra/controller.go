@@ -321,20 +321,28 @@ func requeueAt(v view, end infra.End, backoff bool) ctlruntime.Result {
 }
 
 func (r *reconciler[T]) noteUnresolved(req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, isUnresolved bool, reason string, err error) {
-	prior := meta.FindStatusCondition(v.status.Conditions, v1alpha1.InfraConditionRecordUnresolved)
 	if !isUnresolved {
-		if prior == nil {
+		err = nil
+	}
+	NoteUnresolved(r.c.log, v.status.Conditions, &status.Conditions, status.ObservedGeneration, reason, err,
+		"kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+}
+
+func NoteUnresolved(log *slog.Logger, prior []metav1.Condition, conditions *[]metav1.Condition, generation int64, reason string, err error, attrs ...any) {
+	held := meta.FindStatusCondition(prior, v1alpha1.InfraConditionRecordUnresolved)
+	if err == nil {
+		if held == nil {
 			return
 		}
-		meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraConditionRecordUnresolved)
-		if prior.Status == metav1.ConditionTrue {
-			r.c.log.Info("infra_record_resolved", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+		meta.RemoveStatusCondition(conditions, v1alpha1.InfraConditionRecordUnresolved)
+		if held.Status == metav1.ConditionTrue {
+			log.Info("infra_record_resolved", attrs...)
 		}
 		return
 	}
-	conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordUnresolved, true, reason, err.Error())
-	if prior == nil || prior.Status != metav1.ConditionTrue || prior.Reason != reason || prior.Message != err.Error() {
-		r.c.log.Info("infra_record_unresolved", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", err.Error())
+	conds.Set(conditions, generation, v1alpha1.InfraConditionRecordUnresolved, true, reason, err.Error())
+	if held == nil || held.Status != metav1.ConditionTrue || held.Reason != reason || held.Message != err.Error() {
+		log.Info("infra_record_unresolved", append(attrs, "reason", reason, "err", err.Error())...)
 	}
 }
 

@@ -83,10 +83,10 @@ type recordSync struct {
 func RepoRef(workspace string, ref commonv1.ObjectRef) (commonv1.ObjectRef, error) {
 	kind := strings.TrimSpace(ref.Kind)
 	if kind != "" && !strings.EqualFold(kind, RepoKind) {
-		return commonv1.ObjectRef{}, fmt.Errorf("infra: the repoRef must name an %s, not %s", RepoKind, kind)
+		return commonv1.ObjectRef{}, unresolved{reason: "RepoRefInvalid", err: fmt.Errorf("infra: the repoRef must name an %s, not %s", RepoKind, kind)}
 	}
 	if strings.TrimSpace(ref.Name) == "" {
-		return commonv1.ObjectRef{}, errors.New("infra: the repoRef names no AtprotoRepo")
+		return commonv1.ObjectRef{}, unresolved{reason: "RepoRefInvalid", err: errors.New("infra: the repoRef names no AtprotoRepo")}
 	}
 	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RepoKind, Name: strings.TrimSpace(ref.Name), Workspace: ref.InWorkspace(workspace)}, nil
 }
@@ -128,7 +128,7 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	nsid := v.kind.NSID()
 	repo, err := RepoRef(req.Workspace, b.RepoRef)
 	if err != nil {
-		return nil, unresolved{reason: "RepoRefInvalid", err: err}
+		return nil, err
 	}
 	r.c.bindRepo(string(v.kind), req, repo)
 	did, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, nsid)
