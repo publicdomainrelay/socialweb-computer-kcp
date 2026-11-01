@@ -204,6 +204,15 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	now := time.Now().UTC()
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Record: v.status.Record,
 		Conditions: slices.Clone(v.status.Conditions)}
+	var ephemeral *v1alpha1.EphemeralInfraStatus
+	var end infra.End
+	if v.ephemeral != nil {
+		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, now)
+		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
+		if end.Ended {
+			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
+		}
+	}
 	var rec *recordSync
 	var recordErr error
 	backoff := false
@@ -225,9 +234,11 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 				recordErr = nil
 			}
 			backoff = isUnresolved
-			if !Publishing(v.spec.Record) {
+			if !Publishing(v.spec.Record) && end.Ended {
+				recordErr = nil
+			} else if !Publishing(v.spec.Record) {
 				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-				return ctlruntime.Result{Backoff: backoff}, errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+				return requeueAt(v, end, backoff), errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)))
 			}
 		}
 	}
@@ -266,15 +277,6 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			}
 		}
 	}
-	var ephemeral *v1alpha1.EphemeralInfraStatus
-	var end infra.End
-	if v.ephemeral != nil {
-		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, now)
-		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
-		if end.Ended {
-			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
-		}
-	}
 	statuses, left, err := r.contracts(ctx, req, v, contracts, end.Ended)
 	if err != nil {
 		return ctlruntime.Result{}, err
@@ -308,10 +310,14 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		}
 		return ctlruntime.Result{Backoff: backoff}, nil
 	}
-	if v.ephemeral != nil {
-		return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second), Backoff: backoff}, nil
+	return requeueAt(v, end, backoff), nil
+}
+
+func requeueAt(v view, end infra.End, backoff bool) ctlruntime.Result {
+	if v.ephemeral == nil {
+		return ctlruntime.Result{Backoff: backoff}
 	}
-	return ctlruntime.Result{Backoff: backoff}, nil
+	return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second), Backoff: backoff}
 }
 
 func (r *reconciler[T]) noteUnresolved(req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, isUnresolved bool, reason string, err error) {
