@@ -405,7 +405,7 @@ func (r *contractRunner) postMint(ctx context.Context, bearer string, in atircMi
 	return token, nil
 }
 
-func (r *contractRunner) mintAtirc(ctx context.Context, issuer atircIssuer, in atircMintInput) (string, string, error) {
+func (r *contractRunner) mintAtirc(ctx context.Context, issuer atircIssuer, parent atircRevokeParent, in atircMintInput) (string, string, error) {
 	token, err := r.postMint(ctx, issuer.bearer, in)
 	if err != nil {
 		return "", "", err
@@ -414,7 +414,7 @@ func (r *contractRunner) mintAtirc(ctx context.Context, issuer atircIssuer, in a
 		return token, atircMintPlain, nil
 	}
 	refuse := func(cause error) (string, string, error) {
-		if _, revokeErr := r.revokeAtircSubhandle(ctx, token, in.Subhandle); revokeErr != nil {
+		if _, revokeErr := r.revokeMinted(ctx, parent, token, in.Subhandle); revokeErr != nil {
 			return "", "", &atircUnrevoked{token: token, subhandle: in.Subhandle,
 				err: fmt.Errorf("mint %s: %w; its revoke failed: %w", in.Subhandle, cause, revokeErr)}
 		}
@@ -496,7 +496,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		r.log().Warn("requester_atirc_index_failed", "subhandle", subhandle, "err", err.Error())
 		return "", fmt.Errorf("no token is minted while the atirc minted index cannot record %s: %w", subhandle, err)
 	}
-	token, reason, err := r.mintAtirc(ctx, issuer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease})
+	token, reason, err := r.mintAtirc(ctx, issuer, r.revokeParent(ctx, contract), atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease})
 	var unrevoked *atircUnrevoked
 	if errors.As(err, &unrevoked) {
 		r.recordUnrevoked(ctx, kv, ref, data, contract, path, exp, unrevoked)
@@ -918,6 +918,7 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 		return false
 	}
 	recorded, done := false, true
+	parent := r.revokeParent(ctx, contract)
 	for _, m := range minted {
 		if m.Path != path {
 			continue
@@ -926,7 +927,7 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 		if !r.q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
-		if _, err := r.revokeAtircSubhandle(ctx, m.Token, m.Subhandle); err != nil {
+		if _, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle); err != nil {
 			done = false
 		}
 	}
@@ -953,11 +954,15 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 	if exp, ok := atircTokenExp(token, env); ok && !r.q.now().Before(exp) {
 		return true
 	}
-	revoked, err := r.revokeAtircSubhandle(ctx, token, subhandle)
+	if !derived {
+		_, err := r.revokeMinted(ctx, parent, token, subhandle)
+		return err == nil
+	}
+	revoked, err := r.revokeAtircSubhandle(ctx, token, subhandle, false)
 	if err != nil {
 		return false
 	}
-	if !revoked && derived {
+	if !revoked {
 		r.q.log.Warn("requester_atirc_revoke_unconfirmed", "contract", r.name, "path", path, "subhandle", subhandle,
 			"reason", "a derived subhandle answered 401; the token stays pending until it expires")
 		return false
@@ -984,15 +989,71 @@ func (r *contractRunner) legacySubhandle(contract v1alpha1.ComputeContract, path
 	return atircChild(label, uriRKey(state.RFPURI), handle)
 }
 
-func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhandle string) (bool, error) {
+type atircRevokeParent func() (atircIssuer, bool)
+
+func (r *contractRunner) revokeParent(ctx context.Context, contract v1alpha1.ComputeContract) atircRevokeParent {
+	if r.q.cfg.Spec.AtircParentRef == nil {
+		return nil
+	}
+	var (
+		issuer atircIssuer
+		ok     bool
+		read   bool
+	)
+	return func() (atircIssuer, bool) {
+		if read {
+			return issuer, ok
+		}
+		read = true
+		found, err := r.atircIssuer(ctx, contract)
+		switch {
+		case err != nil:
+			r.log().Warn("requester_atirc_revoke_parent_unavailable", "err", err.Error())
+		case !r.q.now().Before(found.exp):
+			r.log().Warn("requester_atirc_revoke_parent_unavailable", "subhandle", found.base, "exp", found.exp.UTC().Format(time.RFC3339))
+		default:
+			issuer, ok = found, true
+		}
+		return issuer, ok
+	}
+}
+
+func atircBelow(subhandle, base string) bool {
+	return base != "" && strings.HasSuffix(strings.ToLower(subhandle), "."+base)
+}
+
+func (r *contractRunner) revokeMinted(ctx context.Context, parent atircRevokeParent, token, subhandle string) (bool, error) {
+	if parent != nil {
+		if issuer, ok := parent(); ok && atircBelow(subhandle, issuer.base) {
+			revoked, err := r.revokeAtircSubhandle(ctx, issuer.bearer, subhandle, true)
+			var xerr *atircError
+			if err == nil || !errors.As(err, &xerr) || (xerr.status != http.StatusUnauthorized && xerr.status != http.StatusForbidden) {
+				return revoked, err
+			}
+			r.log().Warn("requester_atirc_revoke_parent_refused", "subhandle", subhandle, "parent", issuer.base, "err", err.Error())
+		}
+	}
+	return r.revokeAtircSubhandle(ctx, token, subhandle, false)
+}
+
+func atircLeaseDead(e *atircError) bool {
+	return strings.Contains(strings.ToLower(e.name+" "+e.message), "lease is not alive")
+}
+
+func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, bearer, subhandle string, byParent bool) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
 	defer cancel()
 	var out struct {
 		RevokedAt int64 `json:"revokedAt"`
 	}
-	err := r.postAtirc(ctx, AtircRevokeNSID, token, atircRevokeInput{Subhandle: subhandle}, &out)
+	err := r.postAtirc(ctx, AtircRevokeNSID, bearer, atircRevokeInput{Subhandle: subhandle}, &out)
 	var xerr *atircError
 	switch {
+	case err != nil && byParent:
+		return false, err
+	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized && atircLeaseDead(xerr):
+		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "byLease", true)
+		return true, nil
 	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized:
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "already", true)
 		return false, nil
@@ -1000,7 +1061,7 @@ func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhan
 		r.log().Warn("requester_atirc_revoke_failed", "subhandle", subhandle, "step", "revoke", "err", err.Error())
 		return false, err
 	}
-	r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "revokedAt", time.Unix(out.RevokedAt, 0).UTC().Format(time.RFC3339))
+	r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "byParent", byParent, "revokedAt", time.Unix(out.RevokedAt, 0).UTC().Format(time.RFC3339))
 	return true, nil
 }
 
