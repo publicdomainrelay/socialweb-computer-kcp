@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,7 +22,13 @@ const (
 	sessionAtircLabel = "ssh"
 
 	sessionAtircBinaryWaitSec = 180
+
+	sessionAgentCommand = "atirc agent run"
+
+	maxAtircSubhandle = 253
 )
+
+var atircSubhandleLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type sessionAtirc struct {
 	token string
@@ -35,6 +42,33 @@ func sessionWantsAtirc(command string, lc map[string]string) bool {
 	}
 	fields := strings.Fields(command)
 	return len(fields) > 0 && fields[0] == "atirc"
+}
+
+func sessionAgentRun(command string) (string, bool) {
+	fields := strings.Fields(command)
+	if len(fields) != 4 || fields[0] != "atirc" || fields[1] != "agent" || fields[2] != "run" {
+		return "", false
+	}
+	return fields[3], true
+}
+
+func agentSubhandle(sub, handle string) (string, error) {
+	handle = strings.ToLower(strings.TrimSpace(handle))
+	if handle == "" {
+		return "", errors.New("the requester identity has no handle")
+	}
+	value := strings.ToLower(sub)
+	if value != handle && !strings.HasSuffix(value, "."+handle) {
+		value += "." + handle
+	}
+	bad := len(value) > maxAtircSubhandle
+	for _, label := range strings.Split(value, ".") {
+		bad = bad || !atircSubhandleLabel.MatchString(label)
+	}
+	if bad {
+		return "", fmt.Errorf("%q is not a subhandle atirc takes; use DNS labels of letters, digits and '-' below %s", sub, handle)
+	}
+	return value, nil
 }
 
 func sessionAtircUserData(userData string) (string, error) {
@@ -57,7 +91,7 @@ func (q *Requester) sessionAtircLifetime() time.Duration {
 	return AtircTokenLifetime
 }
 
-func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeClaimContract) (*sessionAtirc, error) {
+func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeClaimContract, agent string) (*sessionAtirc, error) {
 	lease, err := contractLease(state, nil)
 	if err != nil {
 		return nil, err
@@ -66,7 +100,10 @@ func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeCl
 	if err != nil {
 		return nil, err
 	}
-	subhandle := atircChild(sessionAtircLabel, uriRKey(state.RFPURI), issuer.base)
+	subhandle := agent
+	if subhandle == "" {
+		subhandle = atircChild(sessionAtircLabel, uriRKey(state.RFPURI), issuer.base)
+	}
 	if subhandle == "" {
 		return nil, fmt.Errorf("%q and %q make no subhandle", issuer.base, state.RFPURI)
 	}
@@ -95,18 +132,23 @@ func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeCl
 	return minted, nil
 }
 
-func (q *Requester) sessionAtirc(ctx context.Context, account sshtransport.AuthorizedAccount, want bool, state *v1alpha1.NodeClaimContract, io sshtransport.CommandIO) *sessionAtirc {
+func (q *Requester) sessionAtirc(ctx context.Context, account sshtransport.AuthorizedAccount, want bool, agent string, state *v1alpha1.NodeClaimContract, io sshtransport.CommandIO) (*sessionAtirc, error) {
 	if !want {
-		return nil
+		return nil, nil
 	}
-	minted, err := q.mintSessionAtirc(ctx, state)
-	if err != nil {
+	minted, err := q.mintSessionAtirc(ctx, state, agent)
+	switch {
+	case err != nil && agent != "":
+		q.log.Warn("requester_session_atirc_mint_failed", "did", account.DID, "subhandle", agent, "err", err.Error())
+		_ = io.WriteErr([]byte("atirc agent run: no token for " + agent + ": " + err.Error() + "\n"))
+		return nil, err
+	case err != nil:
 		q.log.Warn("requester_session_atirc_mint_failed", "did", account.DID, "err", err.Error())
 		_ = io.WriteErr([]byte("atirc: this session runs without an atirc token: " + err.Error() + "\n"))
-		return nil
+		return nil, nil
 	}
-	q.log.Info("requester_session_atirc_minted", "did", account.DID, "subhandle", minted.subhandle)
-	return minted
+	q.log.Info("requester_session_atirc_minted", "did", account.DID, "subhandle", minted.subhandle, "agent", agent != "")
+	return minted, nil
 }
 
 func (m *sessionAtirc) env() map[string]string {
