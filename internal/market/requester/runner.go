@@ -362,6 +362,13 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		return fmt.Errorf("policy %q names no bundled workflow", policyName)
 	}
 	if state.Policy != nil && state.Policy.URI != "" {
+		attached, err := q.attachedPolicyWorkflow(ctx, *state.Policy)
+		if err != nil {
+			return err
+		}
+		if attached != policyWorkflow {
+			return fmt.Errorf("the contract names policy %s but its RFP attaches %s at %s", policyWorkflow, attached, state.Policy.URI)
+		}
 		policyRef = &market.StrongRef{Type: market.StrongRefNSID, URI: state.Policy.URI, CID: state.Policy.CID}
 	} else {
 		policyRecord := BuildPolicyRecord(policyName, policyWorkflow, workflowText, q.marketDID, policyArgs, q.nowISO())

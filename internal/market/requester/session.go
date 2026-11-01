@@ -674,6 +674,7 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
 	byURI := map[string]BidRecord{}
+	full := map[string]bool{}
 	bidderByDID := map[string]Bidder{}
 	for _, bidder := range bidders {
 		if _, ok := bidderByDID[bidder.DID]; !ok {
@@ -684,7 +685,7 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 		for _, bid := range q.bids.take(rfp.URI) {
 			byURI[bid.URI] = bid
 		}
-		if best := q.sessionBestBid(ctx, rfp, byURI, workflow); best != nil {
+		if best := q.sessionBestBid(ctx, rfp, byURI, workflow, full); best != nil {
 			if bidder, ok := bidderByDID[best.DID]; ok {
 				return best, bidder, true
 			}
@@ -714,38 +715,55 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 	return nil, Bidder{}, errors.New("every bid was denied by policy")
 }
 
-func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord, bids map[string]BidRecord, workflow string) *BidRecord {
-	var best *BidRecord
-	for _, bid := range bids {
-		candidate := bid
-		if err := q.classifyBid(ctx, &candidate); err != nil {
-			continue
-		}
-		if !q.bidAllowedWithPolicy(ctx, candidate, workflow) {
-			continue
-		}
-		switch {
-		case best == nil:
-			best = &candidate
-		case best.Free:
-		case candidate.Free:
-			best = &candidate
-		case candidate.Cost < best.Cost:
-			best = &candidate
-		}
+func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord, bids map[string]BidRecord, workflow string, full map[string]bool) *BidRecord {
+	fullKey := func(bid BidRecord) string {
+		return strings.Join([]string{bid.URI, bid.CID, workflow, rfp.URI, rfp.CID}, "|")
 	}
-	if best != nil {
-		decision := q.policy.Evaluate(ctx, PolicyInput{
-			Workflow:         workflow,
-			SelfDid:          q.marketDID,
-			SubjectDid:       best.DID,
-			CounterpartyDid:  best.DID,
-			RootRequesterDid: q.marketDID,
-			RFP:              &PolicyRef{URI: rfp.URI, CID: rfp.CID},
-			Bid:              &PolicyRef{URI: best.URI, CID: best.CID},
-		})
-		if !decision.Allow {
+	var best *BidRecord
+	for {
+		best = nil
+		for _, bid := range bids {
+			candidate := bid
+			if err := q.classifyBid(ctx, &candidate); err != nil {
+				continue
+			}
+			if allowed, done := full[fullKey(candidate)]; done && !allowed {
+				continue
+			}
+			if !q.bidAllowedWithPolicy(ctx, candidate, workflow) {
+				continue
+			}
+			switch {
+			case best == nil:
+				best = &candidate
+			case best.Free:
+			case candidate.Free:
+				best = &candidate
+			case candidate.Cost < best.Cost:
+				best = &candidate
+			}
+		}
+		if best == nil {
 			return nil
+		}
+		key := fullKey(*best)
+		if _, done := full[key]; !done {
+			decision := q.policy.Evaluate(ctx, PolicyInput{
+				Workflow:         workflow,
+				SelfDid:          q.marketDID,
+				SubjectDid:       best.DID,
+				CounterpartyDid:  best.DID,
+				RootRequesterDid: q.marketDID,
+				RFP:              &PolicyRef{URI: rfp.URI, CID: rfp.CID},
+				Bid:              &PolicyRef{URI: best.URI, CID: best.CID},
+			})
+			full[key] = decision.Allow
+			if !decision.Allow {
+				q.log.Info("requester_bid_policy_denied", "bidder", best.DID, "bid", best.URI, "mode", participant.PolicyModeFull, "reason", decision.Reason)
+			}
+		}
+		if full[key] {
+			break
 		}
 	}
 	return best

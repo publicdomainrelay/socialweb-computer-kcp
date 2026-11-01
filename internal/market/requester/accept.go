@@ -321,10 +321,6 @@ func (q *Requester) classifyBid(ctx context.Context, bid *BidRecord) error {
 
 func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, workflow string) bool {
 	workflow = q.policy.WorkflowFor(workflow)
-	key := bid.DID + "|" + workflow
-	if decision, ok := q.scopeCache.Get(key); ok {
-		return decision.Allow
-	}
 	self := q.marketDID
 	if operator := strings.TrimSpace(q.cfg.Spec.OperatorDID); operator != "" {
 		self = operator
@@ -336,8 +332,14 @@ func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, wor
 		CounterpartyDid:  bid.DID,
 		RootRequesterDid: self,
 	}
+	rfpURI, rfpCID := "", ""
 	if rfp, _ := bid.Record["rfp"].(map[string]any); rfp != nil {
-		input.RFP = &PolicyRef{URI: stringOf(rfp["uri"]), CID: stringOf(rfp["cid"])}
+		rfpURI, rfpCID = stringOf(rfp["uri"]), stringOf(rfp["cid"])
+		input.RFP = &PolicyRef{URI: rfpURI, CID: rfpCID}
+	}
+	key := strings.Join([]string{bid.DID, workflow, rfpURI, rfpCID}, "|")
+	if decision, ok := q.scopeCache.Get(key); ok {
+		return decision.Allow
 	}
 	decision := q.policy.Scope(ctx, input)
 	q.scopeCache.Set(key, decision)

@@ -353,9 +353,13 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   and runs only when set explicitly, never on prod. The acceptance requester alice must be vouched by
   the bidder operators bob and john (`sh.tangled.graph.vouch`, docs/acceptance/0001-auth-modes.md).
 - A market policy always runs, on both sides and in both lanes. No policy named means the default
-  (`requester-tangled-vouch` on a requester, every contract and RFP carries it; `bidder-tangled-vouch`
-  on a bidder, whose full lane runs it when an RFP attaches none). Free winners get the full run too.
-  A missing evaluator, run client or engine denies. `open` runs the open workflow; it never skips.
+  (`requester-tangled-vouch` on a requester, every contract and RFP carries it, owner-session mode
+  included; `bidder-tangled-vouch` on a bidder). The bidder's full lane runs its own workflow and then
+  every policy the RFP attaches, and allows only if all allow; a stored bid verdict never skips it.
+  The requester gate runs the workflow of the attached policy record and refuses a contract whose
+  spec.policy names another. Free winners get the full run too. A missing evaluator, run client or
+  engine, or an `allow` output that is not a strict boolean, denies. `open` runs the open workflow
+  only when named; it never skips.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify

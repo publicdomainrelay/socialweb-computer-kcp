@@ -350,7 +350,6 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 		}
 		cfg.OwnerSessions = owners
 		cfg.DID, cfg.Handle, cfg.RepoDID, cfg.MarketDID = did, handle, did, did
-		cfg.PolicyWorkflow = "open"
 		cfg.PDSURL = session.Service
 		cfg.IdentityMode = IdentityModeCallback
 		cfg.LocalSigner = false
