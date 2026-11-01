@@ -218,13 +218,14 @@ association, upgrade and the foreground form (`run bidder --host-backend proc --
 
 | item | state |
 | --- | --- |
-| a node of a `--with-gateway` tenant cluster from a remote bidder: the node cannot fetch meshd (its download base is the local Exposure `http://192.0.2.1:<port>`, which only a bidder on the same host reaches) | fix in progress |
+| `install requester`: `run requester ssh` as the installed account does not answer; the sign-in URL is not in the account's journal (read `status.pendingAction.url` of MarketIdentity `requester`) | fix in progress |
 | an atirc agent from a local PDS or a `pdsAccount` identity | built, not yet proven against irc.fedfork.com |
 
 ## Docs
 
 | doc | what |
 | --- | --- |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | what is supported today and how far each item is proven |
 | [`docs/quickstart-local.md`](docs/quickstart-local.md), [`docs/quickstart-prod.md`](docs/quickstart-prod.md) | the two quick starts in full |
 | [`docs/acceptance/`](docs/acceptance/) | runbooks: [0012](docs/acceptance/0012-infra-quickstart.md) the infra quick start, [0013](docs/acceptance/0013-mixed-prod.md) mixed prod, auth modes, ssh gateway, atirc agent, ... |
 | [`docs/protocol/README.md`](docs/protocol/README.md) | the atproto lexicons and the end-to-end sequence |

@@ -199,7 +199,7 @@ kill -INT %1                                              # Ctrl-C: stops the kc
   installed unit form). A second `run requester` on the same name is refused while the first holds `<dir>/owner.lock`
 - restart: the same command (or the same command with nothing after `--`) adopts the units and keeps the DID, the vault
   and every contract; a Held contract stays Held across the restart and ssh works again (the A-RUN-REQUESTER
-  reading below; on main 6497fe61 a restart failed Held contracts: Not Supported below). `<dir>/requester.json` records
+  reading below; fixed in rc158, proven on prod in acceptance 0013 A). `<dir>/requester.json` records
   the first start's network, `--identity` and options; a restart with other options is refused (start a new name)
 - `run requester env <name>` prints `KUBECONFIG`, `SOCIALWEB_KCP_HOST`, `SOCIALWEB_KCP_WORKSPACE`, the DID and the ssh public
   key path from the ready file (`--json`); `run requester ssh <name> --contract <cc>` is the `run request ssh` code over
@@ -400,7 +400,8 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
   `cmd/socialweb-node` differs from a published commit has pins the bucket does not hold. Proven on a local network
   (2026-11-01): with the flag the node contract's `nodeJoin` names the bucket and the pins of the released tree, the
   node's bootstrap reached `<bucket>/downloads/<sha256>/socialweb-node-x86_64` (HTTP 404 until CI publishes it), and a
-  guest fetched a published object from the bucket and matched its manifest sha256
+  guest fetched a published object from the bucket and matched its manifest sha256. Proven on prod (rc159, acceptance
+  0013 C): the node of cluster `c1` on hat-7 (a remote bidder) fetched both from the bucket and joined; the pod ran
 - the node reaches the k3s API and the cluster OpenBao over iroh: each is a dumbpipe `listen-tcp` HostProcess of the
   requester's core whose ticket names the public n0 relay and the host's addresses, so a node on any host dials it
   through the relay when no direct path opens (a guest cannot reach its own bidder host's addresses through the fence,
@@ -411,8 +412,7 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
 
 | gap | where it is planned |
 |---|---|
-| a node of your own tenant cluster from a remote prod bidder, until CI has published `downloads/<sha256>/` for the requester's binary (a main or tag build after this change) | the lead's push and prod run |
+| `run requester ssh` from an `install requester` account (does not answer within 1m), and the sign-in URL in that account's journal (read `status.pendingAction.url` of MarketIdentity `requester` with the instance kubeconfig meanwhile) | fix in progress (acceptance 0013 B) |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |
-| a Held contract across a `run requester` restart: main 6497fe61 fails it at once (`the held contract is not resumed: ... the policy engine is not running`), and an `endWhen: Complete` EphemeralInfra then releases the rest | a fix in `internal/market/requester/runner.go` (`resumeReceipt`); acceptance [0013](acceptance/0013-mixed-prod.md) Local Readings |
