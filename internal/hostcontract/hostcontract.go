@@ -19,18 +19,19 @@ import (
 type Role string
 
 const (
-	RoleGateway Role = "gateway"
-	RoleBidder  Role = "bidder"
+	RoleGateway   Role = "gateway"
+	RoleBidder    Role = "bidder"
+	RoleRequester Role = "requester"
 )
 
 const StagedRootEnv = "SOCIALWEB_STAGED_ROOT"
 
 func ParseRole(s string) (Role, error) {
 	switch Role(s) {
-	case RoleGateway, RoleBidder:
+	case RoleGateway, RoleBidder, RoleRequester:
 		return Role(s), nil
 	}
-	return "", fmt.Errorf("hostcontract: role %q: want %s or %s", s, RoleGateway, RoleBidder)
+	return "", fmt.Errorf("hostcontract: role %q: want %s, %s or %s", s, RoleGateway, RoleBidder, RoleRequester)
 }
 
 type Status string

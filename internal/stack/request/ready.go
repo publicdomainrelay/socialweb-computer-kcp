@@ -16,13 +16,14 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
 const (
-	RequestersDir      = "requesters"
-	ReadyFile          = "ready.json"
-	RequesterFile      = "requester.json"
+	RequestersDir      = bootstrap.RequestersDir
+	ReadyFile          = bootstrap.RequesterReadyFile
+	RequesterFile      = bootstrap.RequesterRecordFile
 	KubeconfigFile     = "kubeconfig"
 	ReadySchema        = 1
 	RequesterSchema    = 1

@@ -23,6 +23,14 @@ func BootstrapApps(role hostcontract.Role, prefix string, handles []string) []ta
 		return []table.App{g}
 	}
 	var out []table.App
+	if role == hostcontract.RoleRequester {
+		for _, n := range handles {
+			r := table.Requester(n, RequesterKey(n))
+			r.Prefix = prefix
+			out = append(out, r)
+		}
+		return out
+	}
 	for _, h := range handles {
 		b := table.Bidder(h, HandleID(h))
 		b.Prefix = prefix
@@ -50,7 +58,7 @@ func (in *installer) bootstrapFiles(dir string) ([]string, bool, error) {
 	changed := false
 	uid, gid := in.acct.UID, in.acct.GID
 	front := in.configString("kcp-front-address")
-	for _, a := range BootstrapApps(in.o.Role, in.o.UnitPrefix, in.o.Handles) {
+	for _, a := range BootstrapApps(in.o.Role, in.o.UnitPrefix, in.instances()) {
 		p := bootstrap.InstallParams(a, in.o.StateDir)
 		frontURL := ""
 		if front != "" && a.Role == table.RoleGateway {
@@ -117,7 +125,7 @@ func (in *installer) configString(key string) string {
 }
 
 func (in *installer) enableBootstrap(ctx context.Context, um UserManager) error {
-	units, err := BootableUnits(in.o.Role, in.o.UnitPrefix, in.o.Handles)
+	units, err := BootableUnits(in.o.Role, in.o.UnitPrefix, in.instances())
 	if err != nil || len(units) == 0 {
 		return err
 	}

@@ -44,6 +44,7 @@ var templates embed.FS
 const (
 	AccountGateway       = "socialweb"
 	AccountBidder        = "swc-bidder"
+	AccountRequester     = "swc-requester"
 	BidderProfile        = "prod-qr"
 	StateRoot            = "/var/lib/socialweb-computer"
 	DefaultVMSlots       = 256
@@ -52,6 +53,7 @@ const (
 	CoreName             = "socialweb-computer"
 	GatewayUnit          = hostsvc.NamePrefix + table.GatewayCore
 	BidderTemplate       = hostsvc.NamePrefix + table.BidderCore + hostsvc.ServiceSuffix
+	RequesterTemplate    = hostsvc.NamePrefix + table.RequesterCore + hostsvc.ServiceSuffix
 	SliceUnit            = "socialweb.slice"
 	DropInName           = "socialweb-delegate.conf"
 	AppArmorPath         = "/etc/apparmor.d/" + hostcontract.AppArmorProfileName
@@ -68,6 +70,7 @@ const (
 	MinImageBudget       = 30 * time.Second
 	StartEndedGrace      = 6 * time.Second
 	BidderStartGrace     = 6 * time.Minute
+	RequesterStartGrace  = time.Hour
 	StartJobGrace        = time.Minute
 	AppArmorLoaded       = "/sys/kernel/security/apparmor/profiles"
 	UserUnitDir          = ".config/systemd/user"
@@ -88,6 +91,7 @@ var (
 	handleRE             = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 	accountRE            = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,30}$`)
 	stateRE              = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
+	requesterNameRE      = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$`)
 )
 
 type Account struct {
@@ -127,6 +131,8 @@ type System interface {
 type Options struct {
 	Role                   hostcontract.Role
 	Handles                []string
+	Names                  []string
+	RequesterRecords       map[string][]byte
 	Account                string
 	StateDir               string
 	Binary                 string
@@ -185,8 +191,11 @@ type Report struct {
 }
 
 func DefaultAccount(role hostcontract.Role) string {
-	if role == hostcontract.RoleBidder {
+	switch role {
+	case hostcontract.RoleBidder:
 		return AccountBidder
+	case hostcontract.RoleRequester:
+		return AccountRequester
 	}
 	return AccountGateway
 }
@@ -210,13 +219,35 @@ func BidderLayout(state, prefix, handle string) devinstance.Layout {
 		KineDir: filepath.Join(kcp, "kine-a"), KcpRoot: filepath.Join(kcp, "slot-a"), Prefix: prefix}
 }
 
+func RequesterKey(name string) string { return "req-" + HandleID(name) }
+
+func RequesterLayout(state, prefix, name string) devinstance.Layout {
+	key := RequesterKey(name)
+	dir := bootstrap.RequesterInstanceDir(state, name)
+	kcp := filepath.Join(dir, "kcp")
+	run := filepath.Join(kcp, "run")
+	return devinstance.Layout{ID: "requester-" + HandleID(name), Short: key, StateDir: dir, RuntimeDir: run,
+		Socket: filepath.Join(run, "sup.sock"), SupState: filepath.Join(dir, "sup"),
+		Record: filepath.Join(dir, "instance.json"), CoreRecord: filepath.Join(dir, "core.json"),
+		Lock: filepath.Join(kcp, "instance.lock"), CoreLock: filepath.Join(kcp, "core.lock"), Logs: filepath.Join(dir, "logs"),
+		KineDir: filepath.Join(kcp, "kine-a"), KcpRoot: filepath.Join(kcp, "slot-a"), Prefix: prefix}
+}
+
+func RequesterReadyFile(state, name string) string {
+	return filepath.Join(state, bootstrap.RequestersDir, name, bootstrap.RequesterReadyFile)
+}
+
 func CoreUnits(role hostcontract.Role, prefix string, handles []string) []string {
 	if role == hostcontract.RoleGateway {
 		return []string{table.CoreTemplate(prefix, table.RoleGateway)}
 	}
+	core := table.BidderCore
+	if role == hostcontract.RoleRequester {
+		core = table.RequesterCore
+	}
 	out := make([]string, 0, len(handles))
 	for _, h := range handles {
-		out = append(out, prefixOr(prefix)+table.BidderCore+h+hostsvc.ServiceSuffix)
+		out = append(out, prefixOr(prefix)+core+h+hostsvc.ServiceSuffix)
 	}
 	sort.Strings(out)
 	return out
@@ -464,10 +495,28 @@ func validate(o *Options) error {
 			return fmt.Errorf("install: unit-prefix %q must end in -", o.UnitPrefix)
 		}
 	}
+	if o.Role != hostcontract.RoleRequester && len(o.Names) > 0 {
+		return fmt.Errorf("install %s takes no --name", o.Role)
+	}
 	switch o.Role {
 	case hostcontract.RoleGateway:
 		if len(o.Handles) > 0 {
 			return fmt.Errorf("install gateway takes no --handle")
+		}
+	case hostcontract.RoleRequester:
+		if len(o.Handles) > 0 {
+			return fmt.Errorf("install requester takes no --handle; --name names each requester instance")
+		}
+		if len(o.Names) == 0 {
+			return fmt.Errorf("install requester needs at least one --name (the requester instance, run requester --name)")
+		}
+		for _, n := range o.Names {
+			if !requesterNameRE.MatchString(n) {
+				return fmt.Errorf("install: requester name %q is not a DNS label of at most 32 characters", n)
+			}
+			if len(o.RequesterRecords[n]) == 0 {
+				return fmt.Errorf("install: requester %s has no requester record to write", n)
+			}
 		}
 	case hostcontract.RoleBidder:
 		if len(o.Handles) == 0 {
@@ -510,7 +559,7 @@ func Install(ctx context.Context, o Options, sys System) (Report, error) {
 		return rep, fmt.Errorf("%w: %w", ErrUsage, err)
 	}
 	steps := []func() error{in.account, in.subids, in.kvm, in.delegation, in.apparmor, in.nodePassword, in.stateLayout,
-		in.guestImage, in.unitFiles, in.linger, in.enable, in.bringUp, in.checkHost}
+		in.guestImage, in.unitFiles, in.requesterRecords, in.linger, in.enable, in.bringUp, in.checkHost}
 	for _, s := range steps {
 		if err := s(); err != nil {
 			return rep, err
@@ -721,8 +770,11 @@ func StartTimeoutFor(readyBudget time.Duration) time.Duration {
 func RenderUnits(role hostcontract.Role, state, prefix string, startTimeout time.Duration) (map[string][]byte, error) {
 	out := map[string][]byte{}
 	core, tmpl := table.CoreTemplate(prefix, table.RoleGateway), GatewayUnit
-	if role == hostcontract.RoleBidder {
+	switch role {
+	case hostcontract.RoleBidder:
 		core, tmpl = table.CoreTemplate(prefix, table.RoleBidder), BidderTemplate
+	case hostcontract.RoleRequester:
+		core, tmpl = table.CoreTemplate(prefix, table.RoleRequester), RequesterTemplate
 	}
 	data := unitData{State: state, StartTimeout: strconv.Itoa(int(startTimeout.Seconds())) + "s"}
 	for name, src := range map[string]string{SliceUnit: SliceUnit, core: tmpl} {
@@ -986,7 +1038,70 @@ func (in *installer) config() error {
 	return nil
 }
 
+func (in *installer) instances() []string {
+	if in.o.Role == hostcontract.RoleRequester {
+		return in.o.Names
+	}
+	return in.o.Handles
+}
+
+func (in *installer) requesterRecords() error {
+	if in.o.Role != hostcontract.RoleRequester {
+		return nil
+	}
+	uid, gid := in.acct.UID, in.acct.GID
+	var created, found []string
+	for _, n := range in.o.Names {
+		dir := filepath.Join(in.o.StateDir, bootstrap.RequestersDir, n)
+		for _, d := range []string{filepath.Dir(dir), dir} {
+			if err := in.ensureDir(d, 0o700, uid, gid, false); err != nil {
+				return err
+			}
+		}
+		p := filepath.Join(dir, bootstrap.RequesterRecordFile)
+		if _, err := os.Stat(in.path(p)); err == nil {
+			found = append(found, p)
+			continue
+		}
+		if _, err := in.ensureFile(p, in.o.RequesterRecords[n], 0o600, uid, gid); err != nil {
+			return err
+		}
+		created = append(created, p)
+	}
+	switch {
+	case len(created) > 0:
+		in.step(StepRequesterRecord, OutcomeCreated, strings.Join(created, " "))
+	default:
+		in.step(StepRequesterRecord, OutcomeFound, strings.Join(found, " ")+" (kept: the requester's first start options)")
+	}
+	return nil
+}
+
+func (in *installer) requesterBringUp() error {
+	files := make([]string, 0, len(in.o.Names))
+	for _, n := range in.o.Names {
+		files = append(files, RequesterReadyFile(in.o.StateDir, n))
+	}
+	if in.o.DryRun {
+		in.step(StepBringUp, OutcomeCreated, "would check "+strings.Join(files, ", "))
+		in.printf("would check the ready file %s\n", strings.Join(files, ", "))
+		return nil
+	}
+	for _, f := range files {
+		if st, err := os.Stat(in.path(f)); err != nil || st.Size() == 0 {
+			in.step(StepBringUp, OutcomeRefused, f+" is not written")
+			return fmt.Errorf("install: %s is not written although its unit is active (the unit sends READY only after it); read %s", f,
+				journalHint(in.o.Account, in.acct.UID, CoreUnits(in.o.Role, in.o.UnitPrefix, in.o.Names)...))
+		}
+	}
+	in.step(StepBringUp, OutcomeFound, strings.Join(files, ", "))
+	return nil
+}
+
 func (in *installer) bringUp() error {
+	if in.o.Role == hostcontract.RoleRequester {
+		return in.requesterBringUp()
+	}
 	if in.o.Role != hostcontract.RoleBidder {
 		in.step(StepBringUp, OutcomeNotNeeded, "the gateway answers for itself")
 		return nil
@@ -1186,8 +1301,15 @@ func journalHint(account string, uid int, units ...string) string {
 	return fmt.Sprintf("runuser -u %s -- env XDG_RUNTIME_DIR=/run/user/%d journalctl --user %s", account, uid, strings.Join(flags, " "))
 }
 
+func (in *installer) startTimeout() time.Duration {
+	if in.o.Role == hostcontract.RoleRequester {
+		return in.readyBudget() + RequesterStartGrace
+	}
+	return StartTimeoutFor(in.readyBudget())
+}
+
 func (in *installer) startBudget() time.Duration {
-	return StartTimeoutFor(in.readyBudget()) + StartJobGrace
+	return in.startTimeout() + StartJobGrace
 }
 
 func storeVerifies(store guestimage.Store, pin guestimage.Pin) bool {
@@ -1211,6 +1333,10 @@ func (in *installer) storedSetting(key string) string {
 }
 
 func (in *installer) guestImage() error {
+	if in.o.Role == hostcontract.RoleRequester {
+		in.step(StepGuestImage, OutcomeNotNeeded, "the requester runs no guest")
+		return nil
+	}
 	if in.o.Role != hostcontract.RoleBidder {
 		in.step(StepGuestImage, OutcomeNotNeeded, "the gateway runs no guest")
 		return nil
@@ -1350,7 +1476,7 @@ func removeImageTree(root, dir string) error {
 }
 
 func (in *installer) unitFiles() error {
-	units, err := RenderUnits(in.o.Role, in.o.StateDir, in.o.UnitPrefix, StartTimeoutFor(in.readyBudget()))
+	units, err := RenderUnits(in.o.Role, in.o.StateDir, in.o.UnitPrefix, in.startTimeout())
 	if err != nil {
 		return err
 	}
@@ -1435,7 +1561,7 @@ func (in *installer) linger() error {
 }
 
 func (in *installer) enable() error {
-	units := CoreUnits(in.o.Role, in.o.UnitPrefix, in.o.Handles)
+	units := CoreUnits(in.o.Role, in.o.UnitPrefix, in.instances())
 	if in.o.DryRun && !in.known {
 		for _, u := range units {
 			in.rep.Changes = append(in.rep.Changes, "enable --now "+u)
@@ -1481,6 +1607,7 @@ func (in *installer) enable() error {
 		}
 	}
 	in.rec.addHandles(in.o.Handles)
+	in.rec.addNames(in.o.Names)
 	if err := in.saveRecord(); err != nil {
 		return err
 	}
@@ -1493,6 +1620,10 @@ func (in *installer) enable() error {
 	}
 	if err := in.enableBootstrap(actx, um); err != nil {
 		return err
+	}
+	if in.o.Role == hostcontract.RoleRequester && len(todo)+len(restart) > 0 {
+		in.printf("a requester unit is active only after its sign-in and its ready file; the sign-in step (a QR or browser URL) is in %s\n",
+			journalHint(in.o.Account, in.acct.UID, units...)+" -f")
 	}
 	for _, u := range todo {
 		sctx, cancel := context.WithTimeout(in.ctx, in.startBudget())

@@ -110,7 +110,7 @@ func (u *uninstaller) stopUnits(units []hostsvc.UnitStatus, um UserManager) erro
 	if um == nil {
 		return nil
 	}
-	core := CoreUnits(u.rec.Role, u.rec.UnitPrefix, u.rec.Handles)
+	core := CoreUnits(u.rec.Role, u.rec.UnitPrefix, u.rec.Instances())
 	if err := u.change("disable --now "+strings.Join(core, " ")+" as "+u.uo.Account, func() error { return um.DisableStop(u.ctx, core) }); err != nil {
 		return err
 	}

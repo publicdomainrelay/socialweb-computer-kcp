@@ -581,7 +581,7 @@
     },
     "name": {
       "type": "string",
-      "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run requester: the requester's name, a DNS label (default requester), its state under <state-dir>/requesters/<name>; env, ssh and proxy take it as their argument. run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
+      "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run requester: the requester's name, a DNS label (default requester), its state under <state-dir>/requesters/<name>; env, ssh, proxy and password take it as their argument. install requester: the requester instances, comma-separated (unit socialweb-computer-requester@<name>). run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
     },
     "identity": {
       "type": "string",

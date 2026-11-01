@@ -241,10 +241,90 @@ Requester ingress, every identity:
   `refused: ... --atproto-handle ...` with no RFP; `vm.yaml` of the same requester Deployed in 22 s, ssh printed
   `quickstart-vm-ok`. A real mint from a local PDS is the lead's prod run
 
+### 7a. Installed: install requester (a systemd user unit of its own account)
+
+`install requester` (plan 0039 B-INSTALL-REQUESTER, decisions D2 and D9) is the one explicit root step, the same steps as
+`install bidder`: it creates the account, writes the units, `config.json` and the requester record, enables linger and
+starts the unit. The unit runs the same process, `run requester --name %i --fg`, with `host-backend systemd-user` from
+`config.json`: its core places the requester's kine, front and kcp slot as user units of that account
+(`socialweb-kcp-req-<sha256(name)[:10]>-*`) and its HostProcesses and OpenBao beside them, all in `socialweb.slice`.
+
+```bash
+sudo $SWC install requester --name me --dry-run                 # prints every step; writes nothing
+sudo $SWC install requester --name me                           # account swc-requester, unit socialweb-computer-requester@me
+sudo $SWC install requester --account swc-req-t1 --name me -- --atproto-oauth-qr   # name the account; options after --
+sudo runuser -u swc-requester -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-requester) \
+  journalctl --user -u socialweb-computer-requester@me.service -f   # the sign-in URL; sign in with scripts/oauth-signin.ts
+R=/var/lib/socialweb-computer/swc-requester/requesters/me/ready.json
+sudo -u swc-requester kubectl --kubeconfig "$(sudo jq -r .kubeconfig "$R")" get marketrequesters.socialweb.computer app
+```
+
+- account: `swc-requester` by default; `--account <name>` creates that account when no install record and no user of that
+  name exist; an existing account needs `--adopt-account` (refused otherwise, as for a bidder). The install record is
+  `/var/lib/socialweb-computer/install-<account>.json` with role `requester` and the names
+- `--name` (repeatable, comma-separated) names each instance; each is the unit `socialweb-computer-requester@<name>.service`
+  (Type=notify, Slice=socialweb.slice, Restart=always, Delegate=yes) with its state in `<state>/requesters/<name>`. The
+  unit sends READY=1 only after the ready file is written, so `TimeoutStartSec` is the ready budget plus one hour for a
+  person to sign in; a start that times out restarts and shows a new sign-in URL. `install` waits for that start
+- options after `--` are the MarketRequesterSpec options of `run requester`, parsed by the same code, written once per
+  name into `<state>/requesters/<name>/requester.json` (the first start's options; a second install keeps the file and
+  reports it FOUND). With no identity option the identity is `--atproto-oauth-qr` (D9): the sign-in URL is in the unit's
+  journal; drive it with `scripts/oauth-signin.ts --url "<pendingAction.url>"`
+- an existing account with an app password (`-- --atproto-identity-mode pdsAccount --atproto-handle <h> --atproto-pds-url
+  <pds>`): the password never goes into `config.json`, a flag, a unit or the requester record. After the unit started, as
+  the account, `socialweb-computer run requester password me --state-dir <state> < <file>` reads it once from stdin and writes
+  it into the requester's own OpenBao (`identity/requester/keys`, the SecretRef the MarketIdentity's keysRef names); the
+  composer, waiting on "its account password", goes on
+- `config.json`: `host-backend systemd-user`, `state-dir`, `asset-cache`, `ready-timeout`, `network-timeout`
+  (and `unit-prefix` when given); never a password or a token
+- second install: every step FOUND; `upgrade --binary <new> --sha256 <sum> --state-dir <state>` as the account switches
+  `bin/current`, runs the new binary's `check-host -role requester` (the role comes from the install record, never read as
+  a bidder) and restarts every enabled `socialweb-computer-requester@` unit; `rollback` the same way. The kcp units and the
+  vault keep running across that restart; the core adopts them, so the DID and every Held contract survive
+- reboot: linger starts the user manager, and the enabled kcp units and the requester unit come up again
+- `uninstall requester --account <a>` (root) disables and stops the units, removes the unit files, linger and the drop-in,
+  and keeps the state dir (the DID, the vault, the contracts) unless `--purge`
+- `check-host -role requester`: the checks every role has (systemd, delegation, linger, cgroup v2, socket path, boot id,
+  oomd); no kvm, no subids
+- proven (2026-11-01, this host as root, throwaway account `swc-req-t1`, localRepo against an own market network's PLC):
+  `--dry-run` printed 33 steps; the install created the account and was active 25 s after `enable --now`, ready file
+  and `kubectl get marketrequesters` Ready as the account; with no identity option the identity was oauthQr, AwaitingScan
+  with a pendingAction URL, and the unit stayed activating (no READY before the ready file); a second install was all
+  FOUND; `upgrade` as the account read the role from the record, restarted only the requester unit, kept the DID and left
+  the kcp and OpenBao units adopted (same InvocationID); a restart of `user@<uid>` (the reboot path through linger) was
+  Ready again in 10 s with the same DID; `run requester password` wrote the vault path; `uninstall` kept the state dir
+  and the account, `--purge` removed both. `install bidder --dry-run` and `install gateway --dry-run` print the same
+  steps before and after this change. A real reboot and an OAuth QR install against prod bidders are the lead's runs
+
+### 7b. Same account: a kubectl-applied HostProcess (no root, no new user)
+
+When the account already runs a core (an installed requester, or a dev host instance), a second requester needs no root
+and no new account: apply [`examples/infra/requester-hostprocess.yaml`](../examples/infra/requester-hostprocess.yaml) into
+that core's kcp. The core places it as one more unit (placement supervisor) in `socialweb.slice`; it runs the same process,
+`run requester --name lr2 --state-dir <dir> --fg`, which brings up its own kcp under that unit.
+
+```bash
+export KUBECONFIG=$(sudo jq -r .kubeconfig "$R")                # the core that places it
+P=socialweb-hp-req-$(printf %s me | sha256sum | cut -c1-10)-  # the HostProcess prefix of the installed requester me
+sed -e "s|REPLACE-HP-PREFIX|$P|" -e "s|REPLACE-STATE-DIR|$HOME/lr2|g" examples/infra/requester-hostprocess.yaml | kubectl apply -f -
+kubectl get hostprocess requester-lr2 -o jsonpath='{.status.phase}{"\n"}'   # Running once the ready file is written
+kubectl delete hostprocess requester-lr2                        # SIGTERM: stops its kcp and keeps its state dir
+```
+
+- the unit must start with the core's HostProcess prefix (`<unit-prefix>hp-<key>-`; an installed requester's key is
+  `req-<sha256(name)[:10]>`, a dev instance's is its short id: read it from `kubectl get hostprocesses`), or the core
+  refuses it ("is not under")
+- no root prunes it: a root renders and checks only its own set's HostProcesses by name (`compose.SetWorkloads`,
+  `compose.CheckWorkloads`), adopts only objects labelled with its owner, and `status.gc` only counts an unowned
+  HostProcess as an orphan; it never deletes one. The core adopts the unit by name and InvocationID across its own restart
+- the sign-in URL is in the unit's journal (`journalctl --user -u <unit>`); a password never goes into the argv
+- proven (2026-11-01, as test-0001, own market network, localRepo against the network PLC): applied into the core of an
+  installed-form requester, the HostProcess was Running with its ready file after 18 s, in `socialweb.slice`, and its
+  kubeconfig read the MarketRequester Ready; a restart of that core left it adopted (same InvocationID) with the core's
+  kcp, kine and OpenBao units; `kubectl delete` stopped it in under 1 s, removed the ready file and kept its state dir
+
 Still planned in plan 0039:
 
-- `install requester` (item B-INSTALL-REQUESTER): the same process as a systemd user unit in `socialweb.slice` of an
-  account that install creates when asked, with `config.json` and `upgrade`, as `install bidder` does
 - the gateway in the same kcp (item C-GATEWAY-COMPOSE): `kubectl apply` a Cluster, its k3s control plane runs as
   HostProcesses of the requester's core, and its nodes are rented by the same requester
 - `examples/infra/mixed-prod.yaml` and acceptance `docs/acceptance/0013-mixed-prod.md` (item F-MIXED-PROD, not written yet)
@@ -253,7 +333,6 @@ Still planned in plan 0039:
 
 | gap | where it is planned |
 |---|---|
-| `run requester` as an installed systemd unit (today it runs in your terminal) | plan 0039 B-INSTALL-REQUESTER |
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |

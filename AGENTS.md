@@ -24,8 +24,8 @@ needs the argument behind it. Do not read it end to end.
 | The TypeScript that is left | `scripts/*.ts`, and the policy actions in `internal/policyengine/bundled-actions/tangy/` |
 | Env the clusterprovider reads | `internal/providermain/config.go`; the gateway's defaults for it in `internal/stack/gatewaykcp/env.go` |
 | Env the gateway reads | `internal/gatewaymain/config.go`, `deploy/socialweb-gateway.env.example` |
-| How prod is installed and upgraded | `scripts/deploy.sh` (gateway: `install gateway`, then `upgrade`), `socialweb-computer install bidder` |
-| What a host must provide | `socialweb-computer check-host -role gateway` or `-role bidder`, `docs/host-contract.md` |
+| How prod is installed and upgraded | `scripts/deploy.sh` (gateway: `install gateway`, then `upgrade`), `socialweb-computer install bidder`, `socialweb-computer install requester` |
+| What a host must provide | `socialweb-computer check-host -role gateway`, `-role bidder` or `-role requester`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
 | What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
@@ -110,7 +110,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   read its ready file: `run requester env <name>` (KUBECONFIG, the kcp URL, the workspace, the DID, the ssh
   public key; `--json`) and `run requester ssh <name> --contract <cc> [--transport webrtc] [--exec ...]`
   (the `run request ssh` code with the requester's own key `<dir>/ssh/id_ed25519`; put its `.pub` in the
-  contract's `sshAuthorizedKeys`); `run requester proxy` is its webrtc ProxyCommand.
+  contract's `sshAuthorizedKeys`); `run requester proxy` is its webrtc ProxyCommand. With `--host-backend
+  systemd-user` (plan 0039 B-INSTALL-REQUESTER, the installed form; refused with `--network`) the process is the core
+  itself (`request.RunCore`, the `bidder.RunCore` pattern over `devcore.Run` with the bootstrap app
+  `table.Requester`, key `req-<sha256(name)[:10]>`, layout `install.RequesterLayout` under `<dir>/dev/<name>`): it places
+  kine, front and slot as user units, applies the root, signs in and sends READY=1 only after the ready file; a stop
+  leaves those units and the HostProcesses running for the next start to adopt. `install requester --name <n>`
+  (default account `swc-requester`) writes the unit template `socialweb-computer-requester@.service` (Type=notify,
+  TimeoutStartSec the ready budget plus `install.RequesterStartGrace`, 1 h for a sign-in) and, once per name,
+  `<dir>/requester.json` from the options after `--` (default `--atproto-oauth-qr`); a password never goes into it:
+  `run requester password <name>` reads one from stdin into `identity/requester/keys` of the requester's vault.
+  `upgrade` takes the role from the install record. The same-account form is a kubectl-applied HostProcess
+  (`examples/infra/requester-hostprocess.yaml`); no root prunes a HostProcess outside its set.
 - Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
   XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Firehose has no
   inbound endpoint. Both (the requester default) is the ingress plus the same streams as Firehose. In

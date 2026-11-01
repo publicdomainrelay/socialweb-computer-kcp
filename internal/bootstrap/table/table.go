@@ -23,11 +23,13 @@ const (
 const (
 	RoleGateway   = "gateway"
 	RoleBidder    = "bidder"
+	RoleRequester = "requester"
 	StoreSqlite   = "kine-sqlite"
 	StorePostgres = "kine-postgres"
 	GatewayKey    = "gw"
 	GatewayCore   = "computer-gateway" + hostsvc.ServiceSuffix
 	BidderCore    = "computer-bidder@"
+	RequesterCore = "computer-requester@"
 	RolePostgres  = "pg"
 	RoleFront     = "front"
 	RoleCore      = "core"
@@ -44,6 +46,7 @@ type App struct {
 	Role    string
 	Key     string
 	Handle  string
+	Name    string
 	Store   string
 	Slots   []string
 	DevCore bool
@@ -71,6 +74,12 @@ func Gateway() App {
 func Bidder(handle, hid string) App {
 	return App{Role: RoleBidder, Key: hid, Handle: handle, Store: StoreSqlite, Slots: []string{SlotA}}
 }
+
+func Requester(name, key string) App {
+	return App{Role: RoleRequester, Key: key, Name: name, Store: StoreSqlite, Slots: []string{SlotA}}
+}
+
+func (a App) SingleSlot() bool { return a.Role == RoleBidder || a.Role == RoleRequester }
 
 func Dev(key, store string) App {
 	slots := []string{SlotA}
@@ -117,8 +126,8 @@ func KineRole(slot string) string { return "kine-" + slot }
 func SlotRole(slot string) string { return "kcp-" + slot }
 
 func (a App) Validate() error {
-	if a.Role != RoleGateway && a.Role != RoleBidder {
-		return fmt.Errorf("bootstrap: application role %q: want %s or %s", a.Role, RoleGateway, RoleBidder)
+	if a.Role != RoleGateway && a.Role != RoleBidder && a.Role != RoleRequester {
+		return fmt.Errorf("bootstrap: application role %q: want %s, %s or %s", a.Role, RoleGateway, RoleBidder, RoleRequester)
 	}
 	if !keyRE.MatchString(a.Key) {
 		return fmt.Errorf("bootstrap: application key %q: want lower-case letters, digits and dashes, at most 24", a.Key)
@@ -132,6 +141,17 @@ func (a App) Validate() error {
 		}
 		if a.Handle == "" && !a.DevCore {
 			return errors.New("bootstrap: a bidder application names its handle")
+		}
+	}
+	if a.Role == RoleRequester {
+		if a.Store != StoreSqlite {
+			return errors.New("bootstrap: a requester's kcp is one slot on kine-sqlite; it never has a postgres")
+		}
+		if a.Name == "" {
+			return errors.New("bootstrap: a requester application names its instance")
+		}
+		if len(a.Slots) != 1 {
+			return errors.New("bootstrap: a requester runs one kcp slot")
 		}
 	}
 	if len(a.Slots) == 0 || len(a.Slots) > 2 {
@@ -174,14 +194,19 @@ func (a App) CoreUnit() string {
 		return a.Names().DevCore()
 	case a.Role == RoleBidder:
 		return a.Names().Prefix + BidderCore + a.Handle + hostsvc.ServiceSuffix
+	case a.Role == RoleRequester:
+		return a.Names().Prefix + RequesterCore + a.Name + hostsvc.ServiceSuffix
 	}
 	return a.Names().Prefix + GatewayCore
 }
 
 func CoreTemplate(prefix, role string) string {
 	prefix = cmp.Or(prefix, hostsvc.NamePrefix)
-	if role == RoleBidder {
+	switch role {
+	case RoleBidder:
 		return prefix + BidderCore + hostsvc.ServiceSuffix
+	case RoleRequester:
+		return prefix + RequesterCore + hostsvc.ServiceSuffix
 	}
 	return prefix + GatewayCore
 }

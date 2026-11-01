@@ -1,0 +1,23 @@
+[Unit]
+Description=socialweb-computer requester %i (run requester)
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec={{.StartTimeout}}
+TimeoutStartSec={{.StartTimeout}}
+Slice=socialweb.slice
+WorkingDirectory={{.State}}
+Environment=CONFIG_PATH_SOCIALWEB_COMPUTER={{.State}}/config.json
+ExecStart={{.State}}/bin/current/socialweb-computer run requester --name %i --fg
+Restart=always
+RestartSec=5
+KillMode=control-group
+Delegate=yes
+OOMPolicy=continue
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=10000
+
+[Install]
+WantedBy=default.target

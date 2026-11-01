@@ -1,6 +1,7 @@
 package install
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,8 @@ var (
 type UpgradeOptions struct {
 	StateDir   string
 	Home       string
+	Account    string
+	Root       string
 	RuntimeDir string
 	Proc       string
 	Binary     string
@@ -50,6 +53,15 @@ func (o UpgradeOptions) out() io.Writer {
 	return o.Out
 }
 
+func (o UpgradeOptions) role() hostcontract.Role {
+	if o.Account != "" {
+		if rec, err := ReadRecord(cmp.Or(o.Root, "/"), o.Account); err == nil && rec.Role != "" && rec.StateDir == o.StateDir {
+			return rec.Role
+		}
+	}
+	return InstalledRole(o.Home)
+}
+
 func (o UpgradeOptions) bin() string { return filepath.Join(o.StateDir, "bin") }
 
 func isGatewayCore(name string) bool {
@@ -60,11 +72,20 @@ func isBidderCore(name string) bool {
 	return strings.HasPrefix(name, RuntimePrefix) && strings.Contains(name, "-"+table.BidderCore) && strings.HasSuffix(name, hostsvc.ServiceSuffix)
 }
 
+func isRequesterCore(name string) bool {
+	return strings.HasPrefix(name, RuntimePrefix) && strings.Contains(name, "-"+table.RequesterCore) && strings.HasSuffix(name, hostsvc.ServiceSuffix)
+}
+
 func InstalledRole(home string) hostcontract.Role {
 	entries, _ := os.ReadDir(filepath.Join(home, UserUnitDir))
 	for _, e := range entries {
 		if isGatewayCore(e.Name()) {
 			return hostcontract.RoleGateway
+		}
+	}
+	for _, e := range entries {
+		if isRequesterCore(e.Name()) {
+			return hostcontract.RoleRequester
 		}
 	}
 	return hostcontract.RoleBidder
@@ -74,7 +95,7 @@ func EnabledCoreUnits(home string) []string {
 	entries, _ := os.ReadDir(filepath.Join(home, UserUnitDir, WantsDir))
 	var out []string
 	for _, e := range entries {
-		if isGatewayCore(e.Name()) || isBidderCore(e.Name()) {
+		if isGatewayCore(e.Name()) || isBidderCore(e.Name()) || isRequesterCore(e.Name()) {
 			out = append(out, e.Name())
 		}
 	}
@@ -129,7 +150,7 @@ func Upgrade(ctx context.Context, o UpgradeOptions) error {
 	if have, err := sha256sum.File(dst); err != nil || have != sum {
 		return fmt.Errorf("%w: the copy at %s is %s", ErrManifestMismatch, dst, have)
 	}
-	role := InstalledRole(o.Home)
+	role := o.role()
 	if err := o.SelfCheck(ctx, dst, role, o.StateDir); err != nil {
 		return fmt.Errorf("%w: %s: %v; bin/current still names %s", ErrSelfCheck, dst, err, current)
 	}
