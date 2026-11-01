@@ -287,7 +287,10 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 	reused := held.target != nil
 	target, privateKeyPath, contract := held.target, held.privateKeyPath, held.contract
 	if reused {
-		if err := q.heldSessionAllowed(ctx, contract, policyName); err != nil {
+		policyCtx, policyCancel := context.WithTimeout(ctx, HeldSessionPolicyTimeout)
+		err := q.heldSessionAllowed(policyCtx, contract, policyName)
+		policyCancel()
+		if err != nil {
 			q.log.Info("requester_held_session_policy_denied", "contract", contract, "err", err)
 			if errors.Is(err, ErrPolicyRejected) {
 				held.clear()

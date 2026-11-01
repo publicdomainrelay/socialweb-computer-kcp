@@ -53,6 +53,8 @@ const (
 
 	DefaultReleaseTimeout = 30 * time.Second
 
+	HeldSessionPolicyTimeout = 30 * time.Second
+
 	DefaultReleaseRetryFirst = 5 * time.Second
 
 	DefaultReleaseRetryMax = 5 * time.Minute

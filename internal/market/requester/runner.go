@@ -646,10 +646,9 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 		}
 		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
 		state.Error = "the recorded accept is not resubmitted: " + err.Error()
-		if r.recoverReceipt(ctx, state) {
-			if err := r.releaseContract(ctx, state, bidderDID); err != nil {
-				return fmt.Errorf("%s; releasing its receipt: %w", state.Error, err)
-			}
+		r.recoverReceipt(ctx, state)
+		if releaseErr := r.releaseContract(ctx, state, bidderDID); releaseErr != nil {
+			return fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr)
 		}
 		return errors.New(state.Error)
 	}
@@ -696,7 +695,7 @@ func (q *Requester) recordedWinnerAllowed(ctx context.Context, state *v1alpha1.N
 	switch {
 	case decision.Allow:
 		return nil
-	case decision.Run == "":
+	case !decision.Completed:
 		return errors.New("the policy run for the recorded winner " + bidderDID + " did not complete: " + decision.Reason)
 	}
 	return fmt.Errorf("%w: the recorded winner %s: %s", ErrPolicyRejected, bidderDID, decision.Reason)
@@ -1441,6 +1440,14 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 		return
 	}
 	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+		if errors.Is(err, ErrPolicyRejected) {
+			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+			state.Error = "adopt: " + err.Error()
+			if releaseErr := r.releaseContract(ctx, state, winnerDID(state)); releaseErr != nil && !r.q.stopping() {
+				r.recordFailure(ctx, state, fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr), 1)
+			}
+			return
+		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: "+err.Error(), state, nil, nil, "adopting", 1)
 		return
 	}
