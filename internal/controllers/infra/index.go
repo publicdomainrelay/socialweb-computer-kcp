@@ -2,15 +2,19 @@ package infra
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -27,13 +31,19 @@ import (
 const (
 	IndexAttempts = 5
 
+	IndexRetries = 5
+
 	IndexProbes = 2
 
 	IndexProbeEvery = time.Hour
 
 	IndexFailedWait = 10 * time.Minute
 
+	IndexBudget = 10 * time.Second
+
 	IndexWatchManager = ctlruntime.FieldManagerPrefix + "infra-index"
+
+	indexWatchPrefix = "infraindex-"
 )
 
 var errIndexContended = fmt.Errorf("infra: the index changed under each of %d swapped writes", IndexAttempts)
@@ -57,9 +67,11 @@ type indexWant struct {
 }
 
 type indexFailure struct {
-	at time.Time
+	until time.Time
 
 	cid string
+
+	own string
 
 	reason string
 
@@ -72,49 +84,56 @@ type indexTarget struct {
 	did string
 
 	key infra.IndexKey
+
+	own string
 }
 
-func IndexWatchName(repo string) string {
-	return infra.ChildName(infra.KindInfra, "index", repo)
+func IndexWatchName(workspace string, repo commonv1.ObjectRef) string {
+	name := indexWatchPrefix + repo.Name
+	if ws := repo.InWorkspace(workspace); ws != workspace {
+		sum := sha256.Sum256([]byte(ws))
+		name += "-" + hex.EncodeToString(sum[:3])
+	}
+	if len(name) <= 253 {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return name[:253-13] + "-" + hex.EncodeToString(sum[:6])
 }
 
-func (c *Controller) cachedIndex(did string) (indexCache, bool) {
+func cacheKey(cluster, did string) string {
+	return cluster + "|" + did
+}
+
+func (c *Controller) cachedView(cluster, did string) (infra.IndexView, indexCache, bool) {
+	c.mu.Lock()
+	cache, ok := c.indexes[cacheKey(cluster, did)]
+	c.mu.Unlock()
+	if !ok || !cache.present {
+		return infra.IndexView{}, cache, ok
+	}
+	view, _ := infra.DecodeIndexView(cache.value)
+	return view, cache, true
+}
+
+func (c *Controller) storeIndex(cluster, did string, cache indexCache) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	got, ok := c.indexes[did]
-	return got, ok
+	c.indexes[cacheKey(cluster, did)] = cache
 }
 
-func (c *Controller) storeIndex(did string, cache indexCache) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.indexes[did] = cache
-}
-
-func (c *Controller) loadIndex(ctx context.Context, reader atprotorepo.RecordReader, did string) (indexCache, error) {
+func (c *Controller) loadIndex(ctx context.Context, reader atprotorepo.RecordReader, cluster, did string) (indexCache, error) {
 	got, err := reader.GetRecord(ctx, did, record.InfraNSID, infra.ReservedRkey)
 	if errors.Is(err, atprotorepo.ErrNotFound) {
-		c.storeIndex(did, indexCache{})
+		c.storeIndex(cluster, did, indexCache{})
 		return indexCache{}, nil
 	}
 	if err != nil {
 		return indexCache{}, fmt.Errorf("infra: reading %s: %w", infra.IndexURI(did), err)
 	}
 	out := indexCache{present: true, cid: got.CID, value: got.Value}
-	c.storeIndex(did, out)
+	c.storeIndex(cluster, did, out)
 	return out, nil
-}
-
-func (c *Controller) indexEntries(did string) ([]infra.IndexEntry, indexCache, bool) {
-	cache, ok := c.cachedIndex(did)
-	if !ok || !cache.present {
-		return nil, cache, ok
-	}
-	entries, err := infra.DecodeIndex(cache.value)
-	if err != nil {
-		return nil, cache, true
-	}
-	return entries, cache, true
 }
 
 func (c *Controller) observeIndexWatch(watch *v1alpha1.AtprotoRecordWatch, gone bool) {
@@ -130,20 +149,34 @@ func (c *Controller) observeIndexWatch(watch *v1alpha1.AtprotoRecordWatch, gone 
 	}
 }
 
-func (c *Controller) heldIndexLocked(watch *v1alpha1.AtprotoRecordWatch) {
+func ownIndexWatch(workspace string, watch *v1alpha1.AtprotoRecordWatch) bool {
+	return watch.Labels[v1alpha1.InfraIndexLabel] != "" && watch.Spec.RepoRef != nil && watch.Spec.Collection == record.InfraNSID &&
+		slices.Equal(watch.Spec.Rkeys, []string{infra.ReservedRkey}) && watch.Name == IndexWatchName(workspace, *watch.Spec.RepoRef)
+}
+
+func (c *Controller) heldIndexLocked(cluster, workspace string, watch *v1alpha1.AtprotoRecordWatch) {
 	suffix := "/" + record.InfraNSID + "/" + infra.ReservedRkey
+	wanted := func(did string) bool {
+		for k, want := range c.wants {
+			if k.cluster == cluster && want.workspace == workspace && want.did == did {
+				return true
+			}
+		}
+		return false
+	}
 	for _, rec := range watch.Status.Records {
 		did, ok := indexDID(rec.URI, suffix)
-		if !ok || rec.Cid == "" {
+		if !ok || rec.Cid == "" || !wanted(did) {
 			continue
 		}
-		if held, known := c.indexes[did]; !known || held.cid != rec.Cid {
-			c.indexes[did] = indexCache{present: true, cid: rec.Cid, value: rec.Value}
+		if held, known := c.indexes[cacheKey(cluster, did)]; !known || held.cid != rec.Cid {
+			c.indexes[cacheKey(cluster, did)] = indexCache{present: true, cid: rec.Cid, value: rec.Value}
 		}
 	}
 	for _, uri := range watch.Status.Deleted {
-		if did, ok := indexDID(uri, suffix); ok && !slices.ContainsFunc(watch.Status.Records, func(r v1alpha1.WatchedRecord) bool { return r.URI == uri }) {
-			c.indexes[did] = indexCache{}
+		did, ok := indexDID(uri, suffix)
+		if ok && wanted(did) && !slices.ContainsFunc(watch.Status.Records, func(r v1alpha1.WatchedRecord) bool { return r.URI == uri }) {
+			c.indexes[cacheKey(cluster, did)] = indexCache{}
 		}
 	}
 }
@@ -158,15 +191,15 @@ func indexDID(uri, suffix string) (string, bool) {
 }
 
 func (c *Controller) indexUsers(cluster, workspace, kind string, watch *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
-	if watch.Labels[v1alpha1.InfraIndexLabel] == "" {
+	if !ownIndexWatch(workspace, watch) {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.heldIndexLocked(watch)
+	c.heldIndexLocked(cluster, workspace, watch)
 	_, ensured := c.indexWatches[cluster+"|"+workspace+"|"+watch.Name]
 	var out []ctlruntime.Request
-	decoded := map[string][]infra.IndexEntry{}
+	views := map[string]infra.IndexView{}
 	for k, want := range c.wants {
 		if k.kind != kind || k.cluster != cluster {
 			continue
@@ -175,16 +208,16 @@ func (c *Controller) indexUsers(cluster, workspace, kind string, watch *v1alpha1
 			out = append(out, ctlruntime.Request{Cluster: k.cluster, Workspace: want.workspace, Name: k.name})
 			continue
 		}
-		cache, known := c.indexes[want.did]
+		cache, known := c.indexes[cacheKey(cluster, want.did)]
 		if !known {
 			continue
 		}
-		entries, done := decoded[want.did]
+		view, done := views[want.did]
 		if !done && cache.present {
-			entries, _ = infra.DecodeIndex(cache.value)
-			decoded[want.did] = entries
+			view, _ = infra.DecodeIndexView(cache.value)
+			views[want.did] = view
 		}
-		if infra.IndexHolds(entries, want.key) != want.live {
+		if infra.IndexHolds(view.Live, want.key) != want.live {
 			out = append(out, ctlruntime.Request{Cluster: k.cluster, Workspace: want.workspace, Name: k.name})
 		}
 	}
@@ -201,11 +234,11 @@ func (c *Controller) setWant(k indexKey, want *indexWant) {
 	c.wants[k] = *want
 }
 
-func (c *Controller) failed(k indexKey, cid string) (indexFailure, bool) {
+func (c *Controller) failed(k indexKey, cid, own string) (indexFailure, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	f, ok := c.indexFailed[k]
-	if !ok || f.cid != cid || time.Since(f.at) >= IndexFailedWait {
+	if !ok || f.cid != cid || f.own != own || (!f.until.IsZero() && !time.Now().Before(f.until)) {
 		return indexFailure{}, false
 	}
 	return f, true
@@ -221,8 +254,25 @@ func (c *Controller) setFailed(k indexKey, f *indexFailure) {
 	c.indexFailed[k] = *f
 }
 
+func (r *reconciler[T]) indexWatchOwner(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef) metav1.OwnerReference {
+	owner := ownerRef(v)
+	owner.Controller = nil
+	if repo.Workspace != req.Workspace {
+		return owner
+	}
+	dyn, err := r.c.dynamic(req.Workspace)
+	if err != nil {
+		return owner
+	}
+	got, err := kube.Get[metav1.PartialObjectMetadata](ctx, dyn.Resource(v1alpha1.AtprotoRepoGVR), repo.Name)
+	if err != nil || got.UID == "" {
+		return owner
+	}
+	return metav1.OwnerReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: RepoKind, Name: repo.Name, UID: got.UID}
+}
+
 func (r *reconciler[T]) ensureIndexWatch(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef) error {
-	name := IndexWatchName(repo.Name)
+	name := IndexWatchName(req.Workspace, repo)
 	memo := req.Cluster + "|" + req.Workspace + "|" + name
 	r.c.mu.Lock()
 	_, done := r.c.indexWatches[memo]
@@ -230,14 +280,12 @@ func (r *reconciler[T]) ensureIndexWatch(ctx context.Context, req ctlruntime.Req
 	if done {
 		return nil
 	}
-	owner := ownerRef(v)
-	owner.Controller = nil
 	var sources []commonv1.ObjectRef
 	if v.spec.Record != nil {
 		sources = v.spec.Record.EventSourceRefs
 	}
 	if err := EnsureWatch(ctx, r.c.dynamic, IndexWatchManager, req.Workspace, name, map[string]string{v1alpha1.InfraIndexLabel: infra.ReservedRkey},
-		owner, repo, record.InfraNSID, []string{infra.ReservedRkey}, sources); err != nil {
+		r.indexWatchOwner(ctx, req, v, repo), repo, record.InfraNSID, []string{infra.ReservedRkey}, sources); err != nil {
 		return err
 	}
 	r.c.mu.Lock()
@@ -262,11 +310,13 @@ func (r *reconciler[T]) indexTarget(req ctlruntime.Request, v view, recordStatus
 	if err != nil {
 		return indexTarget{}, false
 	}
-	return indexTarget{repo: repo, did: uri.Authority().String(), key: infra.IndexKey{Collection: v.kind.NSID(), Rkey: rkey}}, true
+	return indexTarget{repo: repo, did: uri.Authority().String(), key: infra.IndexKey{Collection: v.kind.NSID(), Rkey: rkey}, own: recordStatus.CID}, true
 }
 
 func (r *reconciler[T]) indexPass(ctx context.Context, req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, rec *recordSync,
 	ephemeral *v1alpha1.EphemeralInfraStatus, end infra.End, frozen bool, now time.Time) time.Duration {
+	ctx, cancel := context.WithTimeout(ctx, IndexBudget)
+	defer cancel()
 	k := keyOf(req, v)
 	var ref *commonv1.ObjectRef
 	if v.spec.Record != nil {
@@ -280,6 +330,7 @@ func (r *reconciler[T]) indexPass(ctx context.Context, req ctlruntime.Request, v
 	}
 	gen := status.ObservedGeneration
 	if end.Ended && !frozen {
+		r.c.setWant(k, nil)
 		return 0
 	}
 	var change infra.IndexChange
@@ -296,6 +347,7 @@ func (r *reconciler[T]) indexPass(ctx context.Context, req ctlruntime.Request, v
 		present := status.Record.CID != ""
 		if rec != nil {
 			present = rec.cid != ""
+			target.own = rec.cid
 			if rec.action == infra.ActionInvalid {
 				r.c.setWant(k, nil)
 				conds.Set(&status.Conditions, gen, v1alpha1.InfraConditionIndexed, false, "RecordInvalid", "an invalid record is not indexed")
@@ -307,15 +359,14 @@ func (r *reconciler[T]) indexPass(ctx context.Context, req ctlruntime.Request, v
 			conds.Set(&status.Conditions, gen, v1alpha1.InfraConditionIndexed, false, "Pending", "the record is indexed once it is written")
 			return 0
 		}
-		entry := infra.IndexEntry{Collection: target.key.Collection, Rkey: target.key.Rkey, CreatedAt: v.object.GetCreationTimestamp().Time.UTC(),
-			Writer: r.c.writer}
-		if rec != nil && !rec.createdAt.IsZero() {
+		entry := infra.IndexEntry{Collection: target.key.Collection, Rkey: target.key.Rkey, Writer: r.c.writer}
+		if rec != nil {
 			entry.CreatedAt = rec.createdAt.UTC()
 		}
 		if ephemeral != nil {
 			entry.ExpiresAt, _ = time.Parse(time.RFC3339, ephemeral.ExpiresAt)
 		}
-		change.Add = &entry
+		change.Add, change.Refresh = &entry, rec != nil
 	}
 	r.c.setWant(k, &indexWant{workspace: req.Workspace, did: target.did, key: target.key, live: change.Add != nil})
 	if err := r.ensureIndexWatch(ctx, req, v, target.repo); err != nil {
@@ -334,6 +385,8 @@ func (r *reconciler[T]) indexPass(ctx context.Context, req ctlruntime.Request, v
 }
 
 func (r *reconciler[T]) indexEnd(ctx context.Context, req ctlruntime.Request, v view, ref *commonv1.ObjectRef) {
+	ctx, cancel := context.WithTimeout(ctx, IndexBudget)
+	defer cancel()
 	k := keyOf(req, v)
 	if ref == nil {
 		if got, ok := r.childRepo(ctx, req, v); ok {
@@ -366,106 +419,116 @@ func (r *reconciler[T]) childRepo(ctx context.Context, req ctlruntime.Request, v
 	return *ar.Spec.RepoRef, true
 }
 
+func settledReason(change infra.IndexChange, did string) (string, string) {
+	if change.Add != nil {
+		return "Indexed", "the index at " + infra.IndexURI(did) + " lists this deployment"
+	}
+	return "Removed", "the index no longer lists this deployment; the record is kept"
+}
+
 func (r *reconciler[T]) mutateIndex(ctx context.Context, req ctlruntime.Request, v view, target indexTarget, change infra.IndexChange,
 	now time.Time) (string, string, time.Duration) {
 	k := keyOf(req, v)
 	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "index", infra.IndexURI(target.did), "rkey", target.key.Rkey}
-	settled := func(entries []infra.IndexEntry) (string, string, bool) {
-		holds := infra.IndexHolds(entries, target.key)
-		switch {
-		case change.Add != nil && holds:
-			return "Indexed", "the index at " + infra.IndexURI(target.did) + " lists this deployment", true
-		case change.Remove != nil && !holds:
-			return "Removed", "the index no longer lists this deployment; the record is kept", true
-		}
-		return "", "", false
+	view, cache, known := r.c.cachedView(req.Cluster, target.did)
+	if known && view.Settled(change) {
+		r.c.indexRetries.Reset(k)
+		reason, message := settledReason(change, target.did)
+		return reason, message, 0
 	}
-	entries, cache, known := r.c.indexEntries(target.did)
-	if known {
-		if reason, message, ok := settled(entries); ok {
-			r.c.indexRetries.Reset(k)
-			return reason, message, 0
-		}
-		if f, ok := r.c.failed(k, cache.cid); ok {
-			return f.reason, f.message, 0
-		}
+	if f, ok := r.c.failed(k, cache.cid, target.own); ok {
+		return f.reason, f.message, 0
 	}
 	did, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), target.repo, record.InfraNSID, record.EphemeralInfraNSID)
 	if err == nil && did != target.did {
 		err = fmt.Errorf("infra: the AtprotoRepo %s is %s, not %s", target.repo.String(), did, target.did)
 	}
 	if err != nil {
-		return r.indexFailed(k, cache.cid, attrs, err)
+		return r.indexFailed(k, cache.cid, target.own, attrs, err)
 	}
-	if !known {
-		if cache, err = r.c.loadIndex(ctx, reader, target.did); err != nil {
-			return r.indexFailed(k, "", attrs, err)
-		}
-		entries, _, _ = r.c.indexEntries(target.did)
-		if reason, message, ok := settled(entries); ok {
-			r.c.indexRetries.Reset(k)
-			return reason, message, 0
-		}
+	if cache, err = r.c.loadIndex(ctx, reader, req.Cluster, target.did); err != nil {
+		return r.indexFailed(k, "", target.own, attrs, err)
+	}
+	if view, _, _ = r.c.cachedView(req.Cluster, target.did); view.Settled(change) {
+		r.c.indexRetries.Reset(k)
+		r.c.setFailed(k, nil)
+		reason, message := settledReason(change, target.did)
+		return reason, message, 0
 	}
 	writer, err := bus.Resolve[atprotorepo.RecordWriter](ctx, r.c.bus, r.self(req), target.repo,
 		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: []string{record.InfraNSID}})
 	if err != nil {
-		return r.indexFailed(k, cache.cid, attrs, err)
+		return r.indexFailed(k, cache.cid, target.own, attrs, err)
 	}
 	swapper, ok := writer.(atprotorepo.SwapPutter)
 	if !ok {
-		return r.indexFailed(k, cache.cid, attrs, errors.New("infra: the repo cannot put a record by its cid"))
+		return r.indexFailed(k, cache.cid, target.own, attrs, errors.New("infra: the repo cannot put a record by its cid"))
 	}
-	change.Dead = r.c.probe(ctx, reader, target, entries, now)
+	change.Dead = r.c.probe(ctx, reader, target, view.Live, now)
+	var full error
 	for attempt := 1; attempt <= IndexAttempts; attempt++ {
 		var raw json.RawMessage
 		if cache.present {
 			raw = cache.value
 		}
-		value, changed, err := infra.ApplyIndex(raw, change, now)
-		if err != nil {
-			return r.indexFailed(k, cache.cid, attrs, err)
+		value, changed, aerr := infra.ApplyIndex(raw, change, now)
+		if aerr != nil && !errors.Is(aerr, infra.ErrIndexFull) {
+			return r.indexFailed(k, cache.cid, target.own, attrs, aerr)
 		}
+		full = aerr
 		if !changed {
 			break
 		}
 		var ref commonv1.StrongRef
+		var werr error
 		if cache.present {
-			ref, err = swapper.PutRecordSwap(ctx, record.InfraNSID, infra.ReservedRkey, value, cache.cid)
+			ref, werr = swapper.PutRecordSwap(ctx, record.InfraNSID, infra.ReservedRkey, value, cache.cid)
 		} else {
-			ref, err = writer.CreateRecord(ctx, record.InfraNSID, infra.ReservedRkey, value)
+			ref, werr = writer.CreateRecord(ctx, record.InfraNSID, infra.ReservedRkey, value)
 		}
-		if err == nil {
-			r.c.storeIndex(target.did, indexCache{present: true, cid: ref.CID, value: value})
+		if werr == nil {
+			cache = indexCache{present: true, cid: ref.CID, value: value}
+			r.c.storeIndex(req.Cluster, target.did, cache)
 			r.c.log.Info("infra_index_written", append(attrs, "cid", ref.CID, "attempt", attempt, "add", change.Add != nil,
-				"remove", change.Remove != nil, "pruned", len(change.Dead))...)
+				"remove", change.Remove != nil, "pruned", len(change.Dead), "full", full != nil)...)
 			break
 		}
-		if cache.present && !errors.Is(err, atprotorepo.ErrSwapMismatch) {
-			return r.indexFailed(k, cache.cid, attrs, err)
+		if cache.present && !errors.Is(werr, atprotorepo.ErrSwapMismatch) {
+			return r.indexFailed(k, cache.cid, target.own, attrs, werr)
 		}
-		r.c.log.Info("infra_index_contended", append(attrs, "attempt", attempt, "err", err.Error())...)
+		r.c.log.Info("infra_index_contended", append(attrs, "attempt", attempt, "err", werr.Error())...)
 		was := cache.present
-		if cache, err = r.c.loadIndex(ctx, reader, target.did); err != nil {
-			return r.indexFailed(k, "", attrs, err)
+		var lerr error
+		if cache, lerr = r.c.loadIndex(ctx, reader, req.Cluster, target.did); lerr != nil {
+			return r.indexFailed(k, "", target.own, attrs, lerr)
 		}
 		if !was && !cache.present {
-			return r.indexFailed(k, "", attrs, fmt.Errorf("infra: creating %s: %w", infra.IndexURI(target.did), err))
+			return r.indexFailed(k, "", target.own, attrs, fmt.Errorf("infra: creating %s: %w", infra.IndexURI(target.did), werr))
 		}
 		if attempt == IndexAttempts {
-			return r.indexFailed(k, cache.cid, attrs, errIndexContended)
+			return r.indexFailed(k, cache.cid, target.own, attrs, errIndexContended)
 		}
 	}
-	entries, _, _ = r.c.indexEntries(target.did)
+	if full != nil {
+		return r.indexFailed(k, cache.cid, target.own, attrs, full)
+	}
 	r.c.setFailed(k, nil)
 	r.c.indexRetries.Reset(k)
-	if reason, message, ok := settled(entries); ok {
+	if view, _, _ = r.c.cachedView(req.Cluster, target.did); view.Settled(change) {
+		reason, message := settledReason(change, target.did)
 		return reason, message, 0
 	}
 	return "", "", 0
 }
 
-func (r *reconciler[T]) indexFailed(k indexKey, cid string, attrs []any, err error) (string, string, time.Duration) {
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	return d/2 + rand.N(d)
+}
+
+func (r *reconciler[T]) indexFailed(k indexKey, cid, own string, attrs []any, err error) (string, string, time.Duration) {
 	reason := "IndexWriteFailed"
 	switch {
 	case errors.Is(err, errIndexContended):
@@ -477,21 +540,27 @@ func (r *reconciler[T]) indexFailed(k indexKey, cid string, attrs []any, err err
 	case errors.Is(err, ErrRepoNoDID):
 		reason = "RepoPending"
 	}
-	r.c.log.Warn("infra_index_write_failed", append(attrs, "reason", reason, "err", err.Error())...)
-	if reason == "Contended" || netretry.Transient(err) {
-		if reason != "Contended" {
-			reason = "IndexWriteRetrying"
-		}
-		_, delay := r.c.indexRetries.Fail(k)
-		return reason, err.Error(), delay
+	retrying := reason == "Contended" || netretry.Transient(err)
+	if retrying && reason != "Contended" {
+		reason = "IndexWriteRetrying"
 	}
-	r.c.setFailed(k, &indexFailure{at: time.Now(), cid: cid, reason: reason, message: err.Error()})
+	r.c.log.Warn("infra_index_write_failed", append(attrs, "reason", reason, "err", err.Error())...)
+	if retrying {
+		if n, delay := r.c.indexRetries.Fail(k); n < IndexRetries {
+			return reason, err.Error(), max(jitter(delay), netretry.After(err))
+		}
+		r.c.indexRetries.Reset(k)
+		message := fmt.Sprintf("%s; %d tries failed, the next index or record change tries again", err.Error(), IndexRetries)
+		r.c.setFailed(k, &indexFailure{cid: cid, own: own, reason: reason, message: message})
+		return reason, message, 0
+	}
+	r.c.setFailed(k, &indexFailure{until: time.Now().Add(IndexFailedWait), cid: cid, own: own, reason: reason, message: err.Error()})
 	return reason, err.Error(), 0
 }
 
 func (c *Controller) probe(ctx context.Context, reader atprotorepo.RecordReader, target indexTarget, entries []infra.IndexEntry, now time.Time) []infra.IndexDead {
 	candidates := slices.DeleteFunc(slices.Clone(entries), func(e infra.IndexEntry) bool {
-		return e.Key() == target.key || e.Expired(now) || (e.Collection != record.InfraNSID && e.Collection != record.EphemeralInfraNSID)
+		return e.Key() == target.key || e.Expired(now)
 	})
 	slices.SortStableFunc(candidates, func(a, b infra.IndexEntry) int { return a.AddedAt.Compare(b.AddedAt) })
 	var out []infra.IndexDead
@@ -513,7 +582,7 @@ func (c *Controller) probe(ctx context.Context, reader atprotorepo.RecordReader,
 		}
 		probed++
 		got, err := reader.GetRecord(ctx, target.did, e.Collection, e.Rkey)
-		if errors.Is(err, atprotorepo.ErrNotFound) {
+		if errors.Is(err, atprotorepo.ErrRecordNotFound) {
 			out = append(out, infra.IndexDead{IndexEnded: infra.IndexEnded{Collection: e.Collection, Rkey: e.Rkey, EndedAt: now}, Gone: true})
 			continue
 		}
@@ -538,8 +607,8 @@ func (c *Controller) probe(ctx context.Context, reader atprotorepo.RecordReader,
 	}
 	c.mu.Lock()
 	for uri := range c.probed {
-		if !slices.ContainsFunc(entries, func(e infra.IndexEntry) bool { return uri == "at://"+target.did+"/"+e.Collection+"/"+e.Rkey }) &&
-			strings.HasPrefix(uri, "at://"+target.did+"/") {
+		if strings.HasPrefix(uri, "at://"+target.did+"/") &&
+			!slices.ContainsFunc(entries, func(e infra.IndexEntry) bool { return uri == "at://"+target.did+"/"+e.Collection+"/"+e.Rkey }) {
 			delete(c.probed, uri)
 		}
 	}

@@ -11981,27 +11981,38 @@ controller runs (page, iOS `pkg/embedded`, gateway, CLI); there is no central wr
 - Writes: `com.atproto.repo.putRecord` with `swapRecord` through `atprotorepo.SwapPutter` on the
   repo.write handle, or `createRecord` at rkey `self` when there is no index. On InvalidSwap (or a
   create that finds a record) the controller reads again and applies the same set mutation, at most 5
-  attempts with no sleep, then `Indexed=False` reason `Contended` and the netretry backoff (2 s to
-  30 s) through the requeueAt deadline. A record at `self` that is not an index is never written
-  (`IndexNotIndex`). A full index (256 live) refuses the add (`IndexFull`). Permanent failures (403,
-  link denied) wait 10 min or a new index CID; transient ones (5xx, 429, network) take the backoff.
+  attempts with no sleep, then `Indexed=False` reason `Contended`. Every write starts from one fresh
+  getRecord of `infra/self`; the in-memory copy (keyed by kcp cluster and DID, fed only by this
+  workspace's own index watch for a DID one of its infras indexes) serves only the "already settled"
+  and wake checks. A transient failure (Contended, 5xx, 429, network) is retried through the
+  requeueAt deadline: the netretry delay (2 s doubling to 30 s) jittered to 0.5x to 1.5x and never
+  sooner than a 429's Retry-After or Ratelimit-Reset; after 5 tries there is no timer, and the next
+  index CID or own record CID tries again. A record at `self` that is not an index is never written
+  (`IndexNotIndex`); a malformed index (`index` present, a field of the wrong type) is rebuilt from
+  the entries that still decode. Entries with a foreign collection, a bad rkey or no addedAt are
+  dropped on the next write. A full index (256 live) refuses the add (`IndexFull`) but still writes
+  the prunes found. Permanent failures (403, link denied) wait 10 min or a new index or record CID.
+  The index work of one pass has a 10 s budget.
 - Prune, by any writer during its own write: an expired entry (`expiresAt` passed, no read; endReason
   `deadline`); and, from at most 2 probes per write (one getRecord each, oldest `addedAt` first, each
-  entry at most once an hour per process), an entry whose record ended or expired, or that is 404 and
-  was added more than 10 min ago (`infra.IndexGoneAfter`; endReason `deleted`).
-- Self-heal: the per-repo index watch `infra-index-<repo name>` (collection `computer.socialweb.infra`,
-  rkeys `[self]`, label `infra.socialweb.computer/index`, owner the last infra that applied it, no
-  controller flag; one per workspace and repo) updates an in-memory copy of the index (by DID) and
-  wakes only the infras whose wanted entry state differs from it. Its deletion (its owner went) wakes
-  the workspace's indexed infras, and one applies it again. The check costs no PDS read; a cold
-  process reads `infra/self` once per DID.
+  entry at most once an hour per process), an entry whose record ended or expired, or for which the
+  PDS answers `RecordNotFound` (`atprotorepo.ErrRecordNotFound`; a bare HTTP 404 or RepoNotFound is
+  not enough) and that was added more than 10 min ago (`infra.IndexGoneAfter`; endReason `deleted`).
+  An added entry is dropped from `recentEnded`, and a changed `expiresAt` (or the record's
+  `createdAt`) rewrites the entry in place, so a session is never both live and ended and never
+  expires early.
+- Self-heal: the per-repo index watch `infraindex-<repo name>` (plus a hash of the repo's workspace
+  when it is not the infra's; collection `computer.socialweb.infra`, rkeys `[self]`, label
+  `infra.socialweb.computer/index`, owned by the AtprotoRepo when it is in the same workspace, else by
+  the infra that applied it, no controller flag) updates the in-memory copy and wakes only the infras
+  whose wanted entry state differs from it. Its deletion wakes the workspace's indexed infras, and one
+  applies it again. An ending EphemeralInfra that is not frozen wants nothing and is not woken.
 - The index is a hint. Its errors never fail or delay a deployment: they are logged
   (`infra_index_write_failed`) and shown as the condition `Indexed` (True `Indexed`; False `Pending`,
   `Removed`, `RecordInvalid`, `Contended`, `IndexWriteRetrying`, `IndexWriteFailed`, `IndexFull`,
   `IndexNotIndex`, `RepoPending`). The finalizer's removal is best effort.
-- Write load per session: start 1 index write (plus 1 getRecord of `infra/self` on a cold process and
-  at most 2 probe getRecords); end 1 index write (same reads); each lost swap adds 1 getRecord and
-  1 write. Steady state: no index write; the index watch verifies 1 getRecord per 5 min per repo per
+- Write load per session: start 1 index write, 1 getRecord of `infra/self` before it and at most 2
+  probe getRecords; end the same; each lost swap adds 1 getRecord and 1 write. Steady state: no index write; the index watch verifies 1 getRecord per 5 min per repo per
   workspace.
 - The EphemeralInfra kind's ComponentLink (`compose.InfraLinks`) gains repo.write on
   `computer.socialweb.infra` for the index. No OAuth scope change: every infra-writing scope set
