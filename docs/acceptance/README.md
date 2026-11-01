@@ -7,9 +7,9 @@ release everything you rent.
 
 | id | name | what it proves | hosts | how long | last pass |
 | --- | --- | --- | --- | --- | --- |
-| [0001](0001-auth-modes.md) | k8s: account modes, pause, one VM per host | localRepo + oauthQr bidders, per-component suspend, tenant k3s 0 -> 3 -> 0 nodes, one VM per host, typed settings, ACC34 | gateway, local, hat-9, hat-7 | ~45 min | rc142, 2026-10-31 (all 9 sections) |
+| [0001](0001-auth-modes.md) | k8s: account modes, pause, one VM per host | localRepo + oauthQr bidders, per-component suspend, tenant k3s 0 -> 3 -> 0 nodes, one VM per host, typed settings, ACC34 | gateway, local, hat-9, hat-7 | ~45 min | rc154, 2026-11-01 (all 9 sections) |
 | [0002](0002-ssh-gateway.md) | ssh gateway, per-user OAuth | `ssh <handle>@socialweb.computer atirc agent run <name>` rents as the user, agent joins, revoke before release on disconnect / cap, restart survival | gateway (ssh gw), any bidder | ~3 min + session | rc152, 2026-11-01 (owner, port 22) |
-| [0003](0003-cli-webrtc-ssh.md) | CLI ssh over WebRTC (ACC34) | CLI requester rents per host, ssh over WebRTC fresh + restarted kcp, no plaintext signaling | local, hat-9, hat-7 | ~3 min / host | rc142, 2026-10-31 |
+| [0003](0003-cli-webrtc-ssh.md) | CLI ssh over WebRTC (ACC34) | CLI requester rents per host, ssh over WebRTC fresh + restarted kcp, no plaintext signaling | local, hat-9, hat-7 | ~3 min / host | rc154, 2026-11-01 (exit 0, 2.2-4.9 s) |
 | [0004](0004-vm-atirc-agent.md) | atirc agent in a VM (plan 0035) | leased mint at RFP, `guest.agentStart` starts the unit, nick joins, revoke before `vm.terminated` | any bidder, atirc | ~3 min | rc135 page prod / rc132 CLI, 2026-10-31 |
 | [0005](0005-guest-requester-association.md) | guest requester R2, association (plan 0036) | contract-scoped association lets R2 rent a nested VM, grandchild agent, outer release cascades, all tokens revoked, record deleted | 2 bidders, atirc | ~10 min | rc128 cascade, 2026-10-30 |
 | [0006](0006-rollout-compat.md) | rc rollout checks + compat smoke | every component on rcN, Ready / SignedIn / 0 ERROR / host empty, unchanged page + CLI still work | all | ~5-15 min | rc154, 2026-11-01 |
