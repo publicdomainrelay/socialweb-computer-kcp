@@ -263,23 +263,24 @@ func (v *InfraAssociation) UnmarshalJSON(b []byte) error {
 }
 
 type InfraContract struct {
-	Agent             *InfraAgent                `json:"agent,omitempty"`
-	Association       *InfraAssociation          `json:"association,omitempty"`
-	BidderDids        []string                   `json:"bidderDids,omitempty"`
-	ComputeKind       string                     `json:"computeKind,omitempty"`
-	DenyBidderDids    []string                   `json:"denyBidderDids,omitempty"`
-	GuestTools        []string                   `json:"guestTools,omitempty"`
-	Name              string                     `json:"name"`
-	Policy            string                     `json:"policy,omitempty"`
-	PolicyArgs        string                     `json:"policyArgs,omitempty"`
-	SSHAuthorizedKeys []string                   `json:"sshAuthorizedKeys,omitempty"`
-	State             string                     `json:"state"`
-	Tunnels           []InfraTunnel              `json:"tunnels,omitempty"`
-	UserData          string                     `json:"userData,omitempty"`
-	VMName            string                     `json:"vmName,omitempty"`
-	VMReadyTimeoutSec int64                      `json:"vmReadyTimeoutSec,omitempty"`
-	Extra             map[string]json.RawMessage `json:"-"`
-	absent            map[string]json.RawMessage
+	Agent              *InfraAgent                `json:"agent,omitempty"`
+	Association        *InfraAssociation          `json:"association,omitempty"`
+	BidderDids         []string                   `json:"bidderDids,omitempty"`
+	ComputeKind        string                     `json:"computeKind,omitempty"`
+	DenyBidderDids     []string                   `json:"denyBidderDids,omitempty"`
+	GuestTools         []string                   `json:"guestTools,omitempty"`
+	Name               string                     `json:"name"`
+	Policy             string                     `json:"policy,omitempty"`
+	PolicyArgs         string                     `json:"policyArgs,omitempty"`
+	ReleaseRequestedAt string                     `json:"releaseRequestedAt,omitempty"`
+	SSHAuthorizedKeys  []string                   `json:"sshAuthorizedKeys,omitempty"`
+	State              string                     `json:"state"`
+	Tunnels            []InfraTunnel              `json:"tunnels,omitempty"`
+	UserData           string                     `json:"userData,omitempty"`
+	VMName             string                     `json:"vmName,omitempty"`
+	VMReadyTimeoutSec  int64                      `json:"vmReadyTimeoutSec,omitempty"`
+	Extra              map[string]json.RawMessage `json:"-"`
+	absent             map[string]json.RawMessage
 }
 
 func (v InfraContract) MarshalJSON() ([]byte, error) {

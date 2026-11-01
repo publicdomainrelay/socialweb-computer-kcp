@@ -63,7 +63,7 @@ func (r *reconciler[T]) contracts(ctx context.Context, req ctlruntime.Request, v
 		if ending {
 			state = v1alpha1.InfraContractReleased
 		}
-		step := infra.Plan(state, cc, previous[c.Name])
+		step := infra.Plan(state, c.ReleaseRequestedAt, cc, previous[c.Name])
 		if step.Create {
 			created, err := r.create(ctx, req, v, c, secrets[c.Name], nodes[c.Name])
 			if err != nil {
@@ -127,11 +127,14 @@ func (r *reconciler[T]) apply(ctx context.Context, req ctlruntime.Request, v vie
 		next := &v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: cc.Name, Labels: cc.Labels, OwnerReferences: cc.OwnerReferences}}
 		cc.Spec.DeepCopyInto(&next.Spec)
 		next.Spec.Release = true
+		if step.RequestedAt != "" {
+			next.Spec.ReleaseRequestedAt = step.RequestedAt
+		}
 		if err := req.Apply(ctx, next); err != nil {
 			return fmt.Errorf("infra: releasing the ComputeContract %s: %w", cc.Name, err)
 		}
 		r.c.log.Info("infra_contract_release_requested", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "computeContract", cc.Name,
-			"phase", cc.Status.Phase)
+			"phase", cc.Status.Phase, "releaseRequestedAt", next.Spec.ReleaseRequestedAt)
 	case step.Delete:
 		if !cc.DeletionTimestamp.IsZero() {
 			return nil

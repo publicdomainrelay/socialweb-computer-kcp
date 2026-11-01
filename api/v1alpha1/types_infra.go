@@ -66,6 +66,8 @@ type InfraContract struct {
 
 	State InfraContractState `json:"state,omitempty" apigen:"default=Staged,enum=Staged|Requested|Released"`
 
+	ReleaseRequestedAt string `json:"releaseRequestedAt,omitempty"`
+
 	ComputeContractTemplate `json:",inline"`
 }
 

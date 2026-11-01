@@ -32,6 +32,7 @@
           "knownValues": ["staged", "requested", "released"],
           "description": "staged: declared, no RFP is sent. requested: the requester runs the RFP flow and holds the guest. released: the guest is released."
         },
+        "releaseRequestedAt": { "type": "string", "format": "datetime", "description": "With state released: the time of the newest release request; a newer one asks a failed release again." },
         "vmName": { "type": "string", "maxLength": 253 },
         "bidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },
         "denyBidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },

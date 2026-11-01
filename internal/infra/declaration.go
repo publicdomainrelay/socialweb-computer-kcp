@@ -188,6 +188,11 @@ func (d Declaration) Validate() error {
 		default:
 			return fmt.Errorf("%w: the contract %s has the state %q", ErrInvalidDeclaration, c.Name, c.State)
 		}
+		if c.ReleaseRequestedAt != "" {
+			if _, err := time.Parse(time.RFC3339, c.ReleaseRequestedAt); err != nil {
+				return fmt.Errorf("%w: the contract %s has releaseRequestedAt %q, not an RFC 3339 time", ErrInvalidDeclaration, c.Name, c.ReleaseRequestedAt)
+			}
+		}
 		if err := validTunnels(c); err != nil {
 			return err
 		}
