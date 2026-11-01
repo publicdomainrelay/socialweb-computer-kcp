@@ -59,6 +59,10 @@ const (
 
 	transientContractPrefix = "ssh-run-"
 
+	heldContractPrefix = "ssh-"
+
+	heldRecordTimeout = 10 * time.Second
+
 	keepVMLabel = "socialweb.computer/ssh-keep-vm"
 
 	HeldSessionPolicyTimeout = 30 * time.Second
@@ -693,7 +697,7 @@ func (q *Requester) noteFirstResume(contract string, readMs int64) {
 func (q *Requester) Shutdown(ctx context.Context) {
 	q.endTransientSessions(ctx, "shutdown")
 	_ = supervise.Join(ctx, q.wg.Wait)
-	q.releaseAllHeldSessions("shutdown")
+	q.keepHeldSessions("shutdown; the next start adopts it until its recorded expiry")
 }
 
 func (q *Requester) resolveIdentity(ctx context.Context) error {

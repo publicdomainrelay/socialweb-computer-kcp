@@ -1434,14 +1434,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "ddc125458834b1b8c60869beea5515181b9b57b34fff09e734d67c34a1b7e592",
+          "treeSha256": "983b807c28e5fbe696ff63459e485a7675bc29f3fd7263952528e0ecda675100",
           "rawBytes": 40616336,
-          "zstdBytes": 12294648
+          "zstdBytes": 12296646
         },
         "linux/arm64": {
-          "treeSha256": "ddc125458834b1b8c60869beea5515181b9b57b34fff09e734d67c34a1b7e592",
+          "treeSha256": "983b807c28e5fbe696ff63459e485a7675bc29f3fd7263952528e0ecda675100",
           "rawBytes": 40616336,
-          "zstdBytes": 12294648
+          "zstdBytes": 12296646
         }
       }
     },
@@ -1496,14 +1496,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "8baf889a3d570dbf6a8e7e1bf8afe5a7997f463fee6d8ea30603c38d6123aac7",
-          "rawBytes": 98773894,
-          "zstdBytes": 29290562
+          "treeSha256": "fd32fce2b7eb4405bafb9bd4c2323e48d2f0130a686edbe73066fcf4eaf7f906",
+          "rawBytes": 99314582,
+          "zstdBytes": 29373959
         },
         "linux/arm64": {
-          "treeSha256": "8baf889a3d570dbf6a8e7e1bf8afe5a7997f463fee6d8ea30603c38d6123aac7",
-          "rawBytes": 98773894,
-          "zstdBytes": 29290562
+          "treeSha256": "fd32fce2b7eb4405bafb9bd4c2323e48d2f0130a686edbe73066fcf4eaf7f906",
+          "rawBytes": 99314582,
+          "zstdBytes": 29373959
         }
       }
     }
@@ -1565,15 +1565,15 @@
         }
       },
       "atirc": {
-        "version": "0.1.0-1bafff2",
-        "source": "the immutable versioned atirc linux/amd64 release binary that atirc-dev publishes at https://irc.fedfork.com/dl/v0.1.0-1bafff2 (the binary of the irc.fedfork.com server at that version), run on the guest as atirc agent run by atirc-agent.service (plan 0035); linux/arm64 is out of scope, so build-guest-downloads.sh makes no atirc-aarch64",
+        "version": "0.1.0-b0bbe78",
+        "source": "the immutable versioned atirc linux/amd64 release binary that atirc-dev publishes at https://irc.fedfork.com/dl/v0.1.0-b0bbe78 (the binary of the irc.fedfork.com server at that version), run on the guest as atirc agent run by atirc-agent.service (plan 0035); linux/arm64 is out of scope, so build-guest-downloads.sh makes no atirc-aarch64",
         "verify": "the sha256 of the binary, checked by scripts/build-guest-downloads.sh after the download; never irc.fedfork.com/dl/<arch>, which serves whatever binary the server runs",
         "fetch": {
           "linux/amd64": {
             "kind": "binary",
-            "url": "https://irc.fedfork.com/dl/v0.1.0-1bafff2",
-            "sha256": "fd7555e4be02bcb2d2c61393e9432860972b18cb63618712eba0d57944390c3b",
-            "bytes": 41741312
+            "url": "https://irc.fedfork.com/dl/v0.1.0-b0bbe78",
+            "sha256": "828d31878af31a9343265fd9708e2b53434cd2019a70875faee73da54c8c1076",
+            "bytes": 42282000
           }
         }
       }
