@@ -47,7 +47,7 @@ func (f *facts) set(key, value string) {
 	if _, ok := f.values[key]; !ok {
 		f.keys = append(f.keys, key)
 	}
-	f.values[key] = value
+	f.values[key] = strings.Join(strings.Fields(value), "_")
 }
 
 func (f *facts) get(key string) string { return f.values[key] }
@@ -97,9 +97,14 @@ func (r *Runner) Probe(ctx context.Context) (sandbox.Fence, error) {
 	r.probeRerun(ctx, &f, stash)
 	r.probeUncaught(ctx, &f)
 	f.set("clear", r.clear(marker))
-	fenced := fencedBy(&f)
+	failed := failedFacts(&f)
+	fenced := len(failed) == 0
 	r.fenced.Store(fenced)
-	return sandbox.Fence{Fenced: fenced, Message: f.String()}, nil
+	message := "passed: " + f.String()
+	if !fenced {
+		message = "failed: " + strings.Join(failed, ",") + "; " + f.String()
+	}
+	return sandbox.Fence{Fenced: fenced, Message: message}, nil
 }
 
 func (r *Runner) plant(ctx context.Context, marker string) (Planted, error) {
@@ -167,7 +172,7 @@ func (r *Runner) probeRerun(ctx context.Context, f *facts, stash string) {
 	case err != nil || hung || !ok:
 		f.set("rerun", outcome(answer, hung, err))
 	case answer.ExitCode != ProbeExitCode:
-		f.set("rerun", fmt.Sprintf("exit=%d", answer.ExitCode))
+		f.set("rerun", fmt.Sprintf("exit=%d:stderr=%s", answer.ExitCode, oneWord(answer.Stderr)))
 	case !strings.Contains(answer.Stderr, ProbeStderr):
 		f.set("rerun", "NO-STDERR")
 	default:
@@ -186,32 +191,38 @@ func (r *Runner) probeUncaught(ctx context.Context, f *facts) {
 	}
 }
 
-func fencedBy(f *facts) bool {
+func failedFacts(f *facts) []string {
+	var failed []string
 	for _, name := range ProbePlants {
 		if f.get("plant."+name) != "yes" {
-			return false
+			failed = append(failed, "plant."+name)
 		}
 	}
-	want := map[string]string{
-		"env": "ok", "shim": "ok", "net": "fetch", "dom": "none", "bridges": "none", "scan": "clean",
-		"timeout": "killed", "rerun": "ok", "stash": "none", "uncaught": "exit=1",
+	for _, key := range []string{"plant.fileURL", "fence"} {
+		if f.get(key) != "" {
+			failed = append(failed, key)
+		}
 	}
-	for key, value := range want {
-		if f.get(key) != value {
-			return false
+	want := []struct{ key, value string }{
+		{"env", "ok"}, {"shim", "ok"}, {"net", "fetch"}, {"dom", "none"}, {"bridges", "none"}, {"scan", "clean"},
+		{"timeout", "killed"}, {"rerun", "ok"}, {"stash", "none"}, {"uncaught", "exit=1"},
+	}
+	for _, w := range want {
+		if f.get(w.key) != w.value {
+			failed = append(failed, w.key)
 		}
 	}
 	for _, key := range []string{"file", "root", "xhr", "import"} {
 		if v := f.get(key); v != "none" && !strings.HasPrefix(v, "denied") {
-			return false
+			failed = append(failed, key)
 		}
 	}
 	for _, key := range []string{"idb", "cache"} {
 		if v := f.get(key); v != "none" && v != "stored" && !strings.HasPrefix(v, "denied") {
-			return false
+			failed = append(failed, key)
 		}
 	}
-	return f.get("plant.fileURL") == "" && f.get("fence") == ""
+	return failed
 }
 
 func outcome(answer Answer, hung bool, err error) string {
@@ -223,8 +234,16 @@ func outcome(answer Answer, hung bool, err error) string {
 	case answer.TimedOut:
 		return "timedOut"
 	default:
-		return fmt.Sprintf("exit=%d:%s", answer.ExitCode, oneWord(answer.Stderr))
+		return fmt.Sprintf("exit=%d:stdout=%s:stderr=%s", answer.ExitCode, oneWord(tail(answer.Stdout)), oneWord(answer.Stderr))
 	}
+}
+
+func tail(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 120 {
+		s = s[len(s)-120:]
+	}
+	return s
 }
 
 func oneWord(s string) string {
@@ -237,9 +256,17 @@ func oneWord(s string) string {
 
 func lastJSON(stdout string) (map[string]string, bool) {
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	var out map[string]string
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &out); err != nil {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(lines[len(lines)-1])), &raw); err != nil {
 		return nil, false
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		if text, ok := value.(string); ok {
+			out[key] = text
+		} else {
+			out[key] = fmt.Sprint(value)
+		}
 	}
 	return out, true
 }
