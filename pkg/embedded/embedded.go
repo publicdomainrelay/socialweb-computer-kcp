@@ -119,6 +119,10 @@ type Config struct {
 
 	PolicySandbox PolicySandbox
 
+	ProviderIdentities []byte
+
+	BeforeRequester func(ctx context.Context) error
+
 	Log *slog.Logger
 }
 
@@ -152,6 +156,10 @@ type Requester struct {
 	cancel context.CancelFunc
 
 	done chan struct{}
+
+	rest *rest.Config
+
+	providerWorkspace string
 }
 
 func Start(parent context.Context, cfg Config) (*Requester, error) {
@@ -174,10 +182,25 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 	admin.Impersonate = rest.ImpersonationConfig{UserName: "system:kcp:admin", Groups: []string{"system:kcp:admin"}}
 	cfg.Rest = admin
 
+	identities, err := ParseProviderIdentities(cfg.ProviderIdentities)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.ForceApply || !providerReady(parent, cfg.Rest) {
-		if err := applyProvider(parent, cfg, log); err != nil {
+		if err := applyProvider(parent, cfg, identities, log); err != nil {
 			return nil, err
 		}
+	} else if err := restoreProviderIdentities(parent, cfg.Rest, cfg.ProviderWorkspace, identities, log); err != nil {
+		return nil, err
+	}
+	if cfg.BeforeRequester != nil {
+		if err := applyRequesterBindings(parent, cfg, log); err != nil {
+			return nil, err
+		}
+		if err := cfg.BeforeRequester(parent); err != nil {
+			return nil, fmt.Errorf("embedded: the app's BeforeRequester hook: %w", err)
+		}
+		log.Info("embedded: the app's BeforeRequester hook ran")
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -202,7 +225,7 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedded: manager: %w", err)
 	}
-	r := &Requester{manager: mgr, bus: b, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{})}
+	r := &Requester{manager: mgr, bus: b, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{}), rest: cfg.Rest, providerWorkspace: cfg.ProviderWorkspace}
 	if err := r.register(ctx, cfg, composer, log); err != nil {
 		return nil, err
 	}
@@ -574,7 +597,7 @@ func bindingReady(item map[string]any) bool {
 	return false
 }
 
-func applyProvider(parent context.Context, cfg Config, log *slog.Logger) error {
+func applyProvider(parent context.Context, cfg Config, identities ProviderIdentities, log *slog.Logger) error {
 	ctx, cancel := context.WithTimeout(parent, ApplyStallTimeout)
 	defer cancel()
 	applier, err := kcpapply.New(cfg.Rest, kcpapply.Options{Base: RootWorkspace, FieldManager: FieldManager, WaitTimeout: 3 * time.Minute, Log: log})
@@ -585,6 +608,7 @@ func applyProvider(parent context.Context, cfg Config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	restored := false
 	for _, name := range providerSets {
 		set, ok := ix.Set(name)
 		if !ok {
@@ -595,8 +619,19 @@ func applyProvider(parent context.Context, cfg Config, log *slog.Logger) error {
 			return fmt.Errorf("embedded: decoding values for %s: %w", name, err)
 		}
 		start := time.Now()
-		if _, err := applier.Apply(ctx, set, values); err != nil {
-			return fmt.Errorf("embedded: applying the %s set: %w", name, err)
+		for _, part := range splitAfterPhase(set, providerWorkspacePhase) {
+			if _, err := applier.Apply(ctx, part, values); err != nil {
+				return fmt.Errorf("embedded: applying the %s set: %w", name, err)
+			}
+			if name == providerSets[0] && endsWithPhase(part, providerWorkspacePhase) {
+				if err := restoreProviderIdentities(ctx, cfg.Rest, cfg.ProviderWorkspace, identities, log); err != nil {
+					return err
+				}
+				restored = true
+			}
+		}
+		if name == providerSets[0] && !restored && len(identities.Identities) > 0 {
+			return fmt.Errorf("embedded: the %s set has no %s phase, so the provider identities cannot be restored before its APIExports", name, providerWorkspacePhase)
 		}
 		log.Info("embedded: provider set applied", "set", name, "seconds", time.Since(start).Seconds())
 	}
