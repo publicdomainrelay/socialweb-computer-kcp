@@ -10,6 +10,10 @@ spec:
   - name: agent1
     state: Requested
     vmName: einfra-quickstart-agent-agent1
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
     agent:
       envFile: /etc/atirc/atirc.env
   secrets:
