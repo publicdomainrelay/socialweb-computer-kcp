@@ -19,6 +19,8 @@ const PolicyPerspectiveRequester = "requester"
 
 var ErrRFPNoPolicy = errors.New("the RFP attaches no policy")
 
+var ErrPolicyRejected = errors.New("rejected by policy")
+
 type PolicyInput = participant.PolicyInput
 
 type PolicyRef = participant.PolicyRef

@@ -289,8 +289,10 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 	if reused {
 		if err := q.heldSessionAllowed(ctx, contract, policyName); err != nil {
 			q.log.Info("requester_held_session_policy_denied", "contract", contract, "err", err)
-			held.clear()
-			q.releaseHeldSessionTarget(contract, privateKeyPath)
+			if errors.Is(err, ErrPolicyRejected) {
+				held.clear()
+				q.releaseHeldSessionTarget(contract, privateKeyPath)
+			}
 			held.mu.Unlock()
 			return commandFailed(io, "policy denied: ", err)
 		}
@@ -417,29 +419,7 @@ func (q *Requester) heldSessionAllowed(ctx context.Context, contract, policyName
 	if !ok || held.Status.Contract == nil {
 		return errors.New("the held session contract " + contract + " is not known")
 	}
-	state := held.Status.Contract
-	bidderDID := winnerDID(state)
-	if bidderDID == "" || state.Policy == nil || state.Policy.URI == "" || state.RFP == nil || state.RFP.URI == "" ||
-		state.Bid == nil || state.Bid.URI == "" {
-		return errors.New("the held session contract " + contract + " names no winner, policy, RFP or bid")
-	}
-	gate, err := q.attachedPolicy(ctx, market.StrongRef{Type: market.StrongRefNSID, URI: state.Policy.URI, CID: state.Policy.CID},
-		PolicyWorkflowName(policyName))
-	if err != nil {
-		return err
-	}
-	decision := q.policy.Evaluate(ctx, gate.Input(PolicyInput{
-		SelfDid:          q.marketDID,
-		SubjectDid:       bidderDID,
-		CounterpartyDid:  bidderDID,
-		RootRequesterDid: q.marketDID,
-		RFP:              &PolicyRef{URI: state.RFP.URI, CID: state.RFP.CID},
-		Bid:              &PolicyRef{URI: state.Bid.URI, CID: state.Bid.CID},
-	}))
-	if !decision.Allow {
-		return errors.New("the held session's bidder " + bidderDID + " is rejected by policy: " + decision.Reason)
-	}
-	return nil
+	return q.recordedWinnerAllowed(ctx, held.Status.Contract, policyName)
 }
 
 func (q *Requester) provisionHeldContract(ctx context.Context, name, vmName, did, publicKey, policyName string, policyArgs map[string]string) (*SessionTarget, error) {
