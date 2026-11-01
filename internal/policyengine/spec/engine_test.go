@@ -290,3 +290,37 @@ func TestFailClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestNoTrustSnapshotDenies(t *testing.T) {
+	t.Parallel()
+	for _, perspective := range []side{bidderSide, requesterSide} {
+		for _, family := range []string{"tangled-vouch", "mutuals", "only-me", "open"} {
+			for _, mode := range []lane{scope, full} {
+				workflow := workflowOf(family, perspective)
+				t.Run("fail-closed/no-trust-snapshot/"+workflow+"/"+string(mode)+"/"+string(perspective), func(t *testing.T) {
+					t.Parallel()
+					h := policytest.New(t)
+					p := policytest.PartiesFor(string(perspective))
+					h.World.Associate(p.CP, p.Self, p.CPSvc)
+					h.World.Vouch(p.Self, p.CP)
+					h.World.Vouch(p.CP, p.Self)
+					h.SetHost(nil)
+					before := h.Sandbox.Actions()
+					got := evaluate(t, h, workflow, perspective, mode, p.Self, p.CP, nil)
+					ran := got.mustRun(t, workflow)
+					if h.Sandbox.Actions() == before {
+						t.Fatalf("the %s action did not run", workflow)
+					}
+					if _, seeded := ran.Status.Cache["trust/"+p.CP]; seeded {
+						t.Fatalf("a trust snapshot was seeded without a trust host")
+					}
+					if family == "open" {
+						got.mustAllow(t)
+						return
+					}
+					got.mustDeny(t, "")
+				})
+			}
+		}
+	}
+}

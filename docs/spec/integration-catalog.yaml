@@ -1607,6 +1607,17 @@ entries:
       not be created, cancelled); a PDS outage denies tangled-vouch and leaves open allowed.
     cleanup: none.
 
+  - id: TestNoTrustSnapshotDenies
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [bidder, requester, policy engine]
+    setup: >
+      No trust host, so no trust/<counterparty> snapshot is seeded, while the PDS holds an association
+      and vouches both ways that would allow; tangled-vouch, mutuals, only-me and open, both lanes and
+      both perspectives.
+    asserts: The action runs; the trust policies deny in both lanes; open still allows.
+    cleanup: none.
+
   - id: TestEngineVerdictCache
     kind: policyspec
     source: internal/policyengine/spec/cache_test.go
