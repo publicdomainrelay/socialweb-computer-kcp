@@ -18,6 +18,7 @@ release everything you rent.
 | [0009](0009-browser-page.md) | wasm browser page | A1-A7: suite, boot + sign-in, VM lifecycle, Held-reload restore, upgrade load, compat smoke, `/chat` | browser, bidders | ~5 min / test | page-rc141 vs rc153, 2026-11-01 |
 | [0010](0010-ios-app.md) | iOS app, embedded kcp | A1-A6: market sign-in + persistence, launch / agentStart / join, revoke before terminated, cross-restart release, presence, perf | simulator / device, bidders | ~5 min / test | simulator, 2026-10-31 |
 | [0011](0011-atirc.md) | atirc | repo + deploy gates, token lifecycle gates for every path, pipes, `/chat`, lease death | irc.fedfork.com | ~10 min | 2026-11-01 (atirc side of compat smoke) |
+| [0012](0012-infra-quickstart.md) | Infra quickstart | kubectl apply of every `examples/infra` file: VM ssh, tenant k8s node + pod, Deno sandbox stdout, agent VM up to the mint (join on prod), release | own market network (+ prod for the agent join) | ~15 min | 2026-11-01 local qs1 (VM, k8s, Deno; agent to the mint) |
 
 0011 is a copy; the source is the atirc repo (`git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`,
 `docs/acceptance/0001-atirc.md` @ `ec0d088`).
@@ -42,5 +43,6 @@ release everything you rent.
 | requester mint / revoke / lease | 0004, 0011 section 3, 0009 A3 |
 | association / guest requester | 0005 |
 | page build | 0009 A1-A6 on dev, then A3 + A6 on prod |
+| Infra / EphemeralInfra, examples, QUICKSTART | 0012 |
 | iOS app / pkg/embedded | 0010 |
 | OAuth role scope | re-sign every OAuth identity first (0001 section 9 note, 0006), then 0003 hat-7 |
