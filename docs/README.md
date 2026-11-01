@@ -7,6 +7,7 @@ Start with SYSTEM, then KCP. Agents: read [../AGENTS.md](../AGENTS.md) first.
 | doc | what |
 |---|---|
 | [SYSTEM.md](SYSTEM.md) | the whole system: repos, hosts, apps, market protocol, guests, identity, ssh gateway, atirc, tenant clusters, records policy, deploy |
+| [QUICKSTART.md](QUICKSTART.md) | clone -> kcp -> kubectl apply Infra / EphemeralInfra: VM, tenant k8s, Deno sandbox, atirc agent VM; examples in ../examples/infra |
 | [KCP.md](KCP.md) | how every app uses kcp: profiles, slots/front/kine, workspaces, exports, bindings, component runtime, controllers, full API catalog, schema revisions, apigen |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | decisions, measurements, invariants. open a section by heading; do not read end to end |
 
