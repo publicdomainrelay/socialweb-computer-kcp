@@ -60,12 +60,12 @@ func (s *Service) publicOrigin() string {
 	return strings.TrimRight(strings.TrimSpace(s.spec.PublicOrigin), "/")
 }
 
-func perUserMode(spec v1alpha1.SshServerSpec, ownerSessions int) bool {
+func webSignInMode(spec v1alpha1.SshServerSpec, ownerSessions int) bool {
 	return spec.VaultRef != nil && strings.TrimSpace(spec.PublicOrigin) != "" && ownerSessions == 0
 }
 
 func (s *Service) openSignIn(ctx context.Context) (*webSignIn, error) {
-	if !s.perUser {
+	if !webSignInMode(s.spec, len(s.ownerSessions)) {
 		return nil, nil
 	}
 	origin := s.publicOrigin()

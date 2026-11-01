@@ -243,6 +243,8 @@ type Requester struct {
 
 	contracts *participant.Index[v1alpha1.ComputeContract]
 
+	foreignContracts sync.Map
+
 	syncs *participant.Index[v1alpha1.StateSync]
 
 	receipts *participant.Index[market.ResolvedRecord]
