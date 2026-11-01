@@ -226,6 +226,7 @@ apps:
       - {name: secrets, to: contract.secretsRef}
       - {name: agent, to: contract.agent}
       - {name: guest-tools, to: contract.guestTools}
+      - {name: allow-oauth, to: contract.oauthClients}
       - {name: associate, to: contract.association}
       - {name: association-ref, to: spec.identity.associationRef}
       - {name: secrets-fallback, to: spec.secretsFallback}

@@ -606,6 +606,11 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "allow-oauth": {
+      "type": "string",
+      "repeat": true,
+      "description": "run request: --allow-oauth <client_id>=<scope>,<scope>... (repeatable, one OAuth client each; spec.oauthClients) lets the guest approve that atproto OAuth client's authorization as the requesting account, with at most those scopes: the requester writes com.fedproxy.rbac/oauth-<vm> in its own repo (iss the winning bidder's workload issuer, sub the guest, aud <did>#role/oauth-<vm>) and, with --secrets, /etc/socialweb-computer/oauth-wid.json into the bundle; the guest runs com.fedproxy.temp.oauth.exchangeToken and approveAuthorization on the requester's PDS. Needs a localRepo identity (--identity) on the requester's own PDS; the client_id is an https URL without a query; transition:* and repo:com.fedproxy.rbac scopes are refused"
+    },
     "guest-tools": {
       "type": "string",
       "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"

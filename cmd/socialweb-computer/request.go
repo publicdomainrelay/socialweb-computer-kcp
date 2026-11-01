@@ -51,7 +51,7 @@ const (
 	sshConnectionFailed  = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "allow-oauth", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester")
@@ -338,6 +338,14 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	if r.contract.GuestTools, err = guestToolsOf(vals.String("guest-tools")); err != nil {
 		return nil, fmt.Errorf("guest-tools: %w", err)
 	}
+	for line := range strings.SplitSeq(vals.String("allow-oauth"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if r.contract.OAuthClients, err = addOAuthClient(r.contract.OAuthClients, line); err != nil {
+			return nil, fmt.Errorf("allow-oauth: %w", err)
+		}
+	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
 	}
@@ -427,6 +435,12 @@ func (r *requestRun) contractArg(p compose.AppArg) (bool, error) {
 				r.contract.GuestTools = append(r.contract.GuestTools, tool)
 			}
 		}
+	case p.To == "contract.oauthClients":
+		clients, err := addOAuthClient(r.contract.OAuthClients, p.Value)
+		if err != nil {
+			return true, fmt.Errorf("--allow-oauth: %w", err)
+		}
+		r.contract.OAuthClients = clients
 	case p.To == "contract.tunnels":
 		tunnels, err := parseTunnels(p.Value)
 		if err != nil {
@@ -437,6 +451,20 @@ func (r *requestRun) contractArg(p compose.AppArg) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+func addOAuthClient(clients []v1alpha1.ComputeContractOAuthClient, value string) ([]v1alpha1.ComputeContractOAuthClient, error) {
+	id, scopes, _ := strings.Cut(strings.TrimSpace(value), "=")
+	id = strings.TrimSpace(id)
+	if strings.Contains(id, "?") {
+		return nil, fmt.Errorf("%q: the client_id carries a query; write it as spec.oauthClients instead", id)
+	}
+	client := v1alpha1.ComputeContractOAuthClient{ClientID: id, Scopes: splitList(scopes)}
+	next := append(append([]v1alpha1.ComputeContractOAuthClient(nil), clients...), client)
+	if err := requester.CheckOAuthClients(next); err != nil {
+		return nil, err
+	}
+	return next, nil
 }
 
 func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
