@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -477,6 +478,16 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.secrets = p.Value
 		case p.To == "contract.agent":
 			r.contract.Agent = agentOf(p.Value)
+		case p.To == "contract.guestTools":
+			tools, err := guestToolsOf(p.Value)
+			if err != nil {
+				return fmt.Errorf("--guest-tools: %w", err)
+			}
+			for _, tool := range tools {
+				if !slices.Contains(r.contract.GuestTools, tool) {
+					r.contract.GuestTools = append(r.contract.GuestTools, tool)
+				}
+			}
 		case p.To == "contract.tunnels":
 			tunnels, err := parseTunnels(p.Value)
 			if err != nil {

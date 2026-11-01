@@ -255,7 +255,7 @@ func flagsFirst(spec clicfg.Spec, args []string) []string {
 		if strings.Contains(name, "=") {
 			continue
 		}
-		if o, ok := spec.Options[name]; ok && o.Type != clicfg.TypeBoolean && i+1 < len(args) {
+		if o, ok := spec.Options[name]; ok && o.Type != clicfg.TypeBoolean && o.Bare == "" && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
 		}
