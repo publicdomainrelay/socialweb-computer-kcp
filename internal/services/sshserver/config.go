@@ -16,6 +16,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/networkdial"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
@@ -31,6 +32,8 @@ const (
 
 	PublicEndpoint = "ssh-public"
 
+	rootLabelPrefix = "apps.socialweb.computer/root"
+
 	publicAcceptBackoff = 100 * time.Millisecond
 
 	requestTimeout = 30 * time.Second
@@ -44,6 +47,8 @@ type Deps struct {
 	component.Instance
 
 	Hosts component.NetworkHosts
+
+	KCP component.KCPClients
 
 	TLS *tls.Config
 }
@@ -123,6 +128,10 @@ func (s *Service) network() v1alpha1.MarketNetworkValue {
 
 func (s *Service) workspace() string {
 	return cmp.Or(s.deps.Self.Workspace, "root")
+}
+
+func (s *Service) accountRequesterRef(did string) commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RequesterKind, Name: contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did), Workspace: s.workspace()}
 }
 
 func (s *Service) requesterRef() (commonv1.ObjectRef, error) {

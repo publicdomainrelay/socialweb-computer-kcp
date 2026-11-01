@@ -14,16 +14,19 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
 type Service struct {
@@ -69,6 +72,8 @@ type Service struct {
 
 	public net.Listener
 
+	web *webSignIn
+
 	gateway *gateway.Gateway
 }
 
@@ -84,11 +89,53 @@ type requester struct {
 }
 
 func (r requester) RunCommand(ctx context.Context, account sshcontract.Account, command string, env map[string]string, io sshcontract.CommandIO) error {
-	runner, err := r.service.resolveRequester(ctx, r.ref)
+	s := r.service
+	s.mu.Lock()
+	web := s.web
+	s.mu.Unlock()
+	if web == nil {
+		runner, err := s.resolveRequester(ctx, r.ref)
+		if err != nil {
+			return err
+		}
+		return runner.RunCommand(ctx, account, command, env, io)
+	}
+	runner, err := s.resolveRequester(ctx, s.accountRequesterRef(account.DID))
 	if err != nil {
-		return err
+		s.log.Info("sshserver_account_not_signed_in", "did", account.DID, "err", err.Error())
+		_ = io.WriteErr([]byte("sign in at " + s.publicOrigin() + " first: this ssh gateway rents VMs as you, with your own atproto session, and has none for " + account.DID + " yet\n"))
+		io.Exit(1)
+		return nil
 	}
 	return runner.RunCommand(ctx, account, command, env, io)
+}
+
+func (s *Service) ensureAccount(ctx context.Context, did string) error {
+	if s.deps.Bus == nil || s.spec.VaultRef == nil {
+		return errors.New("sshserver: no bus or vault to record the sign-in")
+	}
+	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace()}
+	intents, err := bus.Resolve[contractmarket.Intents](ctx, s.deps.Bus, self, self, bus.Capability{Name: contractmarket.CapabilityIntents})
+	if err != nil {
+		return fmt.Errorf("sshserver: the market intents handle: %w", err)
+	}
+	vault := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Vault", Name: s.spec.VaultRef.Name, Workspace: s.workspace()}
+	labels := map[string]string{contractmarket.SessionOwnerLabel: "true"}
+	for key, value := range s.deps.Labels {
+		if strings.HasPrefix(key, rootLabelPrefix) {
+			labels[key] = value
+		}
+	}
+	identity := v1alpha1.MarketIdentity{
+		ObjectMeta: metav1.ObjectMeta{Name: contractmarket.SessionOwnerName(contractmarket.SessionOwnerIdentityPrefix, did), Labels: labels},
+		Spec: v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModeOAuthSessionProxy, Did: did, Association: v1alpha1.AssociationSkip,
+			SessionRef: &commonv1.SecretRef{Vault: &vault, Mount: "auth/" + atprotoMount, Path: "session/" + did}},
+	}
+	if err := intents.EnsureMarketIdentity(ctx, identity); err != nil {
+		return fmt.Errorf("sshserver: recording the signed-in account %s: %w", did, err)
+	}
+	s.log.Info("sshserver_account_signed_in", "did", did)
+	return nil
 }
 
 func (s *Service) resolveRequester(ctx context.Context, ref commonv1.ObjectRef) (sshcontract.Runner, error) {
@@ -210,24 +257,37 @@ func (s *Service) setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.resolveRequester(ctx, ref); err != nil {
+	web, err := s.openSignIn(ctx)
+	if err != nil {
 		return err
 	}
+	if web == nil {
+		if _, err := s.resolveRequester(ctx, ref); err != nil {
+			return err
+		}
+	}
 	owners := ownersession.New(ownersession.Config{Sessions: s.ownerSessions}, ownersession.Deps{Open: s.openOwner})
+	var auth sshtransport.Authenticator = owners
+	var agents sshtransport.AgentProvider = owners
+	if web != nil {
+		auth, agents = web.auth, web.signIn
+	}
 	g, err := gateway.New(s.cfg, gateway.Deps{
 		Runner:    requester{service: s, ref: ref},
 		Directory: s.directory,
 		Trust:     s.inProcess,
 		Client:    s.httpClient(requestTimeout),
-		Auth:      owners,
-		Agents:    owners,
+		Auth:      auth,
+		Agents:    agents,
 		Log:       s.log,
 	})
 	if err != nil {
+		web.close()
 		return err
 	}
 	s.mu.Lock()
 	s.gateway = g
+	s.web = web
 	s.mu.Unlock()
 	return nil
 }
@@ -237,6 +297,10 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /connect.json", s.connect)
 	mux.HandleFunc("GET /.well-known/cocore-app.json", s.cocoreApp)
+	if s.web != nil {
+		s.web.oauth.Register(mux)
+		mux.HandleFunc("GET /{$}", s.page)
+	}
 	s.gateway.Register(mux)
 	return mux
 }
@@ -314,7 +378,10 @@ func (s *Service) shutdown(ctx context.Context) {
 	g := s.gateway
 	public := s.public
 	s.public = nil
+	web := s.web
+	s.web = nil
 	s.mu.Unlock()
+	defer web.close()
 	if public != nil {
 		_ = public.Close()
 	}

@@ -475,6 +475,24 @@ sets:
     summary: the components of an SshGateway application (socialweb-computer run gateway ssh) in its own kcp - its own OpenBaoServer holding the OAuth sessions and keys and the account that reads it, the iroh dialer HostProcess (internal iroh-dial, the only process that runs dumbpipe), the ComputeContract schema bound in root (every held ssh session is a contract the requester holds), the root:app workspace and, per profile, the hono-socialweb-computer-ssh service; applied by internal/appctl (plan 0008 M4-RUN-GATEWAY-SSH)
     values: SshGateway
     phases:
+      - name: identity-schemas
+        workspace: root:socialweb-provider
+        files:
+          - path: marketidentity-apiresourceschema.yaml
+          - path: atprotorecord-apiresourceschema.yaml
+          - path: atprotorecordwatch-apiresourceschema.yaml
+          - path: marketidentity-apiexport.yaml
+        after:
+          - kind: APIExport
+            name: marketidentities
+            for: IdentityValid
+      - name: identity-binding
+        workspace: root
+        files:
+          - path: apps/gateway/marketidentities-binding.yaml
+        after:
+          - kind: APIBinding
+            for: Ready
       - name: vault
         workspace: root
         files:

@@ -17,11 +17,12 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
-const SessionOwnerLabel = "apps.socialweb.computer/session-owner"
+const SessionOwnerLabel = market.SessionOwnerLabel
 
 type SessionOwner struct {
 	DID string
@@ -54,6 +55,10 @@ func (o SessionOwner) SessionRef(r Root) commonv1.SecretRef {
 
 func ownerPdsName(pdsURL string) string {
 	return "owner-" + Stamp(strings.TrimRight(strings.TrimSpace(pdsURL), "/"))
+}
+
+func SessionOwnerPds(pdsURL, ws string) (commonv1.ObjectRef, string) {
+	return RemotePDSRefIn(ownerPdsName(pdsURL), ws), pdsServiceDID(pdsURL)
 }
 
 func sessionOwnerLabels() map[string]string {

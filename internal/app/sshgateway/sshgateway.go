@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
@@ -395,6 +396,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		Hostnames:         hostnames,
 		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
 		PublicListen:      publicListen(o.Spec),
+		PublicOrigin:      compose.OptionValue(o.Spec.Options, compose.PublicOriginOption),
 	}}
 	out := []compose.Desired{compose.PolicyEngineDesired(), requester, sshServer}
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, marketrequester.RequesterComponent, "http", network, hostnames, false, true)...)
@@ -408,6 +410,67 @@ func publicListen(spec v1alpha1.SshGatewaySpec) string {
 		return ""
 	}
 	return strings.TrimSpace(spec.Ssh.PublicListen)
+}
+
+func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired) ([]compose.Desired, []compose.Link, error) {
+	c, r, o := p.c, p.r, p.o
+	ws := r.Workspace
+	if o.Spec.OwnerSessionsFile != "" || compose.OptionValue(o.Spec.Options, compose.PublicOriginOption) == "" {
+		return nil, nil, nil
+	}
+	var base *v1alpha1.RequesterSpec
+	for _, d := range desired {
+		if spec, ok := d.Spec.(v1alpha1.RequesterSpec); ok && d.Kind == compose.ComponentKindRequester && d.Name == marketrequester.RequesterComponent {
+			base = &spec
+		}
+	}
+	if base == nil {
+		return nil, nil, nil
+	}
+	dids, err := c.SessionOwners(ctx, ws)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []compose.Desired
+	var links []compose.Link
+	for _, did := range dids {
+		owner := compose.SessionOwner{DID: did, Vault: SshGatewayVaultServer, Scope: compose.SshGatewayAtprotoScope()}
+		st, err := c.SessionOwnerState(ctx, ws, did)
+		if err != nil {
+			return nil, nil, err
+		}
+		links = append(links, compose.SessionOwnerLinks(r, ws, ws, owner, st.PdsURL)...)
+		if err := c.ApplySessionOwner(ctx, r, ws, owner, st.PdsURL); err != nil {
+			return nil, nil, err
+		}
+		if !st.Ready || st.PdsURL == "" {
+			continue
+		}
+		id, err := c.Identity(ctx, ws, compose.OwnerIdentityName(did))
+		if err != nil {
+			return nil, nil, err
+		}
+		name := contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did)
+		handle := strings.TrimSpace(id.Status.Handle)
+		spec := *base
+		spec.ComponentSpec = c.NetworkComponentSpec(r, compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, name), o.Spec.Network)
+		spec.Identity = compose.ComponentIdentity(id, handle)
+		pdsRef, pdsDID := compose.SessionOwnerPds(st.PdsURL, "")
+		spec.PdsRef, spec.PdsDID = &pdsRef, pdsDID
+		spec.OperatorDID, spec.OwnerSessionsFile, spec.Hostnames = "", "", nil
+		if handle != "" {
+			spec.Hostnames = []string{handle}
+		}
+		spec.Mode = compose.RequesterMode(v1alpha1.MarketIdentityModeOAuthSessionProxy)
+		out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: name, Spec: spec})
+		out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, name, "http", o.Spec.Network, spec.Hostnames, false, true)...)
+		requester := compose.AppRef(compose.ComponentKindRequester, name, ws)
+		links = append(links,
+			compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...),
+			compose.ServiceAuthLink(requester, compose.AppRef(compose.KindMarketIdentity, id.Name, ws), did),
+			compose.RepoWriteLink(requester, compose.RepoRefIn(did, ws), compose.ScopeAll))
+	}
+	return out, links, nil
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
@@ -501,6 +564,14 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	desired, err := p.desired(plan, ident, id)
 	if err != nil {
 		return p.fail(err)
+	}
+	accounts, accountLinks, err := p.accountRequesters(ctx, desired)
+	if err != nil {
+		return p.retry("the signed-in accounts", err)
+	}
+	desired = append(desired, accounts...)
+	if err := c.ApplyLinks(ctx, r, "accounts", accountLinks); err != nil {
+		return ctlruntime.Result{}, err
 	}
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)

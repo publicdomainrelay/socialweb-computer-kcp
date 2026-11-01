@@ -215,7 +215,17 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     mints `<sub>` below the child.
     The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
     standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
-    listener `ssh-public`, next to the loopback Exposure).
+    listener `ssh-public`, next to the loopback Exposure). With the option `public-origin` (and no
+    owner sessions file) the SshServer serves the web sign-in at `/` over the same OpenBao atproto
+    plugin as GatewayAPI (`gatewayhttp.NewOAuth` over `internal/gateway/custody`, the session at
+    `auth/atproto session/<did>` of the ssh-gateway vault) and `/keys` (badgeBlueKeys at keyRkey in
+    the user's own repo, through the custody agent). A sign-in creates, through the market intents
+    handle, the session owner MarketIdentity `owner-<stamp(did)>` (oauthSessionProxy, root labels of
+    the SshServer); the SshGateway composer then applies the session owner (compose.ApplySessionOwner)
+    and, once it is Ready, a Requester `requester-<stamp(did)>` on that identity with its own ingress,
+    policy, service auth and repo links. An ssh session of DID X runs on X's requester, so its RFP,
+    accept and records are X's; with none, the client gets "sign in at <public-origin> first" and
+    exit 1. The set `ssh-gateway` binds marketidentities in root.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

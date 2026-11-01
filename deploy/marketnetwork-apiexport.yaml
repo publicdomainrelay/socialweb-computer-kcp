@@ -56,7 +56,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: sshservers
-      schema: v1alpha1-13.sshservers.socialweb.computer
+      schema: v1alpha1-14.sshservers.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

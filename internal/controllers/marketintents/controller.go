@@ -150,7 +150,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, kind := range []string{"Bidder", "Requester"} {
+	for _, kind := range []string{"Bidder", "Requester", "SshServer"} {
 		bus.Provide[market.Intents](opts.Bus, schema.GroupKind{Group: v1alpha1.GroupName, Kind: kind}, market.CapabilityIntents, c.open)
 	}
 	return c, nil
