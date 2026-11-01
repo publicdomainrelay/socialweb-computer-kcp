@@ -11642,8 +11642,12 @@ status, or a Retained one, releases as before.
   removes only fields of its own Apply entry, and a null in an apply does not remove a field another
   entry owns (repro on a local kcp v0.33.1: the field stays; a null for an object field leaves `{}`;
   a null for a string fails validation). Now `ApplyStatus` (not SharedStatus) sends the live status
-  keys missing from the desired status, ForeignStatus paths excepted, as nulls in one status merge
-  patch under the controller's field manager, then applies the desired status without them. Repro:
+  keys missing from the desired status as nulls in one status merge patch under the controller's
+  field manager, then applies the desired status without them. Only keys a managedFields entry of
+  the controller's own manager owns (any operation; through the virtual workspace that is the
+  Update entry) are cleared, never a ForeignStatus path (nested ones too) nor a key only another
+  manager owns, so the patch cannot fight another writer, and it is sent only when such a key is
+  live and not desired (a normal reconcile sends nothing more). Repro:
   the merge patch removes the field and the empty Update entry with it; on an absent field it is a
   no-op. Existing objects heal on their next reconcile; a status write costs one more patch only when
   a field drops.
