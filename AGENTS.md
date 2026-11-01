@@ -148,7 +148,11 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   (`bidder_rfp_already_bid`). A relay stream reconnects 1000 events back, a Jetstream 30 s back,
   but never before the cursor its last connection started at, after a 1 s backoff that doubles to
   30 s and resets only after a connection that stayed up 30 s; each close logs `event_stream_closed`
-  (the cursor, `openSeconds`, `retryIn`, the error) and a failed dial `event_stream_subscribe_failed`. Our relay answers a subscribeRepos
+  (the cursor, `openSeconds`, `retryIn`, `restored`, the error) and a failed dial `event_stream_subscribe_failed`.
+  A close the browser page fires after a memory snapshot restore (code 1006, reason
+  `wsconn.RestoredCloseReason` "restored from a memory snapshot", the page's `RESTORE_CLOSE_REASON`;
+  `wsconn.Restored`) redials at once from the cursor in memory and resets the backoff to 1 s; the
+  pdsclient subscribeRepos stream does the same. Any other close keeps the backoff. Our relay answers a subscribeRepos
   without a cursor with live events only (the atproto sync spec); a cursor replays its backlog. The
   js/wasm WebSocket (`internal/kit/wsconn/conn_js.go`) has no receive backpressure, so it queues
   frames up to 16 MiB (`MaxBufferedBytes`), never by a frame count.

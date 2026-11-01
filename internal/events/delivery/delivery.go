@@ -10,6 +10,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/wsconn"
 )
 
 type Phase string
@@ -191,11 +192,16 @@ func (l *Loop) Run(ctx context.Context) {
 		filter := l.cfg.Filter
 		filter.Cursor = atLeast(l.cursor(), floor)
 		floor = filter.Cursor
+		restored := false
 		upstream, err := l.deps.Source.Subscribe(ctx, filter)
 		if err != nil {
 			l.set(PhaseFailed, false, true, ReasonSubscribeFailed, err.Error())
+			if restored = wsconn.Restored(err); restored {
+				delay = base
+			}
 			if ctx.Err() == nil {
-				l.deps.Log.Warn("event_stream_subscribe_failed", "cursor", logCursor(filter.Cursor), "retryIn", delay.String(), "err", err.Error())
+				l.deps.Log.Warn("event_stream_subscribe_failed", "cursor", logCursor(filter.Cursor), "retryIn", retryIn(delay, restored).String(),
+					"restored", restored, "err", err.Error())
 			}
 		} else {
 			l.mu.Lock()
@@ -204,17 +210,21 @@ func (l *Loop) Run(ctx context.Context) {
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
 			opened := time.Now()
 			received, closeErr := l.consume(ctx, upstream)
-			if received && time.Since(opened) >= StableConnection {
+			restored = wsconn.Restored(closeErr)
+			if restored || received && time.Since(opened) >= StableConnection {
 				delay = base
 			}
 			if ctx.Err() == nil && closeErr != nil {
 				l.deps.Log.Warn("event_stream_closed", "cursor", logCursor(filter.Cursor), "openSeconds", int64(time.Since(opened).Seconds()),
-					"received", received, "retryIn", delay.String(), "err", closeErr.Error())
+					"received", received, "retryIn", retryIn(delay, restored).String(), "restored", restored, "err", closeErr.Error())
 			}
 			_ = upstream.Close()
 		}
 		if ctx.Err() != nil {
 			return
+		}
+		if restored {
+			continue
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -225,6 +235,13 @@ func (l *Loop) Run(ctx context.Context) {
 		}
 		delay = min(delay*2, limit)
 	}
+}
+
+func retryIn(delay time.Duration, restored bool) time.Duration {
+	if restored {
+		return 0
+	}
+	return delay
 }
 
 func logCursor(cursor *int64) any {

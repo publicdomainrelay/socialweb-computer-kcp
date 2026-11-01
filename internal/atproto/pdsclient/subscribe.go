@@ -198,6 +198,9 @@ func (s *repoEventStream) Next(ctx context.Context) (RepoEvent, error) {
 				if permanentStreamError(err) {
 					return RepoEvent{}, err
 				}
+				if s.restored(err) {
+					continue
+				}
 				if s.failures+1 > maxReconnectAttempts {
 					return RepoEvent{}, err
 				}
@@ -245,6 +248,9 @@ func (s *repoEventStream) Next(ctx context.Context) (RepoEvent, error) {
 		if permanentStreamError(err) {
 			return RepoEvent{}, err
 		}
+		if s.restored(err) {
+			continue
+		}
 		if s.failures+1 > maxReconnectAttempts {
 			return RepoEvent{}, err
 		}
@@ -254,6 +260,17 @@ func (s *repoEventStream) Next(ctx context.Context) (RepoEvent, error) {
 		}
 		s.delay = nextReconnectDelay(s.delay)
 	}
+}
+
+func (s *repoEventStream) restored(err error) bool {
+	if !wsconn.Restored(err) {
+		return false
+	}
+	s.mu.Lock()
+	s.failures = 0
+	s.delay = initialReconnectDelay
+	s.mu.Unlock()
+	return true
 }
 
 func (s *repoEventStream) Cursor() int64 {
