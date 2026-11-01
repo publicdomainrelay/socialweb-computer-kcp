@@ -325,7 +325,7 @@ flowchart TD
 | `localRepo` | app's own Pds component | none (account created at install) | default bidder, dev requester |
 | `pdsAccount` | a PDS account (password in vault) | app password | market network accounts |
 | `oauthQr` | user's PDS | QR session-transfer at qr.fedfork.com (`status.pendingAction.url`, 5 min) | headless bidder with a real account (hat-7) |
-| `oauthBrowser` | user's PDS | authorize URL in `status.pendingAction` | CLI requester |
+| `oauthBrowser` | user's PDS | authorize URL in `status.pendingAction` | CLI requester, browser page |
 | `oauthDelegated` | user's PDS | session handed in by another app | delegated flows |
 | `oauthSessionProxy` | user's PDS | reads a session another component stored in the vault | ssh gateway session owners, gateway cluster owners |
 
