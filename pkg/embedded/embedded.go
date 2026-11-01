@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
@@ -115,6 +116,7 @@ type Config struct {
 
 type Snapshot struct {
 	Version int                  `json:"version"`
+	Seq     uint64               `json:"seq"`
 	Vault   vaultmemory.Snapshot `json:"vault"`
 }
 
@@ -128,6 +130,12 @@ type Requester struct {
 	identity *marketidentity.Controller
 
 	bus *bus.Bus
+
+	snapMu sync.Mutex
+
+	seq uint64
+
+	wake chan struct{}
 
 	cancel context.CancelFunc
 
@@ -214,9 +222,7 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 		return err
 	}
 	r.vault = vaultCtl
-	if err := r.restore(cfg, log); err != nil {
-		return err
-	}
+	r.restore(ctx, cfg, log)
 	exposureCtl, err := exposurelocal.Register(r.manager, exposurelocal.Options{Origin: cfg.Origin, Handlers: r.bus, Scope: inRoot, Log: log})
 	if err != nil {
 		return err
@@ -297,7 +303,7 @@ func (r *Requester) registerEvents(ctx context.Context, cfg Config, log *slog.Lo
 	})
 }
 
-func (r *Requester) restore(cfg Config, log *slog.Logger) error {
+func (r *Requester) restore(ctx context.Context, cfg Config, log *slog.Logger) {
 	persist := true
 	if len(cfg.Restore) > 0 {
 		snapshot, err := ParseSnapshot(cfg.Restore)
@@ -309,20 +315,51 @@ func (r *Requester) restore(cfg Config, log *slog.Logger) error {
 			}
 		} else {
 			r.vault.Restore(snapshot.Vault)
+			r.seq = snapshot.Seq
 		}
 	}
 	if cfg.OnSnapshot == nil || !persist {
-		return nil
+		return
 	}
+	r.wake = make(chan struct{}, 1)
 	r.vault.Provider().SetOnChange(func() {
-		raw, err := json.Marshal(Snapshot{Version: SnapshotVersion, Vault: r.vault.Snapshot()})
+		select {
+		case r.wake <- struct{}{}:
+		default:
+		}
+	})
+	go r.deliver(ctx, cfg.OnSnapshot, log)
+}
+
+func (r *Requester) deliver(ctx context.Context, fn func([]byte), log *slog.Logger) {
+	emit := func() {
+		raw, err := r.encode()
 		if err != nil {
 			log.Warn("embedded: encoding the snapshot", "err", err.Error())
 			return
 		}
-		cfg.OnSnapshot(raw)
-	})
-	return nil
+		fn(raw)
+	}
+	for {
+		select {
+		case <-r.wake:
+			emit()
+		case <-ctx.Done():
+			select {
+			case <-r.wake:
+				emit()
+			default:
+			}
+			return
+		}
+	}
+}
+
+func (r *Requester) encode() ([]byte, error) {
+	r.snapMu.Lock()
+	defer r.snapMu.Unlock()
+	r.seq++
+	return json.Marshal(Snapshot{Version: SnapshotVersion, Seq: r.seq, Vault: r.vault.Snapshot()})
 }
 
 func ParseSnapshot(raw []byte) (Snapshot, error) {
@@ -411,7 +448,7 @@ func (r *Requester) Snapshot() ([]byte, error) {
 	if r == nil || r.vault == nil {
 		return nil, errors.New("embedded: the vault is not running")
 	}
-	return json.Marshal(Snapshot{Version: SnapshotVersion, Vault: r.vault.Snapshot()})
+	return r.encode()
 }
 
 func Directory() identity.Directory {
