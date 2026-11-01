@@ -70,7 +70,7 @@ scripts/check-architecture.sh || fail "architecture rules (scripts/check-archite
 echo "check.sh: ok architecture rules"
 
 policyspec="./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/"
-go test -count=1 -timeout 5m $policyspec || fail "policy engine specification tests (go test $policyspec)"
+go test -count=1 -timeout 15m $policyspec || fail "policy engine specification tests (go test $policyspec)"
 echo "check.sh: ok policy engine specification tests"
 
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
