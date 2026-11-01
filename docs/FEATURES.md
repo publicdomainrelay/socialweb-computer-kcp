@@ -39,7 +39,7 @@ market network of one host (`dev up`); **built** = in the code, not yet proven l
 | atirc agent in a rented VM (`spec.agent`, `guest.agentStart`) | prod (CLI, page, ssh gateway) | leased mint after the receipt; revoked before `vm.terminated` |
 | Agent placeholder bundle for kubectl-applied contracts | local, prod (page) | no `bao` step needed |
 | Agent identity: OAuth (QR / browser) | prod | |
-| Agent identity: app password (`pdsAccount`) | built | signs the mint through the owner MarketIdentity |
+| Agent identity: app password (`pdsAccount`) | prod (rc161 CLI, hat.dplc.rip on pds.rip: Held, JOIN, revoke before release) | market calls and the mint signed through the owner MarketIdentity; `ATPROTO_PASSWORD` goes to the requester's own OpenBao before sign-in |
 | Agent identity: local PDS (`localRepo`) | built | needs did:plc on plc.directory, a public PDS ingress and a handle you control; `.local` is refused before the RFP |
 | `ssh <handle>@socialweb.computer atirc agent run <name>` | prod | per-user OAuth; the VM is rented as the ssh user |
 | Guest requester R2 with a contract-scoped association, nested VM, grandchild agent, cascading release | prod | [acceptance/0005](acceptance/0005-guest-requester-association.md) |
@@ -111,4 +111,4 @@ The embedded requester (`pkg/embedded`) runs in the app on its own in-process kc
 - a tenant-cluster node's cloud-init fetches `get.k3s.io` from the internet (not pinned)
 - `dev down` can warn that the MarketNetwork was not gone within 2 min; it still finishes clean
 - `units roll kcp` cannot roll an installed requester's kcp yet (a drifted kcp rolls when the core starts)
-- an atirc agent from a local PDS or an app-password identity is built but not yet proven against irc.fedfork.com
+- an atirc agent from a local PDS (`localRepo` on plc.directory with a public handle) is built but not yet proven against irc.fedfork.com

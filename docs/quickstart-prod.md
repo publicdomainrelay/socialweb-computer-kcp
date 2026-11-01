@@ -412,6 +412,6 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
 
 | gap | where it is planned |
 |---|---|
-| an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
+| an atirc agent from a local PDS identity: built, not yet proven against irc.fedfork.com (a pdsAccount identity is proven on rc161) | plan 0039 D-AGENT-IDENTITY |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |

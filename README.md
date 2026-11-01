@@ -218,7 +218,7 @@ association, upgrade and the foreground form (`run bidder --host-backend proc --
 
 | item | state |
 | --- | --- |
-| an atirc agent from a local PDS or a `pdsAccount` identity | built, not yet proven against irc.fedfork.com |
+| an atirc agent from a local PDS identity (`localRepo` on plc.directory, a handle you control) | built, not yet proven against irc.fedfork.com; `pdsAccount` proven on rc161 |
 
 ## Docs
 
