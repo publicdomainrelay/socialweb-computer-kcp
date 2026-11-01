@@ -343,5 +343,5 @@ Still planned in plan 0039:
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
-| deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or put `"compute-kinds": "vm,deno"` in an installed bidder's `config.json` (`install bidder` has no flag for it); pin such a bidder with `bidderDids` | operator setting |
+| deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |
 | a Held contract across a `run requester` restart: main 6497fe61 fails it at once (`the held contract is not resumed: ... the policy engine is not running`), and an `endWhen: Complete` EphemeralInfra then releases the rest | a fix in `internal/market/requester/runner.go` (`resumeReceipt`); acceptance [0013](acceptance/0013-mixed-prod.md) Local Readings |
