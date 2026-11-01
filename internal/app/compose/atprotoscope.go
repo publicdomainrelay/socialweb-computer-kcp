@@ -41,6 +41,7 @@ var requesterScope = []string{
 	"repo:computer.socialweb.temp.policy.typescript?action=create&action=update",
 	"repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create&action=update&action=delete",
 	"repo:com.publicdomainrelay.temp.market.heartbeat?action=create&action=update",
+	"repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete",
 	"repo:" + infrarecord.InfraNSID + "?action=create&action=update&action=delete",
 	"repo:" + infrarecord.EphemeralInfraNSID + "?action=create&action=update&action=delete",
 	"rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*",
