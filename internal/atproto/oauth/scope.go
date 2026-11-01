@@ -135,6 +135,18 @@ var (
 	)
 )
 
+var OptionalScopes = []string{RPCAtircRevoke}
+
+func RequiredScopes(requested []string) []string {
+	out := make([]string, 0, len(requested))
+	for _, scope := range requested {
+		if !slices.Contains(OptionalScopes, scope) {
+			out = append(out, scope)
+		}
+	}
+	return out
+}
+
 func ScopeString(scopes []string) string {
 	return strings.Join(scopes, " ")
 }

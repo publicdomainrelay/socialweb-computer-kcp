@@ -246,7 +246,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     for chat.atirc.revoke (lxm `chat.atirc.revoke`) when the requester identity is OAuth, the
     subhandle is below the requester's handle and the session's granted scopes (the token response,
     never the access token's scope claim) include `rpc:chat.atirc.revoke` (RequesterOAuthScope asks
-    for it; a session without it never asks for that service auth), then, for an `atircMinted`
+    for it, but it is in `oauth.OptionalScopes`, so the identity's scope check does not require it
+    and a session granted without it is not asked to sign in again; such a session never asks for
+    that service auth), then, for an `atircMinted`
     entry, with the minting parent's
     bearer, the `spec.atircParentRef` long token, when the subhandle is below it; an entry revoked
     by a 200 is stamped `revoked` there and not revoked again, while a 401 counts as Done but leaves

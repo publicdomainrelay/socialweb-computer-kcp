@@ -604,7 +604,7 @@ func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthSessionProxy {
 		return strings.Fields(id.Spec.SessionScope)
 	}
-	return a.oauthScopes()
+	return atprotooauth.RequiredScopes(a.oauthScopes())
 }
 
 func (a *Accounts) scopeCheck(workspace string, id *v1alpha1.MarketIdentity, held *heldAccount, granted []string) error {
