@@ -639,7 +639,7 @@ func (q *Requester) Start(ctx context.Context) error {
 		}
 	}
 	repoMs := time.Since(startedAt).Milliseconds()
-	if len(q.cfg.OwnerSessions) > 0 || q.cfg.IdentityMode == IdentityModeOAuth {
+	if len(q.cfg.OwnerSessions) > 0 || q.cfg.IdentityMode == IdentityModeOAuth || (q.cfg.IdentityMode == IdentityModeCallback && !q.cfg.LocalSigner) {
 		if err := q.bindSignerKeyAfterBinds(ctx); err != nil {
 			return err
 		}
@@ -650,6 +650,8 @@ func (q *Requester) Start(ctx context.Context) error {
 		serviceAuth = q.oauthServiceAuth()
 	case !q.cfg.LocalSigner && q.ownerServiceAuth != nil:
 		serviceAuth = q.ownerServiceAuth
+	default:
+		serviceAuth = q.ownerIdentityServiceAuth()
 	}
 	q.serviceAuth = serviceAuth
 	atircAuth, atircSigning, atircReason := q.atircServiceAuth(serviceAuth)

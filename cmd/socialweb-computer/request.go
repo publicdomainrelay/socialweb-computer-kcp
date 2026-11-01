@@ -32,6 +32,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
 )
@@ -695,7 +696,26 @@ func (r *requestRun) writeSummary(ctx context.Context, c *v1alpha1.ComputeContra
 	}
 }
 
+func (r *requestRun) putPdsAccountPassword(ctx context.Context) error {
+	if r.root.Identity.Mode != v1alpha1.MarketIdentityModePdsAccount {
+		return nil
+	}
+	password := strings.TrimSpace(os.Getenv(compose.EnvPdsAccountPassword))
+	if password == "" {
+		return nil
+	}
+	ref, err := r.kcp.PutPdsAccountPassword(ctx, password, r.networkTimeout)
+	if err != nil {
+		return fmt.Errorf("putting %s into the requester's own OpenBao: %w", compose.EnvPdsAccountPassword, err)
+	}
+	r.log("the pdsAccount password is in the requester's own OpenBao", "mount", ref.Mount, "path", ref.Path)
+	return nil
+}
+
 func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
+	if err := r.putPdsAccountPassword(ctx); err != nil {
+		return err
+	}
 	if err := r.kcp.WaitIdentityObject(ctx, r.networkTimeout); err != nil {
 		return err
 	}
@@ -762,6 +782,15 @@ func waitsOnPerson(obj *v1alpha1.MarketIdentity) bool {
 }
 
 func (r *requestRun) identityHint(obj *v1alpha1.MarketIdentity) string {
+	if c := meta.FindStatusCondition(obj.Status.Conditions, atproto.ConditionReady); c != nil && c.Reason == atproto.ReasonWaitingForCredential &&
+		obj.Spec.Mode == v1alpha1.MarketIdentityModePdsAccount {
+		hint := "The pdsAccount identity waits for its app password in the requester's own OpenBao. Give it " + compose.EnvPdsAccountPassword +
+			" in this command's environment"
+		if r.verb == requesterVerb {
+			hint += ", or, while the requester runs: socialweb-computer run requester password " + r.inv.Name + " < <file holding the app password>"
+		}
+		return hint
+	}
 	if obj.Status.Phase != v1alpha1.MarketIdentityPhaseAwaitingApproval || obj.Status.PendingAction != nil {
 		return ""
 	}

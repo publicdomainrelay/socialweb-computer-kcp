@@ -35,6 +35,25 @@ const (
 	RequesterAssociate   = "requester_associate"
 )
 
+const (
+	OptionIdentityMode = "atproto-identity-mode"
+	OptionHandle       = "atproto-handle"
+	OptionPdsURL       = "atproto-pds-url"
+)
+
+var NetworkRequesterIdentityOptions = []string{OptionIdentityMode, OptionHandle, OptionPdsURL}
+
+func NetworkRequesterIdentity(options []v1alpha1.ApplicationOption, networkPdsURL string) v1alpha1.ApplicationIdentity {
+	id := v1alpha1.ApplicationIdentity{Association: v1alpha1.AssociationSkip}
+	if v1alpha1.MarketIdentityMode(OptionValue(options, OptionIdentityMode)) != v1alpha1.MarketIdentityModePdsAccount {
+		return id
+	}
+	id.Mode = v1alpha1.MarketIdentityModePdsAccount
+	id.Handle = strings.TrimSpace(OptionValue(options, OptionHandle))
+	id.PdsURL = cmp.Or(strings.TrimSpace(OptionValue(options, OptionPdsURL)), networkPdsURL)
+	return id
+}
+
 var ErrMissingPdsAccountPassword = errors.New("compose: mode pdsAccount needs the account password in " +
 	EnvPdsAccountPassword + " or --atproto-password; no password is available")
 
