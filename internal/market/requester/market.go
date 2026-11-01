@@ -375,7 +375,7 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string)
 }
 
 func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, string) {
-	offerings, err := market.ListOfferings(ctx, m.Reader, did)
+	offering, _, err := market.ReadOffering(ctx, m.Reader, did)
 	if errors.Is(err, market.ErrNotFound) {
 		return nil, dropNoOffering
 	}
@@ -383,27 +383,18 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 		m.log().Warn("requester_offerings_failed", "did", did, "err", err)
 		return nil, dropOfferingsRead + err.Error()
 	}
-	reason := dropNoOffering
-	var out []Bidder
-	for _, offering := range offerings {
-		if !market.OfferingApplies(offering, market.ComputeVMNSID) {
-			continue
-		}
-		endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
-		if err != nil {
-			m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
-			reason = dropEndpoint + err.Error()
-			continue
-		}
-		if endpoint == "" {
-			if reason == dropNoOffering {
-				reason = dropNoEndpoint
-			}
-			continue
-		}
-		out = append(out, Bidder{DID: did, Endpoint: endpoint, Audience: audience})
+	if !market.OfferingApplies(offering, market.ComputeVMNSID) {
+		return nil, dropNoOffering
 	}
-	return out, reason
+	endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
+	if err != nil {
+		m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
+		return nil, dropEndpoint + err.Error()
+	}
+	if endpoint == "" {
+		return nil, dropNoEndpoint
+	}
+	return []Bidder{{DID: did, Endpoint: endpoint, Audience: audience}}, dropNoOffering
 }
 
 func resolveBidderEndpoint(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {

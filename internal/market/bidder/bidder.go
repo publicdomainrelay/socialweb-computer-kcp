@@ -331,6 +331,14 @@ type Bidder struct {
 
 	offeringURI string
 
+	legacyChecked bool
+
+	legacyOffering string
+
+	legacyCID string
+
+	legacyStale bool
+
 	badgeBound atomic.Bool
 
 	badgeMu sync.Mutex

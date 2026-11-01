@@ -76,6 +76,8 @@ const (
 	DefaultComputeEventServiceID = "pdr_temp_compute_event"
 
 	HeartbeatRKey = "self"
+	OfferingRKey  = "self"
+	RelaysRKey    = "self"
 )
 
 const (

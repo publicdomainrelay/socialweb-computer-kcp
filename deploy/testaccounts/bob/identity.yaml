@@ -65,6 +65,6 @@ declared:
   - {object: testaccount-bob-bot-registration, collection: bot.did.registration, rkey: self, cid: bafyreifnyprsrxk76wvcvzk5x2bzzuag736tfy33vaozmgliukkj2eqo5a, write: verify, readBy: atirc agent registration}
   - {object: testaccount-bob-rbacdid-allowself, collection: com.publicdomainrelay.temp.auth.allowlist.rbacDid, rkey: 3msbt7ah2222m, cid: bafyreidh6idu6ohys4425xcxs3ygy535th4emxtyeofkcbpuduj3mft4ti, write: create, readBy: fedproxy account.auth allowSelf}
 runtimeOwned:
-  - {collection: com.publicdomainrelay.temp.market.offering, rkeys: 3msbt7akfhk2m, writer: "internal/market/bidder offering.go (refreshes refreshedAt)"}
-  - {collection: com.publicdomainrelay.temp.market.heartbeat, rkeys: self, writer: "internal/market/bidder offering.go and internal/controllers/marketpresence (rewrites createdAt)"}
+  - {collection: com.publicdomainrelay.temp.market.offering, rkeys: self, writer: "internal/market/bidder offering.go (PutRecord; until rcB it also updates 3msbt7akfhk2m, the record its heartbeat names; never deletes)"}
+  - {collection: com.publicdomainrelay.temp.market.heartbeat, rkeys: self, writer: "internal/market/bidder offering.go (rewrites createdAt; internal/controllers/marketpresence only reads it)"}
   - {collection: com.publicdomainrelay.temp.badgeBlueKeys, rkeys: 32-character base58 BadgeBlueKeysRkey, writer: "internal/market/bidder offering.go (the bidder key claim)"}

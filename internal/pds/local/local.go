@@ -15,6 +15,7 @@ const scopeAll = "*"
 var (
 	_ atprotorepo.Repo        = (*Repo)(nil)
 	_ atprotorepo.SwapDeleter = (*Repo)(nil)
+	_ atprotorepo.SwapPutter  = (*Repo)(nil)
 	_ pds.Accounts            = (*Accounts)(nil)
 	_ pds.Sessions            = (*Sessions)(nil)
 	_ pds.Sync                = (*Sync)(nil)

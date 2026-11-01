@@ -106,6 +106,10 @@ type SwapDeleter interface {
 	DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error
 }
 
+type SwapPutter interface {
+	PutRecordSwap(ctx context.Context, collection, rkey string, value json.RawMessage, swapCID string) (commonv1.StrongRef, error)
+}
+
 type Subscriber interface {
 	Subscribe(ctx context.Context, opts SubscribeOptions, fn func(Commit) error) error
 }

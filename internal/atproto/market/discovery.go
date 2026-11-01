@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,12 +13,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 const (
 	RelayDiscoveryCacheTTL = 180 * time.Second
 	OfferingsCacheTTL      = 120 * time.Second
+	RelaysCacheTTL         = 60 * time.Second
 	HeartbeatMaxSkew       = 60 * time.Second
 )
 
@@ -201,69 +207,99 @@ func DiscoverBiddersFromRelays(ctx context.Context, relayURLs []string, collecti
 	return out
 }
 
-func AutoDiscoverRelayURLs(ctx context.Context, lister RecordLister, did string) []string {
-	if lister == nil {
+var relaysOf = ttlcache.New[string, []string](ttlcache.Options{TTL: RelaysCacheTTL, MaxEntries: 1024})
+
+func RelayURLsOf(ctx context.Context, getter RecordGetter, did string) []string {
+	if getter == nil || did == "" {
 		return nil
 	}
-	urls := []string{}
-	seen := map[string]bool{}
-	cursor := ""
-	for {
-		page, err := lister.ListRecords(ctx, did, RelaysNSID, 100, cursor)
+	urls, err := relaysOf.GetOrLoad(ctx, did, func(ctx context.Context) ([]string, time.Duration, error) {
+		rec, err := getter.GetRecord(ctx, did, RelaysNSID, RelaysRKey)
+		if RecordAbsent(err) {
+			return []string{}, RelaysCacheTTL, nil
+		}
 		if err != nil {
-			return nil
+			return nil, 0, err
 		}
-		for _, rec := range page.Records {
-			raw, ok := rec.Value["relays"].([]any)
-			if !ok {
-				continue
-			}
-			for _, item := range raw {
-				s, ok := item.(string)
-				if !ok {
-					continue
-				}
-				s = strings.TrimSpace(s)
-				if !(strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")) {
-					continue
-				}
-				if seen[s] {
-					continue
-				}
-				seen[s] = true
-				urls = append(urls, s)
-			}
-		}
-		if len(page.Records) == 0 || page.Cursor == "" {
-			return urls
-		}
-		cursor = page.Cursor
+		return relayURLsIn(rec.Value), RelaysCacheTTL, nil
+	})
+	if err != nil {
+		return nil
 	}
+	return slices.Clone(urls)
 }
 
-func ListOfferings(ctx context.Context, lister RecordLister, did string) ([]Offering, error) {
-	if lister == nil {
-		return nil, fmt.Errorf("%w: no record lister", ErrInvalidRecord)
+func RecordAbsent(err error) bool {
+	if !errors.Is(err, ErrNotFound) {
+		return false
 	}
-	out := []Offering{}
-	cursor := ""
-	for {
-		page, err := lister.ListRecords(ctx, did, OfferingNSID, 100, cursor)
-		if err != nil {
-			return nil, err
-		}
-		for _, rec := range page.Records {
-			offering, err := ParseOffering(rec.Value)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, *offering)
-		}
-		if page.Cursor == "" || len(page.Records) == 0 {
-			return out, nil
-		}
-		cursor = page.Cursor
+	failure, ok := errors.AsType[*xrpc.Error](err)
+	if !ok {
+		return true
 	}
+	return failure.Status == http.StatusNotFound || (failure.Status == http.StatusBadRequest && failure.Name == "RecordNotFound")
+}
+
+func relayURLsIn(value map[string]any) []string {
+	raw, _ := value["relays"].([]any)
+	urls := []string{}
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if !(strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://")) || slices.Contains(urls, s) {
+			continue
+		}
+		urls = append(urls, s)
+	}
+	return urls
+}
+
+func OfferingURI(did string) string {
+	return "at://" + did + "/" + OfferingNSID + "/" + OfferingRKey
+}
+
+func HeartbeatOfferingRKey(ctx context.Context, getter RecordGetter, did string) (string, error) {
+	rec, err := getter.GetRecord(ctx, did, HeartbeatNSID, HeartbeatRKey)
+	if err != nil {
+		return "", err
+	}
+	heartbeat, err := ParseHeartbeat(rec.Value)
+	if err != nil {
+		return "", err
+	}
+	aturi, err := syntax.ParseATURI(heartbeat.Offering)
+	if err != nil || aturi.Authority().String() != did || aturi.Collection().String() != OfferingNSID || aturi.RecordKey() == "" {
+		return "", fmt.Errorf("%w: the heartbeat of %s names %q, not an offering in its own repo", ErrInvalidRecord, did, heartbeat.Offering)
+	}
+	return aturi.RecordKey().String(), nil
+}
+
+func ReadOffering(ctx context.Context, getter RecordGetter, did string) (Offering, string, error) {
+	if getter == nil {
+		return Offering{}, "", fmt.Errorf("%w: no record getter", ErrInvalidRecord)
+	}
+	rec, err := getter.GetRecord(ctx, did, OfferingNSID, OfferingRKey)
+	if errors.Is(err, ErrNotFound) {
+		rkey, herr := HeartbeatOfferingRKey(ctx, getter, did)
+		switch {
+		case errors.Is(herr, ErrNotFound) || rkey == OfferingRKey:
+			return Offering{}, "", err
+		case herr != nil:
+			return Offering{}, "", herr
+		}
+		rec, err = getter.GetRecord(ctx, did, OfferingNSID, rkey)
+	}
+	if err != nil {
+		return Offering{}, "", err
+	}
+	offering, err := ParseOffering(rec.Value)
+	if err != nil {
+		return Offering{}, "", err
+	}
+	return *offering, rec.URI, nil
 }
 
 func OfferingApplies(offering Offering, payloadNSID string) bool {

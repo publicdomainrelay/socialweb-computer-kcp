@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.market.relays",
-  "description": "The relays a participant crawls and asks others to crawl.",
+  "description": "The relays a participant crawls and asks others to crawl. Writers use rkey self; readers read only self.",
   "defs": {
     "main": {
       "type": "record",

@@ -150,7 +150,7 @@ func (r *Repo) open(ctx context.Context) (repo.Repo, error) {
 	return r.srv.Repos().OpenRepo(ctx, r.did, key)
 }
 
-func (r *Repo) write(ctx context.Context, action repo.WriteAction, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error) {
+func (r *Repo) write(ctx context.Context, action repo.WriteAction, collection, rkey string, value json.RawMessage, prev *cid.Cid) (commonv1.StrongRef, error) {
 	nsid, err := syntax.ParseNSID(collection)
 	if err != nil {
 		return commonv1.StrongRef{}, fmt.Errorf("pds: the collection %q: %w", collection, err)
@@ -169,7 +169,10 @@ func (r *Repo) write(ctx context.Context, action repo.WriteAction, collection, r
 	if err != nil {
 		return commonv1.StrongRef{}, err
 	}
-	ev, err := handle.ApplyWrites(ctx, []repo.WriteOp{{Action: action, Collection: nsid, Rkey: key, Record: record}}, nil)
+	ev, err := handle.ApplyWrites(ctx, []repo.WriteOp{{Action: action, Collection: nsid, Rkey: key, Record: record, Prev: prev}}, nil)
+	if errors.Is(err, repo.ErrInvalidSwap) {
+		return commonv1.StrongRef{}, fmt.Errorf("%w: %v", atprotorepo.ErrSwapMismatch, err)
+	}
 	if err != nil {
 		return commonv1.StrongRef{}, err
 	}
@@ -191,14 +194,25 @@ func (r *Repo) write(ctx context.Context, action repo.WriteAction, collection, r
 }
 
 func (r *Repo) CreateRecord(ctx context.Context, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error) {
-	return r.write(ctx, repo.ActionCreate, collection, rkey, value)
+	return r.write(ctx, repo.ActionCreate, collection, rkey, value, nil)
 }
 
 func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error) {
 	if strings.TrimSpace(rkey) == "" {
 		return commonv1.StrongRef{}, errors.New("pds: putRecord needs an rkey")
 	}
-	return r.write(ctx, repo.WriteAction("put"), collection, rkey, value)
+	return r.write(ctx, repo.WriteAction("put"), collection, rkey, value, nil)
+}
+
+func (r *Repo) PutRecordSwap(ctx context.Context, collection, rkey string, value json.RawMessage, swapCID string) (commonv1.StrongRef, error) {
+	if strings.TrimSpace(rkey) == "" {
+		return commonv1.StrongRef{}, errors.New("pds: putRecord needs an rkey")
+	}
+	prev, err := cid.Decode(strings.TrimSpace(swapCID))
+	if err != nil {
+		return commonv1.StrongRef{}, fmt.Errorf("pds: the swap cid %q: %w", swapCID, err)
+	}
+	return r.write(ctx, repo.WriteAction("put"), collection, rkey, value, &prev)
 }
 
 func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error {

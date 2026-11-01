@@ -40,6 +40,7 @@ type Repo struct {
 var (
 	_ atprotorepo.Repo        = (*Repo)(nil)
 	_ atprotorepo.SwapDeleter = (*Repo)(nil)
+	_ atprotorepo.SwapPutter  = (*Repo)(nil)
 )
 
 func New(inner atprotorepo.Repo, scope []string) *Repo {
@@ -79,6 +80,17 @@ func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value jso
 		return commonv1.StrongRef{}, err
 	}
 	return r.inner.PutRecord(ctx, collection, rkey, value)
+}
+
+func (r *Repo) PutRecordSwap(ctx context.Context, collection, rkey string, value json.RawMessage, swapCID string) (commonv1.StrongRef, error) {
+	if err := r.allowed(collection); err != nil {
+		return commonv1.StrongRef{}, err
+	}
+	inner, ok := r.inner.(atprotorepo.SwapPutter)
+	if !ok {
+		return commonv1.StrongRef{}, errors.New("scoped: the repo cannot put a record by its cid")
+	}
+	return inner.PutRecordSwap(ctx, collection, rkey, value, swapCID)
 }
 
 func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error {

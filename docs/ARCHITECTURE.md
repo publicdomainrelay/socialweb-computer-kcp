@@ -11709,7 +11709,7 @@ collections, 5897 records; bob 31 collections, 5424 records. Classes:
 | class | alice | bob | writer |
 | --- | --- | --- | --- |
 | declared minimum | sh.tangled.graph.vouch bob and john; badgeBlueKeys `requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72` (the gateway requester, live mirror); app.bsky and sh.tangled profile; com.fedfork.irc.agentOperator, bot.did.registration; auth.allowlist.rbacDid | sh.tangled.graph.vouch alice; badgeBlueKeys `bidder_associate-` of the two live bidder hosts (did:plc:4vcig7s43z3nyqrnepmcfzqt, did:plc:2l2wdry77c7jtucbslstagkj, live mirror and heartbeat); the same profiles, atirc and rbacDid records | tangled, bsky, atirc (outside this repository); the claims by the association flow (`scripts/associate-bidder.ts`, the did-key associator) |
-| minimum, runtime-owned | badgeBlueKeys 32-character base58 key claims (`market.BadgeBlueKeysRkey`, one per page, iOS or CLI requester key), market.association (contract-scoped) | market.offering `3msbt7akfhk2m`, market.heartbeat `self`, the bidder key claim | `internal/market/requester` identity.go, association.go; `internal/market/bidder` offering.go, `internal/controllers/marketpresence` |
+| minimum, runtime-owned | badgeBlueKeys 32-character base58 key claims (`market.BadgeBlueKeysRkey`, one per page, iOS or CLI requester key), market.association (contract-scoped) | market.offering `self` (and, until rcB, the legacy `3msbt7akfhk2m` its heartbeat names), market.heartbeat `self`, the bidder key claim | `internal/market/requester` identity.go, association.go; `internal/market/bidder` offering.go (`internal/controllers/marketpresence` only reads the heartbeat) |
 | run churn | compute.vm 1078, market.rfp 1076, policy.ghalite 796 (one per RFP, `runner.go` CreateRecord), market.event 677, market.accept 464, vm.delete 419, guest.* 260, config.wif.simple 147, ephemeralInfra 46, fedproxy.rbac node.* | market.event 1241, market.bid 754, bids.free 754, config.wif.simple 754, vm.onNetwork 655, market.receipt 354, guest.* 318, vm.hostKeys 137, vm.terminated 131, fedproxy.rbac 226 | `internal/market/requester`, `internal/market/bidder`, `internal/controllers/infra` |
 | stale or another app | badgeBlueKeys claims of DIDs with no mirror (6c7zf6, 5ipkef), market.offering 30 (July), ccrfp, temp.rfp, agent.*, dev.cocore.*, network.comind.*, sh.tangled repo/spindle/publicKey, fedproxy.sshPublicKey, posts, likes, follows | badgeBlueKeys `bidder_associate-` of 4 DIDs with no mirror, org.tangled.*, vibescrobble | earlier releases and other apps |
 
@@ -11811,6 +11811,56 @@ expired-cursor signal). The watch keeps 512 records, so in a larger collection a
 record can be evicted and then only the stream reports its changes. After a restart, deletes the
 watch recorded while the process was down are not applied to `status.children`. Keeping the first
 listing on a collection that grows with every page load needs the owner's sign-off (review I3).
+
+### A bidder's offering is `market.offering/self`, a participant's relays `market.relays/self`; nothing is deleted (2026-10-31, r139 rcA)
+
+Owner rules: do not list collections that grow without bound, prefer one getRecord on a
+deterministic rkey, never delete user records. Before: the bidder wrote its offering at a TID and
+listed its own `market.offering` (20 per page) on every ensure and touch, deleting every record but
+the first (`dropExtraOfferings`) and every record on suspend (`withdraw`). bob's OAuth scope on
+`market.offering` is create and update only, so those deletes failed and his 30 July offerings
+stayed. The requester listed each candidate bidder's whole `market.offering` collection
+(`ListOfferings`, every page, every record parsed, one invalid record dropped the bidder) and each
+root's whole `market.relays` collection (`AutoDiscoverRelayURLs`, every page).
+
+Decision (rcA). The bidder writes one offering at `market.offering/self` by PutRecord: one getRecord
+of `self` (keeps `createdAt`; no write when endpoint and appliesTo match, except for a touch), then
+the put. It never lists and never deletes. On suspend it puts `self` with `appliesTo: []` and
+`withdrawnAt` (new optional field of `offering.json`; an offering with `withdrawnAt` may have an
+empty appliesTo) first, then tries the heartbeat read and the legacy mirror, so a failed
+heartbeat read never leaves `self` live; it stops the heartbeat; serving again writes appliesTo
+back and drops `withdrawnAt`. Endpoint drift for requesters that still list (a pinned page or iOS): once per
+process the bidder reads `heartbeat/self`; when it names a TID offering in its own repo that a
+getRecord finds, the bidder puts the same content to that one record on every write with
+`swapRecord` set to the cid it last read or wrote (`atprotorepo.SwapPutter`), so it only ever
+updates that record: when the record was deleted or changed since, the put fails, the mirror stops
+for the process and the heartbeat names `self`. It never creates a new TID, never deletes and
+never lists. While mirroring, the heartbeat keeps naming that record, so the mirror is found again
+after a restart; a mirror put that failed for another reason is retried on the next ensure. Every other old
+offering is left as it is. The requester reads `offering/self`; on RecordNotFound it reads
+`heartbeat/self` and then the offering it names, only when that is a record of the same repo in
+`market.offering` (any other authority or collection is refused), and parses that one record.
+Relays are `cfg` relays plus one getRecord `market.relays/self` per root (`RelayURLsOf`, a
+RecordGetter), cached 60 s per DID; only RecordNotFound (HTTP 400 RecordNotFound or 404) means no
+relays, and any other 4xx, a 429 or a 5xx is an error that is not cached; no listing fallback, since no
+writer in this stack ever wrote one. Lexicons keep `"key": "any"` (the TID records exist and stay
+valid); their descriptions name `self`.
+
+Reads. Requester, per unnamed candidate bidder: before, heartbeat 1 getRecord plus
+ceil(N/100) listRecords pages of `market.offering` (bob N=31: 1 page, 31 records parsed). After:
+heartbeat 1 plus `offering/self` 1, one record parsed; a bidder not yet on rcA costs heartbeat 1 plus
+`self` (404) 1 plus heartbeat 1 plus the named TID 1. Relays: before, every page of every root's
+`market.relays`; after, at most 1 getRecord per root per 60 s. Bidder, per ensure or touch: before,
+1 listRecords plus one failed delete per extra record (bob: 30); after, 1 getRecord plus 1 put (plus
+1 put of the legacy record while it is mirrored), and once per process 2 getRecords (heartbeat, the
+named TID).
+
+No OAuth scope changes in rcA. rcB, after the page and iOS run rcA: the requester reads `self` only
+(a heartbeat naming another record is ignored and logged `requester_offering_legacy_ignored`), the
+bidder drops the legacy mirror and its heartbeat names `self`. No record is deleted at any step.
+Rollout rule: never roll a bidder back below rcA and never run a pre-rcA and an rcA bidder on one
+DID at the same time; a pre-rcA bidder lists `market.offering` and deletes every record but the
+first (rkey descending, so it keeps `self` and deletes the TIDs) wherever its scope allows delete.
 
 ### r139: the requester reads the receipt and the termination by getRecord
 

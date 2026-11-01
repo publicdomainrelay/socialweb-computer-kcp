@@ -2,6 +2,7 @@ package scoped
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -22,7 +23,18 @@ type routed struct {
 	network atprotorepo.RecordReader
 }
 
-var _ atprotorepo.SwapDeleter = (*routed)(nil)
+var (
+	_ atprotorepo.SwapDeleter = (*routed)(nil)
+	_ atprotorepo.SwapPutter  = (*routed)(nil)
+)
+
+func (r *routed) PutRecordSwap(ctx context.Context, collection, rkey string, value json.RawMessage, swapCID string) (commonv1.StrongRef, error) {
+	inner, ok := r.Repo.(atprotorepo.SwapPutter)
+	if !ok {
+		return commonv1.StrongRef{}, errors.New("scoped: the routed repo cannot put a record by its cid")
+	}
+	return inner.PutRecordSwap(ctx, collection, rkey, value, swapCID)
+}
 
 func (r *routed) DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error {
 	inner, ok := r.Repo.(atprotorepo.SwapDeleter)

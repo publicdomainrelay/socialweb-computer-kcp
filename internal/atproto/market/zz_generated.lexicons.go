@@ -1562,6 +1562,7 @@ type Offering struct {
 	EndpointURL string                     `json:"endpointUrl,omitempty"`
 	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	RefreshedAt string                     `json:"refreshedAt,omitempty"`
+	WithdrawnAt string                     `json:"withdrawnAt,omitempty"`
 	Extra       map[string]json.RawMessage `json:"-"`
 	absent      map[string]json.RawMessage
 }
