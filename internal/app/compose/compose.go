@@ -60,6 +60,8 @@ type Config struct {
 
 	RemotePDS *pdsv1alpha1.RemotePDS
 
+	Rest *rest.Config
+
 	Log *slog.Logger
 }
 
@@ -101,7 +103,9 @@ type Composer struct {
 
 func New(cfg Config) (*Composer, error) {
 	var restCfg *rest.Config
-	if cfg.Kube == nil {
+	if cfg.Rest != nil {
+		restCfg = rest.CopyConfig(cfg.Rest)
+	} else if cfg.Kube == nil {
 		var err error
 		restCfg, err = kcpserver.FrontRestConfig(cfg.Kubeconfig)
 		if err != nil {

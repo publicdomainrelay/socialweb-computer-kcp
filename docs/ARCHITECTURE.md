@@ -3297,7 +3297,7 @@ api <- contract <- kit <- transport <- impl <- controllers <- app <- cmd
 | `internal/kit/**` | kit (common helpers) | no concept |
 | `internal/controllers/runtime/<pkg>` | transport | the dynamic client and unstructured objects are allowed only here and in `internal/apigen` |
 | `internal/controllers/**`, and the package `internal/controllers/runtime` itself | controllers (adapters) | one reconciler per kind |
-| `internal/app/**`, `internal/stack/**`, `internal/devcore/**`, `internal/<x>main` | app (factory) | `<x>main` is a package directly under `internal/` whose name ends in `main` |
+| `internal/app/**`, `internal/stack/**`, `internal/devcore/**`, `pkg/**`, `internal/<x>main` | app (factory) | `<x>main` is a package directly under `internal/` whose name ends in `main`; `pkg/**` is the factory another module imports (the internal rule keeps it out of `internal/`) |
 | `cmd/**`, `hack/**`, `internal/apigen/**`, `internal/lexgen/**` | cmd (CLI and tools) | |
 | every other `internal/**` | impl | this includes `internal/bus`, the component runtime and the adapters under `internal/services/**` |
 | a directory with no Go package | assets | rank 0, so any layer may embed it |
@@ -3650,6 +3650,7 @@ internal/controllers/events/                registers the event source, event st
 internal/controllers/eventsource/           EventSource: binds the backend kind; the helpers the three backend controllers share
 internal/controllers/eventstream/           EventStream: connects an EventSource to a sink
 internal/controllers/exposure/              Exposure: publishes a service through its ingress
+internal/controllers/exposurelocal/         Exposure, in process: Ready on a given origin, routes to the bus handler; no listener, no ingress (pkg/embedded)
 internal/controllers/firecrackervm/         FirecrackerVM: places and runs the guest through internal/compute/firecracker
 internal/controllers/guestcontrolplane/     GuestControlPlane: its inputs from ComputeVM, GuestIdentityGrant, MarketIdentity, OpenBaoServer and Exposure
 internal/controllers/guestidentitygrant/    GuestIdentityGrant
@@ -3687,6 +3688,7 @@ internal/controllers/subnetlease/           SubnetLease
 internal/controllers/tenantnode/            a tenant cluster's Node objects, through internal/cloudprovider
 internal/controllers/ttl/                   deletes expired objects and reports what it deleted per kind
 internal/controllers/vault/                 Vault: binds the backendRef (OpenBaoServer or RemoteOpenBao); roots and secrets on the bus
+internal/controllers/vaultmemory/           OpenBaoServer and Vault, in process: a memory KV per workspace on the bus, with snapshot and restore; no OpenBao (pkg/embedded)
 internal/controllers/vaultcertificate/      VaultCertificate
 internal/controllers/vaultcredential/       VaultCredential
 ```
@@ -3721,6 +3723,7 @@ internal/stack/componentcore/     the component core: the controller manager, ev
 internal/stack/gatewaykcp/        `serve gateway kcp`: the gateway's kcp, the bootstrap cluster, the clusterprovider env
 internal/stack/gatewayssh/        `run gateway ssh`: the ssh gateway's spec, kcp and listener
 internal/stack/request/           `run request`: invocations, contract summaries, the requester's kcp
+pkg/embedded/                     the requester an app embeds (the AT-IRC iOS app, plan 0038): the MarketRequester root and its Requester in the caller's in-process kcp, comms Firehose, a memory vault, in-process Exposures, no listener and no HostProcess; on ios the policy sandbox fails closed until plan 0038 I6. `Config.OnSnapshot` gets the whole vault (OAuth session and refresh token, DPoP key, contract secrets bundles, atircMinted tokens) as clear JSON with a rising `seq`: the app stores it encrypted (iOS Keychain or a Data Protection Complete file excluded from backups), keeps only the highest seq, and never logs it
 internal/devcore/                 `internal dev-core`: one dev instance's core: components, host processes, postgres, OpenBao, store maintenance, log caps, TTL scope
 internal/foldmain/                the Invocation a verb body runs with (args, env, stdio, the resolved bin/<sha>/ path, the verb words) and the re-exec argv it builds
 internal/ccmmain/                 `internal cloud-controller-manager`; the clusterprovider re-execs it as `<bin/sha path> internal cloud-controller-manager` with its env rebuilt

@@ -8,7 +8,7 @@ case "$mode" in
   --full) run=full ;;
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
-    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests, cross-OS and release builds" >&2
+    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests, cross-OS builds (and pkg/embedded for ios/arm64) and release builds" >&2
     echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
     echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
@@ -96,6 +96,13 @@ for target in darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64;
   fi
   echo "check.sh: ok go build and go vet for $target"
 done
+if ! GOOS=ios GOARCH=arm64 CGO_ENABLED=0 go build ./pkg/embedded; then
+  crossfailed="$crossfailed build:ios/arm64"
+elif ! GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go vet ./pkg/embedded; then
+  crossfailed="$crossfailed vet:ios/arm64"
+else
+  echo "check.sh: ok go build and go vet of pkg/embedded for ios/arm64"
+fi
 if [ -n "$crossfailed" ]; then
   echo "check.sh: the tree must build and vet for every GOOS/GOARCH above; an OS-specific file needs its build tag and a twin for the other OSes (plans 0011, 0012)" >&2
   fail "cross-OS gate:$crossfailed"

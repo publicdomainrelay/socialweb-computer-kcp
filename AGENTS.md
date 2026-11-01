@@ -39,6 +39,7 @@ Go:
 | --- | --- |
 | `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-node`, `socialweb-vmexec`, `socialweb-guest-agent`, `socialweb-apigen`, the two OpenBao auth plugins) |
 | `internal/` | the Go packages, in the plan 0026 layers (`docs/ARCHITECTURE.md` section 12) |
+| `pkg/` | the packages another module imports: `pkg/embedded`, the requester an app runs in its own in-process kcp (plan 0038); its `Config.OnSnapshot` bytes hold every vault secret in clear JSON: store them encrypted (Keychain, Data Protection Complete, no backup), never log them |
 | `api/` | the kcp API types; `go generate ./api/...` writes the schemas, the APIExports and the generated Go |
 | `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
