@@ -50,7 +50,7 @@ const (
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
-var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester")
 
 type requestRun struct {
 	a                 *app
@@ -82,6 +82,7 @@ type requestRun struct {
 	identityObject    *v1alpha1.MarketIdentity
 	expectedPDSURL    string
 	awaitRefFile      string
+	guestRequester    bool
 	handshakeStarted  bool
 }
 
@@ -1106,6 +1107,12 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := r.passthrough(pass, network != ""); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
 	}
+	if vals.Bool("guest-requester") {
+		if network != "" {
+			return a.fail(exitRefused, "run request: --guest-requester is for a standalone invocation")
+		}
+		r.guestRequester, r.skipSSH = true, true
+	}
 	if err := r.associationRef(network != ""); err != nil {
 		return a.fail(exitRefused, "run request: --association-ref: %v", err)
 	}
@@ -1315,6 +1322,7 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 		return exitFailed
 	}
 	r.writeSummary(ctx, c)
+	r.stopGuestRequesterAtirc(ctx)
 	r.stop(context.WithoutCancel(ctx), true)
 	if r.standalone.StateDir != "" {
 		if _, err := os.Stat(r.standalone.StateDir); err == nil {

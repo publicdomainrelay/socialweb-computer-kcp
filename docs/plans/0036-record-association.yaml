@@ -111,6 +111,9 @@ items:
   - id: A6
     title: "R2 joins the owner's atirc channel: the authority's requester mints a child atirc token for the verified guest requester (subhandle r2-<accept rkey>.<authority handle>) into the bundle, revoked on release"
     status: done
+  - id: A7
+    title: "zero-command guest requester: a requester-originated guest.r2Start event makes socialweb-guest-agent start socialweb-r2.service (run request --guest-requester as the agent user), started from the page or run request"
+    status: planned
   - id: P1
     title: "page: associate-agent-DID action + Associated display (wasm)"
     status: done

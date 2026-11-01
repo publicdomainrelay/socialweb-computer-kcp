@@ -235,7 +235,13 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
     token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
     vault and mount.
-    `run request --associate <did>|guest` asks for one.
+    `run request --associate <did>|guest` asks for one. Inside such a guest, the agent user starts the
+    guest requester with one command, `socialweb-computer run request --name <name> --guest-requester
+    [--agent --hold]`: it implies `--association-ref` on `/run/socialweb-r2`, `--skip-ssh` and the
+    parent atirc token, and once associated it posts that it is online and keeps `atirc sub` as its
+    subhandle in the user unit `socialweb-r2-atirc-<name>.service` (until the token expires, or `run
+    request release`). The atirc agent run script enables linger for the agent user and runs the agent
+    with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own

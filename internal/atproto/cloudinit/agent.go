@@ -127,7 +127,13 @@ printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
 id "${nick}" >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash "${nick}"
 if getent group ` + GuestRequesterGroup + ` >/dev/null; then usermod -aG ` + GuestRequesterGroup + ` "${nick}"; fi
-exec runuser -u "${nick}" -- ` + AtircBinary + ` agent run
+loginctl enable-linger "${nick}"
+uid="$(id -u "${nick}")"
+for _ in $(seq 1 30); do
+  [ -S "/run/user/${uid}/bus" ] && break
+  sleep 1
+done
+exec runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ` + AtircBinary + ` agent run
 `
 
 func AssociationRefPath(raw string) (string, error) {
