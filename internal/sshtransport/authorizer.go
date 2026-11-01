@@ -41,8 +41,10 @@ const (
 
 	DefaultFetchTimeout = 15 * time.Second
 
-	maxRecordPages = 20
+	maxErrorBodyBytes = 4096
 )
+
+var ErrRecordNotFound = errors.New("sshtransport: record not found")
 
 type PresentedKey struct {
 	Algo string
@@ -117,7 +119,7 @@ func (r DirectoryResolver) ResolveDID(ctx context.Context, did string) (*DIDDocu
 }
 
 type RecordSource interface {
-	ListRecords(ctx context.Context, pds, did, collection string, limit int, cursor string) ([]map[string]any, string, error)
+	GetRecord(ctx context.Context, pds, did, collection, rkey string) (map[string]any, error)
 }
 
 type HTTPRecordSource struct {
@@ -130,20 +132,16 @@ type HTTPRecordSource struct {
 	Client *http.Client
 }
 
-func (s *HTTPRecordSource) ListRecords(ctx context.Context, pds, did, collection string, limit int, cursor string) ([]map[string]any, string, error) {
-	limit = opt.Positive(limit, 100)
-	base := strings.TrimRight(pds, "/") + "/xrpc/com.atproto.repo.listRecords"
+func (s *HTTPRecordSource) GetRecord(ctx context.Context, pds, did, collection, rkey string) (map[string]any, error) {
+	base := strings.TrimRight(pds, "/") + "/xrpc/com.atproto.repo.getRecord"
 	u, err := url.Parse(base)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	q := u.Query()
 	q.Set("repo", did)
 	q.Set("collection", collection)
-	q.Set("limit", fmt.Sprintf("%d", limit))
-	if cursor != "" {
-		q.Set("cursor", cursor)
-	}
+	q.Set("rkey", rkey)
 	u.RawQuery = q.Encode()
 	trusted := make(map[string]bool, len(s.TrustedHosts))
 	for _, host := range s.TrustedHosts {
@@ -156,26 +154,31 @@ func (s *HTTPRecordSource) ListRecords(ctx context.Context, pds, did, collection
 	maxBytes = opt.Positive(maxBytes, DefaultMaxResponseBytes)
 	raw, err := GuardedFetch(ctx, s.Client, u.String(), maxBytes, trusted)
 	if err != nil {
-		return nil, "", err
+		var status *FetchStatusError
+		if errors.As(err, &status) && (status.Status == http.StatusNotFound || status.Code == "RecordNotFound" || status.Code == "RepoNotFound") {
+			return nil, fmt.Errorf("%w: %v", ErrRecordNotFound, err)
+		}
+		return nil, err
 	}
 	var body struct {
-		Records []struct {
-			Value json.RawMessage `json:"value"`
-		} `json:"records"`
-		Cursor string `json:"cursor"`
+		Value map[string]any `json:"value"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	out := make([]map[string]any, 0, len(body.Records))
-	for _, rec := range body.Records {
-		var value map[string]any
-		if err := json.Unmarshal(rec.Value, &value); err != nil {
-			continue
-		}
-		out = append(out, value)
-	}
-	return out, body.Cursor, nil
+	return body.Value, nil
+}
+
+type FetchStatusError struct {
+	Status int
+
+	Code string
+
+	Origin string
+}
+
+func (e *FetchStatusError) Error() string {
+	return fmt.Sprintf("%d from %s", e.Status, e.Origin)
 }
 
 func IsPrivateAddress(address string) bool {
@@ -274,7 +277,16 @@ func GuardedFetch(ctx context.Context, client *http.Client, rawURL string, maxBy
 		return nil, fmt.Errorf("%s tried to redirect the fetch", target.Scheme+"://"+target.Host)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("%d from %s", resp.StatusCode, target.Scheme+"://"+target.Host)
+		failure := &FetchStatusError{Status: resp.StatusCode, Origin: target.Scheme + "://" + target.Host}
+		if raw, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes)); err == nil {
+			var body struct {
+				Error string `json:"error"`
+			}
+			if json.Unmarshal(raw, &body) == nil {
+				failure.Code = body.Error
+			}
+		}
+		return nil, failure
 	}
 	maxBytes = opt.Positive(maxBytes, DefaultMaxResponseBytes)
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
@@ -308,7 +320,7 @@ type KeyAuthorizerOptions struct {
 type cacheEntry struct {
 	account *AuthorizedAccount
 
-	records []map[string]any
+	matched bool
 
 	lookupFailed bool
 
@@ -346,8 +358,8 @@ func NewPDSKeyAuthorizer(opts KeyAuthorizerOptions) (*PDSKeyAuthorizer, error) {
 	}, nil
 }
 
-func (a *PDSKeyAuthorizer) remember(username string, entry *cacheEntry) {
-	a.cache.SetTTL(username, entry, entry.ttl)
+func (a *PDSKeyAuthorizer) remember(id string, entry *cacheEntry) {
+	a.cache.SetTTL(id, entry, entry.ttl)
 }
 
 func (a *PDSKeyAuthorizer) empty(lookupFailed, unknownAccount bool) *cacheEntry {
@@ -392,26 +404,7 @@ func (a *PDSKeyAuthorizer) resolveAccount(ctx context.Context, username string) 
 	return &AuthorizedAccount{DID: did, Handle: handle, PDS: doc.PDS}, false, nil
 }
 
-func (a *PDSKeyAuthorizer) listAllRecords(ctx context.Context, account *AuthorizedAccount) ([]map[string]any, error) {
-	records := []map[string]any{}
-	seen := map[string]bool{}
-	cursor := ""
-	for range maxRecordPages {
-		found, next, err := a.opts.Records.ListRecords(ctx, account.PDS, account.DID, BadgeBlueKeysNSID, 100, cursor)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, found...)
-		if next == "" || seen[next] {
-			break
-		}
-		seen[next] = true
-		cursor = next
-	}
-	return records, nil
-}
-
-func (a *PDSKeyAuthorizer) load(ctx context.Context, username string) *cacheEntry {
+func (a *PDSKeyAuthorizer) load(ctx context.Context, username string, key PresentedKey) *cacheEntry {
 	account, unknown, err := a.resolveAccount(ctx, username)
 	if err != nil {
 		a.opts.Log.Warn("authorize_error", "username", username, "err", err)
@@ -423,70 +416,43 @@ func (a *PDSKeyAuthorizer) load(ctx context.Context, username string) *cacheEntr
 	if account == nil {
 		return a.empty(true, false)
 	}
-	records, err := a.listAllRecords(ctx, account)
-	if err != nil {
-		a.opts.Log.Warn("authorize_error", "username", username, "err", err)
+	rkey := keyRkey(account.DID, parsedPublicKey{algo: key.Algo, key: key.Key})
+	record, err := a.opts.Records.GetRecord(ctx, account.PDS, account.DID, BadgeBlueKeysNSID, rkey)
+	if err != nil && !errors.Is(err, ErrRecordNotFound) {
+		a.opts.Log.Warn("authorize_error", "username", username, "rkey", rkey, "err", err)
 		return a.empty(true, false)
 	}
-	now := time.Now()
 	return &cacheEntry{
 		account:   account,
-		records:   records,
-		checkedAt: now,
+		matched:   err == nil && isRequesterAssociation(record, account.DID) && sshKeyMatches(record["keyId"], key),
+		checkedAt: time.Now(),
 		ttl:       a.opts.CacheTTL,
 	}
 }
 
-func hasAnyAssociation(entry *cacheEntry, account *AuthorizedAccount) bool {
-	for _, rec := range entry.records {
-		if isRequesterAssociation(rec, account.DID) {
-			return true
-		}
-	}
-	return false
-}
-
-func entryMatches(entry *cacheEntry, key PresentedKey) bool {
-	if entry.account == nil {
-		return false
-	}
-	for _, rec := range entry.records {
-		if isRequesterAssociation(rec, entry.account.DID) && sshKeyMatches(rec["keyId"], key) {
-			return true
-		}
-	}
-	return false
-}
-
 func (a *PDSKeyAuthorizer) Authorize(ctx context.Context, username string, key PresentedKey) (*AuthorizedAccount, error) {
 	now := time.Now()
-	entry, ok := a.cache.Get(username)
+	id := username + "\x00" + key.Algo + " " + key.Key
+	entry, ok := a.cache.Get(id)
 	if !ok {
-		entry = a.load(ctx, username)
-		a.remember(username, entry)
+		entry = a.load(ctx, username, key)
+		a.remember(id, entry)
 	}
-	matched := entryMatches(entry, key)
-	if !matched && now.Sub(entry.checkedAt) >= a.opts.MissRecheck {
-		entry = a.load(ctx, username)
-		a.remember(username, entry)
-		matched = entryMatches(entry, key)
+	if !entry.matched && now.Sub(entry.checkedAt) >= a.opts.MissRecheck {
+		entry = a.load(ctx, username, key)
+		a.remember(id, entry)
 	}
-	if matched && now.Sub(entry.checkedAt) >= a.opts.PositiveCacheTTL {
-		entry = a.load(ctx, username)
-		a.remember(username, entry)
-		matched = entryMatches(entry, key)
+	if entry.matched && now.Sub(entry.checkedAt) >= a.opts.PositiveCacheTTL {
+		entry = a.load(ctx, username, key)
+		a.remember(id, entry)
 	}
 	if entry.lookupFailed {
 		return nil, fmt.Errorf("association lookup failed for %s", username)
 	}
-	if entry.unknownAccount || (entry.account != nil && !hasAnyAssociation(entry, entry.account)) {
-		reason := "no_associations"
-		if entry.unknownAccount {
-			reason = "no_account"
-		}
-		return nil, &NoKeyCouldMatchError{Username: username, Reason: reason}
+	if entry.unknownAccount {
+		return nil, &NoKeyCouldMatchError{Username: username, Reason: "no_account"}
 	}
-	if matched {
+	if entry.matched {
 		return entry.account, nil
 	}
 	return nil, nil
