@@ -11632,6 +11632,22 @@ status, or a Retained one, releases as before.
   `status.observedGeneration` or its Accepted condition. The ExpiresAt requeue and the repo bind
   events are unchanged. Open: the page reading after the change.
 
+- **A status field the controller stops setting is removed, whoever owns it (2026-10-30, r134).**
+  Before: a Ready, SignedIn MarketIdentity kept a stale `status.pendingAction` (hat-7 `prod-qr`: a
+  signInAgain that expired 2026-10-30T19:29:21Z, kept from rc130 to rc133; the page requester: the
+  ScopeUpgrade action after the upgrade sign-in had granted all 28 scopes, so the banner never
+  cleared). The hat-7 managedFields: `f:pendingAction` was owned by `socialweb.computer/marketidentity`
+  with operation Update on the status subresource (the kcp v0.33 APIExport virtual workspace forwards
+  a status apply as get and update), a separate entry from the same manager's Apply entry. An apply
+  removes only fields of its own Apply entry, and a null in an apply does not remove a field another
+  entry owns (repro on a local kcp v0.33.1: the field stays; a null for an object field leaves `{}`;
+  a null for a string fails validation). Now `ApplyStatus` (not SharedStatus) sends the live status
+  keys missing from the desired status, ForeignStatus paths excepted, as nulls in one status merge
+  patch under the controller's field manager, then applies the desired status without them. Repro:
+  the merge patch removes the field and the empty Update entry with it; on an absent field it is a
+  no-op. Existing objects heal on their next reconcile; a status write costs one more patch only when
+  a field drops.
+
 ## 16. Vocabulary
 
 | | |

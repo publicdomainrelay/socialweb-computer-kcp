@@ -56,7 +56,11 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 	}
 	if !r.scope.sharedStatus {
 		if live, err := r.liveStatus(ctx, obj); err == nil {
-			dropped(live, status, r.scope.foreignStatus, "")
+			if gone := dropped(live, status, r.scope.foreignStatus, ""); len(gone) > 0 {
+				if err := r.clearStatus(ctx, obj, gone); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	u.Object["status"] = status
@@ -248,7 +252,26 @@ func (r Request) liveStatus(ctx context.Context, obj Object) (map[string]any, er
 	return status, nil
 }
 
-func dropped(live, desired map[string]any, foreign []string, prefix string) {
+func (r Request) clearStatus(ctx context.Context, obj Object, gone map[string]any) error {
+	body, err := json.Marshal(map[string]any{"status": gone})
+	if err != nil {
+		return fmt.Errorf("runtime: encoding the dropped status fields of %s: %w", obj.GetName(), err)
+	}
+	target, ok := obj.DeepCopyObject().(Object)
+	if !ok {
+		return fmt.Errorf("runtime: %T is not an object", obj)
+	}
+	if err := r.scope.client.Status().Patch(ctx, target, client.RawPatch(types.MergePatchType, body), client.FieldOwner(r.scope.fieldManager)); err != nil {
+		if apierrors.IsMethodNotSupported(err) || apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("runtime: clearing the dropped status fields of %s: %w", obj.GetName(), err)
+	}
+	return nil
+}
+
+func dropped(live, desired map[string]any, foreign []string, prefix string) map[string]any {
+	gone := map[string]any{}
 	for k, v := range live {
 		path := prefix + k
 		if slices.Contains(foreign, path) {
@@ -258,18 +281,21 @@ func dropped(live, desired map[string]any, foreign []string, prefix string) {
 		liveMap, liveIsMap := v.(map[string]any)
 		next, ok := desired[k]
 		if !ok || next == nil {
+			delete(desired, k)
 			if !liveIsMap || !holdsForeign(foreign, path) {
-				desired[k] = nil
+				gone[k] = nil
 				continue
 			}
 			next = map[string]any{}
-			desired[k] = next
 		}
 		nextMap, nextIsMap := next.(map[string]any)
 		if liveIsMap && nextIsMap {
-			dropped(liveMap, nextMap, foreign, path+".")
+			if sub := dropped(liveMap, nextMap, foreign, path+"."); len(sub) > 0 {
+				gone[k] = sub
+			}
 		}
 	}
+	return gone
 }
 
 func holdsForeign(foreign []string, path string) bool {
