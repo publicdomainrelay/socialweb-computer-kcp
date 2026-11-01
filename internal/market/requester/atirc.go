@@ -1017,15 +1017,11 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 	if exp, ok := atircTokenExp(token, env); ok && !r.q.now().Before(exp) {
 		return true
 	}
-	if !derived {
-		_, err := r.revokeMinted(ctx, parent, token, subhandle)
-		return err == nil
-	}
 	revoked, err := r.revokeAtircSubhandle(ctx, token, subhandle, false)
 	if err != nil {
 		return false
 	}
-	if !revoked {
+	if !revoked && derived {
 		r.q.log.Warn("requester_atirc_revoke_unconfirmed", "contract", r.name, "path", path, "subhandle", subhandle,
 			"reason", "a derived subhandle answered 401; the token stays pending until it expires")
 		return false
@@ -1124,12 +1120,30 @@ func (r *contractRunner) revokeParent(ctx context.Context, contract v1alpha1.Com
 }
 
 func atircBelow(subhandle, base string) bool {
-	return base != "" && strings.HasSuffix(strings.ToLower(subhandle), "."+base)
+	return base != "" && strings.HasSuffix(subhandle, "."+base)
+}
+
+func atircTokenSubhandle(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Subhandle string `json:"subhandle"`
+	}
+	if json.Unmarshal(raw, &claims) != nil {
+		return ""
+	}
+	return claims.Subhandle
 }
 
 func (r *contractRunner) revokeMinted(ctx context.Context, parent atircRevokeParent, token, subhandle string) (bool, error) {
 	if parent != nil {
-		if issuer, ok := parent(); ok && atircBelow(subhandle, issuer.base) {
+		if issuer, ok := parent(); ok && atircBelow(subhandle, issuer.base) && atircTokenSubhandle(token) == subhandle {
 			revoked, err := r.revokeAtircSubhandle(ctx, issuer.bearer, subhandle, true)
 			var xerr *atircError
 			if err == nil || !errors.As(err, &xerr) || (xerr.status != http.StatusUnauthorized && xerr.status != http.StatusForbidden) {
