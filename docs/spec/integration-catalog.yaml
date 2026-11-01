@@ -732,10 +732,10 @@ entries:
     actors: [market network, requester soakreq]
     setup: >
       First phase of soak load. --requester (default soakreq), --contract-quota 20000,
-      --record-retention-sec 1800, --record-retention-scan-ms 60000, --max-concurrent 64. Without a
-      NetworkApp of that name it adds a MarketRequester application with the network requester
-      profile, a ComputeContracts quota and options record-retention-sec, record-retention-scan-ms,
-      max-concurrent and per-account-max; an existing one is reused.
+      --max-concurrent 64. Without a NetworkApp of that name it adds a MarketRequester application
+      with the network requester profile, a ComputeContracts quota and options max-concurrent and
+      per-account-max; an existing one is reused. No record retention exists: nothing deletes the
+      requester's records by age.
     asserts: >
       The NetworkApp reaches phase Ready with an instance name and kcp URL, without the stopped
       message, within 10m; listing ComputeContract in the child workspace works within 3m; prints

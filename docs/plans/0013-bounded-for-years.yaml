@@ -196,7 +196,7 @@ items:
     files: ["ts/atproto-market/lib/market-bidder", "ts/atproto-market/lib/requester-xrpc"]
     done_when: "on a market network after 1000 contracts and their retention, each PDS repository holds only live and retained records."
     risks: ["A requester that checks a receipt after the bidder removed its bid record: the receipt and the ComputeVM tombstone answer, not the bid record."]
-    status: doing
+    status: dropped
     evidence:
   - id: M4-SOAK-READING
     milestone: M4

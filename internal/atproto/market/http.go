@@ -138,68 +138,6 @@ func (h *HTTPReader) ListRecords(ctx context.Context, repo, collection string, l
 	return page, nil
 }
 
-func (h *HTTPReader) ListAll(ctx context.Context, repo, collection string, limit int) ([]ListedRecord, error) {
-	pageLimit := limit
-	if pageLimit <= 0 || pageLimit > 100 {
-		pageLimit = 100
-	}
-	out := []ListedRecord{}
-	cursor := ""
-	for {
-		page, err := h.ListRecords(ctx, repo, collection, pageLimit, cursor)
-		if err != nil {
-			if len(out) > 0 {
-				return out, nil
-			}
-			return nil, err
-		}
-		out = append(out, page.Records...)
-		if page.Cursor == "" {
-			return out, nil
-		}
-		cursor = page.Cursor
-	}
-}
-
-func (h *HTTPReader) Scan(ctx context.Context, repo, collection string, visit func(ListedRecord) (bool, error)) (bool, error) {
-	cursor := ""
-	for {
-		page, err := h.ListRecords(ctx, repo, collection, 100, cursor)
-		if err != nil {
-			return false, err
-		}
-		for _, rec := range page.Records {
-			stop, err := visit(rec)
-			if err != nil {
-				return false, err
-			}
-			if stop {
-				return true, nil
-			}
-		}
-		if len(page.Records) == 0 || page.Cursor == "" {
-			return false, nil
-		}
-		cursor = page.Cursor
-	}
-}
-
-func (h *HTTPReader) Find(ctx context.Context, repo, collection string, match func(ListedRecord) bool) (*ListedRecord, error) {
-	var found *ListedRecord
-	_, err := h.Scan(ctx, repo, collection, func(rec ListedRecord) (bool, error) {
-		if !match(rec) {
-			return false, nil
-		}
-		copied := rec
-		found = &copied
-		return true, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return found, nil
-}
-
 type recordResolver struct {
 	remote RecordGetter
 	ownDID string

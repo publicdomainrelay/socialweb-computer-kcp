@@ -5230,6 +5230,10 @@ refutation.
 - **The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway requester's retention (plan 0013
   M3-PDS-RECORD-RETENTION and M3-DISK-RETENTION, 2026-10-18, commits 8dad7806, b517683f, 1be95509, feccd06d, a60721ac,
   efa7e5cd).** The four series that section 14 kept open after dev-gc-1. Causes and changes:
+  **Historical.** This is the TypeScript-era record retention. The Go rewrite (963f7980) deleted it with `ts/`, and no
+  record retention exists: nothing deletes a market record by age, the options `record-retention-sec` and
+  `record-retention-scan-ms` are gone from `deploy/apps/option-map.yaml`, and the owner's rule is that no component
+  deletes records for people. What follows describes code that no longer exists.
   (1) Orphan records. Every 30 s the controller's resync lists the ComputeContracts and called `forget()` on every runner whose
   name the list lacked. A contract created while the list was in flight had already been launched from the watch, so it was taken
   for deleted: the runner set deleted and released, skipped every later status write and ended with "the contract was released
@@ -5778,8 +5782,9 @@ the run made (canary-dry, the leaked canary-to and canary-dry2) and never again,
 - **The requester's RBAC records are the source of the guest's identity grants, on 2026-10-15 (plan 0009
   M3-RBAC-TO-OPENBAO).** For each live guest the bidder reads the `com.fedproxy.rbac` records of its
   requester's repo (the DID resolved through the PLC directory; since rc129 one `getRecord` at rkey
-  `node.<accept rkey>`, the rkey the requester writes it at, and `listRecords` only when that record is
-  missing, for records written before rc129) when it accepts, on every
+  `node.<accept rkey>`, the rkey the requester writes it at; a miss means not written yet or already
+  released, and grants nothing; `listRecords` runs on a miss only for a ComputeVM accepted before rc129,
+  `guestidentity.RBACAtAcceptSince`, by `spec.contract.acceptedAt` or else its creation time) when it accepts, on every
   firehose event for that collection and DID, and every `--compute-provider-kcp-guest-identity-resync-sec`
   (30 s; the market network's requester keeps its repo in its own process, no relay crawls it and its
   commits are not on the firehose, so the read is also the floor under a lost event). A role of a record
@@ -10163,7 +10168,12 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   stale ResourceQuota and 9 Bids after a TTL deletion, that retry was declined again (the third `capacity`
   decline) because the stale `used` still read 10, which is why the exact count moved into the bidder.
 - **A bidder and a requester remove their own market records when no object needs them (plan 0013
-  M3-PDS-RECORD-RETENTION, 2026-10-15).** The bidder (`bid-retention.ts`, started by the bid loop after its
+  M3-PDS-RECORD-RETENTION, 2026-10-15).**
+  **Historical.** This is the TypeScript-era record retention. The Go rewrite (963f7980) deleted it with `ts/`, and no
+  record retention exists: nothing deletes a market record by age, the options `record-retention-sec` and
+  `record-retention-scan-ms` are gone from `deploy/apps/option-map.yaml`, and the owner's rule is that no component
+  deletes records for people. What follows describes code that no longer exists.
+  The bidder (`bid-retention.ts`, started by the bid loop after its
   restore) lists its own `market.bid` records page by page 30 s after it starts and then every 10 minutes
   (up to 50 pages and 200 removals a pass). A record is removed, with the `bids.free` payload and the bid
   config it points at, when the Bid object of its RFP is settled (`Complete` or `Failed` condition) and its
