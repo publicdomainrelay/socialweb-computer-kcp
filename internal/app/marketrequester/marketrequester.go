@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -298,6 +299,9 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		identityStore := strings.TrimSpace(pdsStateDir) != ""
 		existing := identityStore && (contractDID(plan, id) != "" || strings.TrimSpace(compose.OptionValue(o.Spec.Options, "expected-pds-url")) != "")
 		pdsSpec, err := compose.AppPdsSpec(stateRoot, pdsStateDir, existing, network, pdsHandle, vault, hostnames, pdsPublicURL, requireIngress, ingressRef)
+		if err == nil {
+			pdsSpec.Ephemeral = ephemeralIngress(ingress)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -497,6 +501,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := checkExpectedPDSURL(expectedURL, pdsPublicURL, existing); err != nil {
 		return p.fail(err)
 	}
+	if ephemeralIngress(ingress) {
+		if u, err := url.Parse(pdsPublicURL); err == nil && u.Hostname() != "" {
+			pdsHandle = u.Hostname()
+		}
+	}
 	if desired, err = p.desired(ctx, plan, id, pdsHandle, pdsPublicURL, ingress, requireIngress, ingressRef); err != nil {
 		return p.fail(err)
 	}
@@ -647,4 +656,8 @@ func deepCopyGrants(in []v1alpha1.RequesterOAuthGrant) []v1alpha1.RequesterOAuth
 		in[i].DeepCopyInto(&out[i])
 	}
 	return out
+}
+
+func ephemeralIngress(ingress *v1alpha1.IngressConfig) bool {
+	return ingress != nil && ingress.Xrpc != nil && ingress.Xrpc.EphemeralKey
 }

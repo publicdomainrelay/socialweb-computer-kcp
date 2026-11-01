@@ -879,6 +879,10 @@
     "oauth-self": {
       "type": "string",
       "description": "run request and run requester, after --: <client_id>[=<scope>,...]; inside a guest, let this guest's own workload identity (the iss and sub of guest-login.sh token) approve that OAuth client as the requester's account (role oauth-self); a * in the client_id matches a keyed client_id such as https://irc.fedfork.com/oauth/client-metadata*; no scopes take the client metadata's"
+    },
+    "ingress-ephemeral-key": {
+      "type": "boolean",
+      "description": "run request and run requester, after --: the app PDS's ingress host on the xrpc ingress proxy comes from a key held only in memory, so its URL (and the PDS handle, which becomes that host) is new on every start and no key is written; the PDS keeps its keys in memory and tombstones the DIDs it made when it stops"
     }
   }
 }

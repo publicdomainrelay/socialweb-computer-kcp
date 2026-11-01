@@ -163,6 +163,7 @@ apps:
       - {name: ingress-public-host, to: spec.ingress.publicHost}
       - {name: ingress-xrpc-host, to: spec.ingress.xrpc.ingressProxyHost}
       - {name: ingress-relay-url, to: spec.ingress.xrpc.relayURL}
+      - {name: ingress-ephemeral-key, to: spec.ingress.xrpc.ephemeralKey}
       - {name: ingress-opentunnel-command, to: spec.ingress.opentunnel.command}
       - {name: ingress-opentunnel-route-name, to: spec.ingress.opentunnel.routeName}
       - {name: ingress-opentunnel-local-host, to: spec.ingress.opentunnel.localHost}
