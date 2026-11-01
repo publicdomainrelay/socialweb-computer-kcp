@@ -313,7 +313,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if !listed || gap {
 		if gap {
 			r.c.log.Info("infra_collection_resync", attrs...)
-			m.resync = true
+			r.c.flagResync(key)
 		}
 		records, capped, err = listAll(ctx, reader, did, nsid)
 		if err != nil {
@@ -324,13 +324,14 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			next.resyncAt = time.Now()
 		}
 	} else {
-		if m == nil {
-			m = f.baseline(false)
-			m.seen = nil
+		base := m
+		if base == nil {
+			base = f.baseline(true)
+			base.seen, base.records = nil, childRecords(previous.Children)
 		}
-		records = applyFeed(previous.Children, m, f)
+		records = applyFeed(base, f)
 		next = f.baseline(false)
-		next.streams, next.resyncAt = m.streams, m.resyncAt
+		next.streams, next.resyncAt = base.streams, base.resyncAt
 	}
 	r.c.retries.Reset(key)
 	kids, err := r.ops.children(ctx, dyn)
@@ -393,7 +394,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	next.did, next.gen = did, gen
+	next.did, next.gen, next.records = did, gen, records
 	r.c.setMark(key, next)
 	return ctlruntime.Result{RequeueAfter: after}, nil
 }
@@ -429,6 +430,8 @@ type mark struct {
 	streams map[types.UID]bool
 
 	seen map[string]string
+
+	records []atprotorepo.Record
 
 	gone map[string]bool
 
@@ -496,15 +499,23 @@ func (m *mark) freshStream(f feed) bool {
 	return false
 }
 
-func applyFeed(previous []v1alpha1.InfraCollectionChild, m *mark, f feed) []atprotorepo.Record {
-	out := make([]atprotorepo.Record, 0, len(previous))
+func childRecords(children []v1alpha1.InfraCollectionChild) []atprotorepo.Record {
+	out := make([]atprotorepo.Record, 0, len(children))
+	for _, c := range children {
+		out = append(out, atprotorepo.Record{URI: c.URI, CID: c.CID, RKey: c.Rkey})
+	}
+	return out
+}
+
+func applyFeed(m *mark, f feed) []atprotorepo.Record {
+	out := make([]atprotorepo.Record, 0, len(m.records))
 	at := map[string]int{}
-	for _, c := range previous {
-		if f.gone[c.URI] && !m.gone[c.URI] {
+	for _, rec := range m.records {
+		if f.gone[rec.URI] && !m.gone[rec.URI] {
 			continue
 		}
-		at[c.URI] = len(out)
-		out = append(out, atprotorepo.Record{URI: c.URI, CID: c.CID, RKey: c.Rkey})
+		at[rec.URI] = len(out)
+		out = append(out, rec)
 	}
 	for _, uri := range f.order {
 		cid := f.present[uri]
@@ -525,6 +536,16 @@ func (c *Controller) markOf(key retryKey) *mark {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.marks[key]
+}
+
+func (c *Controller) flagResync(key retryKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m := c.marks[key]; m != nil {
+		next := *m
+		next.resync = true
+		c.marks[key] = &next
+	}
 }
 
 func (c *Controller) setMark(key retryKey, m *mark) {

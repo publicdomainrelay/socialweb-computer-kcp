@@ -394,6 +394,7 @@ func (c *Controller) verify(ctx context.Context, obj *v1alpha1.AtprotoRecordWatc
 	}
 	result := c.backend.Verify(ctx, w.status.Records, matches)
 	w.status.Records = result.Records
+	w.status.Deleted = eventstream.NoteDeleted(w.status.Deleted, result.Gone)
 	w.verifiedGeneration = obj.Generation
 	if !result.Verified() {
 		w.verifyAt = time.Now().Add(VerifyRetry)

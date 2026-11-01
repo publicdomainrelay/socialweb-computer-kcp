@@ -69,7 +69,9 @@ type Controller struct {
 
 	pulls map[indexKey]pullNote
 
-	moved map[indexKey]bool
+	moved map[indexKey]string
+
+	unwritten map[indexKey]bool
 
 	repos map[string]*binding.Table[struct{}]
 
@@ -82,7 +84,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
-		pulls: map[indexKey]pullNote{}, moved: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
+		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
 			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
 }
 
@@ -347,20 +349,22 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		status.Phase = v1alpha1.InfraPhaseEnding
 		status.Message = fmt.Sprintf("ended (%s); %d contract(s) releasing", end.Reason, left)
 	}
-	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
-		return ctlruntime.Result{}, err
-	}
-	if recordErr != nil {
-		return ctlruntime.Result{}, recordErr
-	}
 	if rec != nil && rec.write {
 		observed := infra.Observed{Phase: status.Phase, Contracts: statuses}
 		if ephemeral != nil {
 			observed.ExpiresAt, observed.EndedAt, observed.EndReason = ephemeral.ExpiresAt, ephemeral.EndedAt, ephemeral.EndReason
 		}
+		r.c.setUnwritten(keyOf(req, v), true)
 		if err := r.writeRecord(ctx, req, v, rec, observed); err != nil {
 			return ctlruntime.Result{}, err
 		}
+		r.c.setUnwritten(keyOf(req, v), false)
+	}
+	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if recordErr != nil {
+		return ctlruntime.Result{}, recordErr
 	}
 	if end.Ended {
 		if left == 0 {

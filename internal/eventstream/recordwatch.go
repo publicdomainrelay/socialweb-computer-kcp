@@ -89,6 +89,8 @@ func StreamConditions(plans []SourcePlan, streams map[string]eventsapi.EventStre
 type Verification struct {
 	Records []v1alpha1.WatchedRecord
 
+	Gone []string
+
 	Problems []string
 }
 
@@ -125,6 +127,7 @@ func (w *Watches) Verify(ctx context.Context, records []v1alpha1.WatchedRecord, 
 		if err != nil {
 			var xe *pdsclient.XRPCError
 			if errors.As(err, &xe) && (xe.Code == "RecordNotFound" || xe.Code == "RepoNotFound" || xe.StatusCode == http.StatusNotFound) {
+				out.Gone = append(out.Gone, record.URI)
 				continue
 			}
 			out.Problems = append(out.Problems, record.URI+": "+err.Error())

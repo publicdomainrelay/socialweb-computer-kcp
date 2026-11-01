@@ -11773,9 +11773,14 @@ Now an infra whose contracts are all finished (every declared contract Released 
 `status.contracts`, every owned ComputeContract Released or Failed) and whose record is Synced at the
 current generation is settled: its reconcile does no getRecord and writes no AtprotoRecord. It reads
 again only on a real change: a generation change (Synced is then older), its own record's cid
-changing in the watch (`watched` marks the key moved when the cid differs from the one it read),
-or its deletion (the finalizer path is unchanged). The first settled reconcile in a process checks
-its own watch (or its collection's) in kcp once against `status.record`, logs
+changing in the watch (`watched` keeps the cid the watch reported as moved until a read indexes
+that same cid, so a newer cid that lands while a read is in flight is read too), the record
+deleted (the stream's delete, or the watch's verify, which now adds a NotFound record to
+`status.deleted`), or its deletion (the finalizer path is unchanged). A record write is part of
+the pass: the AtprotoRecord is applied before the status, and a failed apply keeps the key
+unwritten, so the Released phase always reaches the record before the infra counts as settled.
+The first settled reconcile in a process binds the repo, applies its own watch (a non-collection
+infra), checks that watch (or its collection's) in kcp once against `status.record`, logs
 `infra_record_settled` and indexes the cid, so a change made while the process was down is still
 read. A finished infra never retries a read on a timer: a failed read leaves Synced False
 (`RecordUnavailable`, `infra_record_read_failed`), and the next event reads again. A live infra
@@ -11787,16 +11792,25 @@ collection in one repo, so its first sync must list (the owner's rule allows a l
 answer is an enumeration; no rkey derivation names records written by other tabs, apps or
 devices). The listing is bounded by the object's own scope (its repo and NSID), paged by 100 and
 capped at 50 pages (`ListCapped`). After it, the collection applies its watch's `status.records`
-and `status.deleted` as a diff against the state it last applied (new uri: a child; new cid: the
-entry's cid; a uri newly deleted: the entry goes; children are never deleted), with no PDS read.
+and `status.deleted` as a diff against the record set it applied last, kept in memory (never
+against the cached `status.children`, which can lag a pass), so a burst cannot drop or bring back
+an entry (new uri: a child; new cid: the entry's cid; a uri newly deleted: the entry goes;
+children are never deleted), with no PDS read. A capped listing stops at the newest 50 pages; an
+older record shows up only when it changes.
 It lists again only after a gap: a ready EventStream of its watch that it has not seen (a new
 stream starts live, with no cursor), a new generation or DID, or a failed relist, and at most once
-per 10 min (`resyncFloor`, a delayed requeue). A process restart is not a gap: the watch's streams
-resume from their saved cursors.
+per 10 min (`resyncFloor`, a delayed requeue) for a relist that succeeded; a failed relist retries
+on the netretry rate like the first listing. A process restart is not a gap for a stream with a
+saved cursor; one with no cursor at restart counts as new.
 
 Left open: each AtprotoRecordWatch still verifies every record in its `status.records` by getRecord
 every 5 min (`VerifyInterval`), and each non-collection infra owns a watch of the whole collection,
-so those reads still grow with infras x records seen.
+so those reads still grow with infras x records seen. A stream that resumes under the same UID
+from a cursor its source no longer replays loses events with no relist (the client sees no
+expired-cursor signal). The watch keeps 512 records, so in a larger collection a settled infra's
+record can be evicted and then only the stream reports its changes. After a restart, deletes the
+watch recorded while the process was down are not applied to `status.children`. Keeping the first
+listing on a collection that grows with every page load needs the owner's sign-off (review I3).
 
 ### r139: the requester reads the receipt and the termination by getRecord
 

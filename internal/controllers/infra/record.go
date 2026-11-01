@@ -308,13 +308,24 @@ func (r *reconciler[T]) settled(ctx context.Context, req ctlruntime.Request, v v
 	k := keyOf(req, v)
 	r.c.mu.Lock()
 	cid, indexed := r.c.bound[stored.URI][k]
-	moved := r.c.moved[k]
+	_, moved := r.c.moved[k]
+	unwritten := r.c.unwritten[k]
 	r.c.mu.Unlock()
 	switch {
-	case moved:
+	case moved || unwritten:
 		return false
 	case indexed:
 		return cid == stored.CID
+	}
+	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
+	if err != nil {
+		return false
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	if !collectionOwned(v.object) {
+		if err := r.ensureWatch(ctx, req, v, repo, v.spec.Record.EventSourceRefs); err != nil {
+			return false
+		}
 	}
 	if changed, err := r.watchedChange(ctx, req, v, stored); err != nil || changed {
 		return false
@@ -613,7 +624,9 @@ func (c *Controller) index(kind string, req ctlruntime.Request, uri, cid string)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dropLocked(k)
-	delete(c.moved, k)
+	if moved, ok := c.moved[k]; ok && moved == cid {
+		delete(c.moved, k)
+	}
 	users := c.bound[uri]
 	if users == nil {
 		users = map[indexKey]string{}
@@ -630,6 +643,7 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	c.dropLocked(k)
 	delete(c.pulls, k)
 	delete(c.moved, k)
+	delete(c.unwritten, k)
 	c.retries.Reset(k)
 }
 
@@ -659,20 +673,38 @@ func (c *Controller) watched(cluster, kind string, watch *v1alpha1.AtprotoRecord
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []ctlruntime.Request
-	add := func(uri string, changed func(cid string) bool) {
+	present := map[string]bool{}
+	add := func(uri, now string) {
 		for key, cid := range c.bound[uri] {
-			if key.kind != kind || key.cluster != cluster || !changed(cid) {
+			if key.kind != kind || key.cluster != cluster {
 				continue
 			}
-			c.moved[key] = true
+			if cid == now {
+				delete(c.moved, key)
+				continue
+			}
+			c.moved[key] = now
 			out = append(out, ctlruntime.Request{Cluster: key.cluster, Name: key.name})
 		}
 	}
 	for _, rec := range watch.Status.Records {
-		add(rec.URI, func(cid string) bool { return cid != rec.Cid })
+		present[rec.URI] = true
+		add(rec.URI, rec.Cid)
 	}
 	for _, uri := range watch.Status.Deleted {
-		add(uri, func(cid string) bool { return cid != "" })
+		if !present[uri] {
+			add(uri, "")
+		}
 	}
 	return out
+}
+
+func (c *Controller) setUnwritten(k indexKey, pending bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pending {
+		c.unwritten[k] = true
+		return
+	}
+	delete(c.unwritten, k)
 }
