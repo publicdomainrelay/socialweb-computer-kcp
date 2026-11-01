@@ -39,6 +39,7 @@ type Option struct {
 	Default     any    `json:"default,omitempty"`
 	Build       string `json:"build,omitempty"`
 	Bare        string `json:"bare,omitempty"`
+	Repeat      bool   `json:"repeat,omitempty"`
 }
 
 const BuildDev = "dev"
@@ -160,9 +161,10 @@ func (v Values) Bool(name string) bool {
 }
 
 type stringFlag struct {
-	set  bool
-	val  string
-	bare string
+	set    bool
+	val    string
+	bare   string
+	repeat bool
 }
 
 func (f *stringFlag) String() string { return f.val }
@@ -172,6 +174,10 @@ func (f *stringFlag) IsBoolFlag() bool { return f.bare != "" }
 func (f *stringFlag) Set(s string) error {
 	if f.bare != "" && s == "true" {
 		s = f.bare
+	}
+	if f.repeat && f.set {
+		f.val += "\n" + s
+		return nil
 	}
 	f.set, f.val = true, s
 	return nil
@@ -228,7 +234,7 @@ func (s Spec) Resolve(command string, names []string, args []string, env Env, co
 			bools[name] = fs.Bool(name, false, usage)
 			continue
 		}
-		strs[name] = &stringFlag{bare: o.Bare}
+		strs[name] = &stringFlag{bare: o.Bare, repeat: o.Repeat}
 		fs.Var(strs[name], name, usage)
 	}
 	fs.Usage = func() {

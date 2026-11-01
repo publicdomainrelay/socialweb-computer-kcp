@@ -15,7 +15,7 @@ type APIResource = apiresource.APIResource
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 5, Export: "clusters", Object: Cluster{}},
 	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
-	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 16, Export: "clusters", Object: NodeClaim{}},
+	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 17, Export: "clusters", Object: NodeClaim{}},
 	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},
 	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 2, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
 		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},
@@ -125,7 +125,7 @@ var APIResources = []APIResource{
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 31, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 32, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Contract", Type: "string", JSONPath: ".status.contract.phase"},
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
