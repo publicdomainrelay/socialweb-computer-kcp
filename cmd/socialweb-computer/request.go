@@ -43,11 +43,13 @@ const (
 	requestIdentityWait = 5 * time.Minute
 	requestSummaryRead  = 10 * time.Second
 	requestAttachProbe  = 10 * time.Second
-	requestSSHRetryRun  = 20 * time.Second
-	transportIroh       = "iroh"
-	transportWebRTC     = "webrtc"
-	sshPort             = 22
-	sshConnectionFailed = 255
+
+	requestOwnerExitWait = 5 * time.Minute
+	requestSSHRetryRun   = 20 * time.Second
+	transportIroh        = "iroh"
+	transportWebRTC      = "webrtc"
+	sshPort              = 22
+	sshConnectionFailed  = 255
 )
 
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
@@ -1058,6 +1060,52 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 	return r.settleRevokes(ctx, c)
 }
 
+func (r *requestRun) releaseForOwner(ctx context.Context) int {
+	r.log("another process runs this invocation and owns its kcp; the release is asked through that kcp and the owner stops it")
+	if err := r.attach(ctx); err != nil {
+		return r.a.fail(exitFailed, "run request release: the invocation's own process holds it but its kcp does not answer: %v", err)
+	}
+	c, err := r.release(ctx)
+	if err != nil || c == nil || c.Status.Phase != v1alpha1.ComputeContractReleased {
+		phase := ""
+		if c != nil {
+			phase = string(c.Status.Phase)
+		}
+		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
+		r.a.log.Error("the owning process keeps the invocation; run `socialweb-computer run request release " + r.inv.Name + "` again to retry the release")
+		return exitFailed
+	}
+	r.log("released; waiting for the owning process to stop the invocation's kcp", "timeout", requestOwnerExitWait.String())
+	wctx, cancel := context.WithTimeout(ctx, requestOwnerExitWait)
+	defer cancel()
+	if err := request.AwaitOwnerGone(wctx, r.stateRoot, r.inv.Name); err != nil {
+		r.a.log.Warn("the owning process did not exit in time; the contract is Released", "err", err.Error())
+	}
+	if s, err := request.ReadSummary(r.stateRoot, r.inv.Name); err == nil {
+		r.summary = s
+	} else {
+		r.summary.Phase, r.summary.Message, r.summary.Contract = string(c.Status.Phase), c.Status.Message, request.SummaryOf(c)
+		r.summary.KcpRunning = false
+	}
+	r.a.printJSON(r.summary)
+	return exitOK
+}
+
+func (r *requestRun) followRelease(ctx context.Context) (*v1alpha1.ComputeContract, bool) {
+	current, err := r.kcp.AwaitContract(ctx, requestSummaryRead, func(*v1alpha1.ComputeContract) bool { return true })
+	if err != nil || current == nil || !current.Spec.Release || releaseSettled(current.Spec.ReleaseRequestedAt)(current) {
+		return current, current != nil
+	}
+	wait := requester.ReleaseWait(*current, r.contractTimeout)
+	r.log("the contract is being released; this process keeps its kcp running until the release settles", "releaseRequestedAt", current.Spec.ReleaseRequestedAt, "timeout", wait.String())
+	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled(current.Spec.ReleaseRequestedAt), r.progress)
+	if err != nil || c == nil {
+		r.a.log.Error("the release did not settle while this process kept the kcp", "err", fmt.Sprint(err))
+		return current, true
+	}
+	return c, true
+}
+
 func (r *requestRun) settleRevokes(ctx context.Context, c *v1alpha1.ComputeContract) (*v1alpha1.ComputeContract, error) {
 	if c == nil || !revokesPending(c) {
 		return c, nil
@@ -1111,6 +1159,11 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 			code = exitFailed
 		} else if ec != 0 {
 			code = exitFailed
+		}
+	}
+	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld {
+		if fc, ok := r.followRelease(ctx); ok {
+			c = fc
 		}
 	}
 	if c.Status.Phase == v1alpha1.ComputeContractFailed && !hasContract {
@@ -1239,6 +1292,11 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := request.WriteInvocation(r.inv); err != nil {
 		return a.fail(exitFailed, "run request: %v", err)
 	}
+	owner, owned, err := request.TakeOwner(r.stateRoot, name)
+	if err != nil || !owned {
+		return a.fail(exitFailed, "run request: the invocation %s is owned by another process: %v", name, err)
+	}
+	defer owner.Close()
 	if err := r.linkIdentityExposure(); err != nil {
 		return a.fail(exitFailed, "run request: %v", err)
 	}
@@ -1349,6 +1407,10 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 	if r == nil {
 		return nil, code
 	}
+	return a.restartLoaded(ctx, r, verb)
+}
+
+func (a *app) restartLoaded(ctx context.Context, r *requestRun, verb string) (*requestRun, int) {
 	if r.cleanupOnly {
 		return r, exitOK
 	}
@@ -1362,16 +1424,40 @@ func (a *app) reopenRequest(ctx context.Context, vals clicfg.Values, rest []stri
 }
 
 func runRequestResume(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
-	r, code := a.reopenRequest(ctx, vals, rest, "resume")
+	r, code := a.loadRequest(vals, rest, "resume")
 	if r == nil {
+		return code
+	}
+	owner, owned, err := request.TakeOwner(r.stateRoot, r.inv.Name)
+	if err != nil {
+		return a.fail(exitFailed, "run request resume: %v", err)
+	}
+	if !owned {
+		return a.fail(exitRefused, "run request resume: another process runs invocation %s; use run request ssh|agent|release %s", r.inv.Name, r.inv.Name)
+	}
+	defer owner.Close()
+	if r, code = a.restartLoaded(ctx, r, "resume"); r == nil {
 		return code
 	}
 	return r.carryOn(ctx)
 }
 
 func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
-	r, code := a.reopenRequest(ctx, vals, rest, "release")
+	r, code := a.loadRequest(vals, rest, "release")
 	if r == nil {
+		return code
+	}
+	if !r.cleanupOnly {
+		owner, owned, err := request.TakeOwner(r.stateRoot, r.inv.Name)
+		if err != nil {
+			return a.fail(exitFailed, "run request release: %v", err)
+		}
+		if !owned {
+			return r.releaseForOwner(ctx)
+		}
+		defer owner.Close()
+	}
+	if r, code = a.restartLoaded(ctx, r, "release"); r == nil {
 		return code
 	}
 	if r.cleanupOnly {
