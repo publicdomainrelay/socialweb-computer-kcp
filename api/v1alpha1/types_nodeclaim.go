@@ -140,6 +140,8 @@ type NodeClaimContract struct {
 
 	R2Release *ContractR2Release `json:"r2Release,omitempty"`
 
+	OAuthClients *ContractOAuthClients `json:"oauthClients,omitempty"`
+
 	Outcome ContractOutcome `json:"outcome,omitempty"`
 
 	Error string `json:"error,omitempty"`
@@ -288,6 +290,20 @@ const (
 
 	ContractGuestRequesterRefused ContractGuestRequesterState = "Refused"
 )
+
+type ContractOAuthClients struct {
+	Role string `json:"role"`
+
+	Audience string `json:"audience"`
+
+	Service string `json:"service"`
+
+	Record *commonv1.StrongRef `json:"record,omitempty"`
+
+	Clients []ComputeContractOAuthClient `json:"clients,omitempty"`
+
+	WrittenAt string `json:"writtenAt,omitempty"`
+}
 
 type ContractGuestRequester struct {
 	Did string `json:"did"`

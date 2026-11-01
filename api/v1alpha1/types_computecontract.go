@@ -49,6 +49,14 @@ type ComputeContractTemplate struct {
 	GuestTools []string `json:"guestTools,omitempty" apigen:"listType=set,enum=socialweb-computer"`
 }
 
+type ComputeContractOAuthClient struct {
+	ClientID string `json:"clientId" apigen:"pattern=^https://[^ ]+$"`
+
+	Scopes []string `json:"scopes" apigen:"listType=set"`
+
+	RedirectURI string `json:"redirectUri,omitempty" apigen:"userEndpoint"`
+}
+
 type ComputeContractSpec struct {
 	ComputeContractTemplate `json:",inline"`
 
@@ -63,6 +71,8 @@ type ComputeContractSpec struct {
 	Adopt bool `json:"adopt,omitempty"`
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
+
+	OAuthClients []ComputeContractOAuthClient `json:"oauthClients,omitempty" apigen:"listType=map,listMapKey=clientId"`
 
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }

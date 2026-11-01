@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-16.nodeclaims.socialweb.computer
+  name: v1alpha1-17.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -485,6 +485,49 @@ spec:
                         type: string
                     required:
                       - phase
+                  oauthClients:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                      audience:
+                        type: string
+                      service:
+                        type: string
+                      record:
+                        type: object
+                        properties:
+                          uri:
+                            type: string
+                          cid:
+                            type: string
+                        required:
+                          - uri
+                          - cid
+                      clients:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            clientId:
+                              type: string
+                              pattern: ^https://[^ ]+$
+                            scopes:
+                              type: array
+                              items:
+                                type: string
+                              x-kubernetes-list-type: set
+                            redirectUri:
+                              type: string
+                          required:
+                            - clientId
+                            - scopes
+                      writtenAt:
+                        type: string
+                    required:
+                      - role
+                      - audience
+                      - service
                   outcome:
                     type: string
                     enum:
