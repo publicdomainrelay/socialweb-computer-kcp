@@ -1045,10 +1045,11 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 	if err := r.kcp.Release(ctx, requestedAt); err != nil {
 		return nil, fmt.Errorf("setting spec.release: %w", err)
 	}
-	wait := r.contractTimeout
-	if current, err := r.kcp.Contract(ctx); err == nil && current != nil {
-		wait = requester.ReleaseWait(*current, r.contractTimeout)
+	current, err := r.kcp.AwaitContract(ctx, r.contractTimeout, func(*v1alpha1.ComputeContract) bool { return true })
+	if err != nil || current == nil {
+		return nil, fmt.Errorf("reading the contract for its release wait within %s: %v", r.contractTimeout, err)
 	}
+	wait := requester.ReleaseWait(*current, r.contractTimeout)
 	r.log("asked the requester to release the contract (spec.release)", "releaseRequestedAt", requestedAt, "timeout", wait.String())
 	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled(requestedAt), r.progress)
 	if err != nil || c == nil {
