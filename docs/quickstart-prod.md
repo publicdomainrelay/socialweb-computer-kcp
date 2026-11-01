@@ -52,9 +52,10 @@ Both policies read `sh.tangled.graph.vouch` records (rkey = the subject DID, `re
 - verdicts are cached 5 minutes, denials too: write the records first
 - check a record: `goat get "at://<operator did>/sh.tangled.graph.vouch/<your did>" | jq -r .kind` prints `vouch`
 - when you operate the bidder yourself (`install bidder`, [bidder.md](bidder.md)), you write the operator record from the
-  operator account; [../examples/infra/vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml) works today
-  only inside a local market network (the network's `operator` repo link); on an installed bidder it is plan 0039 item
-  F3-BIDDER-OPERATOR-REPO
+  operator account; [../examples/infra/vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml) applies in
+  the bidder kcp of a bidder installed with `--bidder-operator-signin <operator handle>`: the operator signs in once
+  by QR (scope: `sh.tangled.graph.vouch` writes only) and the record is written to the operator's repo
+  ([bidder.md](bidder.md), Operator sign-in)
 
 ## 3. Browser Page: kubectl Terminal
 
@@ -255,5 +256,5 @@ Still planned in plan 0039:
 | `run requester` as an installed systemd unit (today it runs in your terminal) | plan 0039 B-INSTALL-REQUESTER |
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
-| `vouch-bidder-operator.yaml` on an installed bidder | plan 0039 F3-BIDDER-OPERATOR-REPO |
+| `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |
