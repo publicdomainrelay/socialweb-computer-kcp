@@ -580,6 +580,8 @@ type atircMinted struct {
 	Exp int64 `json:"exp"`
 
 	UID string `json:"uid,omitempty"`
+
+	Revoked int64 `json:"revoked,omitempty"`
 }
 
 func mintedOf(data map[string]any) ([]atircMinted, error) {
@@ -976,18 +978,22 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 	}
 	recorded, done := false, true
 	parent := r.revokeParent(ctx, contract)
+	var cleared []atircMinted
 	for _, m := range minted {
 		if m.Path != path {
 			continue
 		}
 		recorded = true
-		if !r.q.now().Before(time.Unix(m.Exp, 0)) {
+		if m.Revoked != 0 || !r.q.now().Before(time.Unix(m.Exp, 0)) {
 			continue
 		}
 		if _, err := r.revokeMinted(ctx, parent, m.Token, m.Subhandle); err != nil {
 			done = false
+			continue
 		}
+		cleared = append(cleared, m)
 	}
+	r.markMintedRevoked(ctx, *contract.Spec.SecretsRef, cleared)
 	if recorded {
 		return done
 	}
@@ -1025,6 +1031,48 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 		return false
 	}
 	return true
+}
+
+func (r *contractRunner) markMintedRevoked(ctx context.Context, ref commonv1.SecretRef, cleared []atircMinted) {
+	if len(cleared) == 0 {
+		return
+	}
+	r.bundleMu.Lock()
+	defer r.bundleMu.Unlock()
+	kv, data, _, err := r.readAtircBundle(ctx, ref)
+	if err != nil {
+		r.log().Warn("requester_atirc_revoked_unmarked", "step", "read the bundle", "err", err.Error())
+		return
+	}
+	minted, err := mintedOf(data)
+	if err != nil {
+		r.log().Warn("requester_atirc_revoked_unmarked", "step", "read the minted tokens", "err", err.Error())
+		return
+	}
+	marked := 0
+	for i, m := range minted {
+		for _, c := range cleared {
+			if m.Revoked == 0 && m.Token == c.Token && m.Subhandle == c.Subhandle {
+				minted[i].Revoked = r.q.now().Unix()
+				marked++
+			}
+		}
+	}
+	if marked == 0 {
+		return
+	}
+	raw, err := json.Marshal(minted)
+	if err != nil {
+		return
+	}
+	next := make(map[string]any, len(data))
+	for k, v := range data {
+		next[k] = v
+	}
+	next[atircMintedKey] = string(raw)
+	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
+		r.log().Warn("requester_atirc_revoked_unmarked", "step", "write the bundle", "err", err.Error())
+	}
 }
 
 func (r *contractRunner) legacySubhandle(contract v1alpha1.ComputeContract, path string) string {
