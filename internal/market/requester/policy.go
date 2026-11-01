@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 )
 
 const PolicyPerspectiveRequester = "requester"
+
+var ErrRFPNoPolicy = errors.New("the RFP attaches no policy")
 
 type PolicyInput = participant.PolicyInput
 
@@ -97,6 +100,9 @@ func (q *Requester) attachedPolicy(ctx context.Context, ref market.StrongRef, wa
 	if err != nil {
 		return PolicyGate{}, fmt.Errorf("the attached policy %s: %w", ref.URI, err)
 	}
+	if authority := aturi.Authority().String(); authority != q.repoDID {
+		return PolicyGate{}, fmt.Errorf("the attached policy %s is in repo %s, not the requester's %s", ref.URI, authority, q.repoDID)
+	}
 	record, err := q.repo.GetRecord(ctx, aturi.Authority().String(), aturi.Collection().String(), aturi.RecordKey().String())
 	if err != nil {
 		return PolicyGate{}, fmt.Errorf("read the attached policy %s: %w", ref.URI, err)
@@ -116,6 +122,15 @@ func (q *Requester) attachedPolicy(ctx context.Context, ref market.StrongRef, wa
 	if gate.Name != PolicyWorkflowName(want) {
 		return PolicyGate{}, fmt.Errorf("the contract names policy %s but its RFP attaches %s at %s", PolicyWorkflowName(want), gate.Name, ref.URI)
 	}
+	if text, ok := PolicyWorkflowText(gate.Name); ok {
+		bundled, err := participant.PolicyRecordWorkflow(map[string]any{"$type": PolicyGhaLiteNSID, "workflow": text})
+		if err != nil {
+			return PolicyGate{}, fmt.Errorf("the bundled policy %s: %w", gate.Name, err)
+		}
+		if !bytes.Equal(bundled, body) {
+			return PolicyGate{}, fmt.Errorf("the attached policy %s is not the bundled %s workflow; start a new contract or session name", ref.URI, gate.Name)
+		}
+	}
 	return gate, nil
 }
 
@@ -123,6 +138,9 @@ func rfpPolicyRef(record map[string]any) (market.StrongRef, error) {
 	rfp, err := market.ParseRFP(record)
 	if err != nil {
 		return market.StrongRef{}, err
+	}
+	if len(rfp.Policies) == 0 {
+		return market.StrongRef{}, ErrRFPNoPolicy
 	}
 	if len(rfp.Policies) != 1 {
 		return market.StrongRef{}, fmt.Errorf("the RFP attaches %d policies, want 1", len(rfp.Policies))
