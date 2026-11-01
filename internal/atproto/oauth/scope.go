@@ -46,6 +46,9 @@ const (
 	CollectionPolicyTypeScript      = "computer.socialweb.temp.policy.typescript"
 	CollectionInfra                 = "computer.socialweb.infra"
 	CollectionEphemeralInfra        = "computer.socialweb.ephemeralInfra"
+	CollectionIngressWebRTC         = "com.publicdomainrelay.temp.ingress.webRTC"
+
+	RepoIngressWebRTCCreate = "repo:" + CollectionIngressWebRTC + "?action=create"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"

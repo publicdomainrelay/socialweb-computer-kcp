@@ -239,6 +239,8 @@ type HTTPMarket struct {
 
 	IngressRef func(ctx context.Context) *market.RecordRef
 
+	IngressWritable func(ctx context.Context) bool
+
 	IngressSTUN []string
 
 	HTTPClient *http.Client
@@ -502,7 +504,7 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 	}
 	var offer tunnel.Offer
 	offered := false
-	if m.Ingress != nil {
+	if m.Ingress != nil && (m.IngressWritable == nil || m.IngressWritable(ctx)) {
 		current, err := m.Ingress.Offer(ctx, m.RepoDID, bidder.DID)
 		if err != nil {
 			m.log().Warn("requester_webrtc_offer_failed", "bidder", bidder.DID, "err", err.Error())

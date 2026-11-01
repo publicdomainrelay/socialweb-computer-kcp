@@ -55,22 +55,30 @@ func (q *Requester) oauthServiceAuth() ServiceAuthSource {
 }
 
 func (q *Requester) oauthGranted(ctx context.Context, scope string) (bool, error) {
+	granted, known, err := q.oauthGrants(ctx)
+	if err != nil || !known {
+		return false, err
+	}
+	return len(atprotooauth.MissingScopes([]string{scope}, granted)) == 0, nil
+}
+
+func (q *Requester) oauthGrants(ctx context.Context) ([]string, bool, error) {
 	if q.cfg.IdentityMode != IdentityModeOAuth || q.deps.ServiceAuth == nil {
-		return false, nil
+		return nil, false, nil
 	}
 	handle, err := q.deps.ServiceAuth(ctx, q.identityRef, q.did)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	grants, ok := handle.(pds.ScopeGrants)
 	if !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	granted, ok := grants.GrantedScopes(q.did)
 	if !ok || !atprotooauth.KnownGrant(granted) {
-		return false, nil
+		return nil, false, nil
 	}
-	return len(atprotooauth.MissingScopes([]string{scope}, granted)) == 0, nil
+	return granted, true, nil
 }
 
 func (q *Requester) authenticateOwnerSession(ctx context.Context) error {

@@ -440,7 +440,6 @@ func (b *Bidder) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now time
 		Config:       &market.RecordRef{URI: configRef.URI, CID: configRef.CID},
 		Payload:      market.RecordRef{URI: payload.URI, CID: payload.CID},
 		SubmitAccept: b.cfg.EndpointURL,
-		Ingress:      b.ingressRecords(ctx),
 		CreatedAt:    now.Format(time.RFC3339),
 	})
 	if err != nil {

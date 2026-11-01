@@ -137,7 +137,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context) error {
 			b.setOffering(rec.URI)
 			return nil
 		}
-		record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, b.ingressRecords(ctx), offering.CreatedAt, now)
+		record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, offering.CreatedAt, now)
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context) error {
 		b.log.Info("the bidder offering is corrected", "offering", rec.URI, "endpoint", b.cfg.EndpointURL)
 		return nil
 	}
-	record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, b.ingressRecords(ctx), now, now)
+	record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, now, now)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func (b *Bidder) touchOffering(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	record, err := market.BuildOffering(b.cfg.EndpointURL, []string{market.ComputeVMNSID}, b.ingressRecords(ctx), offering.CreatedAt, b.now().UTC().Format(time.RFC3339))
+	record, err := market.BuildOffering(b.cfg.EndpointURL, []string{market.ComputeVMNSID}, nil, offering.CreatedAt, b.now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return err
 	}

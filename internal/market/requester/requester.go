@@ -314,6 +314,8 @@ type Requester struct {
 	ingressMu sync.Mutex
 
 	ingressRef *market.StrongRef
+
+	ingressScopeSkipped atomic.Bool
 }
 
 var _ contractmarket.Observer = (*Requester)(nil)
@@ -610,21 +612,22 @@ func (q *Requester) Start(ctx context.Context) error {
 	q.log.Info("requester_service_auth", "identityMode", q.cfg.IdentityMode, "localSigner", q.cfg.LocalSigner,
 		"signing", serviceAuthName(serviceAuth))
 	q.market = &HTTPMarket{
-		Directory:   q.deps.Directory,
-		Reader:      q.repo,
-		RepoDID:     q.repoDID,
-		Signer:      q.signer,
-		ServiceKey:  q.repoKey,
-		ServiceAuth: serviceAuth,
-		RelayURLs:   q.cfg.DiscoveryRelays(),
-		BidderDIDs:  append([]string(nil), q.cfg.Spec.BidderDIDs...),
-		OperatorDID: strings.TrimSpace(q.cfg.Spec.OperatorDID),
-		Ingress:     q.ingress(),
-		IngressRef:  q.ingressDescriptor,
-		IngressSTUN: q.cfg.WebRTCSTUN(),
-		HTTPClient:  q.deps.HTTP,
-		Timeout:     q.cfg.BidWindow,
-		Log:         q.log,
+		Directory:       q.deps.Directory,
+		Reader:          q.repo,
+		RepoDID:         q.repoDID,
+		Signer:          q.signer,
+		ServiceKey:      q.repoKey,
+		ServiceAuth:     serviceAuth,
+		RelayURLs:       q.cfg.DiscoveryRelays(),
+		BidderDIDs:      append([]string(nil), q.cfg.Spec.BidderDIDs...),
+		OperatorDID:     strings.TrimSpace(q.cfg.Spec.OperatorDID),
+		Ingress:         q.ingress(),
+		IngressRef:      q.ingressDescriptor,
+		IngressWritable: q.ingressWritable,
+		IngressSTUN:     q.cfg.WebRTCSTUN(),
+		HTTPClient:      q.deps.HTTP,
+		Timeout:         q.cfg.BidWindow,
+		Log:             q.log,
 	}
 	outbox, err := participant.NewOutbox(q.deps.Intents, q.deps.Now,
 		&marketInbox{q: q}, inboxAck{name: BidInboxAdapter}, inboxAck{name: InboxAdapter})
@@ -835,6 +838,9 @@ func (q *Requester) ingressDescriptor(ctx context.Context) *market.RecordRef {
 	if cached != nil {
 		return &market.RecordRef{URI: cached.URI, CID: cached.CID}
 	}
+	if !q.ingressWritable(ctx) {
+		return nil
+	}
 	value, err := market.EncodeRecord(market.IngressWebRTC{Kind: tunnel.KindWebRTC, Mode: market.IngressModeListen, ID: id, StunUrls: q.cfg.WebRTCSTUN(), CreatedAt: q.nowISO()})
 	if err != nil {
 		q.log.Warn("requester_webrtc_descriptor_failed", "err", err)
@@ -850,6 +856,21 @@ func (q *Requester) ingressDescriptor(ctx context.Context) *market.RecordRef {
 	q.ingressMu.Unlock()
 	q.log.Info("requester_webrtc_descriptor", "uri", ref.URI, "cid", ref.CID)
 	return &market.RecordRef{URI: ref.URI, CID: ref.CID}
+}
+
+func (q *Requester) ingressWritable(ctx context.Context) bool {
+	if q.cfg.IdentityMode != IdentityModeOAuth {
+		return true
+	}
+	granted, known, err := q.oauthGrants(ctx)
+	if err != nil || !known || len(atprotooauth.MissingScopes([]string{atprotooauth.RepoIngressWebRTCCreate}, granted)) == 0 {
+		q.ingressScopeSkipped.Store(false)
+		return true
+	}
+	if !q.ingressScopeSkipped.Swap(true) {
+		q.log.Info("requester_webrtc_ingress_skipped", "reason", "the oauth session was not granted "+atprotooauth.RepoIngressWebRTCCreate)
+	}
+	return false
 }
 
 func (q *Requester) ingressRecords(ctx context.Context) []market.RecordRef {
