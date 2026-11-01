@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/workflow"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -58,6 +59,9 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 	inputs, err := r.buildInputs(ctx, run, workflowCR, seed)
 	if err != nil {
 		return failedOutcome(err), nil
+	}
+	if !declaresInput(workflowRaw, CacheKeyInput) {
+		delete(inputs, CacheKeyInput)
 	}
 	requestContext, contextErr := r.requestContext(ctx, run, workflowCR, inputs)
 	if contextErr != nil {
@@ -343,6 +347,20 @@ func normalizeWorkflow(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+const CacheKeyInput = "cache-key"
+
+func declaresInput(raw json.RawMessage, name string) bool {
+	parsed, err := workflow.Parse(raw)
+	if err != nil || parsed == nil {
+		return false
+	}
+	on, _ := parsed.On.(map[string]any)
+	dispatch, _ := on["workflow_dispatch"].(map[string]any)
+	inputs, _ := dispatch["inputs"].(map[string]any)
+	_, ok := inputs[name]
+	return ok
 }
 
 func bundledWorkflow(name string) (json.RawMessage, bool) {
