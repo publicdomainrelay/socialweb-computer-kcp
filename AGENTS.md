@@ -289,7 +289,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     the shared requester no links. The SshServer's Start waits, without polling, until its vault's
     OpenBaoServer is Ready (`sshserver_waits_for_vault`; woken by the vault provider's bus NotifyBound,
     whose binding fingerprint carries the server's readiness, so a Starting to Ready change notifies)
-    instead of exiting. The SshServer's web sign-in follows its vault: a rebound Vault
+    instead of exiting. A requester that publishes its signer key binding (owner-session and OAuth
+    identities) retries that write on every Vault bind (`requester_signer_key_waits_for_vault`)
+    instead of exiting while its identity's vault is Starting, and fails the start only when no
+    bind comes within 2 min. The SshServer's web sign-in follows its vault: a rebound Vault
     (bus NotifyBound from the vault provider) rebuilds the custody sign-in on the new address, with
     at most 6 attempts at 1 s doubling to 30 s when the open fails; the MarketIdentity controller
     reconciles on the same signal and never drops it. The atproto plugin keeps a session active when
