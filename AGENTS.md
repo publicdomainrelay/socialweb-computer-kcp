@@ -200,17 +200,21 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     the bundle carries `/etc/socialweb-computer/association-request.json` {authority, contract (the
     accept uri), nonce}; the requester inside the guest (`run request --association-ref`, run as root,
     finding the ref file empty) writes that as a market.associationRequest record in its own repo at
-    rkey `requester_associate-<authority>`, then its DID to `/run/socialweb-guest-agent/requester-did`;
-    socialweb-guest-agent posts guest.requesterDid (did:plc or did:web, never the requester's own DID;
-    the first one stands); the requester reads that request record by one getRecord in the reported
+    rkey `requester_associate-<sha256(authority)[:32]>-<accept rkey>`, then its DID to
+    `/run/socialweb-guest-agent/requester-did`; socialweb-guest-agent posts guest.requesterDid (did:plc
+    only, never the requester's own DID; a did:web is refused because its resolution fetches a host the
+    guest names); the requester records the first DID as Pending in `status.contract.guestRequester`
+    before it proves it (a second DID is refused, a give-up turns it Refused); the requester reads that request record by one getRecord in the reported
     repo and writes nothing unless authority, contract and nonce match exactly; then it writes the
-    record at rkey `requester_associate-<subject>-<accept rkey>` (never over a record of another
+    record at rkey `requester_associate-<sha256(subject)[:32]>-<accept rkey>` (never over a record of another
     contract, and release deletes only its own), the ref into the bundle, publishes
     guest.secretsUpdated, and the guest agent fetches the bundle again (`SECRETS_REFETCH=1
     setup-secrets.sh`, or the sealed fallback). A failed step retries with a bounded backoff and shows in
     `status.associationMessage`. The atirc token is minted with the record as its `assoc` (a fromGuest
     contract first gets an unbound token for the agent, replaced by one for the subhandle
-    `<label>-<rkey>-a` and revoked once the bound one is written).
+    `<label>-<rkey>-a`; the unbound subhandle is recorded as a pending revoke in the bundle secret and
+    `status.atircRevoke` before the bundle write and revoked with a bounded backoff until it succeeds or
+    the token expires, and on release). A failed bound mint fails the association step and retries.
     `run request --associate <did>|guest` asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`

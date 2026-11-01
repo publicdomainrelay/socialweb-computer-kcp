@@ -1,6 +1,8 @@
 package market
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -67,10 +69,15 @@ func ValidGuestRequesterDID(did, authority string) error {
 	switch {
 	case err != nil || parsed.String() != did:
 		return fmt.Errorf("market: the guest requester DID %q is not a DID", did)
-	case parsed.Method() != "plc" && parsed.Method() != "web":
-		return fmt.Errorf("market: the guest requester DID %s is not a did:plc or did:web", did)
+	case parsed.Method() != "plc":
+		return fmt.Errorf("market: the guest requester DID %s is not a did:plc; a guest-reported did:web would make the authority fetch a host the guest names", did)
 	case did == authority:
 		return fmt.Errorf("market: the guest requester DID %s is the authority's own DID", did)
 	}
 	return nil
+}
+
+func ContractScopedRKey(service, did, acceptURI string) string {
+	sum := sha256.Sum256([]byte(did))
+	return service + "-" + hex.EncodeToString(sum[:])[:32] + "-" + acceptURI[strings.LastIndex(acceptURI, "/")+1:]
 }

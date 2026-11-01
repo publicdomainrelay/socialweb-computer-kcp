@@ -253,8 +253,22 @@ type ContractSecretsRequested struct {
 	Payload commonv1.StrongRef `json:"payload"`
 }
 
+type ContractGuestRequesterState string
+
+const (
+	ContractGuestRequesterPending ContractGuestRequesterState = "Pending"
+
+	ContractGuestRequesterVerified ContractGuestRequesterState = "Verified"
+
+	ContractGuestRequesterRefused ContractGuestRequesterState = "Refused"
+)
+
 type ContractGuestRequester struct {
 	Did string `json:"did"`
+
+	State ContractGuestRequesterState `json:"state" apigen:"enum=Pending|Verified|Refused"`
+
+	Message string `json:"message,omitempty"`
 
 	ReportedAt string `json:"reportedAt"`
 

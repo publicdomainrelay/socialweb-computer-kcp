@@ -43,6 +43,10 @@ type contractAssociation struct {
 	rkey string
 
 	ref commonv1.StrongRef
+
+	expiresAt time.Time
+
+	finished bool
 }
 
 type associationRequestEntry struct {
@@ -66,7 +70,7 @@ func associationSubject(contract v1alpha1.ComputeContract, state *v1alpha1.NodeC
 		return ""
 	case subject != "":
 		return subject
-	case a.FromGuest && state != nil && state.GuestRequester != nil:
+	case a.FromGuest && state != nil && state.GuestRequester != nil && state.GuestRequester.State == v1alpha1.ContractGuestRequesterVerified:
 		return strings.TrimSpace(state.GuestRequester.Did)
 	}
 	return ""
@@ -85,7 +89,7 @@ func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
 }
 
 func ContractAssociationRKey(subject string, accept commonv1.StrongRef) string {
-	return trust.ClaimRKey(trust.RequesterAssociate, subject) + "-" + accept.URI[strings.LastIndex(accept.URI, "/")+1:]
+	return market.ContractScopedRKey(trust.RequesterAssociate, subject, accept.URI)
 }
 
 func (r *contractRunner) associationWritten(subject string) bool {
@@ -94,19 +98,26 @@ func (r *contractRunner) associationWritten(subject string) bool {
 	return r.association != nil && r.association.subject == subject
 }
 
+func (r *contractRunner) associationFinished(subject string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.association != nil && r.association.subject == subject && r.association.finished
+}
+
+func guestPending(state *v1alpha1.NodeClaimContract) bool {
+	return state != nil && state.GuestRequester != nil && state.GuestRequester.State == v1alpha1.ContractGuestRequesterPending
+}
+
 func (r *contractRunner) associationPending(contract v1alpha1.ComputeContract) bool {
 	state := contract.Status.Contract
 	if state == nil || state.Accept == nil || state.Accept.URI == "" || contract.Spec.Release || contract.DeletionTimestamp != nil {
 		return false
 	}
-	if fromGuest(contract) && state.GuestRequester == nil {
-		r.mu.Lock()
-		pending := r.pendingGuest != nil
-		r.mu.Unlock()
-		return pending
+	if fromGuest(contract) && guestPending(state) {
+		return true
 	}
 	subject := associationSubject(contract, state)
-	return subject != "" && !r.associationWritten(subject)
+	return (subject != "" && !r.associationFinished(subject)) || r.revokePending()
 }
 
 func (r *contractRunner) associateLater(contract v1alpha1.ComputeContract) {
@@ -128,14 +139,10 @@ func (r *contractRunner) associationStep(ctx context.Context, state *v1alpha1.No
 	}
 	stepCtx, cancel := context.WithTimeout(ctx, associationStepTimeout)
 	defer cancel()
-	if fromGuest(r.snapshot()) && state.GuestRequester == nil {
-		r.proveGuestRequester(stepCtx, state)
-		return
-	}
 	r.ensureAssociation(stepCtx, state.Accept, state)
 }
 
-func (r *contractRunner) associationFailed(ctx context.Context, step string, err error) {
+func (r *contractRunner) associationFailed(ctx context.Context, step string, err error) bool {
 	refused := errors.Is(err, errAssociationRefused)
 	r.log().Warn("requester_association_failed", "step", step, "err", err.Error(), "retry", !refused)
 	message := step + ": " + err.Error()
@@ -145,9 +152,10 @@ func (r *contractRunner) associationFailed(ctx context.Context, step string, err
 		r.associationAttempts++
 	}
 	r.mu.Unlock()
+	terminal := refused || attempts >= associationRetryAttempts
 	switch {
 	case refused:
-	case attempts >= associationRetryAttempts:
+	case terminal:
 		message += fmt.Sprintf(" (gave up after %d attempts)", attempts)
 	default:
 		delay := min(associationRetryFirst<<attempts, associationRetryMax)
@@ -162,6 +170,7 @@ func (r *contractRunner) associationFailed(ctx context.Context, step string, err
 	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, v1alpha1.ComputeContractStatus{AssociationMessage: message}); err != nil && !notFound(err) {
 		r.log().Warn("requester_association_status_failed", "err", err.Error())
 	}
+	return terminal
 }
 
 func associationTimes(contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) (time.Time, error) {
@@ -179,6 +188,13 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	if state == nil {
 		state = r.stateCopy()
 	}
+	r.mu.Lock()
+	checkRevoke := !r.revokeChecked || r.revokeOutstanding
+	r.revokeChecked = true
+	r.mu.Unlock()
+	if checkRevoke {
+		r.retryPendingRevoke(ctx)
+	}
 	if accept == nil || accept.URI == "" || accept.CID == "" || contract.Spec.Association == nil {
 		return
 	}
@@ -187,23 +203,57 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 			r.associationFailed(ctx, "the association request entry", err)
 			return
 		}
+		if guestPending(state) {
+			r.proveGuestRequester(ctx, state)
+			return
+		}
 	}
 	subject := associationSubject(contract, state)
-	if subject == "" || r.associationWritten(subject) {
+	if subject == "" || r.associationFinished(subject) {
 		return
 	}
 	r.associationMu.Lock()
 	defer r.associationMu.Unlock()
-	if r.associationWritten(subject) {
+	if r.associationFinished(subject) {
 		return
 	}
-	if step, err := r.associate(ctx, contract, *accept, state, subject); err != nil {
+	if !r.associationWritten(subject) {
+		if step, err := r.associate(ctx, contract, *accept, state, subject); err != nil {
+			r.associationFailed(ctx, step, err)
+			return
+		}
+	}
+	if step, err := r.finishAssociation(ctx, contract, state); err != nil {
 		r.associationFailed(ctx, step, err)
 		return
 	}
 	r.mu.Lock()
 	r.associationAttempts = 0
 	r.mu.Unlock()
+}
+
+func (r *contractRunner) finishAssociation(ctx context.Context, contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) (string, error) {
+	r.mu.Lock()
+	current := r.association
+	r.mu.Unlock()
+	if current == nil {
+		return "", nil
+	}
+	if err := r.bindAtircToken(ctx, contract, current.ref, current.expiresAt); err != nil {
+		return "bind the atirc token to the association", err
+	}
+	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
+		(state != nil && state.SecretsApplied != nil)) {
+		if err := r.notifySecretsUpdated(ctx, contract, current.ref); err != nil {
+			return "notify the guest", err
+		}
+	}
+	r.mu.Lock()
+	if r.association == current {
+		current.finished = true
+	}
+	r.mu.Unlock()
+	return "", nil
 }
 
 func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef, state *v1alpha1.NodeClaimContract, subject string) (string, error) {
@@ -266,17 +316,10 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 		return "write the contract status", err
 	}
 	r.mu.Lock()
-	r.association = &contractAssociation{subject: subject, rkey: rkey, ref: ref}
+	r.association = &contractAssociation{subject: subject, rkey: rkey, ref: ref, expiresAt: expiresAt}
 	r.mu.Unlock()
 	if previous != nil && previous.rkey != rkey {
 		r.deleteAssociationRecord(ctx, previous.rkey, accept)
-	}
-	r.bindAtircToken(ctx, contract, ref, expiresAt)
-	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
-		(state != nil && state.SecretsApplied != nil)) {
-		if err := r.notifySecretsUpdated(ctx, contract, ref); err != nil {
-			r.log().Warn("requester_association_notify_failed", "err", err.Error())
-		}
 	}
 	r.log().Info("requester_association_written", "subject", subject, "uri", ref.URI, "cid", ref.CID, "expiresAt", market.FormatTime(expiresAt))
 	return "", nil
@@ -512,52 +555,77 @@ func (r *contractRunner) onGuestRequester(ctx context.Context, state *v1alpha1.N
 		refuse(err.Error())
 		return
 	}
-	r.mu.Lock()
-	if r.pendingGuest != nil && r.pendingGuest.RequesterDID != parsed.RequesterDID {
-		previous := r.pendingGuest.RequesterDID
-		r.mu.Unlock()
-		refuse("the guest already reported " + previous)
+	state.GuestRequester = &v1alpha1.ContractGuestRequester{Did: parsed.RequesterDID, State: v1alpha1.ContractGuestRequesterPending,
+		Message: "proving control of the reported DID", ReportedAt: parsed.ObservedAt,
+		Event:   commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID},
+		Payload: commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID}}
+	if err := r.writeGuestRequester(ctx, state); err != nil {
+		state.GuestRequester = nil
+		refuse("recording the reported DID failed: " + err.Error())
 		return
 	}
-	held := *parsed
-	r.pendingGuest = &held
+	r.mu.Lock()
 	r.associationAttempts = 0
 	r.mu.Unlock()
+	r.log().Info("requester_guest_requester_reported", "did", parsed.RequesterDID)
 	r.proveGuestRequester(ctx, state)
+}
+
+func (r *contractRunner) writeGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract) error {
+	contract := r.snapshot()
+	phase, message := contract.Status.Phase, contract.Status.Message
+	if phase == "" {
+		phase = v1alpha1.ComputeContractHeld
+	}
+	return r.writeStatus(ctx, phase, message, state, r.currentBids(), r.currentChosen(), "associating", 1)
+}
+
+func (r *contractRunner) settleGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract, to v1alpha1.ContractGuestRequesterState, message string) error {
+	previous := *state.GuestRequester
+	state.GuestRequester.State, state.GuestRequester.Message = to, message
+	if err := r.writeGuestRequester(ctx, state); err != nil {
+		*state.GuestRequester = previous
+		return err
+	}
+	return nil
 }
 
 func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract) {
 	q := r.q
 	contract := r.snapshot()
-	r.mu.Lock()
-	pending := r.pendingGuest
-	r.mu.Unlock()
-	if pending == nil || state == nil || state.Accept == nil || state.Accept.URI == "" {
+	if !guestPending(state) || state.Accept == nil || state.Accept.URI == "" {
 		return
 	}
 	accept := *state.Accept
-	did := pending.RequesterDID
-	refuse := func(reason string) {
-		r.mu.Lock()
-		if r.pendingGuest == pending {
-			r.pendingGuest = nil
+	did := state.GuestRequester.Did
+	fail := func(step string, err error) {
+		if !r.associationFailed(ctx, step, err) {
+			return
 		}
-		r.mu.Unlock()
-		r.associationFailed(ctx, "the guest requester's association request", fmt.Errorf("%w: %s", errAssociationRefused, reason))
+		if err := r.settleGuestRequester(ctx, state, v1alpha1.ContractGuestRequesterRefused, step+": "+err.Error()); err != nil {
+			r.log().Warn("requester_guest_requester_status_failed", "err", err.Error())
+		}
+	}
+	refuse := func(reason string) {
+		fail("the guest requester's association request", fmt.Errorf("%w: %s", errAssociationRefused, reason))
+	}
+	if err := market.ValidGuestRequesterDID(did, q.repoDID); err != nil {
+		refuse(err.Error())
+		return
 	}
 	request, ok, err := r.associationRequest(ctx, contract, accept)
 	switch {
 	case err != nil:
-		r.associationFailed(ctx, "the association request entry", err)
+		fail("the association request entry", err)
 		return
 	case !ok:
 		refuse("the contract's bundle holds no association request for " + accept.URI)
 		return
 	}
-	rkey := trust.ClaimRKey(trust.RequesterAssociate, q.repoDID)
+	rkey := market.ContractScopedRKey(trust.RequesterAssociate, q.repoDID, accept.URI)
 	got, err := q.repo.GetRecord(ctx, did, market.AssociationRequestNSID, rkey)
 	if err != nil {
-		r.associationFailed(ctx, "reading "+did+"'s "+market.AssociationRequestNSID+"/"+rkey, err)
+		fail("reading "+did+"'s "+market.AssociationRequestNSID+"/"+rkey, err)
 		return
 	}
 	asked, err := market.ParseAssociationRequest(got.Value)
@@ -575,23 +643,10 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 		refuse("the association request record carries another nonce")
 		return
 	}
-	state.GuestRequester = &v1alpha1.ContractGuestRequester{Did: did, ReportedAt: pending.ObservedAt,
-		Event:   commonv1.StrongRef{URI: pending.Event.URI, CID: pending.Event.CID},
-		Payload: commonv1.StrongRef{URI: pending.Payload.URI, CID: pending.Payload.CID}}
-	phase, message := contract.Status.Phase, contract.Status.Message
-	if phase == "" {
-		phase = v1alpha1.ComputeContractHeld
-	}
-	if err := r.writeStatus(ctx, phase, message, state, r.currentBids(), r.currentChosen(), "associating", 1); err != nil {
-		state.GuestRequester = nil
-		r.associationFailed(ctx, "record the guest requester", err)
+	if err := r.settleGuestRequester(ctx, state, v1alpha1.ContractGuestRequesterVerified, "the association request "+got.URI+" matches"); err != nil {
+		fail("record the verified guest requester", err)
 		return
 	}
-	r.mu.Lock()
-	if r.pendingGuest == pending {
-		r.pendingGuest = nil
-	}
-	r.mu.Unlock()
 	r.log().Info("requester_guest_requester", "did", did, "request", got.URI)
 	r.ensureAssociation(ctx, state.Accept, state)
 }

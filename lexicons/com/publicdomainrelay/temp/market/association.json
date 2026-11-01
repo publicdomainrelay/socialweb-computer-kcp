@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.market.association",
-  "description": "The repository that holds this record associates the subject DID as its requester or bidder. Record key: <service>-<subject with : replaced by ->.",
+  "description": "The repository that holds this record associates the subject DID as its requester or bidder. Record key: <service>-<subject with : replaced by -> for a standing association; <service>-<first 32 hex of sha256(subject)>-<rkey of the contract accept> for a contract-scoped one.",
   "defs": {
     "main": {
       "type": "record",

@@ -20,7 +20,7 @@ const (
 	secretsRefetchEnv = "SECRETS_REFETCH"
 )
 
-var requesterDIDRE = regexp.MustCompile(`^did:(plc:[a-z2-7]{24}|web:[a-zA-Z0-9._%-]+(:[a-zA-Z0-9._%-]+)*)$`)
+var requesterDIDRE = regexp.MustCompile(`^did:plc:[a-z2-7]{24}$`)
 
 type requesterDIDRecord struct {
 	Type string `json:"$type"`
@@ -72,7 +72,7 @@ func (a *Agent) reportRequesterDID(ctx context.Context) {
 	}
 	did := strings.TrimSpace(string(raw))
 	if !requesterDIDRE.MatchString(did) {
-		a.log.Warn("the requester DID file holds no did:plc or did:web; not reported", "file", a.requesterDIDPath())
+		a.log.Warn("the requester DID file holds no did:plc; not reported", "file", a.requesterDIDPath())
 		return
 	}
 	a.mu.Lock()

@@ -80,11 +80,17 @@ type contractRunner struct {
 
 	associationRecords map[string]string
 
-	pendingGuest *GuestEvent
-
 	associationAttempts int
 
 	associationRetry *time.Timer
+
+	revokeOutstanding bool
+
+	revokeChecked bool
+
+	revokeAttempts int
+
+	revokeRetry *time.Timer
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {

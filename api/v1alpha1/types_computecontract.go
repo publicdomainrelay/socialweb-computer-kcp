@@ -262,6 +262,8 @@ type ComputeContractStatus struct {
 	Association *commonv1.StrongRef `json:"association,omitempty"`
 
 	AssociationMessage string `json:"associationMessage,omitempty"`
+
+	AtircRevoke string `json:"atircRevoke,omitempty"`
 }
 
 const (

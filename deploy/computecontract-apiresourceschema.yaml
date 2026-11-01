@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-24.computecontracts.socialweb.computer
+  name: v1alpha1-25.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -566,6 +566,14 @@ spec:
                     properties:
                       did:
                         type: string
+                      state:
+                        type: string
+                        enum:
+                          - Pending
+                          - Verified
+                          - Refused
+                      message:
+                        type: string
                       reportedAt:
                         type: string
                       event:
@@ -590,6 +598,7 @@ spec:
                           - cid
                     required:
                       - did
+                      - state
                       - reportedAt
                       - event
                       - payload
@@ -743,6 +752,8 @@ spec:
                   - uri
                   - cid
               associationMessage:
+                type: string
+              atircRevoke:
                 type: string
       additionalPrinterColumns:
         - name: Phase

@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.market.associationRequest",
-  "description": "The repository that holds this record asks the authority to associate it for one contract: the proof that the subject DID of a com.publicdomainrelay.temp.compute.events.guest.requesterDid event controls this repository. Record key: <service>-<authority with : replaced by ->.",
+  "description": "The repository that holds this record asks the authority to associate it for one contract: the proof that the subject DID of a com.publicdomainrelay.temp.compute.events.guest.requesterDid event controls this repository. Record key: <service>-<first 32 hex of sha256(authority)>-<rkey of the contract accept>.",
   "defs": {
     "main": {
       "type": "record",

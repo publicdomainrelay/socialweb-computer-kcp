@@ -10,7 +10,7 @@
         "type": "object",
         "required": ["did", "createdAt"],
         "properties": {
-          "did": { "type": "string", "format": "did", "description": "The did:plc or did:web of the requester the guest runs." },
+          "did": { "type": "string", "format": "did", "description": "The did:plc of the requester the guest runs; a did:web is refused." },
           "createdAt": { "type": "string", "format": "datetime" },
           "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
         }

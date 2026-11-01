@@ -151,13 +151,13 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 	}
 	r.handshakeStarted = true
 	r.log("the association request record goes into this requester's repo", "did", did, "authority", request.Authority, "contract", request.Contract)
-	go r.reportAndAwaitRef(ctx, watcher, root, did, request.Authority)
+	go r.reportAndAwaitRef(ctx, watcher, root, did, request.Authority, request.Contract)
 	return nil
 }
 
-func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, authority string) {
+func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, authority, contract string) {
 	defer watcher.Close()
-	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + trust.ClaimRKey(trust.RequesterAssociate, authority)
+	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + market.ContractScopedRKey(trust.RequesterAssociate, authority, contract)
 	if _, err := r.kcp.AwaitRecord(ctx, compose.AssociationRequestRecordName, r.networkTimeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
 		if rec.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && rec.Status.ObservedGeneration == rec.Generation {
 			return false, fmt.Errorf("the association request record failed: %s", rec.Status.Message)

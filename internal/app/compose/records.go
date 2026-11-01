@@ -123,7 +123,7 @@ func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws
 		return err
 	}
 	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRequestRecordName},
-		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: market.AssociationRequestNSID, Rkey: trust.ClaimRKey(service, req.Authority),
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: market.AssociationRequestNSID, Rkey: market.ContractScopedRKey(service, req.Authority, req.Contract),
 			Record: record}}
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
