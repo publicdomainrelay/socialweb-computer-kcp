@@ -426,9 +426,27 @@ func distinct(values []string) []string {
 	return out
 }
 
+func (s Snapshot) ActionVouchedBy() map[string][]string {
+	out := make(map[string][]string, len(s.VouchedBy))
+	for voucher, list := range s.VouchedBy {
+		out[voucher] = slices.Clone(list)
+	}
+	if len(s.TrustedOperators) == 0 {
+		return out
+	}
+	self := s.TrustedOperators[0]
+	merged := []string{}
+	for _, operator := range s.TrustedOperators {
+		merged = append(merged, s.VouchedBy[operator]...)
+	}
+	slices.Sort(merged)
+	out[self] = slices.Compact(merged)
+	return out
+}
+
 func (s Snapshot) CacheFiles() models.CacheEntry {
 	operatorOf, _ := json.Marshal(s.OperatorOf)
-	vouchedBy, _ := json.Marshal(s.VouchedBy)
+	vouchedBy, _ := json.Marshal(s.ActionVouchedBy())
 	trustedOperators, _ := json.Marshal(s.TrustedOperators)
 	return models.CacheEntry{
 		"operatorOf.json":       {Data: string(operatorOf), Encoding: models.CacheEncodingText},
