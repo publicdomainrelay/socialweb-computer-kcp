@@ -16,6 +16,8 @@ const (
 	CapabilityWrite = "repo.write"
 
 	CapabilitySubscribe = "repo.subscribe"
+
+	RecordDeleteGiveUp = 24 * time.Hour
 )
 
 var (
@@ -96,6 +98,10 @@ type RecordWriter interface {
 	PutRecord(ctx context.Context, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error)
 
 	DeleteRecord(ctx context.Context, collection, rkey string) error
+}
+
+type SwapDeleter interface {
+	DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error
 }
 
 type Subscriber interface {

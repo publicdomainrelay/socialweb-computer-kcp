@@ -17,6 +17,7 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
@@ -417,8 +418,16 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		gone, err := r.deleteRecord(ctx, req, v)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
+		orphaned := RecordOrphaned(err)
 		switch {
-		case isUnresolved || errors.Is(err, ErrRepoNoDID) || errors.Is(err, errRecordStillPresent):
+		case err != nil && (orphaned || time.Since(v.object.GetDeletionTimestamp().Time) > atprotorepo.RecordDeleteGiveUp):
+			if !orphaned {
+				reason = "DeleteGaveUp"
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordOrphaned, true, reason, err.Error())
+			status.Message = "the record is released without a delete: " + err.Error()
+			r.c.log.Warn("infra_record_orphaned", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", err.Error())
+		case isUnresolved || errors.Is(err, ErrRepoNoDID):
 			status.Message = "the record delete waits: " + err.Error()
 			left, backoff = 1, true
 		case err != nil:

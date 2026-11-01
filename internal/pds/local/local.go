@@ -13,10 +13,11 @@ import (
 const scopeAll = "*"
 
 var (
-	_ atprotorepo.Repo = (*Repo)(nil)
-	_ pds.Accounts     = (*Accounts)(nil)
-	_ pds.Sessions     = (*Sessions)(nil)
-	_ pds.Sync         = (*Sync)(nil)
+	_ atprotorepo.Repo        = (*Repo)(nil)
+	_ atprotorepo.SwapDeleter = (*Repo)(nil)
+	_ pds.Accounts            = (*Accounts)(nil)
+	_ pds.Sessions            = (*Sessions)(nil)
+	_ pds.Sync                = (*Sync)(nil)
 )
 
 type Secrets func(ctx context.Context, ref commonv1.SecretRef) (map[string]any, error)

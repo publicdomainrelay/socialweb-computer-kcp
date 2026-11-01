@@ -11560,15 +11560,21 @@ are unchanged.
 ### An Infra keeps its finalizer until its record is deleted or confirmed absent (2026-10-30, rc131)
 
 Before, the Infra and EphemeralInfra finalizer deleted the child AtprotoRecord and released once it was
-gone; when the repo could not be resolved (repoRef invalid, the AtprotoRepo missing, no repo.read
-handle) the AtprotoRecord finalizer released without a delete, so the infra went and its PDS record
-stayed. Now the finalizer deletes a child AtprotoRecord that holds a published record (not Retain) only
-when the repo resolves, and once the child is gone it confirms the record of `status.record.uri` is
-absent by one getRecord (404). While the repo is unresolvable (RecordUnresolved True with
-RepoRefInvalid, RepoNotFound or RepoUnreadable), has no DID yet, or the record is still there, the
-infra stays in Deleting with its finalizer and requeues on the runtime's rate-limited backoff
-(`Result.Backoff`), woken early by the AtprotoRepo and AtprotoRecord watches. An infra with no record
-in status, or a Retained one, releases as before.
+gone, and the AtprotoRecord finalizer released without a delete on any unbound repo, so the infra went
+and its PDS record stayed. Now the AtprotoRecord finalizer releases without a delete only when its
+AtprotoRepo is gone (404), its repoRef is invalid, or 24 h after its deletion
+(`atprotorepo.RecordDeleteGiveUp`), each logged `atprotorecord_released_without_delete`; on an
+unbound repo it keeps its finalizer and its repo binding, so the bind wakes it, and requeues on the
+runtime backoff. The infra finalizer deletes a child AtprotoRecord that holds a published record (not
+Retain) only when the repo resolves, and once the child is gone it reads `status.record.uri` by one
+getRecord: 404 releases; the same CID as `status.record.cid` is deleted again through a repo.write
+handle (the Infra and EphemeralInfra links grant it) with that CID as the swap; another CID is someone
+else's record and releases (`infra_record_replaced`). While the repo is unresolvable or has no DID
+yet, the infra stays in Deleting and requeues with `Result.Backoff`, woken by the AtprotoRepo bind,
+link and DID watches. An AtprotoRepo 404 (RepoNotFound, as after `compose.PruneLocalAccounts`), an
+AtprotoRepo with no DID whose backend is gone (RepoBackendGone), or 24 h in Deleting (DeleteGaveUp)
+releases with the condition RecordOrphaned and `infra_record_orphaned`. An infra with no record in
+status, or a Retained one, releases as before.
 
 ## 16. Vocabulary
 

@@ -247,4 +247,6 @@ const (
 	InfraConditionRecordValid = "RecordValid"
 
 	InfraConditionRecordUnresolved = "RecordUnresolved"
+
+	InfraConditionRecordOrphaned = "RecordOrphaned"
 )

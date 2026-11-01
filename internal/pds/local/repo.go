@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/ipfs/go-cid"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	atpds "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pds"
@@ -201,6 +202,18 @@ func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value jso
 }
 
 func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error {
+	return r.deleteRecord(ctx, collection, rkey, nil)
+}
+
+func (r *Repo) DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error {
+	prev, err := cid.Decode(strings.TrimSpace(swapCID))
+	if err != nil {
+		return fmt.Errorf("pds: the swap cid %q: %w", swapCID, err)
+	}
+	return r.deleteRecord(ctx, collection, rkey, &prev)
+}
+
+func (r *Repo) deleteRecord(ctx context.Context, collection, rkey string, prev *cid.Cid) error {
 	nsid, err := syntax.ParseNSID(collection)
 	if err != nil {
 		return fmt.Errorf("pds: the collection %q: %w", collection, err)
@@ -213,7 +226,7 @@ func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error 
 	if err != nil {
 		return err
 	}
-	if _, err := handle.ApplyWrites(ctx, []repo.WriteOp{{Action: repo.ActionDelete, Collection: nsid, Rkey: key}}, nil); err != nil {
+	if _, err := handle.ApplyWrites(ctx, []repo.WriteOp{{Action: repo.ActionDelete, Collection: nsid, Rkey: key, Prev: prev}}, nil); err != nil {
 		return notFound(err)
 	}
 	return nil

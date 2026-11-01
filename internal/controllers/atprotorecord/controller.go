@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +52,10 @@ const (
 	ReasonInvalidSpec = "InvalidSpec"
 
 	ReasonSwapMismatch = "SwapMismatch"
+
+	ReasonRepoGone = "RepoGone"
+
+	ReasonDeleteGaveUp = "DeleteGaveUp"
 )
 
 var OwnKinds = []string{MarketIdentityKind, Kind, RecordWatchKind}
@@ -167,7 +172,11 @@ func scopeOf(spec v1alpha1.AtprotoRecordSpec) []string {
 func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord) (ctlruntime.Result, error) {
 	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
 	if !object.DeletionTimestamp.IsZero() {
-		return ctlruntime.Result{}, c.finalize(ctx, req, object, target)
+		done, err := c.finalize(ctx, req, object, target)
+		if err != nil || done {
+			return ctlruntime.Result{}, err
+		}
+		return ctlruntime.Result{Waiting: true, Backoff: true}, nil
 	}
 	ref, err := repoRef(req.Workspace, object.Spec)
 	if err != nil {
@@ -227,30 +236,48 @@ func (c *Controller) sync(ctx context.Context, req ctlruntime.Request, object *v
 	return nil
 }
 
-func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord, target binding.Target) error {
-	defer c.repos.Set(target, nil)
+func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, object *v1alpha1.AtprotoRecord, target binding.Target) (bool, error) {
+	release := func(reason string, cause error) (bool, error) {
+		c.repos.Set(target, nil)
+		if reason != "" {
+			c.log.Warn("atprotorecord_released_without_delete", "workspace", req.Workspace, "name", object.Name,
+				"uri", object.Status.URI, "reason", reason, "err", cause.Error())
+		}
+		return true, nil
+	}
 	if strings.TrimSpace(object.Status.URI) == "" && strings.TrimSpace(object.Status.Cid) == "" {
-		return nil
+		return release("", nil)
 	}
 	if object.Spec.DeletionPolicy == v1alpha1.RecordDeletionRetain {
 		c.log.Info("atprotorecord_retained", "workspace", req.Workspace, "name", object.Name, "uri", object.Status.URI)
-		return nil
+		return release("", nil)
 	}
 	ref, err := repoRef(req.Workspace, object.Spec)
 	if err != nil {
-		return nil
+		return release(ReasonInvalidSpec, err)
 	}
+	c.repos.Set(target, &ref, binding.Key(ref.Workspace, RepoKind, ref.Name))
+	gaveUp := time.Since(object.DeletionTimestamp.Time) > atprotorepo.RecordDeleteGiveUp
 	repo, err := bus.Resolve[atprotorepo.Repo](ctx, c.bus, self(req, object), ref,
 		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: scopeOf(object.Spec)})
-	if errors.Is(err, atprotorepo.ErrNotBound) || (err != nil && c.repoGone(ctx, req.Workspace, ref)) {
-		c.log.Warn("the AtprotoRecord repo is gone; the record is released without a delete", "workspace", req.Workspace,
-			"name", object.Name, "repo", ref.String())
-		return nil
+	switch {
+	case err != nil && c.repoGone(ctx, req.Workspace, ref):
+		return release(ReasonRepoGone, err)
+	case err != nil && gaveUp:
+		return release(ReasonDeleteGaveUp, err)
+	case errors.Is(err, atprotorepo.ErrNotBound) || errors.Is(err, pds.ErrNotFound):
+		c.log.Info("atprotorecord_delete_waits", "workspace", req.Workspace, "name", object.Name, "repo", ref.String(), "err", err.Error())
+		return false, nil
+	case err != nil:
+		return false, err
 	}
-	if err != nil {
-		return err
+	if err := deleteRecord(ctx, repo, strings.TrimSpace(object.Spec.Collection), strings.TrimSpace(object.Spec.Rkey)); err != nil {
+		if gaveUp {
+			return release(ReasonDeleteGaveUp, err)
+		}
+		return false, err
 	}
-	return deleteRecord(ctx, repo, strings.TrimSpace(object.Spec.Collection), strings.TrimSpace(object.Spec.Rkey))
+	return release("", nil)
 }
 
 func (c *Controller) repoGone(ctx context.Context, workspace string, ref commonv1.ObjectRef) bool {
