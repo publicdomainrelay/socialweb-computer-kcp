@@ -28,8 +28,6 @@ const (
 	RequesterAssociate   = "requester_associate"
 	defaultTrustCacheTTL = 5 * time.Minute
 	trustErrorTTL        = 5 * time.Second
-
-	maxLegacyListedRecords = 2000
 )
 
 type Host interface {
@@ -80,7 +78,6 @@ type Resolver struct {
 	log    func(level, msg string, meta map[string]any)
 	now    func() time.Time
 	ops    *ttlcache.Cache[operatorKey, operatorEntry]
-	legacy *ttlcache.Cache[string, map[claim]bool]
 	vouch  *ttlcache.Cache[vouchKey, bool]
 }
 
@@ -101,7 +98,6 @@ func NewResolver(opts ResolverOptions) *Resolver {
 		log:    log,
 		now:    time.Now,
 		ops:    ttlcache.New[operatorKey, operatorEntry](ttlcache.Options{TTL: ttl}),
-		legacy: ttlcache.New[string, map[claim]bool](ttlcache.Options{TTL: ttl}),
 		vouch:  ttlcache.New[vouchKey, bool](ttlcache.Options{TTL: ttl}),
 	}
 }
@@ -231,32 +227,8 @@ func (r *Resolver) claimHeld(ctx context.Context, want claim) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if held, ok := claimOf(value); ok && held == want {
-		return true, nil
-	}
-	return r.legacyClaimListed(ctx, want)
-}
-
-func (r *Resolver) legacyClaimListed(ctx context.Context, want claim) (bool, error) {
-	r.log("info", "resolveOperatorDid legacy claim listing", map[string]any{"did": want.subject, "operator": want.operator, "service": want.service})
-	if claims, ok := r.legacy.Get(want.operator); ok {
-		return claims[want], nil
-	}
-	records, err := r.client.ListRecords(ctx, want.operator, BadgeBlueKeysNSID, maxLegacyListedRecords)
-	if err != nil {
-		return false, err
-	}
-	claims := make(map[claim]bool)
-	for _, record := range records {
-		if atproto.RepoFromURI(record.URI) != want.operator {
-			continue
-		}
-		if held, ok := claimOf(record.Value); ok && held.operator == want.operator && held.subject != want.operator && associationRole(held.service) {
-			claims[held] = true
-		}
-	}
-	r.legacy.Set(want.operator, claims)
-	return claims[want], nil
+	held, ok := claimOf(value)
+	return ok && held == want, nil
 }
 
 func claimOf(value map[string]any) (claim, bool) {
@@ -305,7 +277,6 @@ func (r *Resolver) Log(level, msg string, meta map[string]any) {
 
 func (r *Resolver) ApplyEvent(did, rkey string) {
 	r.ops.DeleteKeys(func(key operatorKey) bool { return key.did == did })
-	r.legacy.Delete(did)
 	r.vouch.DeleteKeys(func(key vouchKey) bool {
 		return (did != "" && key.voucher == did) || (rkey != "" && key.voucher == rkey)
 	})
@@ -313,7 +284,6 @@ func (r *Resolver) ApplyEvent(did, rkey string) {
 
 func (r *Resolver) Invalidate() {
 	r.ops.DeleteKeys(func(operatorKey) bool { return true })
-	r.legacy.DeleteKeys(func(string) bool { return true })
 	r.vouch.DeleteKeys(func(vouchKey) bool { return true })
 }
 
