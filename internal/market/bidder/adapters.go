@@ -215,9 +215,6 @@ func (b *Bidder) applyEvent(ctx context.Context, request participant.OutboxReque
 	}
 	if target := payload.submitTarget(request); target != "" {
 		body := map[string]any{"uri": event.URI, "cid": event.CID, "record": event.Record}
-		if refs := b.IngressRecords(ctx); len(refs) > 0 {
-			body["ingress"] = refs
-		}
 		postCtx, cancel := context.WithTimeout(ctx, EventSubmitTimeout)
 		err := b.outbound.Post(postCtx, target, market.SubmitEventNSID, body)
 		cancel()
@@ -624,7 +621,6 @@ func (b *Bidder) acceptContract(ctx context.Context, request participant.OutboxR
 		Accept:      market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID},
 		Payload:     &market.RecordRef{URI: out.rfp.Payload.URI, CID: out.rfp.Payload.CID},
 		SubmitEvent: receiptSubmitEvent,
-		Ingress:     b.ingressRecords(ctx),
 	}, acceptResolved, payload.RequesterDID)
 	if err != nil {
 		return out, nil, fmt.Errorf("bidder: writing the receipt: %w", err)

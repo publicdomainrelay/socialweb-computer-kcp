@@ -131,7 +131,7 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 	if len(body.Ingress) > 0 {
 		if refs, err := bidder.AnswerIngressRecords(r.Context(), body.Ingress, issuer); err != nil {
 			s.log.Warn("bidder_webrtc_answer_failed", "rfp", body.RFPURI, "requester", issuer, "err", err)
-		} else {
+		} else if len(refs) > 0 {
 			list := make([]map[string]any, 0, len(refs))
 			for _, ref := range refs {
 				list = append(list, ref.Map())
@@ -159,14 +159,7 @@ func (s *Service) handleSubmitBid(w http.ResponseWriter, r *http.Request) {
 		participant.WriteXRPCError(w, http.StatusBadRequest, "InvalidRequest", err.Error())
 		return
 	}
-	bidder := s.bidder.Load()
-	response := map[string]any{"ok": true}
-	if bidder != nil {
-		if refs := bidder.IngressRecords(r.Context()); len(refs) > 0 {
-			response["ingress"] = refs
-		}
-	}
-	httpjson.Write(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
@@ -197,11 +190,7 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		participant.WriteXRPCError(w, http.StatusInternalServerError, "InternalError", "the provisioning intent could not be recorded: "+err.Error())
 		return
 	}
-	response := map[string]any{"ok": true, "id": id, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID}
-	if refs := bidder.IngressRecords(r.Context()); len(refs) > 0 {
-		response["ingress"] = refs
-	}
-	httpjson.Write(w, http.StatusAccepted, response)
+	httpjson.Write(w, http.StatusAccepted, map[string]any{"ok": true, "id": id, "acceptUri": body.AcceptURI, "acceptCid": body.AcceptCID})
 }
 
 func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
@@ -225,11 +214,7 @@ func (s *Service) handleSubmitEvent(w http.ResponseWriter, r *http.Request) {
 	err := bidder.SubmitEvent(r.Context(), body.URI, body.CID, body.Record, issuer)
 	switch {
 	case err == nil:
-		response := map[string]any{"ok": true}
-		if refs := bidder.IngressRecords(r.Context()); len(refs) > 0 {
-			response["ingress"] = refs
-		}
-		httpjson.Write(w, http.StatusOK, response)
+		httpjson.Write(w, http.StatusOK, map[string]any{"ok": true})
 	case errors.Is(err, core.ErrEventForbidden):
 		participant.WriteXRPCError(w, http.StatusForbidden, "Forbidden", "not the accept author")
 	case errors.Is(err, core.ErrEventInvalid):

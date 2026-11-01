@@ -16,6 +16,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
@@ -110,6 +111,9 @@ func (b *Bidder) AnswerIngressRecords(ctx context.Context, refs []market.StrongR
 			b.log.Warn("bidder_webrtc_offer_mismatch", "offer", ref.URI, "requester", requesterDID)
 			continue
 		}
+		if !b.ingressWritable(ctx) {
+			return nil, nil
+		}
 		answer, err := b.AnswerIngress(ctx, tunnel.Offer{
 			Kind: tunnel.KindWebRTC, ID: record.ID, Session: record.Session,
 			Peer: record.Peer, Type: tunnel.SignalOffer, SDP: record.Sdp,
@@ -132,64 +136,28 @@ func (b *Bidder) AnswerIngressRecords(ctx context.Context, refs []market.StrongR
 		b.ingressMu.Lock()
 		b.ingressLive[answer.ID] = true
 		b.ingressMu.Unlock()
-		out := []market.StrongRef{answerRef}
-		if descriptor := b.ingressDescriptor(ctx); descriptor != nil {
-			out = append(out, market.NewStrongRef(descriptor.URI, descriptor.CID))
-		}
-		return out, nil
+		return []market.StrongRef{answerRef}, nil
 	}
 	return nil, errors.New("bidder: the request names no ingress offer for this bidder")
 }
 
-func (b *Bidder) ingressDescriptor(ctx context.Context) *market.RecordRef {
-	if b.ingress == nil || b.records == nil {
-		return nil
+func (b *Bidder) ingressWritable(ctx context.Context) bool {
+	if b.scopeGrants == nil {
+		return true
 	}
-	id := tunnel.ID(b.cfg.DID)
-	if id == "" {
-		return nil
+	granted, known, err := b.scopeGrants(ctx)
+	if err != nil || !known || !atprotooauth.KnownGrant(granted) {
+		b.ingressScopeSkipped.Store(false)
+		return true
 	}
-	b.ingressRefMu.Lock()
-	cached := b.ingressRef
-	b.ingressRefMu.Unlock()
-	if cached != nil {
-		return &market.RecordRef{URI: cached.URI, CID: cached.CID}
+	if len(atprotooauth.MissingScopes([]string{atprotooauth.RepoIngressWebRTCCreate}, granted)) == 0 {
+		b.ingressScopeSkipped.Store(false)
+		return true
 	}
-	value, err := market.EncodeRecord(market.IngressWebRTC{
-		Kind: tunnel.KindWebRTC, Mode: market.IngressModeListen, ID: id,
-		StunUrls: []string{tunnel.DefaultSTUN}, CreatedAt: market.NowISO(),
-	})
-	if err != nil {
-		b.log.Warn("bidder_webrtc_descriptor_failed", "err", err)
-		return nil
+	if !b.ingressScopeSkipped.Swap(true) {
+		b.log.Info("bidder_webrtc_answer_skipped", "reason", "the oauth session was not granted "+atprotooauth.RepoIngressWebRTCCreate)
 	}
-	ref, err := participant.EnsureRecordAt(ctx, b.records, b.cfg.DID, market.IngressWebRTCNSID, "webrtc", value)
-	if err != nil {
-		b.log.Warn("bidder_webrtc_descriptor_failed", "err", err)
-		return nil
-	}
-	b.ingressRefMu.Lock()
-	b.ingressRef = &ref
-	b.ingressRefMu.Unlock()
-	b.log.Info("bidder_webrtc_descriptor", "uri", ref.URI, "cid", ref.CID)
-	return &market.RecordRef{URI: ref.URI, CID: ref.CID}
-}
-
-func (b *Bidder) ingressRecords(ctx context.Context) []market.RecordRef {
-	ref := b.ingressDescriptor(ctx)
-	if ref == nil {
-		return nil
-	}
-	return []market.RecordRef{*ref}
-}
-
-func (b *Bidder) IngressRecords(ctx context.Context) []market.StrongRef {
-	refs := b.ingressRecords(ctx)
-	out := make([]market.StrongRef, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, market.NewStrongRef(ref.URI, ref.CID))
-	}
-	return out
+	return false
 }
 
 func (b *Bidder) liveIngress(ownerDID string) string {
@@ -372,9 +340,6 @@ func (b *Bidder) submitBid(ctx context.Context, endpoint string, ref market.Stro
 		return fmt.Errorf("reading the bid record %s: %w", ref.URI, err)
 	}
 	body := map[string]any{"uri": ref.URI, "cid": ref.CID, "record": record.Value}
-	if refs := b.IngressRecords(ctx); len(refs) > 0 {
-		body["ingress"] = refs
-	}
 	return b.outbound.Post(ctx, endpoint, market.SubmitBidNSID, body)
 }
 

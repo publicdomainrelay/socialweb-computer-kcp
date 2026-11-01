@@ -235,6 +235,8 @@ type Deps struct {
 
 	Ingress tunnel.Answerer
 
+	ScopeGrants func(ctx context.Context) ([]string, bool, error)
+
 	Tokens *participant.Tokens
 
 	HTTP *http.Client
@@ -275,9 +277,9 @@ type Bidder struct {
 
 	sandboxes map[string]*sandboxRun
 
-	ingressRefMu sync.Mutex
+	scopeGrants func(ctx context.Context) ([]string, bool, error)
 
-	ingressRef *market.StrongRef
+	ingressScopeSkipped atomic.Bool
 
 	outbound *participant.Outbound
 
@@ -371,6 +373,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		guestEvents: deps.GuestEvents,
 		webrtcPorts: deps.WebRTCPorts,
 		ingress:     deps.Ingress,
+		scopeGrants: deps.ScopeGrants,
 		ingressLive: map[string]bool{},
 		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},

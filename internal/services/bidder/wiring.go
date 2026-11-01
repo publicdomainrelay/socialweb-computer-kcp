@@ -161,6 +161,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		GuestEvents: s.guestEvents(),
 		WebRTCPorts: ports,
 		Ingress:     peer,
+		ScopeGrants: s.scopeGrants,
 		Tokens:      participant.NewTokens(s.minter(), DefaultCallTimeout),
 		HTTP:        httpClient,
 		Directory:   s.dir,
@@ -266,6 +267,23 @@ func (s *Service) minter() xrpc.Minter {
 	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
 		return bus.Resolve[pds.ServiceAuth](ctx, handlers, self, target, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{did}})
 	}}
+}
+
+func (s *Service) scopeGrants(ctx context.Context) ([]string, bool, error) {
+	target, ok := s.serviceAuthSigner()
+	if s.deps.Bus == nil || s.did == "" || !ok {
+		return nil, false, nil
+	}
+	handle, err := bus.Resolve[pds.ServiceAuth](ctx, s.deps.Bus, s.self(), target, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{s.did}})
+	if err != nil {
+		return nil, false, err
+	}
+	grants, ok := handle.(pds.ScopeGrants)
+	if !ok {
+		return nil, false, nil
+	}
+	granted, known := grants.GrantedScopes(s.did)
+	return granted, known, nil
 }
 
 func (s *Service) serviceAuthSigner() (commonv1.ObjectRef, bool) {
