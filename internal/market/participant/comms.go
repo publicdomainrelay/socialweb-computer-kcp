@@ -87,18 +87,18 @@ func (a *Authorizer) Authorize(ctx context.Context, header, lxm, recordURI strin
 	return issuer, nil
 }
 
-func (a *Authorizer) AuthorizeRequest(r *http.Request, lxm, recordURI string) (string, bool, int) {
+func (a *Authorizer) AuthorizeRequest(r *http.Request, lxm, recordURI string) (string, bool, int, error) {
 	if a == nil {
-		return "", false, http.StatusInternalServerError
+		return "", false, http.StatusInternalServerError, errors.New("participant: no authorizer")
 	}
 	issuer, err := a.Authorize(r.Context(), r.Header.Get("Authorization"), lxm, recordURI)
 	if err != nil {
 		if errors.Is(err, market.ErrForbidden) {
-			return "", false, http.StatusForbidden
+			return "", false, http.StatusForbidden, err
 		}
-		return "", false, http.StatusUnauthorized
+		return "", false, http.StatusUnauthorized, err
 	}
-	return issuer, true, 0
+	return issuer, true, 0, nil
 }
 
 func ReadSubmitBody(r *http.Request, out any) error {

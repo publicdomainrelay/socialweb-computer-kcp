@@ -137,6 +137,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, run 
 	}
 	engine, ok := c.engineFor(ctx, req, run.Spec.EngineRef)
 	if !ok {
+		if message, failed := c.engineNotReady(req, run.Spec.EngineRef); failed {
+			c.log.Info("a policy run fails: its engine is not ready", "run", key, "reason", message)
+			return ctlruntime.Result{}, c.write(ctx, req, run, pecontroller.EngineNotReadyStatus(run, message))
+		}
 		c.wait(req.Cluster, run.Spec.EngineRef, run.Name)
 		message := "the run is waiting for a ready policy engine"
 		if run.Spec.EngineRef != "" {
@@ -151,6 +155,13 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, run 
 		return ctlruntime.Result{}, nil
 	}
 	return ctlruntime.Result{}, c.start(ctx, req, run, engine)
+}
+
+func (c *Controller) engineNotReady(req ctlruntime.Request, name string) (string, bool) {
+	if name == "" {
+		return c.engines.OnlyNotReady(req.Cluster + "/")
+	}
+	return c.engines.NotReady(pecontroller.EngineKey(req.Cluster, name))
 }
 
 func (c *Controller) engineFor(ctx context.Context, req ctlruntime.Request, name string) (*pecontroller.Engine, bool) {

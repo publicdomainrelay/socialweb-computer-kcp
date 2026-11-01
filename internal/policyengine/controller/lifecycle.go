@@ -94,14 +94,21 @@ func SuspendedStatus(run *policyv1alpha1.PolicyWorkflowRun) policyv1alpha1.Polic
 }
 
 func DeadlineStatus(run *policyv1alpha1.PolicyWorkflowRun) policyv1alpha1.PolicyWorkflowRunStatus {
+	return notStartedStatus(run, "DeadlineExceeded", "the policy run exceeded its deadline")
+}
+
+func EngineNotReadyStatus(run *policyv1alpha1.PolicyWorkflowRun, message string) policyv1alpha1.PolicyWorkflowRunStatus {
+	return notStartedStatus(run, "EngineNotReady", message)
+}
+
+func notStartedStatus(run *policyv1alpha1.PolicyWorkflowRun, reason, message string) policyv1alpha1.PolicyWorkflowRunStatus {
 	outcome := failedOutcome(nil)
-	message := "the policy run exceeded its deadline"
 	outcome.Status.Annotations["error"] = []models.Annotation{{AnnotationLevel: models.AnnotationError, Message: message, Title: message}}
 	outcome.Status.Conditions = nil
 	meta.SetStatusCondition(&outcome.Status.Conditions, metav1.Condition{
 		Type:    policyengine.ConditionFailed,
 		Status:  metav1.ConditionTrue,
-		Reason:  "DeadlineExceeded",
+		Reason:  reason,
 		Message: message,
 	})
 	status := RunStatusFromOutcome(outcome)

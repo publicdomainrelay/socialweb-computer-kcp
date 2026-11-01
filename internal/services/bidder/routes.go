@@ -70,8 +70,9 @@ func (s *Service) admit(w http.ResponseWriter, r *http.Request, lxm, recordURI s
 		participant.WriteXRPCError(w, http.StatusServiceUnavailable, "Unavailable", "the bidder is not ready to authorize requests")
 		return "", false
 	}
-	issuer, ok, status := authorizer.AuthorizeRequest(r, lxm, recordURI)
+	issuer, ok, status, err := authorizer.AuthorizeRequest(r, lxm, recordURI)
 	if !ok {
+		s.log.Warn("the bidder refused a market request", "lxm", lxm, "record", recordURI, "status", status, "serviceAuthHost", s.serviceAuthHost, "err", err.Error())
 		participant.WriteXRPCError(w, status, participant.AuthCode(status), "invalid service-auth token")
 	}
 	return issuer, ok

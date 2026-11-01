@@ -6,10 +6,18 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/auth"
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/golang-jwt/jwt/v5"
+)
+
+const (
+	ServiceAuthIssuedAtLeeway = 30 * time.Second
+
+	ServiceAuthExpiryLeeway = 5 * time.Second
 )
 
 var bearerRE = regexp.MustCompile(`^Bearer (.+)$`)
@@ -63,6 +71,10 @@ func VerifyServiceAuth(ctx context.Context, dir identity.Directory, opts VerifyS
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidAuth, err)
 	}
+	leeway, err := serviceAuthLeeway(token, time.Now())
+	if err != nil {
+		return nil, err
+	}
 	serviceDID := ServiceDIDForHost(strings.ToLower(opts.Hostname))
 	dids := append([]string{serviceDID, ServiceDIDForHost(opts.Hostname)}, opts.ExtraAudienceDIDs...)
 	if name, _, err := net.SplitHostPort(opts.Hostname); err == nil && name != "" {
@@ -80,7 +92,7 @@ func VerifyServiceAuth(ctx context.Context, dir identity.Directory, opts VerifyS
 	}
 	var lastErr error
 	for _, candidate := range audiences {
-		validator := &auth.ServiceAuthValidator{Audience: candidate.aud, Dir: dir}
+		validator := &auth.ServiceAuthValidator{Audience: candidate.aud, Dir: dir, TimestampLeeway: leeway}
 		issuer, err := validator.Validate(ctx, token, &nsid)
 		if err != nil {
 			lastErr = err
@@ -128,4 +140,31 @@ func ServiceAudienceDIDs(host string) []string {
 		unique = append(unique, did)
 	}
 	return unique
+}
+
+func serviceAuthLeeway(token string, now time.Time) (time.Duration, error) {
+	claims := jwt.RegisteredClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrInvalidAuth, err)
+	}
+	if claims.ExpiresAt == nil {
+		return 0, fmt.Errorf("%w: the service auth token has no exp", ErrInvalidAuth)
+	}
+	if late := now.Sub(claims.ExpiresAt.Time); late > ServiceAuthExpiryLeeway {
+		return 0, fmt.Errorf("%w: the service auth token expired %s ago", ErrInvalidAuth, late.Round(time.Second))
+	}
+	leeway := ServiceAuthExpiryLeeway
+	for _, at := range []*jwt.NumericDate{claims.IssuedAt, claims.NotBefore} {
+		if at == nil {
+			continue
+		}
+		skew := at.Sub(now)
+		if skew > ServiceAuthIssuedAtLeeway {
+			return 0, fmt.Errorf("%w: the service auth token is issued %s in this host's future (clock skew)", ErrInvalidAuth, skew.Round(time.Second))
+		}
+		if skew+time.Second > leeway {
+			leeway = skew + time.Second
+		}
+	}
+	return leeway, nil
 }
