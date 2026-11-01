@@ -11606,6 +11606,19 @@ status, or a Retained one, releases as before.
   300 KB `policy-requester-tangled-vouch` bundle: shared dir 30 ms a run, a fresh empty DENO_DIR
   125 ms, the linked fresh dir 31 to 38 ms; the next run sees `hit false`, `null`.
 
+- **A requester start releases before it seals secrets or sweeps orphans (2026-10-30, r134).**
+  Before (page reload with a release already requested): the requester sealed and published the
+  guest's secrets through the ContractEvent path (the guest's secrets key arriving from the
+  backlog) and ran the atirc orphan sweep, and `requester_release` came 13 s after
+  `requester_started`; 57901b31 had stopped only the contract runner from sealing. Now
+  `sealGuestSecrets` does nothing for a contract whose release is requested (`spec.release`, a
+  deletion, or a runner that took the release; `requester_guest_secrets_not_sealed`), an outbound
+  `secrets` or `secretsUpdated` ContractEvent of such a contract is not published (Pending "the
+  release ... is requested"; one already published is not submitted), and the orphan sweep starts
+  only when no runner is releasing (`requester_atirc_orphan_sweep_after_releases`, woken by each
+  runner end, at most 2 min, `requester_atirc_orphan_sweep_release_bound`). The release path and its
+  revoke-before-Released order are unchanged.
+
 ## 16. Vocabulary
 
 | | |

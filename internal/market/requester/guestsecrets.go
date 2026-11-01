@@ -57,6 +57,10 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	if !secretsRequestPending(state) {
 		return nil
 	}
+	if q.releasing(contract) {
+		q.log.Info("requester_guest_secrets_not_sealed", "contract", contract.Name, "reason", "the release is requested")
+		return nil
+	}
 	runnerSecrets := q.runnerSecrets(contract.Name)
 	q.sealMu.Lock()
 	defer q.sealMu.Unlock()
@@ -115,6 +119,18 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	q.log.Info("requester_guest_secrets_sealed", "contract", contract.Name, "contractEvent", name, "recipient", key.Name,
 		"request", reply.URI, "files", len(entries), "bytes", len(ciphertext))
 	return nil
+}
+
+func (q *Requester) releasing(contract v1alpha1.ComputeContract) bool {
+	if contract.Spec.Release || contract.DeletionTimestamp != nil {
+		return true
+	}
+	runner := q.runnerFor(contract.Name)
+	return runner != nil && runner.released()
+}
+
+func secretsEvent(nsid string) bool {
+	return nsid == market.ComputeEventsGuestSecretsNSID || nsid == market.ComputeEventsGuestSecretsUpdatedNSID
 }
 
 func (q *Requester) runnerSecrets(name string) *secretsState {
