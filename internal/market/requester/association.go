@@ -543,15 +543,27 @@ func (r *contractRunner) onGuestRequester(ctx context.Context, state *v1alpha1.N
 	case contract.Spec.Release || contract.DeletionTimestamp != nil:
 		refuse("the contract is releasing")
 		return
+	}
+	if r.recordGuestRequester(ctx, state, parsed) {
+		r.proveGuestRequester(ctx, state)
+	}
+}
+
+func (r *contractRunner) recordGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bool {
+	refuse := func(reason string) bool {
+		r.log().Warn("requester_guest_requester_refused", "did", parsed.RequesterDID, "event", parsed.Event.URI, "reason", reason)
+		return false
+	}
+	switch {
+	case !fromGuest(r.snapshot()):
+		return refuse("the contract has no spec.association.fromGuest")
 	case state.GuestRequester != nil && state.GuestRequester.Did == parsed.RequesterDID:
-		return
+		return false
 	case state.GuestRequester != nil:
-		refuse("the guest already reported " + state.GuestRequester.Did)
-		return
+		return refuse("the guest already reported " + state.GuestRequester.Did)
 	}
 	if err := market.ValidGuestRequesterDID(parsed.RequesterDID, r.q.repoDID); err != nil {
-		refuse(err.Error())
-		return
+		return refuse(err.Error())
 	}
 	state.GuestRequester = &v1alpha1.ContractGuestRequester{Did: parsed.RequesterDID, State: v1alpha1.ContractGuestRequesterPending,
 		Message: "proving control of the reported DID", ReportedAt: parsed.ObservedAt,
@@ -559,14 +571,13 @@ func (r *contractRunner) onGuestRequester(ctx context.Context, state *v1alpha1.N
 		Payload: commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID}}
 	if err := r.writeGuestRequester(ctx, state); err != nil {
 		state.GuestRequester = nil
-		refuse("recording the reported DID failed: " + err.Error())
-		return
+		return refuse("recording the reported DID failed: " + err.Error())
 	}
 	r.mu.Lock()
 	r.associationAttempts = 0
 	r.mu.Unlock()
 	r.log().Info("requester_guest_requester_reported", "did", parsed.RequesterDID)
-	r.proveGuestRequester(ctx, state)
+	return true
 }
 
 func (r *contractRunner) writeGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract) error {

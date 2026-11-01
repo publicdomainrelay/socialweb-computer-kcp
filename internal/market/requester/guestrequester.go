@@ -25,7 +25,8 @@ func GuestRequesterReleaseEventName(contract string) string {
 func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract) {
 	q := r.q
 	contract := r.snapshot()
-	if !fromGuest(contract) || state == nil || state.GuestRequester == nil || state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified ||
+	if !fromGuest(contract) || state == nil || state.GuestRequester == nil ||
+		(state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified && state.GuestRequester.State != v1alpha1.ContractGuestRequesterPending) ||
 		q.deps.ContractEvents == nil || contract.UID == "" {
 		return
 	}

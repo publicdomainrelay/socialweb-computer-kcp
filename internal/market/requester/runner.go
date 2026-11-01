@@ -1313,6 +1313,47 @@ func guestMayRun(state *v1alpha1.NodeClaimContract) bool {
 		(state.Release == nil || !state.Release.OK)
 }
 
+func (r *contractRunner) applyReleaseBacklog(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	receiptURI := receiptURIOf(state)
+	if receiptURI == "" {
+		return
+	}
+	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
+	defer closeEvents()
+	apply := func(event MarketEvent) {
+		switch market.NSIDFromURI(event.Payload.URI) {
+		case market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsVMTerminatedNSID:
+		default:
+			return
+		}
+		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
+		if err != nil {
+			r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
+			return
+		}
+		switch parsed.Kind {
+		case market.ComputeEventsGuestRequesterDIDNSID:
+			r.recordGuestRequester(ctx, state, parsed)
+		case market.ComputeEventsVMTerminatedNSID:
+			if applyTermination(state, parsed.Termination, r.q.nowISO()) {
+				r.log().Info("requester_release_found_termination", "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
+			}
+		}
+	}
+	for _, event := range pending {
+		apply(event)
+	}
+	_ = r.q.drainEvents(ctx, r.name, receiptURI)
+	for {
+		select {
+		case event := <-events:
+			apply(event)
+		default:
+			return
+		}
+	}
+}
+
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
 	q := r.q
 	r.captureReleaseRequest()
@@ -1320,6 +1361,9 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		r.deleteContractRecords(ctx)
 		return nil
+	}
+	if state.Release == nil || !state.Release.OK {
+		r.applyReleaseBacklog(ctx, state)
 	}
 	if state.Termination != nil {
 		state.Phase = v1alpha1.ContractReleased
