@@ -308,17 +308,61 @@ func (r *reconciler[T]) deleteRecord(ctx context.Context, req ctlruntime.Request
 	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, records, name)
 	switch {
 	case apierrors.IsNotFound(err):
-		return true, nil
+		return r.recordAbsent(ctx, req, v)
 	case err != nil:
 		return false, err
 	case !ar.DeletionTimestamp.IsZero():
 		return false, nil
+	}
+	if holdsRecord(ar) {
+		if _, _, err := r.recordRepo(ctx, req, v); err != nil {
+			return false, err
+		}
 	}
 	if err := records.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
 	r.c.log.Info("infra_record_deleting", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name)
 	return false, nil
+}
+
+var errRecordStillPresent = errors.New("infra: the record is still in its repo after its AtprotoRecord was deleted")
+
+func holdsRecord(ar *v1alpha1.AtprotoRecord) bool {
+	return ar.Spec.DeletionPolicy != v1alpha1.RecordDeletionRetain &&
+		(strings.TrimSpace(ar.Status.URI) != "" || strings.TrimSpace(ar.Status.Cid) != "")
+}
+
+func (r *reconciler[T]) recordRepo(ctx context.Context, req ctlruntime.Request, v view) (string, atprotorepo.RecordReader, error) {
+	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
+	if err != nil {
+		return "", nil, err
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	return Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
+}
+
+func (r *reconciler[T]) recordAbsent(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
+	stored := v.status.Record
+	if stored == nil || stored.Direction == v1alpha1.InfraSyncRetained || strings.TrimSpace(stored.URI) == "" {
+		return true, nil
+	}
+	uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI))
+	if err != nil {
+		return true, nil
+	}
+	_, reader, err := r.recordRepo(ctx, req, v)
+	if err != nil {
+		return false, err
+	}
+	_, err = reader.GetRecord(ctx, uri.Authority().String(), uri.Collection().String(), uri.RecordKey().String())
+	switch {
+	case errors.Is(err, atprotorepo.ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("infra: confirming %s is deleted: %w", stored.URI, err)
+	}
+	return false, fmt.Errorf("%w: %s", errRecordStillPresent, stored.URI)
 }
 
 func (r *reconciler[T]) unbindRecord(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {

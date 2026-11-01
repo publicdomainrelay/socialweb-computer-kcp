@@ -11557,6 +11557,19 @@ guest fetched before it, so the guest fetches the bundle again. Index before min
 release started, `atircMinted` and the release revoke are unchanged. UUID, manual and plain tokens
 are unchanged.
 
+### An Infra keeps its finalizer until its record is deleted or confirmed absent (2026-10-30, rc131)
+
+Before, the Infra and EphemeralInfra finalizer deleted the child AtprotoRecord and released once it was
+gone; when the repo could not be resolved (repoRef invalid, the AtprotoRepo missing, no repo.read
+handle) the AtprotoRecord finalizer released without a delete, so the infra went and its PDS record
+stayed. Now the finalizer deletes a child AtprotoRecord that holds a published record (not Retain) only
+when the repo resolves, and once the child is gone it confirms the record of `status.record.uri` is
+absent by one getRecord (404). While the repo is unresolvable (RecordUnresolved True with
+RepoRefInvalid, RepoNotFound or RepoUnreadable), has no DID yet, or the record is still there, the
+infra stays in Deleting with its finalizer and requeues on the runtime's rate-limited backoff
+(`Result.Backoff`), woken early by the AtprotoRepo and AtprotoRecord watches. An infra with no record
+in status, or a Retained one, releases as before.
+
 ## 16. Vocabulary
 
 | | |

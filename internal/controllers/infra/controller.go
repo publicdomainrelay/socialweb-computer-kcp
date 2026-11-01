@@ -378,14 +378,20 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		left++
 	}
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Phase: v1alpha1.InfraPhaseDeleting, Contracts: statuses,
-		Record: v.status.Record, Conditions: v.status.Conditions,
+		Record: v.status.Record, Conditions: slices.Clone(v.status.Conditions),
 		Message: fmt.Sprintf("%d ComputeContract(s) releasing", left)}
+	backoff := false
 	if left == 0 && v.spec.Record != nil {
 		gone, err := r.deleteRecord(ctx, req, v)
-		if err != nil {
+		reason, isUnresolved := Unresolved(err)
+		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
+		switch {
+		case isUnresolved || errors.Is(err, ErrRepoNoDID) || errors.Is(err, errRecordStillPresent):
+			status.Message = "the record delete waits: " + err.Error()
+			left, backoff = 1, true
+		case err != nil:
 			return ctlruntime.Result{Waiting: true}, err
-		}
-		if !gone {
+		case !gone:
 			status.Message = "the record is being deleted"
 			left = 1
 		}
@@ -394,7 +400,7 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		return ctlruntime.Result{Waiting: true}, err
 	}
 	if left > 0 {
-		return ctlruntime.Result{Waiting: true}, nil
+		return ctlruntime.Result{Waiting: true, Backoff: backoff}, nil
 	}
 	r.c.forget(string(v.kind), req)
 	r.c.log.Info("infra_released", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)
