@@ -414,7 +414,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.ensureAtircToken(ctx, contract, rfpURI)
 
 	if state.Accept != nil && state.Accept.URI != "" {
-		return r.resumeAccepted(ctx, state)
+		return r.resumeAccepted(ctx, state, gate, rfpURI, rfpCID)
 	}
 
 	spec := r.snapshot().Spec
@@ -635,10 +635,31 @@ func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.No
 	return r.waitForRelease(ctx, state, receiptURI, bidderDID)
 }
 
-func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.NodeClaimContract) error {
+func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.NodeClaimContract, gate PolicyGate, rfpURI, rfpCID string) error {
 	bidderDID := winnerDID(state)
 	if bidderDID == "" {
 		return errors.New("the recorded contract names no winning bidder")
+	}
+	if state.Bid == nil || state.Bid.URI == "" {
+		return errors.New("the recorded contract names no winning bid")
+	}
+	decision := r.q.policy.Evaluate(ctx, gate.Input(PolicyInput{
+		SelfDid:          r.q.marketDID,
+		SubjectDid:       bidderDID,
+		CounterpartyDid:  bidderDID,
+		RootRequesterDid: r.q.marketDID,
+		RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
+		Bid:              &PolicyRef{URI: state.Bid.URI, CID: state.Bid.CID},
+	}))
+	if !decision.Allow {
+		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+		state.Error = "the recorded accept is not resubmitted: winner rejected by policy: " + decision.Reason
+		if r.recoverReceipt(ctx, state) {
+			if err := r.releaseContract(ctx, state, bidderDID); err != nil {
+				return fmt.Errorf("%s; releasing its receipt: %w", state.Error, err)
+			}
+		}
+		return errors.New(state.Error)
 	}
 	bidder, ok := r.q.bidderForDID(ctx, bidderDID)
 	if !ok {
