@@ -382,14 +382,27 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
   `/readyz` ok, every cluster HostProcess adopted by unit name and InvocationID but the cluster OpenBao (restarted in
   place). The first node join of a fresh network waited about 4 min for the bidder's guest OIDC discovery to report its
   configured issuer (it reported `https://127.0.0.1:0` until then)
-- on prod the node's meshd download base is the local Exposure (`http://192.0.2.1:<port>`), which reaches only a bidder
-  on the same host; renting a node from a remote prod bidder needs a public origin for that download (open, the lead's run)
+- a node on a remote bidder: the node fetches `socialweb-meshd` and `socialweb-node` from
+  `<base>/downloads/<sha256>/<name>` and checks the sha256 its contract pins (`spec.nodeJoin.meshd`, `nodeAgent`).
+  The base is `--node-download-base` (env `SOCIALWEB_NODE_DOWNLOAD_BASE`), by default the public bucket the bidders
+  already read guest images from, where CI publishes the pinned downloads tree by sha256 (the `publish` job, prefix
+  `downloads/`, content-addressed: an object is never replaced). With `--network` the default is unused and the node
+  fetches from the requester's local Exposure, as the network's bidders share its host; a dev build whose `rust/` or
+  `cmd/socialweb-node` differs from a published commit has pins the bucket does not hold. Proven on a local network
+  (2026-11-01): with the flag the node contract's `nodeJoin` names the bucket and the pins of the released tree, the
+  node's bootstrap reached `<bucket>/downloads/<sha256>/socialweb-node-x86_64` (HTTP 404 until CI publishes it), and a
+  guest fetched a published object from the bucket and matched its manifest sha256
+- the node reaches the k3s API and the cluster OpenBao over iroh: each is a dumbpipe `listen-tcp` HostProcess of the
+  requester's core whose ticket names the public n0 relay and the host's addresses, so a node on any host dials it
+  through the relay when no direct path opens (a guest cannot reach its own bidder host's addresses through the fence,
+  so the same-host proof already takes an internet path); the node's join bundle comes by getSecrets over the
+  requester ingress, and the cluster OpenBao checks the node's token against the bidder's public OIDC issuer
 
 ## Not Supported On Prod Today
 
 | gap | where it is planned |
 |---|---|
-| a node of your own tenant cluster from a remote prod bidder (the meshd download base is local) | plan 0039 C-GATEWAY-COMPOSE, the lead's prod run |
+| a node of your own tenant cluster from a remote prod bidder, until CI has published `downloads/<sha256>/` for the requester's binary (a main or tag build after this change) | the lead's push and prod run |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |

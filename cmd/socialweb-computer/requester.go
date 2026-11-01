@@ -36,7 +36,7 @@ const (
 )
 
 var requesterOptions = []string{backendOpt, "network", "name", "identity", "state-dir", "ready-file", "fg", "ready-timeout", "network-timeout",
-	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix", "with-gateway"}
+	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix", "with-gateway", "node-download-base"}
 
 var requesterPasswordOptions = []string{"name", "state-dir", "network-timeout"}
 

@@ -21,6 +21,7 @@ import (
 const (
 	ProfileGatewayRequester = "requester"
 	GatewayDownloadsOption  = "downloads-dir"
+	GatewayNodeDownloadBase = "node-download-base"
 	requesterSetPhase       = "rbac"
 	requesterNodeVaultMount = marketrequester.RequesterVaultClient
 )
@@ -91,6 +92,7 @@ func (p *pass) requesterDesired(mr *v1alpha1.MarketRequester) ([]compose.Desired
 		ClusterProvider:   clusterProvider,
 		ClusterStateDir:   clusterState,
 		Audience:          mr.Status.Did,
+		PublicOrigin:      strings.TrimRight(strings.TrimSpace(compose.OptionValue(o.Spec.Options, GatewayNodeDownloadBase)), "/"),
 		RequiredDownloads: required,
 		NodeMarket:        market,
 		NodesOnly:         true,

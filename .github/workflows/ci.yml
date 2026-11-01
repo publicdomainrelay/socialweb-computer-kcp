@@ -71,10 +71,32 @@ jobs:
           jq -e --arg v "$want" '(.builds | length) > 0 and all(.builds[]; .denoEmbedded.version == $v and (.denoEmbedded.zips | keys | sort) == ["linux/amd64","linux/arm64"])' "$rel/release.json"
           rm -rf "$OUT/binaries" && mkdir -p "$OUT/binaries" && cp -a "$rel"/. "$OUT/binaries/"
           (cd "$OUT/binaries" && sha256sum -c --quiet SHA256SUMS)
+      - name: node downloads by sha256
+        run: |
+          set -euo pipefail
+          blob="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB/src/1/internal/assets/blobs/linux_amd64/socialweb-computer-k8s-downloads.tar.zst"
+          tree="$(mktemp -d "$RUNNER_TEMP/k8s-downloads.XXXXXX")"
+          zstd -dc "$blob" | tar -x -C "$tree"
+          rm -rf "$OUT/downloads" && mkdir -p "$OUT/downloads"
+          for side in "$tree"/*.sha256; do
+            name="$(basename "$side" .sha256)"
+            want="$(cut -d' ' -f1 "$side")"
+            got="$(sha256sum "$tree/$name" | cut -d' ' -f1)"
+            echo "downloads/$want/$name (sha256 $got)"
+            test "$got" = "$want"
+            mkdir -p "$OUT/downloads/$want" && cp "$tree/$name" "$OUT/downloads/$want/$name"
+          done
+          test "$(find "$OUT/downloads" -type f | wc -l)" -gt 0
       - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: ${{ runner.temp }}/ci/out/${{ github.sha }}/binaries/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: node-downloads
+          path: ${{ runner.temp }}/ci/out/${{ github.sha }}/downloads/
           if-no-files-found: error
           retention-days: 7
 
@@ -172,6 +194,10 @@ jobs:
         with:
           name: binaries
           path: ${{ runner.temp }}/ci/out/${{ github.sha }}/binaries
+      - uses: actions/download-artifact@v8
+        with:
+          name: node-downloads
+          path: ${{ runner.temp }}/ci/out/${{ github.sha }}/downloads
       - if: needs.guest-image.outputs.published != 'true'
         uses: actions/download-artifact@v8
         with:
@@ -217,6 +243,9 @@ jobs:
           else
             prefix="main/$GITHUB_SHA"; also="main/latest"
           fi
+          dl="$OUT/downloads"
+          timeout -k 10 1800 deno run -A --no-lock scripts/publish-spaces.ts --dir "$dl" --prefix downloads --content-addressed
+          rm -rf "$dl"
           timeout -k 10 4800 deno run -A --no-lock scripts/publish-spaces.ts --dir "$OUT" --prefix "$prefix" ${also:+--also "$also"}
       - name: the published guest image is where the binary looks for it
         env:
