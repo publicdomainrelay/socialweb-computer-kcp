@@ -36,6 +36,7 @@ const (
 	HostInterval        = time.Second
 	HostApplyTimeout    = time.Minute
 	ChildWorkspaceReady = 30 * time.Second
+	ChildWorkspaceGone  = 2 * time.Minute
 )
 
 const hostProcessExport = "hostprocesses"
@@ -92,7 +93,29 @@ func WaitHost(ctx context.Context, kubeconfig string, timeout time.Duration) err
 	return nil
 }
 
-func EnsureChildWorkspace(ctx context.Context, kubeconfig, id string, timeout time.Duration) error {
+func awaitChildGone(ctx context.Context, ws kube.Resource, id string, log *slog.Logger) error {
+	started := time.Now()
+	waited := false
+	_, err := kube.Await(ctx, ws, id, ChildWorkspaceGone, func(w *tenancyv1alpha1.Workspace) (bool, error) {
+		if w == nil || w.DeletionTimestamp == nil {
+			return true, nil
+		}
+		if !waited {
+			waited = true
+			log.Info("the child workspace is being deleted in the parent; waiting for it to go before placing it again", "workspace", ChildWorkspace(id))
+		}
+		return false, nil
+	})
+	if err != nil {
+		return fmt.Errorf("devinstance: workspace %s was being deleted in the parent and did not go within %s: %w", ChildWorkspace(id), ChildWorkspaceGone, err)
+	}
+	if waited {
+		log.Info("the deleted child workspace is gone; placing it again", "workspace", ChildWorkspace(id), "seconds", time.Since(started).Seconds())
+	}
+	return nil
+}
+
+func EnsureChildWorkspace(ctx context.Context, kubeconfig, id string, timeout time.Duration, log *slog.Logger) error {
 	if err := WaitHost(ctx, kubeconfig, timeout); err != nil {
 		return err
 	}
@@ -101,6 +124,9 @@ func EnsureChildWorkspace(ctx context.Context, kubeconfig, id string, timeout ti
 		return err
 	}
 	ws := dc.Resource(kcpgvr.Workspaces)
+	if err := awaitChildGone(ctx, ws, id, log); err != nil {
+		return err
+	}
 	o := kube.Doc{
 		"apiVersion": "tenancy.kcp.io/v1alpha1", "kind": "Workspace",
 		"metadata": map[string]any{"name": id, "annotations": map[string]any{kcpserver.WorkspaceOwnerAnnotation: kcpserver.ShardAdminOwner}},

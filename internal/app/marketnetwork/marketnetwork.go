@@ -85,6 +85,8 @@ type Controller struct {
 
 	unserved map[string]string
 
+	unplaced map[string]string
+
 	roots sync.Map
 }
 
@@ -412,6 +414,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	apps := ctl.ensureApps(ctx, r, o, published, pdsURL, aliceURL, false)
 	unserved := ctl.takeUnserved()
+	unplaced := ctl.takeUnplaced()
 	ctl.declareOperatorVouches(ctx, r, o.Spec.Apps)
 	p.st.Apps = apps
 	names := make([]string, 0, len(o.Spec.Apps))
@@ -439,6 +442,9 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	if unserved != nil {
 		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the child applications", unserved)
+	}
+	if unplaced != nil {
+		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the child applications", unplaced)
 	}
 	if verr != nil {
 		return p.write(v1alpha1.ApplicationPhaseProvisioning, "the network verifier: "+verr.Error())
@@ -495,6 +501,7 @@ func (ctl *Controller) ensureApps(ctx context.Context, r compose.Root, o *v1alph
 			bidderDids = append(bidderDids, a.Did)
 		}
 	}
+	ctl.takeUnplaced()
 	apps := make([]v1alpha1.NetworkAppStatus, len(o.Spec.Apps))
 	var wg sync.WaitGroup
 	for i, app := range o.Spec.Apps {
