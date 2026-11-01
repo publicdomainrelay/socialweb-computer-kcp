@@ -104,7 +104,9 @@ k root get marketnetworks.socialweb.computer network -o json | jq -r '.status.ap
 
 Or `$SWC run requester --name qs --network $I --state-dir "$ST"` in its own terminal: the same child application, plus
 a ready file and a kubeconfig of the workspace `root:qs` (`$ST/requesters/qs/`; [quickstart-prod.md](quickstart-prod.md)
-section 7). A restart must repeat `--network $I`.
+section 7). A restart must repeat `--network $I`, and must wait after the Ctrl-C until the child's dev workspace is gone
+(`k root:dev get workspaces $I-qs` NotFound, a few seconds): a restart while it is Deleting fails after 3 minutes
+([acceptance/0012](acceptance/0012-infra-quickstart.md) Known Pitfalls). Held contracts stay Held across the restart.
 
 What it composes in `root:qs` (read them, do not write them):
 
@@ -219,6 +221,7 @@ Examples, one per scenario:
 ## 6. Apply And Await
 
 ```bash
+[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519   # no key yet
 sed "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat ~/.ssh/id_ed25519.pub)|" examples/infra/vm.yaml > "$ST/vm.yaml"
 k root:qs apply -f "$ST/vm.yaml"
 k root:qs wait infras.socialweb.computer/quickstart-vm --for=jsonpath='{.status.phase}'=Deployed --timeout=3m
@@ -319,7 +322,7 @@ What happens:
 - when the contract's `secretsRef` path holds no bundle, the requester writes the placeholder bundle itself (one entry at
   `agent.envFile`, `ATIRC_TOKEN=`, mode 0600; log `requester_agent_bundle_placeholder`)
 - before the RFP the requester checks its own handle: irc.fedfork.com mints only for a handle that resolves to the DID.
-  The network requester's handle is `<workspace>.requester.local`, so locally the contract is Failed with `refused: the
+  The network requester's handle is `root-<name>.requester.local` (the workspace, `-` for `:`), so locally the contract is Failed with `refused: the
   atirc agent needs a requester handle that resolves to <did>: ... is a .local handle that nobody resolves; start the
   requester with --atproto-handle ...`, with no RFP and no record; a plain VM contract of the same requester still runs
 - with a handle that resolves, after the receipt the requester mints a leased atirc token `<label>-<rfp rkey>.<handle>`
