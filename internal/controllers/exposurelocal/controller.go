@@ -163,7 +163,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	switch {
 	case spec.Suspend:
 		return c.withdraw(ctx, req, object, exposurev1alpha1.ExposurePending, "Suspended", "the Exposure is suspended")
-	case spec.Mode != exposurev1alpha1.ExposureModeLocal && spec.Mode != exposurev1alpha1.ExposureModeIngress:
+	case spec.Mode == exposurev1alpha1.ExposureModeIngress:
+		return c.withdraw(ctx, req, object, exposurev1alpha1.ExposurePending, "NoIngress",
+			"an in-process host has no ingress; only a local Exposure is served")
+	case spec.Mode != exposurev1alpha1.ExposureModeLocal:
 		return c.withdraw(ctx, req, object, exposurev1alpha1.ExposureFailed, "InvalidMode", fmt.Sprintf("unknown mode %q", spec.Mode))
 	case serviceName == "":
 		return c.withdraw(ctx, req, object, exposurev1alpha1.ExposurePending, "ServiceMissing", "the Exposure has no serviceRef")
