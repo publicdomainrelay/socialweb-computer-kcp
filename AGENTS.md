@@ -246,8 +246,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     parentRef (the page), or a parent answered 401/403 falls back to the token itself; a leased token
     is revoked before vm.delete, while its lease is alive, and a 401 saying the lease is not alive
     counts as revoked (`requester_atirc_revoked` byLease). The first
-    attempt runs before Released is written, or Failed when no guest can still run (no receipt, an
-    acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
+    attempt runs before vm.delete is recorded when the bundle holds a leased token (after the guest
+    requester's release), else before Released is written, or Failed when no guest can still run (no
+    receipt, an acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
     when every token path is revoked that way or never held a token; Pending while retries run;
     Abandoned after 24 h); only that first write and the retries set it, a later status write never
     does, and no token is minted once it is set. `run request` and `run request release` share one

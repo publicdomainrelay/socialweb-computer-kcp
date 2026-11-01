@@ -1414,6 +1414,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
 	r.releaseGuestRequester(ctx, state)
+	r.revokeBeforeDestroy(ctx)
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
 	for err != nil {
 		release.Attempts++

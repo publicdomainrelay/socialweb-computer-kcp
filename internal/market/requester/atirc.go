@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -698,6 +699,9 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRe
 	if !ReleaseRevokesExpected(contract) || r.q.deps.VaultWrite == nil {
 		return "", nil
 	}
+	if state := contract.Status.AtircRevokes; state == v1alpha1.AtircRevokesDone || state == v1alpha1.AtircRevokesAbandoned {
+		return state, nil
+	}
 	paths := releaseTokenPaths(contract)
 	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix(), UID: string(contract.UID)}
 	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(len(paths)+1)*atircCallTimeout)
@@ -719,6 +723,59 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRe
 		}
 	}
 	return v1alpha1.AtircRevokesPending, func() { r.q.startReleaseRevokes(r, contract, marker, false) }
+}
+
+func (r *contractRunner) holdsLeasedToken(ctx context.Context, contract v1alpha1.ComputeContract) bool {
+	r.bundleMu.Lock()
+	_, data, entries, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
+	r.bundleMu.Unlock()
+	if err != nil {
+		r.log().Warn("requester_atirc_revoke_before_destroy_skipped", "step", "read the bundle", "err", err.Error())
+		return false
+	}
+	minted, _ := mintedOf(data)
+	for _, m := range minted {
+		if _, leased := atircTokenLeases(m.Token); leased && r.q.now().Before(time.Unix(m.Exp, 0)) {
+			return true
+		}
+	}
+	paths := releaseTokenPaths(contract)
+	for _, e := range entries {
+		if _, leased := atircTokenLeases(atircToken(e.Value)); leased && slices.Contains(paths, e.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *contractRunner) revokeBeforeDestroy(ctx context.Context) {
+	contract := r.snapshot()
+	state := contract.Status.AtircRevokes
+	if !ReleaseRevokesExpected(contract) || r.q.deps.VaultWrite == nil || state == v1alpha1.AtircRevokesDone || state == v1alpha1.AtircRevokesAbandoned {
+		return
+	}
+	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
+	leased := r.holdsLeasedToken(read, contract)
+	cancel()
+	if !leased {
+		return
+	}
+	var (
+		start func()
+		ran   bool
+	)
+	r.atircRevoke.Do(func() {
+		ran = true
+		state, start = r.revokeAtircToken(ctx)
+	})
+	if !ran || state == "" {
+		return
+	}
+	r.log().Info("requester_atirc_revoke_before_destroy", "atircRevokes", state)
+	r.mergeRevokes(context.WithoutCancel(ctx), state)
+	if start != nil {
+		start()
+	}
 }
 
 func (r *contractRunner) mergeRevokes(ctx context.Context, state v1alpha1.AtircRevokesState) {
