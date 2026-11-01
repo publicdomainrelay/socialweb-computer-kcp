@@ -666,7 +666,7 @@
     },
     "ready-file": {
       "type": "string",
-      "description": "run requester: the ready file, written once the MarketRequester root is Ready (to <path>.tmp, then renamed; mode 0600) and rewritten on every restart and when one of its fields changes; removed on a clean stop. JSON {schema, name, pid, startedAt, kcpUrl, kubeconfig, workspace, did, handle, identityMode, pdsUrl, ingress {pds, requester}, sshPublicKey}: paths and public values only, never a token, key or password. <state-dir>/requesters/<name>/ready.json is always written; this names a second copy. run requester env|ssh|proxy read it (default that same path)"
+      "description": "run requester: the ready file, written once the MarketRequester root is Ready and, with --with-gateway, its Gateway too (to <path>.tmp, then renamed; mode 0600) and rewritten on every restart and when one of its fields changes; removed on a clean stop. JSON {schema, name, pid, startedAt, kcpUrl, kubeconfig, workspace, did, handle, identityMode, pdsUrl, ingress {pds, requester}, sshPublicKey, gateway}: paths and public values only, never a token, key or password. <state-dir>/requesters/<name>/ready.json is always written; this names a second copy. run requester env|ssh|proxy read it (default that same path)"
     },
     "contract-timeout": {
       "type": "string",

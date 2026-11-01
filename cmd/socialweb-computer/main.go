@@ -82,6 +82,7 @@ func builtVerbs() map[string]builtVerb {
 		"run requester cluster":    {requesterGatewayOptions, runRequesterCluster},
 		"run requester kubeconfig": {requesterGatewayOptions, runRequesterKubeconfig},
 		"run requester password":   {requesterPasswordOptions, runRequesterPassword},
+		"run requester signin":     {requesterSigninOptions, runRequesterSignin},
 		"run gateway ssh":          {gatewaySshOptions, runGatewaySsh},
 		"run request list":         {[]string{"state-dir", "json"}, runRequestList},
 		"run request release":      {requestOptions, runRequestRelease},
