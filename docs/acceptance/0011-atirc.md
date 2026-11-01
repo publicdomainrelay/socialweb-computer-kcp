@@ -1,0 +1,94 @@
+# Acceptance 0011: atirc (copy of the atirc repo doc)
+
+How to prove an atirc change is safe to ship: repo-level suites, then the prod
+token-lifecycle checks every contract smoke must pass.
+
+- Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `ec0d088` (author: `atirc-dev`). This is a copy; edit upstream first
+- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z
+
+## 1. Repo-level gates (run before every deploy)
+
+- `cargo fmt` - clean.
+- `cargo test` in `cli/` - the whole suite (unit + integration, currently 219).
+  Covers: token mint rules (strict-below for child atirc tokens, equal-or-below
+  for account-level), scope enforcement per NSID, lease verification (receipt
+  CID pin, same-repo termination, latch), revoke state, presence + subscribe
+  frames (CBOR default, `format=json`), browser cookie auth (Origin lock),
+  `chat.atirc.pipe` pairing/relay (ws + iroh), owner questions.
+- Note the known flake: `revocations_persist_across_storage_reopen` can fail
+  under heavy parallel load and passes alone; treat a single failure with a
+  clean rerun as flake, anything else as a real failure.
+
+## 2. Deploy gates (prod, after `server --upgrade`)
+
+- `GET /` with `User-Agent: curl` returns the binary (200).
+- `GET /chat` returns 200 (web client) and the root page links it.
+- `GET /dl/v0.1.0-<sha>` returns 200 and the pinned `/usr/local/bin/atirc-v0.1.0-<sha>`.
+- `POST /xrpc/chat.atirc.revoke` without auth returns 401.
+- `serve` pid unchanged across the upgrade.
+- If the release changes iroh ops: `atirc-iroh.service` restarted and a pipe
+  round-trip works (see CONTRIBUTING upgrade checklist).
+
+## 3. Token lifecycle gates (every page/CLI/iOS/ssh VM smoke)
+
+Every contract smoke must show, from server logs and
+`tokens/revocations.ndjson`:
+
+- `token_minted` for the smoke's subhandle at accept/provision time.
+- `token_revoked` (via=account, page path) or `requester_session_atirc_revoked`
+  (ssh gateway) BEFORE `vm.terminated` (typically 0.5-10s before).
+- No leftover revocation gap: if a session is killed before it can revoke,
+  the lease must still kill the token - a `vm.terminated` record existing is
+  sufficient. Manual mitigation for a missed revoke:
+  append `{"revoked_at":<unix>,"subhandle":"..."}` to
+  `<data>/tokens/revocations.ndjson` and `kill -USR2` the serve pid.
+
+## 4. Path-specific acceptance
+
+### Page / CLI requester
+- Request VM -> Held -> release; expect mint then revoke-before-termination.
+- Restored tab (snapshot) repeat must mint/revoke the same way.
+
+### ssh gateway agent
+- `ssh <handle>@socialweb.computer atirc agent run <name>` rents a VM as that
+  handle, mints `<name>.<handle>` leased on the session receipt+termination,
+  the nick joins the channel, and on session end the gateway revokes BEFORE
+  releasing the contract.
+- A second `atirc agent run <deeper>` inside the guest inherits the lease.
+
+### send/recv pipes
+- `atirc recv <peer> <stream>` mints `<stream>.<own subhandle>` and prints the
+  peer's hello; `atirc send <receiver-subhandle> <stream>` pipes stdin.
+- Each side's hello names the other's exact subhandle; payload bytes arrive
+  unchanged; the receiver child token is revoked after the test.
+
+### Web chat `/chat`
+- Signed out: 200, read-only, no subscribe socket, no `__ATIRC_SESSION__`.
+- Signed in: injected `__ATIRC_SESSION__`, `?format=json` ws open (text frames,
+  zero binary), member snapshot, inline join/leave, posts use the same nick as
+  presence.
+- Cookie auth only with `Origin: https://irc.fedfork.com`; anything else 401.
+
+### Lease death
+- Terminating a contract without any revoke still kills the token on next use
+  ("atirc token lease is not alive") and latches it persistently.
+- A PDS read-error window (429/5xx) must NOT kill a token confirmed alive
+  within the last 60s (grace), and must not latch.
+
+## 5. Lifecycle model
+
+```mermaid
+sequenceDiagram
+  participant Req as requester (page/CLI/ssh)
+  participant At as atirc
+  participant Bid as bidder host
+  Req->>Bid: contract (RFP, bids, accept)
+  Bid-->>Req: receipt + VM on network
+  Req->>At: chat.atirc.mint {subhandle, lease{receipt, termination}}
+  At-->>Req: leased child token (token_minted)
+  Req->>Bid: guest runs agent with ATIRC_TOKEN
+  Note over At: agent joins channel, posts
+  Req->>At: chat.atirc.revoke (on release)
+  Bid-->>Bid: vm.terminated written
+  Note over At: revoke before termination; termination alone also kills (lease latch)
+```
