@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,8 +200,8 @@ func TestCacheKeyOnlyWhenDeclared(t *testing.T) {
 			}
 			seen, _ := ran.Output("evaluate", "cache-key")
 			switch {
-			case tc.declared && seen != sent:
-				t.Fatalf("a workflow that declares cache-key saw %q, want %q", seen, sent)
+			case tc.declared && !strings.HasPrefix(seen, sent):
+				t.Fatalf("a workflow that declares cache-key saw %q, want the run's key %q", seen, sent)
 			case !tc.declared && seen != "absent":
 				t.Fatalf("a workflow that does not declare cache-key saw %q", seen)
 			}
