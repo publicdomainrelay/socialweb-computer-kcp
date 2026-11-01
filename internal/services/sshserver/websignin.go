@@ -3,10 +3,12 @@ package sshserver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/custody"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -69,6 +71,45 @@ func (s *Service) oauthRoute(w http.ResponseWriter, r *http.Request) {
 func sameEndpoint(a, b *webSignIn) bool {
 	return a != nil && b != nil && a.endpoint.Address == b.endpoint.Address && bytes.Equal(a.endpoint.CACert, b.endpoint.CACert) &&
 		bytes.Equal(a.endpoint.ClientCert, b.endpoint.ClientCert) && bytes.Equal(a.endpoint.ClientKey, b.endpoint.ClientKey)
+}
+
+func (s *Service) awaitVault(ctx context.Context) error {
+	if s.spec.VaultRef == nil || s.spec.VaultRef.Name == "" || s.deps.Bus == nil {
+		return nil
+	}
+	workspace, name := s.workspace(), s.spec.VaultRef.Name
+	wake := make(chan struct{}, 1)
+	cancel := s.deps.Bus.Subscribe(func(key bus.Key) {
+		if key.Kind != vaultObjectKind || key.Name != name || key.Workspace != workspace {
+			return
+		}
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	})
+	defer cancel()
+	waiting := false
+	for {
+		_, err := s.vaultEndpoint(ctx)
+		switch {
+		case err == nil:
+			if waiting {
+				s.log.Info("sshserver_vault_ready", "vault", workspace+"/"+name)
+			}
+			return nil
+		case !errors.Is(err, custody.ErrNotReady):
+			return err
+		case !waiting:
+			waiting = true
+			s.log.Info("sshserver_waits_for_vault", "vault", workspace+"/"+name, "reason", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wake:
+		}
+	}
 }
 
 func (s *Service) followVault(ctx context.Context) func() {

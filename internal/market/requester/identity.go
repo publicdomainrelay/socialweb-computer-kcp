@@ -107,6 +107,35 @@ func (q *Requester) authenticateOwnerSession(ctx context.Context) error {
 	return nil
 }
 
+func (q *Requester) bindSignerKeyAfterVaults(ctx context.Context) error {
+	if q.deps.WatchVaults == nil {
+		return q.bindSignerKey(ctx)
+	}
+	wake, cancel := q.deps.WatchVaults()
+	defer cancel()
+	waiting := false
+	for {
+		err := q.bindSignerKey(ctx)
+		if err == nil {
+			if waiting {
+				q.log.Info("requester_signer_key_vault_ready")
+			}
+			return nil
+		}
+		if !waiting {
+			waiting = true
+			q.log.Info("requester_signer_key_waits_for_vault", "reason", "a vault bind wakes the next try; no bind within "+signerBindVaultWait.String()+" fails the start", "err", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-wake:
+		case <-time.After(signerBindVaultWait):
+			return err
+		}
+	}
+}
+
 func (q *Requester) bindSignerKey(ctx context.Context) error {
 	if q.repo == nil || q.signer == nil {
 		return errors.New("requester: the signer binding has no repo or signer")

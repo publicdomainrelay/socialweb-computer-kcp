@@ -1,6 +1,7 @@
 package custody
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,9 +10,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
+var ErrNotReady = errors.New("not Ready")
+
 func EndpointFor(status v1alpha1.OpenBaoServerStatus, client, mount string) (Endpoint, v1alpha1.OpenBaoServerClientRefs, error) {
 	if status.Phase != v1alpha1.OpenBaoServerPhaseReady {
-		return Endpoint{}, v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer is %s, not Ready", status.Phase)
+		return Endpoint{}, v1alpha1.OpenBaoServerClientRefs{}, fmt.Errorf("the OpenBaoServer is %s, %w", status.Phase, ErrNotReady)
 	}
 	refs, err := openbaoctl.ClientRefs(status, client)
 	if err != nil {

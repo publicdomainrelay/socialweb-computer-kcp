@@ -49,12 +49,15 @@ type bindingContract struct {
 	Clients []v1alpha1.OpenBaoServerClientRefs
 
 	Remote *v1alpha1.RemoteOpenBaoSpec
+
+	Ready bool
 }
 
 func (b Binding) fingerprint() string {
 	c := bindingContract{Vault: b.Vault, Backend: b.Backend}
 	if b.Server != nil {
 		c.Address, c.CABundle, c.Refs, c.Clients = b.Server.Address, b.Server.CABundle, b.Server.Refs, b.Server.Clients
+		c.Ready = b.Server.Phase == v1alpha1.OpenBaoServerPhaseReady
 	}
 	if b.Remote != nil {
 		spec := b.Remote.Spec
