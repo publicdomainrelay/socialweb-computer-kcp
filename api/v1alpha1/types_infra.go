@@ -39,7 +39,7 @@ type EphemeralInfraList struct {
 type InfraSpec struct {
 	Description string `json:"description,omitempty" apigen:"maxLength=1024"`
 
-	Contracts []InfraContract `json:"contracts,omitempty"`
+	Contracts []InfraContract `json:"contracts,omitempty" apigen:"listType=map,listMapKey=name"`
 
 	Secrets []InfraContractSecret `json:"secrets,omitempty" apigen:"listType=map,listMapKey=contract"`
 
