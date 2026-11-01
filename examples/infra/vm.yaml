@@ -8,6 +8,10 @@ spec:
   - name: vm1
     state: Requested
     vmName: quickstart-vm1
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
     sshAuthorizedKeys:
     - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
     userData: |

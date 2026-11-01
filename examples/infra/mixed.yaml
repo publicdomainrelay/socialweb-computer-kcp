@@ -10,6 +10,10 @@ spec:
   - name: vm1
     state: Requested
     vmName: einfra-quickstart-vm1
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
     sshAuthorizedKeys:
     - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
     userData: |
@@ -24,6 +28,10 @@ spec:
   - name: agent1
     state: Requested
     vmName: einfra-quickstart-agent1
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
     agent:
       envFile: /etc/atirc/atirc.env
   secrets:
