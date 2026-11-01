@@ -11969,11 +11969,48 @@ when it ends or deletes an infra, and an older end rule re-requests the contract
 that an object is created for. Old cached pages run their own old kcp and still delete their own
 records; that cannot be prevented from here.
 
-Deferred to rcB: the writers of the index (the swap put capability `atprotorepo.SwapPutter`, the
-add, remove, prune and self-heal of entries, the per-repo index watch and the `Indexed` condition on
-infras). Until rcB nothing writes `infra/self`, so a collection adopts nothing. No listing is kept for
-the records written before r140 (design D2a): they stay unindexed and age out by
-`createdAt + ttlSeconds`.
+rcB (r142): the index writers. Each session's own infra controller (the object owns its rkey: not a
+`spec.record.uri` binding, not a collection child) keeps its entry in `infra/self`, wherever that
+controller runs (page, iOS `pkg/embedded`, gateway, CLI); there is no central writer.
+
+- Add: once a getRecord shows the record exists (never on the Create pass), the controller adds
+  `{collection, rkey, createdAt, expiresAt (EphemeralInfra), addedAt, writer}`. Remove: after the
+  finalizer's final write is confirmed (and on the live unbind of M5, and when the record is frozen
+  by G2), the entry moves to `recentEnded` (newest first, 32 kept). An entry already present is never
+  rewritten.
+- Writes: `com.atproto.repo.putRecord` with `swapRecord` through `atprotorepo.SwapPutter` on the
+  repo.write handle, or `createRecord` at rkey `self` when there is no index. On InvalidSwap (or a
+  create that finds a record) the controller reads again and applies the same set mutation, at most 5
+  attempts with no sleep, then `Indexed=False` reason `Contended` and the netretry backoff (2 s to
+  30 s) through the requeueAt deadline. A record at `self` that is not an index is never written
+  (`IndexNotIndex`). A full index (256 live) refuses the add (`IndexFull`). Permanent failures (403,
+  link denied) wait 10 min or a new index CID; transient ones (5xx, 429, network) take the backoff.
+- Prune, by any writer during its own write: an expired entry (`expiresAt` passed, no read; endReason
+  `deadline`); and, from at most 2 probes per write (one getRecord each, oldest `addedAt` first, each
+  entry at most once an hour per process), an entry whose record ended or expired, or that is 404 and
+  was added more than 10 min ago (`infra.IndexGoneAfter`; endReason `deleted`).
+- Self-heal: the per-repo index watch `infra-index-<repo name>` (collection `computer.socialweb.infra`,
+  rkeys `[self]`, label `infra.socialweb.computer/index`, owner the last infra that applied it, no
+  controller flag; one per workspace and repo) updates an in-memory copy of the index (by DID) and
+  wakes only the infras whose wanted entry state differs from it. Its deletion (its owner went) wakes
+  the workspace's indexed infras, and one applies it again. The check costs no PDS read; a cold
+  process reads `infra/self` once per DID.
+- The index is a hint. Its errors never fail or delay a deployment: they are logged
+  (`infra_index_write_failed`) and shown as the condition `Indexed` (True `Indexed`; False `Pending`,
+  `Removed`, `RecordInvalid`, `Contended`, `IndexWriteRetrying`, `IndexWriteFailed`, `IndexFull`,
+  `IndexNotIndex`, `RepoPending`). The finalizer's removal is best effort.
+- Write load per session: start 1 index write (plus 1 getRecord of `infra/self` on a cold process and
+  at most 2 probe getRecords); end 1 index write (same reads); each lost swap adds 1 getRecord and
+  1 write. Steady state: no index write; the index watch verifies 1 getRecord per 5 min per repo per
+  workspace.
+- The EphemeralInfra kind's ComponentLink (`compose.InfraLinks`) gains repo.write on
+  `computer.socialweb.infra` for the index. No OAuth scope change: every infra-writing scope set
+  already holds create and update on `computer.socialweb.infra`.
+- The InfraCollection remembers the index entries that came back NotFound, keyed by the index CID,
+  and reads them again only when the index changes (L5).
+
+No listing is kept for the records written before r140 (design D2a): they stay unindexed and age out
+by `createdAt + ttlSeconds`. Rollback from rcB to rcA is safe: the index is left behind and only read.
 
 ### Steady state writes nothing per event: stream progress is coalesced to one write a minute (2026-10-31, r141)
 
