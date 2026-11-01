@@ -332,16 +332,20 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.ApplyLinks(ctx, r, "root", links); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if !c.Applied(r) {
-		values := &manifests.Gateway{}
-		if o.Spec.Network != nil {
-			if pds, err := GatewayPds(*values, c.StateRoot(), o.Spec.Network); err == nil {
-				values.Pds = pds
-			}
+	values := &manifests.Gateway{}
+	if o.Spec.Network != nil {
+		if pds, err := GatewayPds(*values, c.StateRoot(), o.Spec.Network); err == nil {
+			values.Pds = pds
 		}
+	}
+	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(GatewaySet, o.Spec.Profile, values, "association-watch"))
+	if err != nil {
+		return p.retry("its set workloads", err)
+	}
+	if !c.Applied(r) {
 		identity := p.identitySpec(plan)
 		digest, digestErr := compose.InfraDigest(GatewaySet, o.Spec.Profile, values, identity, "association-watch")
-		if digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
+		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its workspace, its records and its requester identity"); err != nil {

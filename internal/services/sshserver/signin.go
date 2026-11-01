@@ -39,6 +39,10 @@ const (
 var errNoOperator = errors.New("this ssh gateway names no operator, so its policy admits no account")
 
 type webSignIn struct {
+	endpoint custody.Endpoint
+
+	handler http.Handler
+
 	signIn *custody.SignIn
 
 	auth *gatewayhttp.RequestAuth
@@ -79,7 +83,7 @@ func (s *Service) openSignIn(ctx context.Context) (*webSignIn, error) {
 		return nil, err
 	}
 	tasks := supervise.New(ctx)
-	web := &webSignIn{signIn: signIn, tasks: tasks}
+	web := &webSignIn{endpoint: endpoint, signIn: signIn, tasks: tasks}
 	if web.auth, err = gatewayhttp.NewRequestAuth(gatewayhttp.RequestAuthOptions{SignIn: signIn, PublicOrigin: origin, Log: s.log}); err != nil {
 		web.close()
 		return nil, err
@@ -89,6 +93,7 @@ func (s *Service) openSignIn(ctx context.Context) (*webSignIn, error) {
 		web.close()
 		return nil, err
 	}
+	web.handler = web.oauth.Handler()
 	return web, nil
 }
 

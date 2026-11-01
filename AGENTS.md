@@ -247,7 +247,21 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     ends unless `LC_KEEP_VM`) or held, is a ComputeContract, so bids and events reach it through the
     addressee index and the ingress like any contract. The iroh dialer socket lives in the SshServer
     state dir, or in the instance runtime dir when that path is over 107 bytes; `run gateway ssh`
-    refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root.
+    refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root. A restart
+    keeps the path whole: every app root (gateway, bidder, requester, network, ssh gateway) renders its
+    set's HostProcesses and OpenBaoServers each pass (compose.SetWorkloads, CheckWorkloads); a
+    missing one, or a HostProcess Lost for a replaceable reason (unit gone, host rebooted, manager or
+    devsup restarted, identity mismatch), which the root deletes, voids the applied-set shortcut and
+    the set is applied again. A per-DID account requester stays composed while its session owner is
+    Pending (it is dropped only when the session expired, the owner signed out or the cap is reached),
+    and in per-user mode the SshServer has no requesterRef and the shared requester no links. The
+    SshServer's web sign-in follows its vault: a rebound Vault (bus NotifyBound from the vault
+    provider) rebuilds the custody sign-in on the new address; MarketIdentity reconciles on the same
+    signal. The atproto plugin marks a session expired only on invalid_grant; a refresh refused for a
+    client-side reason (invalid_client, invalid_client_metadata, unauthorized_client, a DPoP error)
+    leaves it active, and a session expired by one of those before is refreshed again on the next
+    read or proof. A release whose destroy record or submitEvent keeps failing settles as Released
+    when the bidder's vm.terminated appears.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

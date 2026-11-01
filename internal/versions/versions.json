@@ -1272,7 +1272,7 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-atproto",
           "package": ".",
-          "sha256": "7ea0bd7c18b78f11a89a1cb29e75956615b457ba34ec4ebdd3a70e0580a84feb",
+          "sha256": "26ffc763d79a2ce4a84a1d2aca47d708636bda87133bdccb2c60a36f4f9552f6",
           "members": {
             "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
           }
@@ -1281,7 +1281,7 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-atproto",
           "package": ".",
-          "sha256": "586a34668d7fed2a8f5d1b3618b21439b887cdcd31a1aca753bf338d8622ea9c",
+          "sha256": "da3263fa5eaa8dbb548792effdfd94823240a95813ad435172feebfea12967fc",
           "members": {
             "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
           }
@@ -1298,14 +1298,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "4fbb15064fd6075e23e82c7348cda0510ac7028aa5a2230e65337fde24d5c17c",
+          "treeSha256": "ed753a7f9f630a88c8108e54789caaad7fa7b58bf4ff785d61cfdb43a48e655d",
           "rawBytes": 16425086,
-          "zstdBytes": 5157302
+          "zstdBytes": 5157887
         },
         "linux/arm64": {
-          "treeSha256": "56c4a928b8b01ff4c7704bba7ab079a669fd007eac23e7dc201c074087bf9a43",
+          "treeSha256": "cd5bafdf9c8ffa73e8189f186c68c37467a1c9293881dd92376931c6def2c6eb",
           "rawBytes": 15335550,
-          "zstdBytes": 4589165
+          "zstdBytes": 4588735
         },
         "darwin/arm64": {
           "treeSha256": "103721b8a0985135d19c262f30c13d69803c30e0bee82409e3fb47e9ccb3b1cf",
