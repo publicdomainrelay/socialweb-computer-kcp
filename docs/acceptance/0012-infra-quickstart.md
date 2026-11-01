@@ -110,9 +110,18 @@ $SWC run request agent "$NAME" --state-dir "$R"
 $SWC run request release "$NAME" --state-dir "$R"
 ```
 
-or, from the browser page terminal, `kubectl apply -f agent-vm.yaml`, then the agentStart, once the page writes the bundle
-for kubectl-applied agent contracts (page-rc141: the contract fails at once, `reading the secrets bundle ...: not found`;
-the page team's fix is page-rc142).
+or, from the browser page terminal (page-rc142 and later), `kubectl apply -f agent-vm.yaml`, then the Agent button,
+then `kubectl patch ... state Released`. The page writes the ssh key and the agent secrets bundle for a kubectl-applied
+contract.
+
+## Prod Readings (2026-11-01, rc154 bidders, page-rc142)
+
+| Path | Account | Held | Agent | Release |
+| --- | --- | --- | --- | --- |
+| CLI `run request --hold --agent` | alice | 04:05Z, local bidder | `aliceoa-3mz7vzp2j2v2b` joined; answered `x86_64 fc-lpfuqerea3de-1a35a0de` over atirc | token revoked 04:09:57 before vm.delete; first `release` exited 0 while Releasing, a second `release` finished it (open defect) |
+| page terminal, kubectl EphemeralInfra `qsprod` | hat | created 04:10:19, Held 04:11:00, local bidder | `hat-3mz7wtwqt2c2r` joined; ssh `uname -a` from the page terminal | revoked, then Released 04:12:55 |
+
+No token or key material in any log (plaintext check 0 on every log file).
 
 ## Cleanup
 
@@ -124,12 +133,13 @@ the page team's fix is page-rc142).
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `dev up` exit 1: gateway `Requester ... names no identity DID or handle` | a component Failed for a moment at start; `dev status` shows Ready seconds later |
+| `dev up` exit 1: gateway `Requester ... names no identity DID or handle` | before rc156: a component Failed for a moment at start; rc156 `dev up` waits 1 min on a Failed component |
 | `no bids received within 30s`; bidder Bid `policy rejected ... not vouched` (requester-tangled-vouch) | the bidder runs the RFP's attached policy as itself (`self-did` = bidder, `counterparty-did` = requester, PolicyWorkflowRun in `root:bidder-1`): the bidder operator has not vouched the requester; apply vouch-bidder-operator.yaml; denials are cached 5 min |
 | requester -> bidder vouch alone, still `not vouched` | expected: that is the requester's own direction; the bidder-side run needs the operator -> requester record |
 | deno contract `no bids` | the bidder does not serve `deno`: `MarketBidder.spec.computeKinds` |
 | agent contract fails before the RFP: `an agent needs its token in spec.secretsRef` | add `spec.secrets` for the contract |
 | agent mint error | the bundle path is not in the vault (write it first), or the local requester DID is unknown to irc.fedfork.com (prod step) |
 | `Using secret key ...` on the terminal | dumbpipe's own ephemeral key on stderr: `2>/dev/null` in the ProxyCommand |
-| EphemeralInfra `endWhen: Complete` stays `Released` | it ends only at the next reconcile, today the ttl requeue: Released 03:32:06, gone 03:39:10 (`expiresAt` 03:39:08); open defect for the lead |
-| released DenoSandbox ComputeVM stays `Running` with `spec.release` set | bidder side: the sandbox ComputeVM is never finished; open defect for the lead; `dev down` removes it |
+| EphemeralInfra `endWhen: Complete` stays `Released` until its ttl | fixed in rc156: it ends in the pass that sees every contract Released or Failed (released 04:02:28, gone 04:02:30) |
+| released DenoSandbox ComputeVM stays `Running` with `spec.release` set | fixed in rc156: the bidder terminates and deletes it like a VM (released 04:01:45, gone 04:01:47) |
+| `run request release` exits 0 while the contract is still `Releasing`, the VM keeps running | open defect (2026-11-01 prod, `--hold --agent`); run `run request release` again |
