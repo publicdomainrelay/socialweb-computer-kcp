@@ -65,6 +65,8 @@ type Config struct {
 	CocoreAppName string
 
 	CocoreTTL time.Duration
+
+	PDSOverrides map[string]string
 }
 
 type Deps struct {
@@ -127,7 +129,7 @@ func New(cfg Config, deps Deps) (*Gateway, error) {
 		directory = identity.DefaultDirectory()
 	}
 	authorizer, err := sshtransport.NewPDSKeyAuthorizer(sshtransport.KeyAuthorizerOptions{
-		Resolver: sshtransport.DirectoryResolver{Directory: directory},
+		Resolver: sshtransport.PDSOverrideResolver{Inner: sshtransport.DirectoryResolver{Directory: directory}, PDS: cfg.PDSOverrides},
 		Records: &sshtransport.HTTPRecordSource{
 			TrustedHosts: append([]string(nil), cfg.TrustedHosts...),
 			Trust:        deps.Trust,

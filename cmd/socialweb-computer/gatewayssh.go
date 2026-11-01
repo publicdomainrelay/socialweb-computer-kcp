@@ -297,6 +297,11 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 		instance = gatewayssh.InstanceID(name)
 	}
 	vals := r.vals.With("instance", instance).With("profile", bootstrap.ProfileQuick)
+	if l, err := r.a.layoutOf(instance, vals); err != nil {
+		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
+	} else if err := sshgateway.CheckIrohSocket(l); err != nil {
+		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
+	}
 	up, code := bringUp(ctx, r.a, vals, false)
 	if code != exitOK {
 		return code

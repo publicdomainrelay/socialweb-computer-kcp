@@ -144,10 +144,15 @@ func (s *HTTPRecordSource) GetRecord(ctx context.Context, pds, did, collection, 
 	q.Set("rkey", rkey)
 	u.RawQuery = q.Encode()
 	trusted := make(map[string]bool, len(s.TrustedHosts))
-	for _, host := range s.TrustedHosts {
-		trusted[host] = true
+	host := strings.ToLower(u.Hostname())
+	for _, name := range s.TrustedHosts {
+		name = strings.ToLower(strings.TrimSpace(name))
+		trusted[name] = true
+		if name != "" && strings.HasSuffix(host, "."+name) {
+			trusted[host] = true
+		}
 	}
-	if host := u.Hostname(); s.Trust != nil && host != "" && s.Trust(host) {
+	if s.Trust != nil && host != "" && s.Trust(host) {
 		trusted[host] = true
 	}
 	maxBytes := s.MaxBytes
@@ -485,4 +490,27 @@ func sshKeyMatches(stored any, presented PresentedKey) bool {
 		return false
 	}
 	return parsed.Algo == presented.Algo && parsed.Key == presented.Key
+}
+
+type PDSOverrideResolver struct {
+	Inner IdentityResolver
+
+	PDS map[string]string
+}
+
+var _ IdentityResolver = PDSOverrideResolver{}
+
+func (r PDSOverrideResolver) ResolveHandle(ctx context.Context, handle string) (string, error) {
+	return r.Inner.ResolveHandle(ctx, handle)
+}
+
+func (r PDSOverrideResolver) ResolveDID(ctx context.Context, did string) (*DIDDocument, error) {
+	doc, err := r.Inner.ResolveDID(ctx, did)
+	if err != nil {
+		return nil, err
+	}
+	if pds := strings.TrimSpace(r.PDS[doc.DID]); pds != "" {
+		doc.PDS = pds
+	}
+	return doc, nil
 }

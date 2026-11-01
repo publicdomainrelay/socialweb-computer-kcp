@@ -674,6 +674,8 @@ type RequesterSpec struct {
 	AtircMintedRef *commonv1.SecretRef `json:"atircMintedRef,omitempty"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
+
+	ContractOwnerDid string `json:"contractOwnerDid,omitempty"`
 }
 
 type GatewayAPI struct {
@@ -792,6 +794,8 @@ type SshServerSpec struct {
 	MaxAccounts int32 `json:"maxAccounts,omitempty" apigen:"default=64,minimum=1"`
 
 	PolicyEngineRef *commonv1.ObjectRef `json:"policyEngineRef,omitempty"`
+
+	AccountRequesters bool `json:"accountRequesters,omitempty"`
 
 	MaxConnections int32 `json:"maxConnections,omitempty" apigen:"default=10000,minimum=1"`
 

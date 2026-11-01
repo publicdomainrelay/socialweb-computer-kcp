@@ -142,6 +142,9 @@ func (q *Requester) ObserveContractEvent(ctx context.Context, change contractmar
 		return 0, nil
 	}
 	event := *change.Event
+	if contract := change.Contract; contract != nil && !q.ownsContract(*contract) {
+		return 0, nil
+	}
 	if prev, ok := q.contractEvents.Get(event.Name); ok && (prev.UID == "" || prev.UID == event.UID) && statusAhead(prev.Status, event.Status) {
 		event.Status = *prev.Status.DeepCopy()
 	}

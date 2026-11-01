@@ -20,10 +20,15 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 	switch change.Kind {
 	case contractmarket.KindComputeContract:
 		if change.Gone || change.ComputeContract == nil {
+			q.foreignContracts.Delete(change.Name)
 			q.contractGone(change.Name)
 			return 0, nil
 		}
 		contract := *change.ComputeContract
+		if !q.ownsContract(contract) {
+			q.foreignContracts.Store(change.Name, true)
+			return 0, nil
+		}
 		q.contracts.Put(change.Name, contract)
 		q.observePending(contract)
 		q.reconcileContract(ctx, contract)
@@ -47,6 +52,9 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 }
 
 func (q *Requester) observeSync(ctx context.Context, item v1alpha1.StateSync) (time.Duration, error) {
+	if mine, retry := q.syncOwnership(item); !mine {
+		return retry, nil
+	}
 	q.syncs.Put(item.Name, item)
 	var wait time.Duration
 	if q.outbox.Handles(&item) {

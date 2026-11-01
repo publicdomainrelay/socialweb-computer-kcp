@@ -236,8 +236,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     auth, repo links and the SshServer's stream link to it. An ssh session of DID X runs on X's
     requester (which refuses any other DID), so its RFP, accept and records are X's; with no link to
     it the client gets "sign in at <public-origin> first", any other failure "ssh gateway error", exit
-    1 either way. In this mode the shared Requester `requester` and its identity are not composed,
-    and the SshGateway is Ready without one. The set `ssh-gateway` binds marketidentities in root.
+    1 either way. The owner sessions file (market network seam) composes the same per-DID requesters,
+    one per account in the file, signed in with its password. In both modes the shared Requester
+    `requester` and its identity are not composed, the SshServer has `spec.accountRequesters`, and the
+    SshGateway is Ready without one. Every ssh gateway requester names its ingress Exposure in
+    `spec.marketExposureRef`, so its RFPs and accepts carry the submitBid and submitEvent callbacks,
+    and a per-DID requester has `spec.contractOwnerDid`: it runs only the ComputeContracts whose
+    `spec.ownerDid` is that DID and their StateSyncs and ContractEvents, so many requesters share one
+    workspace. Every ssh session, transient (`ssh-run-<hash>`, TTL 1 h, released when the command
+    ends unless `LC_KEEP_VM`) or held, is a ComputeContract, so bids and events reach it through the
+    addressee index and the ingress like any contract. The iroh dialer socket lives in the SshServer
+    state dir, or in the instance runtime dir when that path is over 107 bytes; `run gateway ssh`
+    refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

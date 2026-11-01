@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"path/filepath"
 	"slices"
@@ -100,7 +101,7 @@ func SshGatewayValues(spec v1alpha1.SshGatewaySpec, stateDir string, l devinstan
 		return v, errors.New("sshgateway: the instance has no dumbpipe executable for the iroh dialer (dev up --dumbpipe-path in a dev build)")
 	}
 	v.IrohDial = manifests.IrohDial{Unit: l.Names().HostProcessPrefix() + SshGatewayIrohDial + ".service",
-		Socket: filepath.Join(stateDir, SshGatewayIrohSocket), Dumbpipe: dumbpipe}
+		Socket: IrohSocketPath(l), Dumbpipe: dumbpipe}
 	if err := (irohdial.Config{Socket: v.IrohDial.Socket, Dumbpipe: dumbpipe}).Check(); err != nil {
 		return v, err
 	}
@@ -327,8 +328,20 @@ func ownerIdentityOf(path string) (string, string) {
 	return did, s.Identifier
 }
 
-func irohSocket(stateRoot string) string {
-	return filepath.Join(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindSshServer, SshServerComponent), SshGatewayIrohSocket)
+func IrohSocketPath(l devinstance.Layout) string {
+	inState := filepath.Join(compose.ComponentCRStateDir(l.StateDir, compose.ComponentKindSshServer, SshServerComponent), SshGatewayIrohSocket)
+	if len(inState) <= irohdial.MaxSocketPath || l.RuntimeDir == "" {
+		return inState
+	}
+	return filepath.Join(l.RuntimeDir, SshGatewayIrohSocket)
+}
+
+func CheckIrohSocket(l devinstance.Layout) error {
+	socket := IrohSocketPath(l)
+	if len(socket) > irohdial.MaxSocketPath {
+		return fmt.Errorf("sshgateway: the iroh dialer socket %s is %d bytes, over the %d a unix socket path takes; pick a shorter --state-dir or --instance", socket, len(socket), irohdial.MaxSocketPath)
+	}
+	return nil
 }
 
 func (p *pass) requesterIdentity(ctx context.Context, plan compose.AccountPlan, apply bool) (*v1alpha1.ComponentIdentity, *v1alpha1.MarketIdentity, error) {
@@ -383,7 +396,8 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		Mode:                 mode,
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		OwnerSessionsFile:    o.Spec.OwnerSessionsFile,
-		IrohSocket:           irohSocket(stateRoot),
+		IrohSocket:           IrohSocketPath(p.c.Config().Layout),
+		MarketExposureRef:    requesterExposureRef(marketrequester.RequesterComponent),
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
 		Comms:                o.Spec.Comms,
@@ -397,6 +411,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		VaultRef:          vault,
 		Hostnames:         hostnames,
 		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+		AccountRequesters: perUserAccounts(o.Spec),
 		PublicListen:      publicListen(o.Spec),
 		WebListen:         webListen(o.Spec),
 		PublicOrigin:      compose.OptionValue(o.Spec.Options, compose.PublicOriginOption),
@@ -433,7 +448,47 @@ func publicListen(spec v1alpha1.SshGatewaySpec) string {
 }
 
 func perUserAccounts(spec v1alpha1.SshGatewaySpec) bool {
-	return spec.OwnerSessionsFile == "" && compose.OptionValue(spec.Options, compose.PublicOriginOption) != ""
+	return spec.OwnerSessionsFile != "" || compose.OptionValue(spec.Options, compose.PublicOriginOption) != ""
+}
+
+func requesterExposureRef(name string) *commonv1.LocalObjectRef {
+	return &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindRequester, name) + compose.ExposureIngressSuffix}
+}
+
+type accountRequester struct {
+	did string
+
+	identity *v1alpha1.ComponentIdentity
+
+	pdsRef *commonv1.ObjectRef
+
+	pdsDID string
+
+	links []compose.Link
+}
+
+func (p *pass) ownerSessionAccounts(ctx context.Context, base v1alpha1.RequesterSpec, mount string) ([]accountRequester, error) {
+	c, r, o := p.c, p.r, p.o
+	ws := r.Workspace
+	sessions, err := compose.ReadOwnerSessions(o.Spec.OwnerSessionsFile)
+	if err != nil {
+		return nil, err
+	}
+	var out []accountRequester
+	for _, did := range slices.Sorted(maps.Keys(sessions)) {
+		if len(out) >= maxAccounts(o.Spec) {
+			break
+		}
+		s := sessions[did]
+		owner := compose.Owner{DID: did, PdsURL: s.Service, Identifier: s.Identifier, Password: s.Password,
+			CARef: c.PublishNetworkTrust(r, o.Spec.Network), Vault: SshGatewayVaultServer, Mount: mount}
+		if err := c.ApplyOwnerRepo(ctx, r, ws, owner); err != nil {
+			c.Log().Warn("composing an ssh account's repo", "root", r.Owner(), "did", did, "err", err.Error())
+		}
+		out = append(out, accountRequester{did: did, identity: &v1alpha1.ComponentIdentity{Did: did, Handle: strings.TrimSpace(s.Identifier)},
+			pdsRef: base.PdsRef, pdsDID: base.PdsDID, links: compose.OwnerRepoLinks(ws, ws, owner)})
+	}
+	return out, nil
 }
 
 func withoutSharedRequester(desired []compose.Desired) []compose.Desired {
@@ -450,7 +505,7 @@ func withoutSharedRequester(desired []compose.Desired) []compose.Desired {
 	return out
 }
 
-func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired) ([]compose.Desired, []compose.Link, error) {
+func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired, mount string) ([]compose.Desired, []compose.Link, error) {
 	c, r, o := p.c, p.r, p.o
 	ws := r.Workspace
 	if !perUserAccounts(o.Spec) {
@@ -465,6 +520,52 @@ func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired)
 	if base == nil {
 		return nil, nil, nil
 	}
+	server := compose.AppRef(compose.ComponentKindSshServer, SshServerComponent, ws)
+	links := []compose.Link{compose.PolicyRunLink(server, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), sshserver.SignInWorkflow)}
+	var accounts []accountRequester
+	var err error
+	if o.Spec.OwnerSessionsFile != "" {
+		accounts, err = p.ownerSessionAccounts(ctx, *base, mount)
+	} else {
+		var sessionLinks []compose.Link
+		accounts, sessionLinks, err = p.sessionOwnerAccounts(ctx)
+		links = append(links, sessionLinks...)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []compose.Desired
+	for _, a := range accounts {
+		name := contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, a.did)
+		spec := *base
+		spec.ComponentSpec = c.NetworkComponentSpec(r, compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, name), o.Spec.Network)
+		spec.Identity = a.identity
+		spec.PdsRef, spec.PdsDID = a.pdsRef, a.pdsDID
+		spec.OperatorDID, spec.GuestSSHKeysFile, spec.Hostnames = "", "", nil
+		if a.identity.Handle != "" {
+			spec.Hostnames = []string{a.identity.Handle}
+		}
+		if o.Spec.OwnerSessionsFile == "" {
+			spec.OwnerSessionsFile = ""
+			spec.Mode = compose.RequesterMode(v1alpha1.MarketIdentityModeOAuthSessionProxy)
+		}
+		spec.MarketExposureRef = requesterExposureRef(name)
+		spec.ContractOwnerDid = a.did
+		out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: name, Spec: spec})
+		out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, name, "http", o.Spec.Network, spec.Hostnames, false, true)...)
+		requester := compose.AppRef(compose.ComponentKindRequester, name, ws)
+		links = append(links, a.links...)
+		links = append(links,
+			compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...),
+			compose.RepoWriteLink(requester, compose.RepoRefIn(a.did, ws), compose.ScopeAll),
+			compose.RefLink(server, requester, compose.Cap(sshcontract.CapabilityRun, sshcontract.ScopeRun)))
+	}
+	return out, links, nil
+}
+
+func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []compose.Link, error) {
+	c, r, o := p.c, p.r, p.o
+	ws := r.Workspace
 	dids, err := c.SessionOwners(ctx, ws)
 	if err != nil {
 		return nil, nil, err
@@ -488,9 +589,8 @@ func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired)
 	if err := c.PruneSessionOwners(ctx, ws, keep); err != nil {
 		return nil, nil, err
 	}
-	var out []compose.Desired
+	var out []accountRequester
 	var links []compose.Link
-	server := compose.AppRef(compose.ComponentKindSshServer, SshServerComponent, ws)
 	for _, did := range keep {
 		owner := compose.SessionOwner{DID: did, Vault: SshGatewayVaultServer, Scope: compose.SshGatewayAtprotoScope()}
 		st, err := c.SessionOwnerState(ctx, ws, did)
@@ -508,28 +608,12 @@ func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired)
 		if err != nil {
 			return nil, nil, err
 		}
-		name := contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did)
-		handle := strings.TrimSpace(id.Status.Handle)
-		spec := *base
-		spec.ComponentSpec = c.NetworkComponentSpec(r, compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, name), o.Spec.Network)
-		spec.Identity = compose.ComponentIdentity(id, handle)
 		pdsRef, pdsDID := compose.SessionOwnerPds(st.PdsURL, "")
-		spec.PdsRef, spec.PdsDID = &pdsRef, pdsDID
-		spec.OperatorDID, spec.OwnerSessionsFile, spec.GuestSSHKeysFile, spec.Hostnames = "", "", "", nil
-		if handle != "" {
-			spec.Hostnames = []string{handle}
-		}
-		spec.Mode = compose.RequesterMode(v1alpha1.MarketIdentityModeOAuthSessionProxy)
-		out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: name, Spec: spec})
-		out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, name, "http", o.Spec.Network, spec.Hostnames, false, true)...)
-		requester := compose.AppRef(compose.ComponentKindRequester, name, ws)
-		links = append(links,
-			compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...),
-			compose.ServiceAuthLink(requester, compose.AppRef(compose.KindMarketIdentity, id.Name, ws), did),
-			compose.RepoWriteLink(requester, compose.RepoRefIn(did, ws), compose.ScopeAll),
-			compose.RefLink(server, requester, compose.Cap(sshcontract.CapabilityRun, sshcontract.ScopeRun)))
+		identityRef := compose.AppRef(compose.KindMarketIdentity, id.Name, ws)
+		out = append(out, accountRequester{did: did, identity: compose.ComponentIdentity(id, strings.TrimSpace(id.Status.Handle)), pdsRef: &pdsRef, pdsDID: pdsDID,
+			links: []compose.Link{compose.ServiceAuthLink(compose.AppRef(compose.ComponentKindRequester,
+				contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did), ws), identityRef, did)}})
 	}
-	links = append(links, compose.PolicyRunLink(server, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), sshserver.SignInWorkflow))
 	return out, links, nil
 }
 
@@ -633,7 +717,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err != nil {
 		return p.fail(err)
 	}
-	accounts, accountLinks, err := p.accountRequesters(ctx, desired)
+	accounts, accountLinks, err := p.accountRequesters(ctx, desired, mount)
 	if err != nil {
 		return p.retry("the signed-in accounts", err)
 	}

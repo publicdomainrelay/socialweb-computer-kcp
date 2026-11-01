@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -73,4 +74,15 @@ func (t *ownerTokens) login(ctx context.Context) (string, time.Time, error) {
 		return session.AccessJWT, time.Now(), nil
 	}
 	return session.AccessJWT, expires.Add(-pdsclient.TokenExpirySkew), nil
+}
+
+func ownerSessionPDS(sessions map[string]ownersession.Session) map[string]string {
+	if len(sessions) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(sessions))
+	for did, session := range sessions {
+		out[did] = strings.TrimRight(strings.TrimSpace(session.Service), "/")
+	}
+	return out
 }

@@ -73,7 +73,7 @@ func New(spec v1alpha1.SshServerSpec, deps Deps) (*Service, error) {
 		s.ownerSessions = sessions
 		did = cmp.Or(did, owner)
 	}
-	s.perUser = perUserMode(spec, len(s.ownerSessions))
+	s.perUser = spec.AccountRequesters
 	hostKeyPath := spec.HostKeyRef
 	if hostKeyPath == "" && stateDir != "" {
 		hostKeyPath = filepath.Join(stateDir, "ssh_host_ed25519_key")
@@ -106,6 +106,7 @@ func New(spec v1alpha1.SshServerSpec, deps Deps) (*Service, error) {
 		CocoreAPIBaseURL:   gateway.DefaultCocoreAPIBaseURL,
 		CocoreAppName:      gateway.DefaultCocoreAppName,
 		CocoreTTL:          gateway.DefaultCocoreTTL,
+		PDSOverrides:       ownerSessionPDS(s.ownerSessions),
 	}
 	log := deps.Log
 	if log == nil {
