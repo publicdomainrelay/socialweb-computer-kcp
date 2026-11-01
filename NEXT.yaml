@@ -971,9 +971,3 @@ paused_2026_10_19:
       policy run is skipped for free bids (internal/market/requester/runner.go policyRef != nil
       && !winner.Free), so free winners get the scope run only. Owner to decide whether free
       winners also get the full run.
-  - id: PAGE-EVENTSTREAM-LINK-DENIED
-    text: >
-      The page logs "bus: link denied EventStream watch-einfra-<infra> -> EventSource
-      watch-einfra-<infra> capability=events.subscribe{computer.socialweb.ephemeralInfra,...}"
-      and retries (39x on the :8090 page on 2026-10-30, predates plan 0037). Triage the
-      capability grant for the infra watch.
