@@ -40,7 +40,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-operator-signin", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -286,6 +286,9 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	}
 	if args := vals.String("bidder-policy-args"); args != "" && !slices.ContainsFunc(r.options, func(o v1alpha1.ApplicationOption) bool { return o.Name == "policy-args" }) {
 		r.options = append(r.options, v1alpha1.ApplicationOption{Name: "policy-args", Value: args})
+	}
+	if account := vals.String("bidder-operator-signin"); account != "" && !slices.ContainsFunc(r.options, func(o v1alpha1.ApplicationOption) bool { return o.Name == compose.OperatorSignInOption }) {
+		r.options = append(r.options, v1alpha1.ApplicationOption{Name: compose.OperatorSignInOption, Value: account})
 	}
 	switch {
 	case r.network != "" && r.profile != marketbidder.BidderProfileNetwork:

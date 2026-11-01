@@ -110,6 +110,56 @@ The bidder's own `AtprotoRecord/association` is applied through the app's PDS by
 controller. The helper writes the operator's claim once; the verified claim is the proof, and the
 identity reports `Associated=True`.
 
+### Operator sign-in: the operator's vouches from the bidder kcp
+
+The option `operator-signin` (plan 0039 D5) signs the operator's own account in next to the bidder, so
+[../examples/infra/vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml) applies unchanged
+in the bidder kcp, as in a market network. Set it once:
+
+| where | how |
+| --- | --- |
+| `install bidder` | `--bidder-operator-signin <operator handle or DID>`, written to config.json `bidder-operator-signin` |
+| `run bidder` | `--bidder-operator-signin <handle>`, or `-- --operator-signin <handle>` (wins) |
+| config.json | `"bidder-operator-signin": "<handle>"`, or `"bidder-options": "--operator-signin <handle>"` |
+
+It composes, in the bidder's workspace, the names a market network uses:
+
+- `MarketIdentity operator`: mode `oauthQr`, `spec.sessionScope` `atproto
+  repo:sh.tangled.graph.vouch?action=create&action=update` (the scope the identity checks and asks for; nothing
+  else), the session at `<mount>/identity/operator/oauth-session` of the bidder's OpenBao, association `Skip`;
+  the transferred QR session must be the named account
+- once it is Ready: `RemotePDS operator-<hash>` (its PDS), `RemoteRepo operator`, `AtprotoRepo operator` and the
+  ComponentLink `link-records-operator`, which lets AtprotoRecords labelled
+  `apps.socialweb.computer/record-repo: operator` write `sh.tangled.graph.vouch` through that repo
+
+Without the option nothing of it is composed, and the bidder's own `MarketIdentity bidder` and its scope never
+change. The operator account should be the bidder's associated operator (`MarketIdentity bidder`
+`status.approvedAssociations`): `bidder-tangled-vouch` reads that operator's vouches.
+
+```bash
+STATE=/var/lib/socialweb-computer/swc-bidder
+K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+kb() { sudo kubectl --kubeconfig "$K" "$@"; }
+URL=$(kb get marketidentity operator -o jsonpath='{.status.pendingAction.url}')
+deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$URL"
+kb get marketidentity operator -o jsonpath='{.status.phase} {.status.did}{"\n"}'
+REQ=did:plc:...
+sed -e "s/REPLACE-REQUESTER-DID/$REQ/" -e "s/2026-11-01T00:00:00Z/$(date -u +%Y-%m-%dT%H:%M:%SZ)/" \
+  examples/infra/vouch-bidder-operator.yaml | kb apply -f -
+kb get atprotorecords.socialweb.computer operator-vouch-requester -o jsonpath='{.status.phase} {.status.uri}{"\n"}'
+```
+
+- Applied with `at://<operator did>/sh.tangled.graph.vouch/<requester did>`; the record is `deletionPolicy:
+  Retain`, so a `kubectl delete` keeps it in the repo
+- the QR page decides the scope it asks the PDS for; a session granted without the vouch scope fails the
+  identity's scope check ("lacks scopes the identity now needs"); sign in again once the QR page asks for it
+- the QR link expires after 5 minutes; read it right before the sign-in, never print it
+- `-- --operator-signin-mode pdsAccount --operator-pds-url <url>` signs the operator in with a password instead
+  (the market network's mode, an app password on a hosted PDS): put it in the bidder's OpenBao at
+  `<mount>/identity/operator/keys`, key `password`, before the bidder starts
+- removing the option stops composing them; the objects it made stay until you delete them
+  (`marketidentity`, `atprotorepo`, `remoterepo` named `operator`); the records stay in the repo
+
 ## Upgrade and uninstall
 
 ```bash

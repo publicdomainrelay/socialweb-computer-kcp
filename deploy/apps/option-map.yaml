@@ -65,6 +65,9 @@ apps:
       - {name: guest-lan-udp, to: spec.guestNetwork.lanUDP}
       - {name: guest-host-udp, to: spec.guestNetwork.hostUDP}
       - {name: policy-args, to: options}
+      - {name: operator-signin, to: options}
+      - {name: operator-signin-mode, to: options}
+      - {name: operator-pds-url, to: options}
       - {name: ingress-provider, to: spec.ingress.provider}
       - {name: ingress-public-host, to: spec.ingress.publicHost}
       - {name: ingress-xrpc-host, to: spec.ingress.xrpc.ingressProxyHost}

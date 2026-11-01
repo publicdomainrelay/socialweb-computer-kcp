@@ -174,17 +174,30 @@ func (c *Composer) ApplyOperatorRepo(ctx context.Context, r Root, ws string, op 
 			return err
 		}
 	}
-	vault := func() *commonv1.ObjectRef {
-		return &commonv1.ObjectRef{Kind: v1alpha1.KindOpenBaoServer, Name: op.Vault, Workspace: r.Workspace}
-	}
+	return c.applyOperatorRecordRepo(ctx, r, ws, op, did, operatorAccountIdentity(r, op))
+}
+
+func operatorVault(r Root, op Operator) *commonv1.ObjectRef {
+	return &commonv1.ObjectRef{Kind: v1alpha1.KindOpenBaoServer, Name: op.Vault, Workspace: r.Workspace}
+}
+
+func operatorAccountIdentity(r Root, op Operator) v1alpha1.MarketIdentitySpec {
 	identity := v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModePdsAccount, Handle: strings.TrimSpace(op.Identifier),
 		PdsURL: strings.TrimRight(strings.TrimSpace(op.PdsURL), "/"), Association: v1alpha1.AssociationSkip,
-		KeysRef:    &commonv1.SecretRef{Vault: vault(), Mount: op.Mount, Path: OperatorKeysPath},
-		SessionRef: &commonv1.SecretRef{Vault: vault(), Mount: op.Mount, Path: OperatorSessionPath}}
+		KeysRef:    &commonv1.SecretRef{Vault: operatorVault(r, op), Mount: op.Mount, Path: OperatorKeysPath},
+		SessionRef: &commonv1.SecretRef{Vault: operatorVault(r, op), Mount: op.Mount, Path: OperatorSessionPath}}
+	if op.CARef != nil && op.tls() {
+		ca := *op.CARef
+		identity.CARef = &ca
+	}
+	return identity
+}
+
+func (c *Composer) applyOperatorRecordRepo(ctx context.Context, r Root, ws string, op Operator, did string, identity v1alpha1.MarketIdentitySpec) error {
 	var caRef *commonv1.ObjectRef
 	if op.CARef != nil && op.tls() {
 		ca := *op.CARef
-		caRef, identity.CARef = &ca, &ca
+		caRef = &ca
 	}
 	links := OperatorRecordLinks(ws, op.ref(r.Workspace), did, caRef)
 	if err := c.AddLinks(ctx, r, operatorRecordLinkSet, links); err != nil {

@@ -98,6 +98,20 @@ func (a *Accounts) scopesFor(mode v1alpha1.MarketIdentityMode) []string {
 	return a.oauthScopes()
 }
 
+func ownScopes(id *v1alpha1.MarketIdentity) []string {
+	if id == nil || id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthSessionProxy {
+		return nil
+	}
+	return strings.Fields(id.Spec.SessionScope)
+}
+
+func (a *Accounts) requestedScopes(id *v1alpha1.MarketIdentity) []string {
+	if scopes := ownScopes(id); len(scopes) > 0 {
+		return scopes
+	}
+	return a.scopesFor(id.Spec.Mode)
+}
+
 func (a *Accounts) statesFor(workspace string) oauthclient.StateStore {
 	if a.oauth.States == nil && a.oauth.StateRef != nil {
 		if vault := a.vaultFor(workspace); vault != nil {
@@ -112,7 +126,7 @@ func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alp
 	key := qrKey(workspace, id.Name)
 	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
-		signed := a.sessionSignedIn(ctx, status, generation, session, handle, ref)
+		signed := a.sessionSignedIn(ctx, id, status, generation, session, handle, ref)
 		if signed.Status.PendingAction == nil {
 			a.browser.Delete(key)
 			return signed, nil
@@ -292,7 +306,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
 		a.qr.Delete(key)
-		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
+		return a.sessionSignedIn(ctx, id, status, generation, session, handle, ref), nil
 	}
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthQr needs spec.sessionRef for the oauth session; no secret is written to status"), nil
@@ -328,10 +342,10 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	} else {
 		if !sessionQr.GrantReported() {
 			a.log.Info("qr_session_grant_unverified", "workspace", workspace, "identity", id.Name, "did", sessionQr.UserDID,
-				"assumed", strings.Join(a.qrScopes(), " "))
+				"assumed", strings.Join(a.requestedScopes(id), " "))
 		}
 		var data oauthclient.SessionData
-		data, err = sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
+		data, err = sessionQr.SessionData(a.sessionClientID(id), a.requestedScopes(id))
 		if err == nil {
 			data = a.sessionWithEndpoints(ctx, data)
 			session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
@@ -348,7 +362,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	if err != nil {
 		return pending(status, generation, "SessionRestoreFailed", err.Error()), err
 	}
-	return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
+	return a.sessionSignedIn(ctx, id, status, generation, session, handle, ref), nil
 }
 
 func qrPending(status v1alpha1.MarketIdentityStatus, generation int64, qr *qrTransfer, need signInNeed) v1alpha1.MarketIdentityStatus {
@@ -374,7 +388,7 @@ func (a *Accounts) oauthDelegated(ctx context.Context, workspace string, id *v1a
 	status v1alpha1.MarketIdentityStatus) (Result, error) {
 	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
-		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
+		return a.sessionSignedIn(ctx, id, status, generation, session, handle, ref), nil
 	}
 	if errors.Is(err, errNoSessionRef) {
 		return pending(status, generation, "AwaitingSession", "mode oauthDelegated waits for spec.sessionRef"), nil
@@ -455,6 +469,9 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 		return "", "", time.Time{}, err
 	}
 	scopes := a.oauthScopes()
+	if own := ownScopes(id); len(own) > 0 {
+		scopes = own
+	}
 	pendingAuth := oauthclient.PendingAuth{
 		State:                   state,
 		CodeVerifier:            verifier,
@@ -603,7 +620,7 @@ func (a *Accounts) restoreOAuthSession(ctx context.Context, workspace string, id
 		Handle:     handle,
 		RepoDID:    stored[0].AccountDID,
 		ClientID:   a.sessionClientID(id),
-		Scopes:     a.scopesFor(id.Spec.Mode),
+		Scopes:     a.requestedScopes(id),
 		Directory:  a.oauth.Directory,
 		HTTPClient: client,
 		Store:      store,
@@ -648,6 +665,9 @@ func (e *scopeChangedError) subjects() []string {
 func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthSessionProxy {
 		return strings.Fields(id.Spec.SessionScope)
+	}
+	if scopes := ownScopes(id); len(scopes) > 0 {
+		return scopes
 	}
 	return atprotooauth.RequiredScopes(a.oauthScopes())
 }
@@ -735,7 +755,7 @@ func (a *Accounts) openSessionData(ctx context.Context, workspace string, id *v1
 		RepoDID:    data.AccountDID,
 		PDSURL:     data.HostURL,
 		ClientID:   a.sessionClientID(id),
-		Scopes:     a.scopesFor(id.Spec.Mode),
+		Scopes:     a.requestedScopes(id),
 		Directory:  a.oauth.Directory,
 		HTTPClient: client,
 		Store:      &vaultSessionStore{vault: vault, ref: *ref, clientID: a.pinnedClientID(id)},
@@ -767,11 +787,11 @@ func saveSession(ctx context.Context, vault SecretStore, ref *commonv1.SecretRef
 	return (&vaultSessionStore{vault: vault, ref: *ref}).Save(ctx, data)
 }
 
-func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketIdentityStatus, generation int64,
+func (a *Accounts) sessionSignedIn(ctx context.Context, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus, generation int64,
 	session *oauthclient.Session, handle string, ref *commonv1.SecretRef) Result {
 	token, _ := session.AccessToken(ctx)
 	out := signedIn(status, generation, session.DID(), handle, session.HostURL(), ref, token)
-	if missing := a.upgradeScopes(session.Scopes()); len(missing) > 0 {
+	if missing := a.upgradeScopes(id, session.Scopes()); len(missing) > 0 {
 		subjects := make([]string, 0, len(missing))
 		for _, scope := range missing {
 			subjects = append(subjects, atprotooauth.ScopeSubject(scope))
@@ -783,8 +803,8 @@ func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketId
 	return out
 }
 
-func (a *Accounts) upgradeScopes(granted []string) []string {
-	if !atprotooauth.KnownGrant(granted) {
+func (a *Accounts) upgradeScopes(id *v1alpha1.MarketIdentity, granted []string) []string {
+	if !atprotooauth.KnownGrant(granted) || len(ownScopes(id)) > 0 {
 		return nil
 	}
 	var optional []string

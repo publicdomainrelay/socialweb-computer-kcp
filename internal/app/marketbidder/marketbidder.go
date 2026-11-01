@@ -542,6 +542,7 @@ func (p *pass) account(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	p.operatorSignIn(ctx, mount)
 	if err := p.rotateSigningKey(ctx, mount); err != nil {
 		p.log().Warn("rotating the bidder's OIDC signing key", "err", err.Error())
 	}
@@ -686,6 +687,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if o.Spec.Profile == BidderProfileNetwork {
 		p.operator(ctx, id, mount)
 	}
+	p.operatorSignIn(ctx, mount)
 	if snap.Satisfied(desired) && p.st.Did != "" {
 		return p.ready("every component is ready")
 	}
@@ -713,8 +715,34 @@ func (p *pass) operator(ctx context.Context, id *v1alpha1.MarketIdentity, mount 
 				"handle", o.Spec.Identity.Handle, "bidderDid", id.Status.Did)
 		}
 	}
+	if compose.OperatorSignInSet(o.Spec.Options) {
+		return
+	}
 	if err := c.ApplyOperatorRepo(ctx, r, r.Workspace, op); err != nil {
 		p.log().Warn("composing the repo the market network operator account's declared records write through", "err", err.Error())
+	}
+}
+
+func (p *pass) operatorSignIn(ctx context.Context, mount string) {
+	c, r, o := p.c, p.r, p.o
+	if !compose.OperatorSignInSet(o.Spec.Options) {
+		return
+	}
+	var caRef *commonv1.ObjectRef
+	if compose.OptionValue(o.Spec.Options, compose.OperatorSignInModeOption) == string(v1alpha1.MarketIdentityModePdsAccount) {
+		caRef = c.PublishNetworkTrust(r, o.Spec.Network)
+	}
+	s, err := compose.OperatorSignInOf(o.Spec.Options, BidderVaultServer, mount, caRef)
+	if err != nil {
+		p.log().Warn("bidder_operator_signin_refused", "err", err.Error())
+		return
+	}
+	did, err := c.ApplyOperatorSignIn(ctx, r, s)
+	switch {
+	case err != nil:
+		p.log().Warn("bidder_operator_signin", "account", s.Account, "mode", string(s.Mode), "err", err.Error())
+	case did == "":
+		p.log().Info("bidder_operator_signin_waiting", "account", s.Account, "mode", string(s.Mode), "identity", compose.OperatorRepoName)
 	}
 }
 
