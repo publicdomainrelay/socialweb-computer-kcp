@@ -158,9 +158,33 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 	if err != nil || envFile == "" {
 		return
 	}
-	if err := r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}); err != nil {
-		r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "err", err.Error())
+	err = r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{})
+	if err == nil {
+		return
 	}
+	r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", 1, "err", err.Error())
+	if _, retrying := r.q.atircMintRetrying.LoadOrStore(contract.Name, true); retrying {
+		return
+	}
+	r.q.wg.Go(func() {
+		defer r.q.atircMintRetrying.Delete(contract.Name)
+		for attempt := 2; attempt <= associationRetryAttempts; attempt++ {
+			if !sleepRetry(ctx, attempt-1) {
+				return
+			}
+			current := r.snapshot()
+			if current.Status.AtircRevokes != "" || r.released() {
+				return
+			}
+			err := r.writeAtircToken(ctx, current, envFile, "", rfpURI, time.Time{})
+			if err == nil {
+				r.log().Info("requester_atirc_minted_after_retry", "envFile", envFile, "attempt", attempt)
+				return
+			}
+			r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", attempt, "err", err.Error())
+		}
+		r.log().Warn("requester_atirc_mint_gave_up", "envFile", envFile, "attempts", associationRetryAttempts)
+	})
 }
 
 func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef, deadline time.Time) error {
@@ -224,8 +248,9 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if !exp.After(q.now()) {
 		return fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
 	}
-	if err := q.indexMinted(ctx, contract); err != nil {
+	if err := q.indexMinted(ctx, contract, exp); err != nil {
 		r.log().Warn("requester_atirc_index_failed", "subhandle", subhandle, "err", err.Error())
+		return fmt.Errorf("no token is minted while the atirc minted index cannot record %s: %w", subhandle, err)
 	}
 	mintCtx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()

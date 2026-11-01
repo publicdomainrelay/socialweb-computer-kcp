@@ -6,7 +6,11 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("vault: not found (HTTP 404)")
+var (
+	ErrNotFound = errors.New("vault: not found (HTTP 404)")
+
+	ErrMountNotReady = errors.New("vault: the mount is not ready")
+)
 
 const (
 	CapabilityRead = "vault.read"

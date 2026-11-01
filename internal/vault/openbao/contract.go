@@ -94,8 +94,21 @@ func (h *Handle) Read(ctx context.Context, mount, path string, version int) (map
 	if version > 0 {
 		target = fmt.Sprintf("%s?version=%d", target, version)
 	}
-	return client.GetKV(ctx, target)
+	data, err := client.GetKV(ctx, target)
+	var re *ResponseError
+	if errors.As(err, &re) && re.Status == http.StatusNotFound && strings.Contains(re.Body, "no handler for route") {
+		return nil, mountNotReady{re}
+	}
+	return data, err
 }
+
+type mountNotReady struct {
+	re *ResponseError
+}
+
+func (e mountNotReady) Error() string { return vault.ErrMountNotReady.Error() + ": " + e.re.Error() }
+
+func (e mountNotReady) Unwrap() []error { return []error{vault.ErrMountNotReady, e.re} }
 
 func (h *Handle) Write(ctx context.Context, mount, path string, data map[string]any) error {
 	client, mount, path, err := h.kvTarget(ctx, mount, path)

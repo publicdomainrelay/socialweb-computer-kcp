@@ -273,6 +273,8 @@ type Requester struct {
 
 	atircIndexMu sync.Mutex
 
+	atircMintRetrying sync.Map
+
 	orphanSweep sync.Once
 
 	waiting map[string]bool

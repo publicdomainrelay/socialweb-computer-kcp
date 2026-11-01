@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +27,8 @@ type atircIndexEntry struct {
 	UID string `json:"uid,omitempty"`
 
 	SecretsRef commonv1.SecretRef `json:"secretsRef"`
+
+	Exp int64 `json:"exp,omitempty"`
 }
 
 func (q *Requester) atircMintedRef() commonv1.SecretRef {
@@ -41,13 +42,11 @@ func (q *Requester) atircMintedRef() commonv1.SecretRef {
 	return out
 }
 
-func vaultMissing(data map[string]any, err error) bool {
-	var status interface{ HTTPStatus() int }
-	if err != nil {
-		return errors.Is(err, vault.ErrNotFound) || (errors.As(err, &status) && status.HTTPStatus() == http.StatusNotFound)
-	}
-	return data == nil
+func vaultPathGone(err error) bool {
+	return err != nil && errors.Is(err, vault.ErrNotFound) && !errors.Is(err, vault.ErrMountNotReady)
 }
+
+var errVaultNoData = errors.New("the vault answered no data and no error")
 
 func (q *Requester) readAtircIndex(ctx context.Context) (vault.KV, commonv1.SecretRef, []atircIndexEntry, error) {
 	ref := q.atircMintedRef()
@@ -56,11 +55,13 @@ func (q *Requester) readAtircIndex(ctx context.Context) (vault.KV, commonv1.Secr
 		return nil, ref, nil, err
 	}
 	data, err := kv.Read(ctx, ref.Mount, ref.Path, 0)
-	if vaultMissing(data, err) {
+	switch {
+	case vaultPathGone(err):
 		return kv, ref, nil, nil
-	}
-	if err != nil {
+	case err != nil:
 		return nil, ref, nil, err
+	case data == nil:
+		return nil, ref, nil, errVaultNoData
 	}
 	text, _ := data[atircIndexKey].(string)
 	if text == "" {
@@ -89,20 +90,24 @@ func (e atircIndexEntry) same(o atircIndexEntry) bool {
 		(e.SecretsRef.Vault == nil) == (o.SecretsRef.Vault == nil) && (e.SecretsRef.Vault == nil || *e.SecretsRef.Vault == *o.SecretsRef.Vault)
 }
 
-func (q *Requester) indexMinted(ctx context.Context, contract v1alpha1.ComputeContract) error {
+func (q *Requester) indexMinted(ctx context.Context, contract v1alpha1.ComputeContract, exp time.Time) error {
 	if contract.Spec.SecretsRef == nil {
-		return nil
+		return errors.New("the contract has no secrets bundle to index")
 	}
-	add := atircIndexEntry{Contract: contract.Name, UID: string(contract.UID), SecretsRef: *contract.Spec.SecretsRef.DeepCopy()}
+	add := atircIndexEntry{Contract: contract.Name, UID: string(contract.UID), SecretsRef: *contract.Spec.SecretsRef.DeepCopy(), Exp: exp.Unix()}
 	q.atircIndexMu.Lock()
 	defer q.atircIndexMu.Unlock()
 	kv, ref, entries, err := q.readAtircIndex(ctx)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
+	for i, e := range entries {
 		if e.same(add) {
-			return nil
+			if e.Exp >= add.Exp {
+				return nil
+			}
+			entries[i].Exp = add.Exp
+			return writeAtircIndex(ctx, kv, ref, entries)
 		}
 	}
 	return writeAtircIndex(ctx, kv, ref, append(entries, add))
@@ -184,6 +189,11 @@ func (q *Requester) sweepOrphansOnce(stop context.Context) (int, error) {
 		ctx, cancel := context.WithTimeout(stop, 4*atircCallTimeout)
 		cleared, err := q.revokeOrphan(ctx, entry)
 		cancel()
+		if (err != nil || !cleared) && entry.Exp > 0 && !q.now().Before(time.Unix(entry.Exp, 0)) {
+			q.log.Info("requester_atirc_orphan_expired", "contract", entry.Contract, "uid", entry.UID, "err", fmt.Sprint(err))
+			done = append(done, entry)
+			continue
+		}
 		if err != nil || !cleared {
 			left++
 			q.log.Warn("requester_atirc_orphan_revoke_pending", "contract", entry.Contract, "uid", entry.UID, "err", fmt.Sprint(err))
@@ -220,19 +230,21 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 	contract := v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: entry.Contract, UID: types.UID(entry.UID)},
 		Spec: v1alpha1.ComputeContractSpec{SecretsRef: entry.SecretsRef.DeepCopy()}}
 	r := newContractRunner(q, contract)
-	r.bundleMu.Lock()
 	kv, err := q.deps.VaultWrite(ctx, entry.SecretsRef)
-	var data map[string]any
-	if err == nil {
-		data, err = kv.Read(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, 0)
+	if err != nil {
+		return false, fmt.Errorf("the vault client of the bundle: %w", err)
 	}
+	r.bundleMu.Lock()
+	data, err := kv.Read(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, 0)
 	r.bundleMu.Unlock()
-	if vaultMissing(data, err) {
+	switch {
+	case vaultPathGone(err):
 		q.log.Info("requester_atirc_orphan_cleared", "contract", entry.Contract, "uid", entry.UID, "reason", "the bundle is gone")
 		return true, nil
-	}
-	if err != nil {
+	case err != nil:
 		return false, fmt.Errorf("read the bundle: %w", err)
+	case data == nil:
+		return false, fmt.Errorf("read the bundle: %w", errVaultNoData)
 	}
 	minted, err := mintedOf(data)
 	if err != nil {
@@ -251,11 +263,13 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	data, err = kv.Read(ctx, entry.SecretsRef.Mount, entry.SecretsRef.Path, 0)
-	if vaultMissing(data, err) {
+	switch {
+	case vaultPathGone(err):
 		return true, nil
-	}
-	if err != nil {
+	case err != nil:
 		return false, fmt.Errorf("read the bundle again: %w", err)
+	case data == nil:
+		return false, fmt.Errorf("read the bundle again: %w", errVaultNoData)
 	}
 	current, err := mintedOf(data)
 	if err != nil {
