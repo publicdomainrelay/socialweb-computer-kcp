@@ -70,8 +70,11 @@ func isSandbox(vm *v1alpha1.ComputeVM) bool {
 }
 
 func (c *Controller) reconcileSandbox(ctx context.Context, req ctlruntime.Request, vm *v1alpha1.ComputeVM) (ctlruntime.Result, error) {
-	if !vm.DeletionTimestamp.IsZero() || computevm.ReleaseRequested(vm) {
+	if !vm.DeletionTimestamp.IsZero() {
 		return c.release(ctx, req, vm)
+	}
+	if computevm.ReleaseRequested(vm) {
+		return c.deleteOnRequest(ctx, req, vm)
 	}
 	st := vm.Status
 	st.Conditions = append([]metav1.Condition(nil), st.Conditions...)
@@ -205,15 +208,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 		return ctlruntime.Result{}, c.write(ctx, req, vm, st)
 	}
 	if computevm.ReleaseRequested(vm) {
-		observedAt := computevm.ReleaseRequestedAt(vm)
-		if observedAt == "" {
-			observedAt = now()
-		}
-		if err := c.host.EnsureTerminationSync(ctx, *vm, "deleted_on_request", observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
-			return ctlruntime.Result{}, err
-		}
-		c.log.Info("the creator asks for the release; the ComputeVM is deleted and its finalizer releases the backend", "computevm", vm.Name)
-		return ctlruntime.Result{}, req.Delete(ctx, vm)
+		return c.deleteOnRequest(ctx, req, vm)
 	}
 	have, err := c.backend(ctx, req, vm)
 	if err != nil {
@@ -253,6 +248,18 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, vm *
 		}
 	}
 	return ctlruntime.Result{}, c.write(ctx, req, vm, st)
+}
+
+func (c *Controller) deleteOnRequest(ctx context.Context, req ctlruntime.Request, vm *v1alpha1.ComputeVM) (ctlruntime.Result, error) {
+	observedAt := computevm.ReleaseRequestedAt(vm)
+	if observedAt == "" {
+		observedAt = now()
+	}
+	if err := c.host.EnsureTerminationSync(ctx, *vm, "deleted_on_request", observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	c.log.Info("the creator asks for the release; the ComputeVM is deleted and its finalizer releases the backend", "computevm", vm.Name, "backend", vm.Spec.BackendRef.Kind)
+	return ctlruntime.Result{}, req.Delete(ctx, vm)
 }
 
 func (c *Controller) release(ctx context.Context, req ctlruntime.Request, vm *v1alpha1.ComputeVM) (ctlruntime.Result, error) {

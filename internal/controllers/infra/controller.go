@@ -283,17 +283,23 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		Conditions: slices.Clone(v.status.Conditions)}
 	var ephemeral *v1alpha1.EphemeralInfraStatus
 	var end infra.End
-	ending := func(recorded infra.Decoded) {
+	var lastRecorded infra.Decoded
+	ending := func(recorded infra.Decoded, current []v1alpha1.InfraContractStatus) {
 		if v.ephemeral == nil {
 			return
 		}
-		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, recorded, now)
+		lastRecorded = recorded
+		previous := *v.ephemeral
+		if current != nil {
+			previous.Contracts = current
+		}
+		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, previous, recorded, now)
 		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
 		if end.Ended {
 			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
 		}
 	}
-	ending(infra.Decoded{})
+	ending(infra.Decoded{}, nil)
 	var rec *recordSync
 	var recordErr error
 	backoff := false
@@ -345,7 +351,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		if slices.ContainsFunc(contracts, func(cc v1alpha1.ComputeContract) bool { return !infra.Finished(&cc) }) {
 			recorded.CreatedAt = time.Time{}
 		}
-		ending(recorded)
+		ending(recorded, nil)
 		frozen = rec.action == infra.ActionEnded
 		if !frozen {
 			meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraConditionRecordEnded)
@@ -405,6 +411,14 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	statuses, left, err := r.contracts(ctx, req, v, contracts, end.Ended || frozen)
 	if err != nil {
 		return ctlruntime.Result{}, err
+	}
+	if v.ephemeral != nil && !end.Ended && !frozen {
+		if ending(lastRecorded, statuses); end.Ended {
+			r.c.log.Info("infra_ephemeral_complete", "workspace", req.Workspace, "name", req.Name, "reason", end.Reason)
+			if statuses, left, err = r.contracts(ctx, req, v, contracts, true); err != nil {
+				return ctlruntime.Result{}, err
+			}
+		}
 	}
 	status.Contracts = statuses
 	status.Phase = infra.Phase(statuses)

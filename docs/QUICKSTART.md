@@ -69,7 +69,7 @@ $SWC dev status --instance $I --state-dir "$ST" | jq -r '.network.status.phase, 
 - Ready when `.network.status.phase` is `Ready` (about 35 s on hat-8)
 - `dev up` gives its own dev bidders a bidder policy of its choosing; a prod bidder runs `bidder-tangled-vouch`. Either way
   the bidder also runs the contract's attached `requester-tangled-vouch` before it bids, so the vouches of section 4 are needed
-- `dev up` can exit 1 on a component that is Failed for a moment (seen: gateway Requester "names no identity DID or handle"); read `dev status`, the network goes Ready seconds later
+- `dev up` waits through a component that is Failed for a moment (seen: gateway Requester "names no identity DID or handle"); it fails only when one stays Failed for a minute
 
 Against prod bidders instead: there is no Infra path from this CLI yet. Use one of:
 
@@ -311,9 +311,10 @@ k root:qs get computecontracts.socialweb.computer einfra-quickstart-deno-sbx1 -o
 
 - prints `{"exitCode":0,...,"stdout":"quickstart-deno-ok sum=10 on linux/x86_64\n"}`; `vmAddress` is `sandbox://<computevm>`
 - the contract goes Held once the result is reported; set `state: Released` to release it
-- `endWhen: Complete` ends the object at the next reconcile after every contract is Released; today that next reconcile
-  is the ttl requeue, so it goes at `status.expiresAt` (runbook 0012)
-- the bidder keeps the released sandbox's ComputeVM `Running` with `spec.release` set (runbook 0012); `dev down` removes it
+- `endWhen: Complete` ends the object in the reconcile that sees every requested contract Released or Failed
+  (`infra_ephemeral_complete`); it is deleted then, not at `status.expiresAt`
+- a released sandbox's ComputeVM is deleted like a VM's: termination StateSync (vm.terminated), sandbox stopped,
+  finalizer dropped
 - a bidder without `deno` in its kinds drops the RFP before bidding: `no bids received within 30s`
 - [prod] prod bidders serve `vm` only unless the operator added `--compute-kinds vm,deno`; pin a deno bidder with `bidderDids`
 
