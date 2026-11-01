@@ -701,6 +701,8 @@ type MarketRequesterSpec struct {
 
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
 
+	OAuthGrants []RequesterOAuthGrant `json:"oauthGrants,omitempty"`
+
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`

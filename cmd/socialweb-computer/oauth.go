@@ -14,6 +14,8 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/workloadoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
@@ -301,4 +303,47 @@ func writeCookieJar(path string, jar http.CookieJar, origin string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+const (
+	oauthSelfRole = "oauth-self"
+
+	oauthSelfAudience = "did:web:socialweb.computer#oauth-self"
+)
+
+func oauthGrantsOption(name, value string) ([]v1alpha1.RequesterOAuthGrant, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	switch name {
+	case "oauth-grants-file":
+		raw, err := os.ReadFile(strings.TrimSpace(value))
+		if err != nil {
+			return nil, fmt.Errorf("--oauth-grants-file: %w", err)
+		}
+		var grants []v1alpha1.RequesterOAuthGrant
+		if err := json.Unmarshal(raw, &grants); err != nil {
+			return nil, fmt.Errorf("--oauth-grants-file: not a JSON list of {role, issuer, subject, clients}: %w", err)
+		}
+		return grants, nil
+	case "oauth-self":
+		id, scopes, _ := strings.Cut(strings.TrimSpace(value), "=")
+		client := v1alpha1.ComputeContractOAuthClient{ClientID: strings.TrimSpace(id), Scopes: oauthList(scopes)}
+		if len(client.Scopes) == 0 {
+			declared, err := clientMetadataScopes(ctx, strings.ReplaceAll(client.ClientID, "*", ""))
+			if err != nil {
+				return nil, fmt.Errorf("--oauth-self: %w", err)
+			}
+			client.Scopes = declared
+		}
+		token, err := workloadoauth.CommandToken(ctx, strings.Fields(defaultOAuthTokenCommand), oauthSelfAudience)
+		if err != nil {
+			return nil, fmt.Errorf("--oauth-self: this process's workload token: %w", err)
+		}
+		issuer, subject, err := workloadoauth.TokenIdentity(token)
+		if err != nil {
+			return nil, fmt.Errorf("--oauth-self: %w", err)
+		}
+		return []v1alpha1.RequesterOAuthGrant{{Role: oauthSelfRole, Issuer: issuer, Subject: subject, Clients: []v1alpha1.ComputeContractOAuthClient{client}}}, nil
+	}
+	return nil, fmt.Errorf("--%s is not an oauth grant option", name)
 }

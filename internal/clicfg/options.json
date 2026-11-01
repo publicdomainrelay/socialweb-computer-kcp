@@ -871,6 +871,14 @@
     "oauth-jar": {
       "type": "string",
       "description": "oauth approve: write the app's cookies (its signed-in session) to this file, mode 0600, as [{url, name, value}]"
+    },
+    "oauth-grants-file": {
+      "type": "string",
+      "description": "run request and run requester, after --: a JSON file holding a list of {role, issuer, subject, clients: [{clientId, scopes, redirectUri}]}; the requester writes one com.fedproxy.rbac record per role in its own repo on its own PDS (localRepo identity) so that workload may approve those OAuth clients as the requester's account, and deletes a role that leaves the list"
+    },
+    "oauth-self": {
+      "type": "string",
+      "description": "run request and run requester, after --: <client_id>[=<scope>,...]; inside a guest, let this guest's own workload identity (the iss and sub of guest-login.sh token) approve that OAuth client as the requester's account (role oauth-self); a * in the client_id matches a keyed client_id such as https://irc.fedfork.com/oauth/client-metadata*; no scopes take the client metadata's"
     }
   }
 }

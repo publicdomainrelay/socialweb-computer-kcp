@@ -111,7 +111,7 @@ var APIResources = []APIResource{
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 38, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 39, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
@@ -154,7 +154,7 @@ var APIResources = []APIResource{
 	{Kind: "Bidder", Plural: "bidders", Revision: 25, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 12, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 13, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Requester", Plural: "requesters", Revision: 30, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Requester", Plural: "requesters", Revision: 31, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 18, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "SshServer", Plural: "sshservers", Revision: 18, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Plc", Plural: "plcs", Revision: 12, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},

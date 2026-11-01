@@ -589,6 +589,16 @@ type PdsOAuth struct {
 	WorkloadIssuers []string `json:"workloadIssuers,omitempty" apigen:"listType=set"`
 }
 
+type RequesterOAuthGrant struct {
+	Role string `json:"role" apigen:"pattern=^[A-Za-z0-9._:~-]{1,512}$"`
+
+	Issuer string `json:"issuer" apigen:"userEndpoint"`
+
+	Subject string `json:"subject"`
+
+	Clients []ComputeContractOAuthClient `json:"clients"`
+}
+
 type Requester struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -674,6 +684,8 @@ type RequesterSpec struct {
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
 
 	AtircMintedRef *commonv1.SecretRef `json:"atircMintedRef,omitempty"`
+
+	OAuthGrants []RequesterOAuthGrant `json:"oauthGrants,omitempty"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 

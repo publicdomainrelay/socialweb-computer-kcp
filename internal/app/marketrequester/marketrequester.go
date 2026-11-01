@@ -288,6 +288,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
 		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
+		OAuthGrants:          deepCopyGrants(o.Spec.OAuthGrants),
 		AtircMintedRef:       &commonv1.SecretRef{Mount: plan.Vault.MountOr(RequesterVaultClient), Path: role.AtircMintedPath},
 		SuspendParticipation: o.Spec.Suspend,
 	}
@@ -635,4 +636,15 @@ func contractDID(plan compose.AccountPlan, id *v1alpha1.MarketIdentity) string {
 		return did
 	}
 	return strings.TrimSpace(id.Spec.Did)
+}
+
+func deepCopyGrants(in []v1alpha1.RequesterOAuthGrant) []v1alpha1.RequesterOAuthGrant {
+	if in == nil {
+		return nil
+	}
+	out := make([]v1alpha1.RequesterOAuthGrant, len(in))
+	for i := range in {
+		in[i].DeepCopyInto(&out[i])
+	}
+	return out
 }

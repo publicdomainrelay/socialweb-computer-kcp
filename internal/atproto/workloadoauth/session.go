@@ -3,6 +3,7 @@ package workloadoauth
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -267,4 +268,23 @@ func (s *Session) ApproveLogin(ctx context.Context, app *http.Client, loginURL, 
 		return Approval{}, err
 	}
 	return Approval{Account: account, Role: role, PDS: request.Origin, Request: request, Redirect: redirect}, nil
+}
+
+func TokenIdentity(token string) (string, string, error) {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 3 {
+		return "", "", errors.New("workloadoauth: the workload token is not a JWT")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return "", "", errors.New("workloadoauth: the workload token's claims are not base64url")
+	}
+	var claims struct {
+		Iss string `json:"iss"`
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil || claims.Iss == "" || claims.Sub == "" {
+		return "", "", errors.New("workloadoauth: the workload token names no iss and sub")
+	}
+	return strings.TrimRight(claims.Iss, "/"), claims.Sub, nil
 }

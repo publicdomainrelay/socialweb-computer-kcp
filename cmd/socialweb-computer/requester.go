@@ -116,6 +116,12 @@ func parseRequesterSpec(args []string, verb string, verbOptions []string, networ
 			if !applied {
 				return root, fmt.Errorf("--%s maps to %s, which %s does not take", p.Name, p.To, verb)
 			}
+		case p.To == "spec.oauthGrants":
+			grants, err := oauthGrantsOption(p.Name, p.Value)
+			if err != nil {
+				return root, err
+			}
+			root.OAuthGrants = append(root.OAuthGrants, grants...)
 		case p.To == "spec.secretsFallback":
 			switch fallback := v1alpha1.SecretsFallback(strings.TrimSpace(p.Value)); fallback {
 			case v1alpha1.SecretsFallbackNone, v1alpha1.SecretsFallbackSealed:

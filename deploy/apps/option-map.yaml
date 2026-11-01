@@ -230,6 +230,8 @@ apps:
       - {name: associate, to: contract.association}
       - {name: association-ref, to: spec.identity.associationRef}
       - {name: secrets-fallback, to: spec.secretsFallback}
+      - {name: oauth-grants-file, to: spec.oauthGrants}
+      - {name: oauth-self, to: spec.oauthGrants}
       - {name: tunnel, to: contract.tunnels}
       - {name: guest-host-aliases, to: options}
       - {name: guest-ca-file, to: profile}
