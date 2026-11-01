@@ -149,7 +149,7 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 	_, err = contractevent.Register(mgr, contractevent.Options{Bus: c.handlers, Clients: clients.client, Scope: local, Log: cfg.Log})
 	warn("ContractEvent", err)
 	if cfg.DynamicFactory != nil {
-		_, err = infractl.Register(mgr, infractl.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
+		_, err = infractl.Register(mgr, infractl.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Writer: "core", Log: cfg.Log})
 		warn("Infra, EphemeralInfra", err)
 		_, err = infracollection.Register(mgr, infracollection.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
 		warn("InfraCollection, EphemeralInfraCollection", err)
