@@ -111,7 +111,7 @@ user (`check-host` reports it).
 1. `$SWC run requester --name mk --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/mk.log" 2>&1 &`; sign in
    as in A1; wait until the ready file names the gateway: `jq -r .gateway "$ST/requesters/mk/ready.json"` is not `null`.
 2. `$SWC run requester cluster mk --cluster c1 --state-dir "$ST"`; then `TK=$($SWC run requester kubeconfig mk --cluster
-   c1 --state-dir "$ST")` (retry until the file exists).
+   c1 --state-dir "$ST")` (retry until it prints a path: the Cluster is Ready).
 3. `kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml`: a NodeClaim becomes an Infra in the requester
    kcp, its contract is bid and Held, the node VM fetches meshd by sha256 from the public bucket and joins k3s; poll
    until the `quickstart-k8s` pod is Ready (a `kubectl wait` before the pod exists returns no match); `kubectl logs

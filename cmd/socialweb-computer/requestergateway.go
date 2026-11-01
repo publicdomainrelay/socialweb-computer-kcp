@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
@@ -142,6 +143,19 @@ func runRequesterKubeconfig(ctx context.Context, a *app, vals clicfg.Values, res
 	}
 	if !fsx.Exists(path) {
 		return a.fail(exitFailed, "run requester kubeconfig: the cluster %s has no admin kubeconfig yet (%s); kubectl get clusters.socialweb.computer in its home workspace shows its phase", cluster, path)
+	}
+	timeout, err := time.ParseDuration(vals.String("network-timeout"))
+	if err != nil {
+		return a.fail(exitRefused, "run requester kubeconfig: network-timeout: %v", err)
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	phase, err := gatewaykcp.RequesterClusterPhase(cctx, ready.Kubeconfig, ready.Did, cluster)
+	if err != nil {
+		return a.fail(exitFailed, "run requester kubeconfig: the cluster %s: %v", cluster, err)
+	}
+	if phase != v1alpha1.ClusterReady {
+		return a.fail(exitFailed, "run requester kubeconfig: the cluster %s is %s, not Ready yet (its home workspace %s)", cluster, cmp.Or(string(phase), "without a phase"), clusterhome.HomePath(ready.Did, cluster))
 	}
 	fmt.Fprintln(a.stdout, path)
 	return exitOK
