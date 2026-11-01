@@ -150,6 +150,25 @@ func (s *Service) checkNodesOnly() error {
 	case !s.vaultConfigured():
 		return errors.New("gatewayapi: nodesOnly needs the vault ref of the node join bundles")
 	}
+	if s.spec.PublicOrigin != "" {
+		if err := checkDownloadBase(s.spec.PublicOrigin); err != nil {
+			return fmt.Errorf("gatewayapi: nodesOnly publicOrigin, the base nodes fetch <base>/downloads/<sha256>/<name> from: %w", err)
+		}
+	}
+	return nil
+}
+
+func checkDownloadBase(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%q is not an absolute https URL", raw)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q carries a query or fragment", raw)
+	}
 	return nil
 }
 

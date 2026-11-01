@@ -138,7 +138,11 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `<instance state>/gateway` exists, which `run requester --with-gateway` makes before the network places it.
   `requester.json` records `withGateway`; the ready file gains `gateway {workspace, name, clusters}`;
   `run requester cluster <name> --cluster <c>` makes the home workspace `root:<account>:<c>` and its Cluster, and
-  `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path.
+  `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path. A node fetches socialweb-meshd and
+  socialweb-node from `<base>/downloads/<sha256>/<name>` and checks the pinned sha256: the base is the nodes-only
+  GatewayAPI's `spec.publicOrigin`, set from `--node-download-base` (default the public bucket, where the CI
+  `publish` job puts the pinned socialweb-computer-k8s-downloads tree content-addressed under `downloads/`); with
+  `--network` and the default it is the local Exposure.
 - Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
   XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Firehose has no
   inbound endpoint. Both (the requester default) is the ingress plus the same streams as Firehose. In

@@ -28,18 +28,21 @@ import (
 
 const RequesterGatewayDir = "gateway"
 
-func RequesterSpec(base v1alpha1.GatewaySpec, requester string, downloads string) v1alpha1.GatewaySpec {
+func RequesterSpec(base v1alpha1.GatewaySpec, requester, downloads, nodeDownloadBase string) v1alpha1.GatewaySpec {
 	spec := base
 	spec.Profile = appgateway.ProfileGatewayRequester
 	spec.RequesterRef = &commonv1.ObjectRef{Kind: string(v1alpha1.ApplicationKindMarketRequester), Name: requester}
 	var opts []v1alpha1.ApplicationOption
 	for _, o := range base.Options {
-		if o.Name != appgateway.GatewayDownloadsOption {
+		if o.Name != appgateway.GatewayDownloadsOption && o.Name != appgateway.GatewayNodeDownloadBase {
 			opts = append(opts, o)
 		}
 	}
 	if downloads != "" {
 		opts = append(opts, v1alpha1.ApplicationOption{Name: appgateway.GatewayDownloadsOption, Value: downloads})
+	}
+	if nodeDownloadBase != "" {
+		opts = append(opts, v1alpha1.ApplicationOption{Name: appgateway.GatewayNodeDownloadBase, Value: nodeDownloadBase})
 	}
 	spec.Options = opts
 	return spec

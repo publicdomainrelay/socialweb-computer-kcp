@@ -89,7 +89,7 @@ func (r *requesterRun) startGateway(ctx context.Context, assetExes map[string]de
 		}
 		exes[gatewaykcp.ExeCore] = devinstance.Executable{Path: exe}
 	}
-	spec := gatewaykcp.RequesterSpec(v1alpha1.GatewaySpec{}, request.RootName, exes[gatewaykcp.ExeWebDownloads].Path)
+	spec := gatewaykcp.RequesterSpec(v1alpha1.GatewaySpec{}, request.RootName, exes[gatewaykcp.ExeWebDownloads].Path, r.nodeDownloadBase())
 	cfg := gatewaykcp.Config{Backend: rec.Backend, Executables: exes, Spec: spec, RootName: appgateway.GatewayRootName, Environ: os.Environ(),
 		Exe: exes[gatewaykcp.ExeCore].Path, Stderr: r.a.stderr, Log: r.a.log}
 	ws := cmp.Or(strings.TrimSpace(rec.BaseWorkspace), r.workspace, "root")
@@ -220,4 +220,12 @@ func (r *requesterRun) markGateway(ctx context.Context) error {
 		return err
 	}
 	return os.MkdirAll(requesterGatewayMarker(cl), 0o700)
+}
+
+func (r *requesterRun) nodeDownloadBase() string {
+	base := strings.TrimRight(strings.TrimSpace(r.vals.String("node-download-base")), "/")
+	if r.inv.Mode == request.ModeNetwork && r.vals.Source("node-download-base") == clicfg.SourceDefault {
+		return ""
+	}
+	return base
 }
