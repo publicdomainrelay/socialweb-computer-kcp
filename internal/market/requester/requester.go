@@ -271,6 +271,10 @@ type Requester struct {
 
 	bundleLocks sync.Map
 
+	atircIndexMu sync.Mutex
+
+	orphanSweep sync.Once
+
 	waiting map[string]bool
 
 	settled map[string]bool

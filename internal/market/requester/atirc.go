@@ -39,6 +39,10 @@ const (
 
 	AtircParentPath = "identity/atirc-parent"
 
+	AtircMintedPath = "contracts/_atirc-minted"
+
+	DefaultSecretsMount = "requester"
+
 	atircReleaseKey = "atircReleasePending"
 
 	atircMintedKey = "atircMinted"
@@ -220,6 +224,9 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if !exp.After(q.now()) {
 		return fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
 	}
+	if err := q.indexMinted(ctx, contract); err != nil {
+		r.log().Warn("requester_atirc_index_failed", "subhandle", subhandle, "err", err.Error())
+	}
 	mintCtx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()
 	var out struct {
@@ -251,7 +258,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		next[k] = v
 	}
 	next["bundle"] = string(raw)
-	minted, err := withMinted(data, atircMinted{Path: path, Subhandle: subhandle, Token: token, Exp: exp.Unix()}, q.now())
+	minted, err := withMinted(data, atircMinted{Path: path, Subhandle: subhandle, Token: token, Exp: exp.Unix(), UID: string(contract.UID)}, q.now())
 	if err != nil {
 		return err
 	}
@@ -272,6 +279,8 @@ type atircMinted struct {
 	Token string `json:"token"`
 
 	Exp int64 `json:"exp"`
+
+	UID string `json:"uid,omitempty"`
 }
 
 func mintedOf(data map[string]any) ([]atircMinted, error) {

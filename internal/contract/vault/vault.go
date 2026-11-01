@@ -2,8 +2,11 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrNotFound = errors.New("vault: not found (HTTP 404)")
 
 const (
 	CapabilityRead = "vault.read"

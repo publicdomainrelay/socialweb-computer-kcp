@@ -9549,6 +9549,11 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 		*out = new(commonv1alpha1.SecretRef)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.AtircMintedRef != nil {
+		in, out := &in.AtircMintedRef, &out.AtircMintedRef
+		*out = new(commonv1alpha1.SecretRef)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 

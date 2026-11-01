@@ -665,6 +665,8 @@ type RequesterSpec struct {
 
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
 
+	AtircMintedRef *commonv1.SecretRef `json:"atircMintedRef,omitempty"`
+
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }
 

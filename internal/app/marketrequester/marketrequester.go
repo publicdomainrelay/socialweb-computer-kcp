@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
+	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
 
@@ -283,6 +284,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
 		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
+		AtircMintedRef:       &commonv1.SecretRef{Mount: plan.Vault.MountOr(RequesterVaultClient), Path: role.AtircMintedPath},
 		SuspendParticipation: o.Spec.Suspend,
 	}
 	out := []compose.Desired{compose.PolicyEngineDesired()}
