@@ -19,6 +19,8 @@ and the bidders. Do not run it without that authority.
 This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
 the next placement, and every VM released when the cluster returned to zero.
+It passed again, all nine sections, on `v0.0.0-rc142` (2026-10-31) with every
+bidder on rc142.
 Plan 0026 (abstract kinds, the bus with default-deny ComponentLinks) changed
 the object names and fields it reads; the commands below use the plan 0026
 names. Every kind is read by its full resource name (for example
@@ -169,8 +171,8 @@ participation, never obligations). The Bidder process keeps running: it
 withdraws its offering, stops its heartbeat, declines new RFPs and accepts, and
 still releases the VMs it runs on `vm.delete`, over XRPC or the firehose. The
 root stays `Ready` with `componentSummary`
-`{"desired":4,"notReady":0,"ready":3,"suspended":1}` on a localRepo bidder
-(Bidder, GuestControlPlane, Pds, PolicyEngine) and the Bidder reports
+`{"desired":5,"notReady":0,"ready":4,"suspended":1}` on a localRepo bidder
+(Bidder, GuestControlPlane, Pds, PolicyEngine and one more since rc81) and the Bidder reports
 `true Ready`. A Requester override works the same way. Other component kinds
 keep `spec.suspend`, which stops the component. Section 7 uses it.
 
@@ -523,8 +525,9 @@ ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidd
 ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl get marketbidders.socialweb.computer app -o jsonpath='{.status.conditions}' | jq -c '.[]|select(.type==\"ComponentDrift\")'"
 ```
 
-The child `suspend` is empty/false and `ComponentDrift=True` names
-`Bidder/bidder`. A typo key fails closed:
+The child `suspend` is empty/false within seconds. `ComponentDrift=True` names
+`Bidder/bidder` only until the next pass sees the child match again; then it is
+`False NoDrift`, so read it right after the edit or in the core log. A typo key fails closed:
 
 ```bash
 ssh "$HOST" "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$K kubectl patch marketbidders.socialweb.computer app --type merge -p '{\"spec\":{\"components\":{\"Bldier\":{\"suspend\":true}}}}'"
@@ -616,8 +619,8 @@ Pass conditions for each host:
   `"transport":"webrtc"`. On the local bidder in a market network it was 2.16 s
   on a fresh invocation and about 7 s after the invocation's kcp restarted
   (2026-10-24).
-- The winner is `$HOST`: the `winnerDid` of `run request list --state-dir "$R"
-  --json` for `$NAME` is `$D7`, `$D9` or `$DL` of section 4 for that host.
+- The winner is `$HOST`: while the contract is held, `$HOST` lists a Running
+  ComputeVM for the requester DID (`run request list --json` carries no winner).
 - No log line holds signaling plaintext or a private key:
 
 ```bash
