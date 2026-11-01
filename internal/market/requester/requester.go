@@ -275,12 +275,6 @@ type Requester struct {
 
 	atircMintRetrying sync.Map
 
-	atircLeaseFallback atomic.Bool
-
-	atircLeaseMu sync.Mutex
-
-	atircLeaseEndpoints map[string]bool
-
 	atircRevokesStarted sync.Map
 
 	orphanSweep sync.Once

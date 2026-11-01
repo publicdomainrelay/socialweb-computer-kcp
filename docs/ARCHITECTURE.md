@@ -11543,13 +11543,12 @@ record at `market.EventRKeys(market.TerminationKey(receiptURI))` (the rkey the p
 the requester_associate record for the r2 token, and the accept uri. The server appends it to the
 bearer's chain, so the signed claim `leases` is root to leaf; the requester accepts a token only when
 `leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
-mint. Every error answer is a failed mint, retried with backoff; the deployed pre-lease server
-ignores the field and answers 200, so no 400 means "old server". A token with no `leases` claim is
-kept as a plain token (logged once, `requester_atirc_lease_unsupported`) only when the parent token
-carries no leases and the endpoint never returned a leases claim (remembered per endpoint in the
-requester's vault next to the minted index, `<atircMintedRef path>-lease`; an unreadable record
-fails the mint); otherwise it is revoked and the mint fails. The agent mint's outcome is the
-ComputeContract condition `AtircTokenMinted` (Leased, Unleased, Present, MintFailed, GaveUp); the r2
+mint. Every error answer is a failed mint, retried with backoff. The configured atirc endpoint is
+lease-aware (v0.1.0-ff02afe and later, rc131): a 200 to a leased mint whose token has no `leases`
+claim is revoked and fails the mint (reason LeaseClaimMissing), never a plain token; rc130's
+per-endpoint fallback and its `<atircMintedRef path>-lease` vault record are gone. A mint without a
+lease is unchanged. The agent mint's outcome is the ComputeContract condition `AtircTokenMinted`
+(Leased, Unleased, Present, MintFailed, LeaseClaimMissing, GaveUp); the r2
 mint's failures show in `status.associationMessage`. Until the agent token is minted,
 getSecrets and the sealed fallback serve the bundle without the agent envFile entry; a whole-bundle
 503 would outlast setup-secrets (10 tries 5 s apart, a oneshot with no restart) and leave the guest
