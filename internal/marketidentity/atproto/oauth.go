@@ -210,6 +210,10 @@ func signInNeeded(status *v1alpha1.MarketIdentityStatus, err error) (signInNeed,
 		status.Did, status.Handle, status.PdsURL = "", "", ""
 		return signInNeed{reason: "AccountMismatch", message: mismatch.text}, true
 	}
+	var unverified *oauthclient.QRUnverifiedError
+	if errors.As(err, &unverified) {
+		return signInNeed{reason: "QRSessionUnverified", message: qrUnverifiedMessage(unverified)}, true
+	}
 	if reason, message, again := signInAgainReason(err); again {
 		return signInNeed{again: true, reason: reason, message: message}, true
 	}
@@ -220,6 +224,13 @@ func signInNeeded(status *v1alpha1.MarketIdentityStatus, err error) (signInNeed,
 		return signInNeed{reason: v1alpha1.ReasonSignedOut, message: signedOutMessage}, true
 	}
 	return signInNeed{}, true
+}
+
+func qrUnverifiedMessage(e *oauthclient.QRUnverifiedError) string {
+	if e.VerifiedDID == "" {
+		return fmt.Sprintf("refused the QR session transfer: the QR origin did not verify the session of %s at the account PDS (no verifiedDid); scan the new QR code to sign in again", e.UserDID)
+	}
+	return fmt.Sprintf("refused the QR session transfer: the QR origin verified %s at the account PDS, but the session names %s; scan the new QR code to sign in again", e.VerifiedDID, e.UserDID)
 }
 
 func sessionErrorReason(err error) string {
@@ -265,16 +276,23 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
 	}
 	a.qr.Delete(key)
-	if !sessionQr.GrantReported() {
-		a.log.Info("qr_session_grant_unverified", "workspace", workspace, "identity", id.Name, "did", sessionQr.UserDID,
-			"assumed", strings.Join(a.qrScopes(), " "))
-	}
-	data, err := sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
-	if err == nil {
-		data = a.sessionWithEndpoints(ctx, data)
-		session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
-	} else if !errors.Is(err, oauthclient.ErrScopeRejected) {
-		return failed(status, generation, "QRSessionInvalid", err.Error()), err
+	err = sessionQr.Verified()
+	if err != nil {
+		a.log.Info("qr_session_unverified", "workspace", workspace, "identity", id.Name, "did", sessionQr.UserDID,
+			"verifiedDid", sessionQr.VerifiedDID)
+	} else {
+		if !sessionQr.GrantReported() {
+			a.log.Info("qr_session_grant_unverified", "workspace", workspace, "identity", id.Name, "did", sessionQr.UserDID,
+				"assumed", strings.Join(a.qrScopes(), " "))
+		}
+		var data oauthclient.SessionData
+		data, err = sessionQr.SessionData(a.sessionClientID(id), a.qrScopes())
+		if err == nil {
+			data = a.sessionWithEndpoints(ctx, data)
+			session, handle, err = a.openSessionData(ctx, workspace, id, data, ref, sessionQr.Handle)
+		} else if !errors.Is(err, oauthclient.ErrScopeRejected) {
+			return failed(status, generation, "QRSessionInvalid", err.Error()), err
+		}
 	}
 	if need, ok := signInNeeded(&status, err); ok && err != nil {
 		if qr, err = a.newQrState(key); err != nil {

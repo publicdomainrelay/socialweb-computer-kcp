@@ -24,6 +24,8 @@ import (
 const (
 	QRNSID = "com.fedfork.atprotoOauthQR"
 
+	QRNonceHeader = "x-oauth-qr-nonce"
+
 	DefaultQRTTL = 5 * time.Minute
 
 	QRServiceAuthTTL = time.Minute
@@ -72,10 +74,33 @@ type QRSession struct {
 	DPoPPrivateJWK map[string]any `json:"dpopPrivateJwk"`
 
 	Scope string `json:"scope,omitempty"`
+
+	VerifiedDID string `json:"verifiedDid"`
 }
 
 func (q QRSession) GrantReported() bool {
 	return strings.TrimSpace(q.Scope) != ""
+}
+
+type QRUnverifiedError struct {
+	VerifiedDID string
+
+	UserDID string
+}
+
+func (e *QRUnverifiedError) Error() string {
+	if e.VerifiedDID == "" {
+		return "oauthclient: the qr origin did not verify the transferred session of " + e.UserDID + " at the account PDS"
+	}
+	return fmt.Sprintf("oauthclient: the qr origin verified %s at the account PDS, but the transferred session names %s", e.VerifiedDID, e.UserDID)
+}
+
+func (q QRSession) Verified() error {
+	verified, user := strings.TrimSpace(q.VerifiedDID), strings.TrimSpace(q.UserDID)
+	if verified == "" || verified != user {
+		return &QRUnverifiedError{VerifiedDID: verified, UserDID: user}
+	}
+	return nil
 }
 
 func QRClientID(origin string) string {
@@ -219,13 +244,14 @@ func (q *QRTransfer) PollOnce(ctx context.Context) (QRSession, bool, error) {
 	if err != nil {
 		return QRSession{}, false, fmt.Errorf("oauthclient: the qr service auth token: %w", err)
 	}
-	query := url.Values{"cliDid": {q.CLIDID}, "nonce": {q.Nonce}}
+	query := url.Values{"cliDid": {q.CLIDID}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.Origin+"/xrpc/"+QRNSID+"?"+query.Encode(), nil)
 	if err != nil {
 		return QRSession{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set(QRNonceHeader, q.Nonce)
 	resp, err := q.client().Do(req)
 	if err != nil {
 		return QRSession{}, false, err
