@@ -139,6 +139,36 @@ sudo /var/lib/socialweb-computer/swc-bidder/bin/current/socialweb-computer unins
 deletes the account install created. `--force` proceeds with active VM units; each stopped VM becomes
 `Lost`.
 
+## Terminate a VM from the bidder
+
+A bidder operator ends a VM by deleting its `ComputeVM` in the bidder's kcp. Use it when the requester
+cannot release the contract (the tab or app that holds it is gone) or when the owner asks for a VM to be
+freed. It is the same path a requester's `vm.delete` takes, so nothing is left behind.
+
+```bash
+K=$(sudo -n -u swc-bidder sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1')
+kb() { sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG="$K" kubectl "$@"; }
+kb get computevms.socialweb.computer -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,CREATED:.metadata.creationTimestamp
+kb delete computevms.socialweb.computer <name> --wait=false
+kb get computevms.socialweb.computer
+```
+
+The name is `fc-<first 12 chars of the requester DID after did:plc:>-<hash>`; pick the VM by that DID
+prefix and its creation time, and never delete one you have not matched to the contract you mean to end.
+
+What the delete does, in order (its finalizer, logged by the bidder):
+
+1. a termination StateSync, and a `vm.terminated` record pinned in the bidder's repo with reason
+   `deleted_on_request`;
+2. the VM process, its unit and its work dir are removed and the contract is released;
+3. the finalizer is dropped and the ComputeVM is gone.
+
+The `vm.terminated` event is also delivered to the requester; a 404 there only means the requester is
+gone, and the record in the bidder repo still stands. Every atirc token leased to the contract dies by
+its lease as soon as that termination record exists; a requester that is still running also revokes it.
+Check the host afterwards: `kb get computevms.socialweb.computer` is empty for that contract and no
+`firecracker` process remains for it.
+
 ## Unit and logs
 
 `swc-bidder` is a system account, so its user units log to the system journal.
