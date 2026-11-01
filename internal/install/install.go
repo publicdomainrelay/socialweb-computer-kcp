@@ -1297,9 +1297,13 @@ func (in *installer) waitStarted(um UserManager, unit string) error {
 func journalHint(account string, uid int, units ...string) string {
 	flags := make([]string, 0, len(units))
 	for _, u := range units {
-		flags = append(flags, "-u "+u)
+		flags = append(flags, "_SYSTEMD_USER_UNIT="+u)
 	}
-	return fmt.Sprintf("runuser -u %s -- env XDG_RUNTIME_DIR=/run/user/%d journalctl --user %s", account, uid, strings.Join(flags, " "))
+	return fmt.Sprintf("journalctl _UID=%d %s", uid, strings.Join(flags, " "))
+}
+
+func signinHint(state, name string) string {
+	return fmt.Sprintf("%s run requester signin %s --state-dir %s", filepath.Join(state, "bin", "current", "socialweb-computer"), name, state)
 }
 
 func (in *installer) startTimeout() time.Duration {
@@ -1622,9 +1626,12 @@ func (in *installer) enable() error {
 	if err := in.enableBootstrap(actx, um); err != nil {
 		return err
 	}
-	if in.o.Role == hostcontract.RoleRequester && len(todo)+len(restart) > 0 {
-		in.printf("a requester unit is active only after its sign-in and its ready file; the sign-in step (a QR or browser URL) is in %s\n",
-			journalHint(in.o.Account, in.acct.UID, units...)+" -f")
+	if in.o.Role == hostcontract.RoleRequester && len(todo)+len(restart)+len(starting) > 0 {
+		in.printf("a requester unit is active only after its sign-in and its ready file; the sign-in step (a QR or browser URL) is in %s -f (as root; journalctl --user as %s reads nothing, a system account logs into the system journal)\n",
+			journalHint(in.o.Account, in.acct.UID, units...), in.o.Account)
+		for _, name := range in.o.Names {
+			in.printf("the sign-in URL of requester %s, as root or %s: %s\n", name, in.o.Account, signinHint(in.o.StateDir, name))
+		}
 	}
 	for _, u := range todo {
 		sctx, cancel := context.WithTimeout(in.ctx, in.startBudget())

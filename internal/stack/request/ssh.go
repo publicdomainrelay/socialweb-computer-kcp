@@ -21,6 +21,7 @@ const (
 	KeyFile          = "id_ed25519"
 	SSHPollInterval  = 5 * time.Second
 	sshConnectTimout = "ConnectTimeout=10"
+	ProxyShell       = "/bin/sh"
 )
 
 var ErrHostKeyMismatch = errors.New("request: the guest's ssh host key does not match the key it reported (StrictHostKeyChecking=yes)")
@@ -107,12 +108,18 @@ func (s SSH) args(t Target) []string {
 	}
 }
 
+func sshCommand(ctx context.Context, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd.Env = append(os.Environ(), "SHELL="+ProxyShell)
+	return cmd
+}
+
 func (s SSH) WaitReady(ctx context.Context, t Target, timeout time.Duration, progress func(attempt int, err string)) error {
 	deadline := time.Now().Add(timeout)
 	for attempt := 1; ; attempt++ {
 		args := append(s.args(t), "-o", "BatchMode=yes", "-o", sshConnectTimout, "root@"+t.Alias, "true")
 		var stderr bytes.Buffer
-		cmd := exec.CommandContext(ctx, "ssh", args...)
+		cmd := sshCommand(ctx, args)
 		cmd.Stderr = childproc.FilterSecrets(&stderr)
 		err := cmd.Run()
 		if err == nil {
@@ -146,7 +153,7 @@ func (s SSH) Run(ctx context.Context, t Target, program string, interactive bool
 	} else {
 		args = append(args, "root@"+t.Alias, program)
 	}
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := sshCommand(ctx, args)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, childproc.FilterSecrets(stderr)
 	err := cmd.Run()
 	var ee *exec.ExitError

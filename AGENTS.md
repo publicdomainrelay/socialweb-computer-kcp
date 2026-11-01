@@ -110,7 +110,8 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   read its ready file: `run requester env <name>` (KUBECONFIG, the kcp URL, the workspace, the DID, the ssh
   public key; `--json`) and `run requester ssh <name> --contract <cc> [--transport webrtc] [--exec ...]`
   (the `run request ssh` code with the requester's own key `<dir>/ssh/id_ed25519`; put its `.pub` in the
-  contract's `sshAuthorizedKeys`); `run requester proxy` is its webrtc ProxyCommand. With `--host-backend
+  contract's `sshAuthorizedKeys`); `run requester proxy` is its webrtc ProxyCommand. Every ssh the CLI runs gets `SHELL=/bin/sh`, because ssh runs its
+ProxyCommand with `$SHELL -c` and an installed account's shell is nologin (sudo and the user manager set SHELL from passwd). With `--host-backend
   systemd-user` (plan 0039 B-INSTALL-REQUESTER, the installed form; refused with `--network`) the process is the core
   itself (`request.RunCore`, the `bidder.RunCore` pattern over `devcore.Run` with the bootstrap app
   `table.Requester`, key `req-<sha256(name)[:10]>`, layout `install.RequesterLayout` under `<dir>/dev/<name>`): it places
@@ -118,7 +119,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   leaves those units and the HostProcesses running for the next start to adopt. `install requester --name <n>`
   (default account `swc-requester`) writes the unit template `socialweb-computer-requester@.service` (Type=notify,
   TimeoutStartSec the ready budget plus `install.RequesterStartGrace`, 1 h for a sign-in) and, once per name,
-  `<dir>/requester.json` from the options after `--` (default `--atproto-oauth-qr`); a password never goes into it:
+  `<dir>/requester.json` from the options after `--` (default `--atproto-oauth-qr`). The account is a system account, so
+journald puts its user units' lines in the system journal (only root reads them: `journalctl _UID=<uid>
+_SYSTEMD_USER_UNIT=<unit>`); `run requester signin <name>` prints the MarketIdentity's `pendingAction.url` from the
+requester's own kcp, and `install` prints both. A password never goes into requester.json:
   `run requester password <name>` reads one from stdin into `identity/requester/keys` of the requester's vault.
   `upgrade` takes the role from the install record. The same-account form is a kubectl-applied HostProcess
   (`examples/infra/requester-hostprocess.yaml`); no root prunes a HostProcess outside its set.
@@ -136,7 +140,8 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   kine and OpenBao are HostProcesses of the requester's core; in a market network the
   child core runs the gateway's outbound trust and egress (`gatewaykcp.NetworkOutbound`) when
   `<instance state>/gateway` exists, which `run requester --with-gateway` makes before the network places it.
-  `requester.json` records `withGateway`; the ready file gains `gateway {workspace, name, clusters}`;
+  `requester.json` records `withGateway`; the ready file is first written only once the Gateway is Ready too, with
+`gateway {workspace, name, clusters}`;
   `run requester cluster <name> --cluster <c>` makes the home workspace `root:<account>:<c>` and its Cluster, and
   `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path. A node fetches socialweb-meshd and
   socialweb-node from `<base>/downloads/<sha256>/<name>` and checks the pinned sha256: the base is the nodes-only

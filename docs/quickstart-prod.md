@@ -259,8 +259,9 @@ starts the unit. The unit runs the same process, `run requester --name %i --fg`,
 sudo $SWC install requester --name me --dry-run                 # prints every step; writes nothing
 sudo $SWC install requester --name me                           # account swc-requester, unit socialweb-computer-requester@me
 sudo $SWC install requester --account swc-req-t1 --name me -- --atproto-oauth-qr   # name the account; options after --
-sudo runuser -u swc-requester -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-requester) \
-  journalctl --user -u socialweb-computer-requester@me.service -f   # the sign-in URL; sign in with scripts/oauth-signin.ts
+ST=/var/lib/socialweb-computer/swc-requester
+sudo -u swc-requester $ST/bin/current/socialweb-computer run requester signin me --state-dir $ST   # the sign-in URL on stdout
+sudo journalctl _UID=$(id -u swc-requester) _SYSTEMD_USER_UNIT=socialweb-computer-requester@me.service -f   # its log, as root
 R=/var/lib/socialweb-computer/swc-requester/requesters/me/ready.json
 sudo -u swc-requester kubectl --kubeconfig "$(sudo jq -r .kubeconfig "$R")" get marketrequesters.socialweb.computer app
 ```
@@ -274,8 +275,13 @@ sudo -u swc-requester kubectl --kubeconfig "$(sudo jq -r .kubeconfig "$R")" get 
   person to sign in; a start that times out restarts and shows a new sign-in URL. `install` waits for that start
 - options after `--` are the MarketRequesterSpec options of `run requester`, parsed by the same code, written once per
   name into `<state>/requesters/<name>/requester.json` (the first start's options; a second install keeps the file and
-  reports it FOUND). With no identity option the identity is `--atproto-oauth-qr` (D9): the sign-in URL is in the unit's
-  journal; drive it with `scripts/oauth-signin.ts --url "<pendingAction.url>"`
+  reports it FOUND). With no identity option the identity is `--atproto-oauth-qr` (D9): `run requester signin <name>` (as
+  the account or root) reads the MarketIdentity `requester` from the requester's own kcp and prints its
+  `pendingAction.url` on stdout (phase and expiry on stderr, `--json` for the object; nothing when Ready); drive it with
+  `scripts/oauth-signin.ts --url "$(... run requester signin me ...)"`. `install` prints both commands before it starts
+  the unit. The unit's log has the same URL, but only root reads it: the account is a system account (uid under 1000),
+  journald stores its user units' lines in the system journal, and `journalctl --user` as the account opens no file;
+  as root, `journalctl --user-unit` matches root's own uid, so name `_UID=<uid> _SYSTEMD_USER_UNIT=<unit>`
 - an existing account with an app password (`-- --atproto-identity-mode pdsAccount --atproto-handle <h> --atproto-pds-url
   <pds>`): the password never goes into `config.json`, a flag, a unit or the requester record. After the unit started, as
   the account, `socialweb-computer run requester password me --state-dir <state> < <file>` reads it once from stdin and writes
@@ -323,7 +329,9 @@ kubectl delete hostprocess requester-lr2                        # SIGTERM: stops
 - no root prunes it: a root renders and checks only its own set's HostProcesses by name (`compose.SetWorkloads`,
   `compose.CheckWorkloads`), adopts only objects labelled with its owner, and `status.gc` only counts an unowned
   HostProcess as an orphan; it never deletes one. The core adopts the unit by name and InvocationID across its own restart
-- the sign-in URL is in the unit's journal (`journalctl --user -u <unit>`); a password never goes into the argv
+- the sign-in URL: `run requester signin lr2 --state-dir <dir>`, or the unit's journal (`journalctl --user -u <unit>` for a
+  normal account; for a system account such as swc-requester only root reads it, `journalctl _UID=<uid>
+  _SYSTEMD_USER_UNIT=<unit>`); a password never goes into the argv
 - proven (2026-11-01, as test-0001, own market network, localRepo against the network PLC): applied into the core of an
   installed-form requester, the HostProcess was Running with its ready file after 18 s, in `socialweb.slice`, and its
   kubeconfig read the MarketRequester Ready; a restart of that core left it adopted (same InvocationID) with the core's
@@ -369,7 +377,8 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
 - a Cluster lives in a home workspace `root:<account>:<cluster>` of your DID: `run requester cluster` makes the account
   workspace, its AtprotoIdentity, the home workspace and the Cluster `{account: <did>, running: true}`; delete the
   Cluster there to tear it down
-- the ready file gains `gateway {workspace, name, clusters}` once the Gateway is Ready; `requester.json` records
+- the ready file is written only once the Gateway is Ready too, with `gateway {workspace, name, clusters}` in its first
+  write, so `run requester cluster` right after `until [ -s ready.json ]` finds it; `requester.json` records
   `withGateway`, so a restart keeps the gateway and the clusters
 - preflight: cgroup v2, user manager delegation, one subuid/subgid range and setuid newuidmap/newgidmap (the
   `check-host -role gateway` fixes); a dev build or a release build (k3s and external-secrets are embedded)

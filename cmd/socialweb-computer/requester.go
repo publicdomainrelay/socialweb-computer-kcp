@@ -40,6 +40,8 @@ var requesterOptions = []string{backendOpt, "network", "name", "identity", "stat
 
 var requesterPasswordOptions = []string{"name", "state-dir", "network-timeout"}
 
+var requesterSigninOptions = []string{"name", "state-dir", "json"}
+
 var requesterHelperOptions = []string{"name", "state-dir", "ready-file", "json"}
 
 var requesterSSHOptions = []string{"name", "state-dir", "ready-file", "contract", "transport", "tag", "exec", "contract-timeout", "network-timeout",
@@ -485,35 +487,30 @@ func (r *requesterRun) serve(ctx context.Context, started time.Time, readyFile, 
 		return err
 	}
 	ready := r.ready(ctx, st)
-	if err := r.writeReady(ready); err != nil {
-		return fmt.Errorf("the ready file: %w", err)
-	}
-	r.log("the requester is Ready; the ready file is written", "readyFile", readyFile, "did", ready.Did, "kcp", ready.KcpURL, "workspace", ready.Workspace,
-		"sshPublicKey", pub)
-	r.a.printJSON(requesterSummary{Ready: ready, Mode: r.inv.Mode, Network: r.inv.Network, Instance: r.inv.Instance, ReadyFile: readyFile, Restarted: restarted,
-		Seconds: time.Since(started).Seconds()})
-	if err := notifyReady(); err != nil {
-		return err
-	}
 	gctx, stopGateway := context.WithCancel(ctx)
 	defer stopGateway()
 	var gatewayDone <-chan error
 	if r.gatewayOn {
 		done, gw, err := r.startGateway(gctx, r.gatewayExe, ready.Did)
 		if err != nil {
-			for _, path := range r.readyFiles {
-				_ = request.RemoveReady(path)
-			}
 			return fmt.Errorf("--with-gateway: %w", err)
 		}
 		gatewayDone = done
 		r.mu.Lock()
 		r.gateway = gw
 		r.mu.Unlock()
-		if err := r.writeReady(r.ready(ctx, st)); err != nil {
-			r.a.log.Warn("rewriting the ready file with the gateway", "err", err.Error())
-		}
+		ready = r.ready(ctx, st)
 		r.log("the requester's gateway is Ready; the ready file names it", "workspace", gw.Workspace, "clusters", gw.Clusters)
+	}
+	if err := r.writeReady(ready); err != nil {
+		return fmt.Errorf("the ready file: %w", err)
+	}
+	r.log("the requester is Ready; the ready file is written", "readyFile", readyFile, "did", ready.Did, "kcp", ready.KcpURL, "workspace", ready.Workspace,
+		"sshPublicKey", pub, "gateway", ready.Gateway != nil)
+	r.a.printJSON(requesterSummary{Ready: ready, Mode: r.inv.Mode, Network: r.inv.Network, Instance: r.inv.Instance, ReadyFile: readyFile, Restarted: restarted,
+		Seconds: time.Since(started).Seconds()})
+	if err := notifyReady(); err != nil {
+		return err
 	}
 	follow, stopFollow := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -580,6 +577,64 @@ func runRequesterPassword(ctx context.Context, a *app, vals clicfg.Values, rest 
 	}
 	a.printJSON(map[string]string{"name": pos[0], "mount": ref.Mount, "path": ref.Path})
 	return exitOK
+}
+
+type requesterSignin struct {
+	Name          string                                `json:"name"`
+	Phase         v1alpha1.MarketIdentityPhase          `json:"phase"`
+	Did           string                                `json:"did,omitempty"`
+	Handle        string                                `json:"handle,omitempty"`
+	Message       string                                `json:"message,omitempty"`
+	PendingAction *v1alpha1.MarketIdentityPendingAction `json:"pendingAction,omitempty"`
+}
+
+func runRequesterSignin(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	pos, pass := splitWords(rest)
+	if len(pos) != 1 || len(pass) > 0 {
+		return a.fail(exitRefused, "run requester signin <name>: one requester name")
+	}
+	_, dir, err := requesterHome(a, vals, pos[0])
+	if err != nil {
+		return a.fail(exitRefused, "run requester signin: %v", err)
+	}
+	var rec devinstance.Record
+	if err := fsx.ReadJSON(filepath.Join(request.InstanceStateDirIn(dir, pos[0]), "instance.json"), &rec); err != nil || rec.AdminKubeconfig == "" {
+		return a.fail(exitRefused, "run requester signin: the requester %s has no kcp of its own under %s (start it first; a --network requester renders its sign-in in its own terminal): %v", pos[0], dir, err)
+	}
+	k, err := request.OpenKcp(rec.AdminKubeconfig, rec.BaseWorkspace)
+	if err != nil {
+		return a.fail(exitFailed, "run requester signin: %v", err)
+	}
+	ids, err := k.Identities()
+	if err != nil {
+		return a.fail(exitFailed, "run requester signin: %v", err)
+	}
+	gctx, cancel := context.WithTimeout(ctx, requesterReadyRead)
+	defer cancel()
+	obj, err := ids.GetMarketIdentity(gctx, marketrequester.RequesterIdentity)
+	if err != nil {
+		return a.fail(exitFailed, "run requester signin: the requester %s's kcp does not answer or holds no identity yet (is its unit running?): %v", pos[0], err)
+	}
+	out := requesterSignin{Name: pos[0], Phase: obj.Status.Phase, Did: obj.Status.Did, Handle: obj.Status.Handle, Message: obj.Status.Message,
+		PendingAction: obj.Status.PendingAction}
+	if vals.Bool("json") {
+		a.printJSON(out)
+		return exitOK
+	}
+	switch {
+	case out.PendingAction != nil && out.PendingAction.URL != "":
+		fmt.Fprintf(a.stderr, "identity %s is %s: %s; open the URL below (scripts/oauth-signin.ts --url) before %s\n", marketrequester.RequesterIdentity,
+			out.Phase, cmp.Or(out.Message, string(out.PendingAction.Kind)), cmp.Or(out.PendingAction.ExpiresAt, "it is replaced"))
+		fmt.Fprintln(a.stdout, out.PendingAction.URL)
+		return exitOK
+	case out.Phase == v1alpha1.MarketIdentityPhaseReady:
+		fmt.Fprintf(a.stderr, "identity %s is Ready as %s (%s); no sign-in is pending\n", marketrequester.RequesterIdentity, cmp.Or(out.Handle, "no handle"), out.Did)
+		return exitOK
+	case out.PendingAction != nil:
+		return a.fail(exitFailed, "run requester signin: identity %s is %s and waits on %s, not on a sign-in URL: %s", marketrequester.RequesterIdentity, out.Phase,
+			out.PendingAction.Kind, cmp.Or(out.PendingAction.Message, out.Message))
+	}
+	return a.fail(exitFailed, "run requester signin: identity %s is %s with no sign-in URL yet: %s", marketrequester.RequesterIdentity, cmp.Or(string(out.Phase), "unset"), out.Message)
 }
 
 func (r *requesterRun) ready(ctx context.Context, st v1alpha1.ApplicationStatus) request.Ready {
