@@ -79,6 +79,8 @@ type Controller struct {
 	identities *binding.Table[known]
 
 	events chan ctlruntime.Request
+
+	bus *bus.Bus
 }
 
 func New(opts Options) *Controller {
@@ -97,7 +99,7 @@ func New(opts Options) *Controller {
 	}
 	accounts := atproto.New(atproto.Config{Endpoints: opts.Endpoints, Vault: opts.Vault, Resolver: opts.Resolver, HTTPClient: opts.HTTPClient,
 		TLS: trust, Sessions: sessions(opts.Bus), OAuth: opts.OAuth, PLCURL: opts.PLCURL, RecordHTTP: opts.RecordHTTP, Log: log})
-	return &Controller{accounts: accounts, roots: roots, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer)}
+	return &Controller{accounts: accounts, roots: roots, log: log, identities: binding.New[known](), events: make(chan ctlruntime.Request, eventBuffer), bus: opts.Bus}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -131,6 +133,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		c.gone(ctx, req)
 		return ctlruntime.Result{}, nil
 	}
+	prior, held := c.identities.Get(req.Workspace, req.Name)
+	wasReady := held && prior.identity != nil && prior.identity.Status.Phase == v1alpha1.MarketIdentityPhaseReady
 	c.remember(req, object)
 	status := object.Status
 	watch, err := c.associationWatch(ctx, req, object)
@@ -153,6 +157,10 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, errors.Join(reconcileErr, err)
 	}
 	c.remember(req, next)
+	if !wasReady && next.Status.Phase == v1alpha1.MarketIdentityPhaseReady {
+		c.log.Info("marketidentity_ready_notified", "workspace", req.Workspace, "identity", req.Name)
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: GroupKind.Kind, Name: req.Name})
+	}
 	if reconcileErr != nil {
 		return ctlruntime.Result{}, reconcileErr
 	}

@@ -105,7 +105,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		Inputs:         inputs,
 		OpenRepo:       s.openRepo,
 		AwaitRepo:      s.awaitRepo,
-		WatchVaults:    s.watchVaults,
+		WatchBinds:     s.watchBinds,
 		Policy:         runner,
 		Vault:          s.secretsVault,
 		VaultWrite:     s.secretsVaultWrite,
@@ -154,13 +154,15 @@ func (s *Service) openRepo(ctx context.Context, did string) (atprotorepo.Repo, e
 	return bus.Resolve[atprotorepo.Repo](ctx, s.deps.Bus, s.self(), s.repoRef(did), bus.Capability{Name: atprotorepo.CapabilityWrite})
 }
 
-func (s *Service) watchVaults() (<-chan struct{}, func()) {
+func (s *Service) watchBinds() (<-chan struct{}, func()) {
 	wake := make(chan struct{}, 1)
 	if s.deps.Bus == nil {
 		return wake, func() {}
 	}
 	cancel := s.deps.Bus.Subscribe(func(key bus.Key) {
-		if key.Kind != "Vault" {
+		switch key.Kind {
+		case "Vault", "MarketIdentity", "AtprotoRepo":
+		default:
 			return
 		}
 		select {
