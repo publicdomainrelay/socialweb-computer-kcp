@@ -3657,7 +3657,7 @@ internal/controllers/guestidentitygrant/    GuestIdentityGrant
 internal/controllers/hostinstall/           HostInstall
 internal/controllers/hostrelease/           HostRelease
 internal/controllers/infra/                 Infra and EphemeralInfra: their ComputeContracts (staged, requested, released), their AtprotoRecord and AtprotoRecordWatch, the pull of a record edited elsewhere
-internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: listRecords of an account's collection into child objects
+internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: one listing of an account's collection, then its record watch, into child objects
 internal/controllers/jetstreameventsource/  JetstreamEventSource
 internal/controllers/kcpinstallation/       KcpInstallation
 internal/controllers/localrepo/             LocalRepo: a repo on a local Pds component
@@ -11744,6 +11744,49 @@ so it waits for a planned one.
 
 No record is ever deleted from a test account (owner, 2026-10-31 05:05Z: "we never want to be
 deleting records for people"); the r137 requester retention sweep was reverted in r138.
+
+### A finished infra reads its record only on a real change; a collection lists once, then follows its watch (2026-10-31, r139)
+
+Before: the Infra and EphemeralInfra controller read its PDS record (one getRecord) on every
+reconcile, and a reconcile came from every change of its AtprotoRecordWatch (that watch covers the
+whole collection, so every record write of every other tab woke every infra of the account), every
+AtprotoRecord, ComputeContract, repo bind and link event, and the netretry timer (2 s doubling to
+30 s) while a read failed. An EphemeralInfra with `endWhen: deadline` stays to its expiry (`ttlSeconds`,
+default `infra.DefaultTTL` 1 h; the page keeps them 24 h) after its contracts are released, so a page's PDS reads grew with
+tabs x time. Measured on prod 2026-10-30 by the wasm page: alice's PDS answered 429 and one page
+load logged 26 `infra_record_read_retrying`. Under a 429 a finished infra read at least 120 times
+an hour on the retry timer alone, plus once per event above. The InfraCollection relisted the whole
+collection (unbounded pages) on every change of its watch, cursor updates included: O(N) reads per
+record event, O(N^2) over a collection's life.
+
+Now an infra whose contracts are all finished (every declared contract Released or Failed in
+`status.contracts`, every owned ComputeContract Released or Failed) and whose record is Synced at the
+current generation is settled: its reconcile does no getRecord and writes no AtprotoRecord. It reads
+again only on a real change: a generation change (Synced is then older), its own record's cid
+changing in the watch (`watched` marks the key moved when the cid differs from the one it read),
+or its deletion (the finalizer path is unchanged). The first settled reconcile in a process checks
+its own watch (or its collection's) in kcp once against `status.record`, logs
+`infra_record_settled` and indexes the cid, so a change made while the process was down is still
+read. A finished infra never retries a read on a timer: a failed read leaves Synced False
+(`RecordUnavailable`, `infra_record_read_failed`), and the next event reads again. A live infra
+keeps `RecordReadRetrying` and its retry timer. After: 0 reads an hour per finished infra with no
+change to its own record, one read per change of it.
+
+The collection keeps one full enumeration: an InfraCollection is a view of every record of one
+collection in one repo, so its first sync must list (the owner's rule allows a listing where the
+answer is an enumeration; no rkey derivation names records written by other tabs, apps or
+devices). The listing is bounded by the object's own scope (its repo and NSID), paged by 100 and
+capped at 50 pages (`ListCapped`). After it, the collection applies its watch's `status.records`
+and `status.deleted` as a diff against the state it last applied (new uri: a child; new cid: the
+entry's cid; a uri newly deleted: the entry goes; children are never deleted), with no PDS read.
+It lists again only after a gap: a ready EventStream of its watch that it has not seen (a new
+stream starts live, with no cursor), a new generation or DID, or a failed relist, and at most once
+per 10 min (`resyncFloor`, a delayed requeue). A process restart is not a gap: the watch's streams
+resume from their saved cursors.
+
+Left open: each AtprotoRecordWatch still verifies every record in its `status.records` by getRecord
+every 5 min (`VerifyInterval`), and each non-collection infra owns a watch of the whole collection,
+so those reads still grow with infras x records seen.
 
 ## 16. Vocabulary
 
