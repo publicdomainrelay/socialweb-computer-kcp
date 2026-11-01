@@ -244,6 +244,8 @@ const (
 
 	InfraClusterLabel = "infra.socialweb.computer/cluster"
 
+	InfraIndexLabel = "infra.socialweb.computer/index"
+
 	InfraConditionSynced = "Synced"
 
 	InfraConditionSyncConflict = "SyncConflict"
@@ -257,6 +259,8 @@ const (
 	InfraConditionRecordEnded = "RecordEnded"
 
 	InfraConditionRecordReserved = "RecordReserved"
+
+	InfraConditionIndexed = "Indexed"
 
 	InfraReasonRecordReadRetrying = "RecordReadRetrying"
 
