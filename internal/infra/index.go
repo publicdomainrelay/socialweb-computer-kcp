@@ -189,7 +189,8 @@ func IndexHolds(entries []IndexEntry, key IndexKey) bool {
 }
 
 func sameEntry(have IndexEntry, want IndexEntry) bool {
-	return have.ExpiresAt.Equal(want.ExpiresAt) && (want.CreatedAt.IsZero() || have.CreatedAt.Equal(want.CreatedAt))
+	return have.ExpiresAt.Truncate(time.Second).Equal(want.ExpiresAt.Truncate(time.Second)) &&
+		(want.CreatedAt.IsZero() || have.CreatedAt.Truncate(time.Second).Equal(want.CreatedAt.Truncate(time.Second)))
 }
 
 func (v IndexView) Settled(ch IndexChange) bool {
