@@ -286,7 +286,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     links of its last applied PDS URL, while its session owner is Pending or unresolved; it is
     dropped only when the session expired for a reason that is not one the plugin keeps active, the
     owner signed out or the cap is reached. In per-user mode the SshServer has no requesterRef and
-    the shared requester no links. The SshServer's web sign-in follows its vault: a rebound Vault
+    the shared requester no links. The SshServer's Start waits, without polling, until its vault's
+    OpenBaoServer is Ready (`sshserver_waits_for_vault`; woken by the vault provider's bus NotifyBound,
+    whose binding fingerprint carries the server's readiness, so a Starting to Ready change notifies)
+    instead of exiting. The SshServer's web sign-in follows its vault: a rebound Vault
     (bus NotifyBound from the vault provider) rebuilds the custody sign-in on the new address, with
     at most 6 attempts at 1 s doubling to 30 s when the open fails; the MarketIdentity controller
     reconciles on the same signal and never drops it. The atproto plugin keeps a session active when

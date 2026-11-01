@@ -259,6 +259,9 @@ func (s *Service) setup(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.awaitVault(ctx); err != nil {
+		return err
+	}
 	web, err := s.openSignIn(ctx)
 	if err != nil {
 		return err
