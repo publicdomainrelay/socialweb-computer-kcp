@@ -11648,6 +11648,22 @@ status, or a Retained one, releases as before.
   no-op. Existing objects heal on their next reconcile; a status write costs one more patch only when
   a field drops.
 
+- **A requester start no longer waits on the GC scan and the default client rate limit (2026-10-30,
+  r134).** Before (pkg/embedded on hat-8, a fresh kcp v0.33.0 each run, harness = `embedded.Start`
+  then `WaitReady`): `Start` 3.3 to 3.5 s, ready 10.9 and 11.3 s. Between the manager start and the
+  MarketRequester's own set (`market-requester` schemas) the first root pass ran the GC scan of the
+  status samples inline: about 40 sequential LISTs of every kind in root, three of them answered
+  Retry-After 1 s (kinds bound a second earlier), the rest client-side throttled at 200 ms each
+  (client-go's default 5 QPS: the embedded and page rest configs set no QPS). None of the suspected
+  backoff sites ran on the host (no APIExport retry, no out-of-scope requeue, no served wait). Now
+  the first GC scan waits `GCSampleEvery` (30 s) after the first status sample, `compose.New` and
+  `runtime.NewManager` default a rest config without QPS to 50 QPS, burst 100 (as kcpapply and
+  kcpserver do), `ListComponents` lists the component kinds in parallel, and the two waits that have
+  no watch start short: the kcpapply served-kind wait polls from 50 ms doubling to `Poll` (1 s), the
+  APIExport provider retry from 50 ms (`ExportRetryFirst`). After: `Start` 2.8 to 3.5 s (the first
+  boot's provider sets, sequential; a restart skips them), ready 5.7 s twice (8.4 and 8.7 s with the
+  QPS and parallel list only). The page and iOS readings after rc134 are open.
+
 ## 16. Vocabulary
 
 | | |
