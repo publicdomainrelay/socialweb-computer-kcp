@@ -52,6 +52,7 @@ import (
 	contractexposure "github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
+	sandboxembedded "github.com/johnandersen777/socialweb-computer-kcp/internal/sandbox/embedded"
 )
 
 const (
@@ -77,6 +78,10 @@ const (
 
 	CloseTimeout = 15 * time.Second
 )
+
+type PolicySandbox = sandboxembedded.Host
+
+var ErrNoPolicySandbox = sandboxembedded.ErrNoHost
 
 var providerSets = []string{"provider", "hostprocesses", "applications", "bidder"}
 
@@ -110,6 +115,8 @@ type Config struct {
 	OnSnapshot func([]byte)
 
 	OnRestoreError func(error)
+
+	PolicySandbox PolicySandbox
 
 	Log *slog.Logger
 }
@@ -273,7 +280,7 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 	}); err != nil {
 		return err
 	}
-	runner, opener := policySandbox()
+	runner, opener := policySandbox(cfg.PolicySandbox)
 	if err := policy.Register(r.manager, policy.Options{Bus: r.bus, Sandbox: runner, OpenSandbox: opener, Log: log}); err != nil {
 		return fmt.Errorf("embedded: policy controllers: %w", err)
 	}
@@ -380,11 +387,18 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 	}
 	resource := kc.Resource(v1alpha1.MarketRequesterGVR)
 	comms := &v1alpha1.MarketComms{Mode: v1alpha1.MarketCommsModeFirehose}
+	provider := policySandboxProvider(cfg.PolicySandbox)
+	components := policySandboxComponents(provider)
 	if cur, err := kube.Get[v1alpha1.MarketRequester](ctx, resource, AppName); err == nil {
-		if cur.Spec.Comms != nil && cur.Spec.Comms.Mode == comms.Mode && cur.Spec.SecretsFallback == v1alpha1.SecretsFallbackSealed {
+		if cur.Spec.Comms != nil && cur.Spec.Comms.Mode == comms.Mode && cur.Spec.SecretsFallback == v1alpha1.SecretsFallbackSealed &&
+			componentsPolicySandbox(cur.Spec.Components) == provider {
 			return nil
 		}
-		patch, err := json.Marshal(map[string]any{"spec": map[string]any{"comms": comms, "secretsFallback": v1alpha1.SecretsFallbackSealed}})
+		spec := map[string]any{"comms": comms, "secretsFallback": v1alpha1.SecretsFallbackSealed}
+		if components != nil {
+			spec["components"] = components
+		}
+		patch, err := json.Marshal(map[string]any{"spec": spec})
 		if err != nil {
 			return err
 		}
@@ -405,12 +419,32 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 		Network:         &v1alpha1.MarketNetworkValue{PLCDirectoryURL: PLCDirectoryURL},
 		Comms:           comms,
 		SecretsFallback: v1alpha1.SecretsFallbackSealed,
+		Components:      components,
 	}}
 	obj.APIVersion = v1alpha1.GroupVersion.String()
 	obj.Kind = "MarketRequester"
 	obj.Name = AppName
 	_, err = kube.Apply[*v1alpha1.MarketRequester](ctx, resource, obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
+}
+
+var policyEngineKey = compose.ComponentKey(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent)
+
+func policySandboxComponents(provider string) v1alpha1.ComponentOverrides {
+	if provider == "" {
+		return nil
+	}
+	return v1alpha1.ComponentOverrides{policyEngineKey: {Settings: &v1alpha1.ComponentSettings{
+		PolicyEngine: &v1alpha1.PolicyEngineSettings{Sandbox: &v1alpha1.PolicyEngineSandboxSettings{Provider: provider}},
+	}}}
+}
+
+func componentsPolicySandbox(components v1alpha1.ComponentOverrides) string {
+	settings := components[policyEngineKey].Settings
+	if settings == nil || settings.PolicyEngine == nil || settings.PolicyEngine.Sandbox == nil {
+		return ""
+	}
+	return settings.PolicyEngine.Sandbox.Provider
 }
 
 func (r *Requester) Close() error {

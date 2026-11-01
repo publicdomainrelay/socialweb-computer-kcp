@@ -4,16 +4,18 @@ package embedded
 
 import (
 	"context"
-	"errors"
 
 	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
+	sandboxembedded "github.com/johnandersen777/socialweb-computer-kcp/internal/sandbox/embedded"
 )
 
-var ErrNoPolicySandbox = errors.New("embedded: iOS has no policy sandbox yet (plan 0038 I6), so every policy decision is a Deny")
+func policySandboxProvider(PolicySandbox) string {
+	return policyv1alpha1.PolicySandboxProviderEmbedded
+}
 
-func policySandbox() (sandbox.Runner, func(context.Context, *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error)) {
-	return nil, func(context.Context, *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error) {
-		return nil, ErrNoPolicySandbox
+func policySandbox(host PolicySandbox) (sandbox.Runner, func(context.Context, *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error)) {
+	return nil, func(ctx context.Context, spec *policyv1alpha1.PolicySandboxConfig) (sandbox.Runner, error) {
+		return sandboxembedded.Open(ctx, host, spec)
 	}
 }
