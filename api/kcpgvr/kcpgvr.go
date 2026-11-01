@@ -10,6 +10,7 @@ var (
 
 	ConfigMaps      = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 	Secrets         = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	Namespaces      = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
 	ServiceAccounts = schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
 	Services        = schema.GroupVersionResource{Version: "v1", Resource: "services"}
 	Events          = schema.GroupVersionResource{Version: "v1", Resource: "events"}
