@@ -50,6 +50,8 @@ type Options struct {
 
 	Last int
 
+	Start int
+
 	Host string
 
 	Network string
@@ -73,6 +75,8 @@ type Registry struct {
 	first int
 
 	last int
+
+	start int
 
 	now func() time.Time
 
@@ -100,6 +104,8 @@ func Open(opts Options) (*Registry, error) {
 		return nil, fmt.Errorf("ports: the port registry last port %d is out of range", opts.Last)
 	case opts.Last < opts.First:
 		return nil, fmt.Errorf("ports: the port registry range %d-%d is empty", opts.First, opts.Last)
+	case opts.Start != 0 && (opts.Start < opts.First || opts.Start > opts.Last):
+		return nil, fmt.Errorf("ports: the port registry start port %d is outside %d-%d", opts.Start, opts.First, opts.Last)
 	}
 	host := strings.TrimSpace(opts.Host)
 	host = cmp.Or(host, DefaultPortHost)
@@ -116,6 +122,7 @@ func Open(opts Options) (*Registry, error) {
 		network: network,
 		first:   opts.First,
 		last:    opts.Last,
+		start:   cmp.Or(opts.Start, opts.First),
 		now:     time.Now,
 		leases:  map[string]Lease{},
 	}
@@ -150,7 +157,9 @@ func (r *Registry) Allocate(name string) (Lease, error) {
 		used[lease.Port] = true
 	}
 	port := 0
-	for candidate := r.first; candidate <= r.last; candidate++ {
+	span := r.last - r.first + 1
+	for i := range span {
+		candidate := r.first + (r.start-r.first+i)%span
 		if used[candidate] {
 			continue
 		}

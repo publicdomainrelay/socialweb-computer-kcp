@@ -2,6 +2,7 @@ package marketnetwork
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -16,8 +17,9 @@ import (
 )
 
 func (ctl *Controller) portLeases() (map[string]component.PortLease, error) {
-	reg, err := component.OpenPortRegistry(component.PortRegistryOptions{StateDir: NetworkStateDir(ctl.c.StateRoot()),
-		First: NetworkPortFirst, Last: NetworkPortLast})
+	stateDir := NetworkStateDir(ctl.c.StateRoot())
+	reg, err := component.OpenPortRegistry(component.PortRegistryOptions{StateDir: stateDir,
+		First: NetworkPortFirst, Last: NetworkPortLast, Start: networkPortStart(stateDir)})
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +40,13 @@ func (ctl *Controller) portLeases() (map[string]component.PortLease, error) {
 		out[name] = lease
 	}
 	return out, nil
+}
+
+func networkPortStart(stateDir string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filepath.Clean(stateDir)))
+	blocks := uint32((NetworkPortLast - NetworkPortFirst + 1) / NetworkPortBlock)
+	return NetworkPortFirst + int(h.Sum32()%blocks)*NetworkPortBlock
 }
 
 func leasePort(lease component.PortLease) int32 {

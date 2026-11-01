@@ -49,9 +49,9 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
    (quickstart-local section 2); `dev status` phase Ready; `MarketBidder app` `spec.computeKinds` in `root:bidder-1` is
    `["vm","deno"]`.
 2. Add the requester app `qs` to `MarketNetwork.spec.apps`; wait `.status.apps[qs]` Ready with a did.
-3. Vouches (quickstart-local section 4): [vouch.yaml](../../examples/infra/vouch.yaml) in `root:qs` (requester -> bidder) and
-   [vouch-bidder-operator.yaml](../../examples/infra/vouch-bidder-operator.yaml) in `root:bidder-1` (bidder operator -> requester);
-   both AtprotoRecords Applied. Wait 5 minutes if any contract was denied before.
+3. Vouches (quickstart-local section 4): the network composes `network-vouch-bidder-1` in `root:qs` (requester -> bidder)
+   and `operator-vouch-requester-<stamp>` in `root:bidder-1` (bidder operator -> requester); read both Applied. The
+   bidder runs `bidder-tangled-vouch` (no `open` anywhere). Wait 5 minutes if any contract was denied before.
 4. VM: apply `vm.yaml` (your key in), `kubectl wait ... phase=Deployed`, ssh over iroh, read `/root/quickstart`.
 5. k8s: apply `k8s-cluster.yaml` to the tenant kubeconfig; read the gateway Infra `nodes-<hex>`, node Ready, pod logs.
 6. Deno: apply `deno-sandbox.yaml`; read `status.contract.sandbox`.
@@ -66,7 +66,7 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
 | --- | --- | --- |
 | network Ready | `dev status` | 34 s (`dev up` exit 1 on a transient, `dev status` Ready right after) |
 | requester app `qs` Ready, did | `MarketNetwork.status.apps` | < 75 s after the `spec.apps` apply |
-| `vouch-bidder` Applied, `at://<qs did>/sh.tangled.graph.vouch/<bidder did>`; `operator-vouch-requester` Applied, `at://<bidder operator did>/sh.tangled.graph.vouch/<qs did>` | AtprotoRecord status | 1-4 s |
+| `network-vouch-bidder-1` Applied, `at://<qs did>/sh.tangled.graph.vouch/<bidder did>`; `operator-vouch-requester-<stamp>` Applied, `at://<bidder operator did>/sh.tangled.graph.vouch/<qs did>` | AtprotoRecord status | 1-4 s |
 | Infra `quickstart-vm` Deploying -> Deployed | `status.phase`, `status.contracts[vm1]` | 19 s (03:46:01 -> 03:46:20) |
 | ssh prints `quickstart-vm-ok`, `x86_64` | ssh over dumbpipe | 0.7 s |
 | gateway Infra `nodes-<hex>` Deployed, node `<acct>-tenant-node1` Ready, pod Running, log `quickstart-k8s-ok` | `root:gateway`, tenant k3s | pod applied 03:27:30, Infra Deployed 20 s, node Ready 37 s, pod Running 46 s |
@@ -134,7 +134,7 @@ No token or key material in any log (plaintext check 0 on every log file).
 | Symptom | Cause / fix |
 | --- | --- |
 | `dev up` exit 1: gateway `Requester ... names no identity DID or handle` | before rc156: a component Failed for a moment at start; rc156 `dev up` waits 1 min on a Failed component |
-| `no bids received within 30s`; bidder Bid `policy rejected ... not vouched` (requester-tangled-vouch) | the bidder runs the RFP's attached policy as itself (`self-did` = bidder, `counterparty-did` = requester, PolicyWorkflowRun in `root:bidder-1`): the bidder operator has not vouched the requester; apply vouch-bidder-operator.yaml; denials are cached 5 min |
+| `no bids received within 30s`; bidder Bid `policy rejected ... not vouched` (requester-tangled-vouch) | the bidder runs the RFP's attached policy as itself (`self-did` = bidder, `counterparty-did` = requester, PolicyWorkflowRun in `root:bidder-1`): the bidder operator has not vouched the requester: read `operator-vouch-requester-<stamp>` in `root:bidder-1` (the network composes it once the requester has a DID); denials are cached 5 min |
 | requester -> bidder vouch alone, still `not vouched` | expected: that is the requester's own direction; the bidder-side run needs the operator -> requester record |
 | deno contract `no bids` | the bidder does not serve `deno`: `dev up` without `--compute-kinds vm,deno` (`MarketBidder.spec.computeKinds`) |
 | agent contract fails before the RFP: `an agent needs its token in spec.secretsRef` | add `spec.secrets` for the contract |

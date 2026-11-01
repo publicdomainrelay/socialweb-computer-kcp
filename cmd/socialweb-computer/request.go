@@ -551,13 +551,14 @@ func (r *requestRun) childRecord(netLayout devinstance.Layout, instance string) 
 
 func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	started := time.Now()
-	var kubeconfig, workspace string
+	var kubeconfig, workspace, netKubeconfig string
 	switch r.inv.Mode {
 	case request.ModeNetwork:
 		netLayout, netRec, err := r.networkLayout()
 		if err != nil {
 			return err
 		}
+		netKubeconfig = netRec.AdminKubeconfig
 		if fresh {
 			app := v1alpha1.NetworkApp{Name: r.inv.Name, Kind: v1alpha1.ApplicationKindMarketRequester,
 				Profile: marketrequester.RequesterProfileNetwork, Options: r.appOptions, SecretsFallback: r.root.SecretsFallback,
@@ -619,6 +620,13 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		r.log("requester", "phase", string(st.Phase), "message", st.Message, "components", len(st.Components))
 	}); err != nil {
 		return err
+	}
+	if netKubeconfig != "" {
+		if err := request.WaitNetworkVouches(ctx, netKubeconfig, r.inv.Name, r.networkTimeout, func(ws, record string) {
+			r.log("waiting for the network's vouch", "workspace", ws, "record", record)
+		}); err != nil {
+			return err
+		}
 	}
 	return request.WriteInvocationIn(r.home(), r.inv)
 }

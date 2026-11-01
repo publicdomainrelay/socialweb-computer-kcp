@@ -1315,10 +1315,10 @@ entries:
     source: owner order 2026-10-30 (bidders default to bidder-tangled-vouch; open is opt-in only)
     actors: [bidder, requester, policy engine, kcp]
     setup: >
-      Own network: --bidders 1, no gateway, --app-values with a bidder entry that names no policy
-      (the market network profile otherwise sets policy open explicitly). One run request
-      --network <inst> from a requester outside the bidder operator's vouch graph, then the same
-      with the bidder's spec.policy set to open.
+      Own network: --bidders 1, no gateway, the default bidder policy (the market network profile
+      names none, so bidder-tangled-vouch). One run request --network <inst> whose network vouches
+      are not Applied yet (a requester outside the bidder operator's vouch graph), then the same
+      with dev up --bidder-policy open.
     asserts: >
       With spec.policy unset the Bidder component's spec.policy is bidder-tangled-vouch, its
       status.guestNetwork.hostUDPReason is "policy not only-me", and the bidder publishes no bid

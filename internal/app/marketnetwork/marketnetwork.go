@@ -35,6 +35,7 @@ const (
 	NetworkPortsFile    = "ports.json"
 	NetworkPortFirst    = 30000
 	NetworkPortLast     = 39999
+	NetworkPortBlock    = 8
 	FrontRebindAfter    = 30 * time.Second
 
 	NetworkAlicePdsName      = "alice"

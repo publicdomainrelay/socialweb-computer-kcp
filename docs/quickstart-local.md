@@ -66,8 +66,9 @@ $SWC dev status --instance $I --state-dir "$ST" | jq -r '.network.status.phase, 
   as `run bidder --compute-kinds`); without it a network bidder serves `vm` only and a deno contract gets no bid
 - `--guest-image-source` names a guest image dir (`image.json`, `rootfs.ext4`, `vmlinux`); without it `dev up` fetches the pinned one
 - Ready when `.network.status.phase` is `Ready` (about 35 s on hat-8)
-- `dev up` gives its own dev bidders a bidder policy of its choosing; the bidder also runs the contract's attached
-  `requester-tangled-vouch` before it bids, so the vouches of section 4 are needed
+- network bidders run the default `bidder-tangled-vouch` and also the contract's attached `requester-tangled-vouch`
+  before they bid; the network composes the vouches of section 4 for its own requesters. `open` runs only when you
+  name it (`--bidder-policy open` or `{"bidder":{"policy":"open"}}` in `--app-values`); it is insecure
 - `dev up` waits through a component that is Failed for a moment (seen: gateway Requester "names no identity DID or handle"); it fails only when one stays Failed for a minute
 
 ## 3. kubectl Access
@@ -128,27 +129,24 @@ but `denounce` counts.
 - an Infra contract carries no `policy` field; the default applies
 - `MarketBidder app` `status.did` is the bidder DID; `MarketIdentity bidder` `status.approvedAssociations` holds its operator
 
-In the local network both records are kcp objects written through ComponentLinks:
+In the local network the MarketNetwork composes both records for every MarketRequester app (yours, and each `run
+request --network` invocation), once the requester and the bidder have DIDs; read them, do not write them:
 
-- [vouch.yaml](../examples/infra/vouch.yaml), in `root:qs`: a ComponentLink that lets AtprotoRecords labelled
-  `quickstart.socialweb.computer/vouch` write `sh.tangled.graph.vouch` to the requester's repo, and the record for the bidder
-- [vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml), in `root:bidder-1`: the bidder operator's
-  record for the requester, through the network's link `link-records-operator` (label `apps.socialweb.computer/record-repo: operator`)
+- in `root:bidder-1`: AtprotoRecord `operator-vouch-requester-<stamp of the requester DID>`, the bidder operator's
+  record for the requester, through the bidder's link `link-records-operator` (label `apps.socialweb.computer/record-repo: operator`)
+- in `root:qs`: AtprotoRecord `network-vouch-bidder-1`, the requester's record for the bidder, through the ComponentLink
+  `link-network-vouches-root-qs` (AtprotoRecords labelled `apps.socialweb.computer/network-vouch`)
+- `run request --network` waits until both are Applied before it posts its contract
 
-Both AtprotoRecords are `deletionPolicy: Retain`: `kubectl delete` of either removes the kcp object and keeps the vouch
-record in the repo. Nothing here deletes a user's record; remove a vouch from the account itself (`goat`).
+The requester's record is `deletionPolicy: Retain`. Nothing here deletes a user's record; remove a vouch from the
+account itself (`goat`). [vouch.yaml](../examples/infra/vouch.yaml) and
+[vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml) are the same two records by hand, for a
+requester or bidder the network does not compose.
 
 ```bash
-DID=$(k root:qs get marketrequesters.socialweb.computer app -o jsonpath='{.status.did}')
-REPO=repo-$(echo "$DID" | tr ':' '-')
-BID=$(k root:bidder-1 get marketbidders.socialweb.computer app -o jsonpath='{.status.did}')
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-sed -e "s/REPLACE-REQUESTER-REPO/$REPO/" -e "s/REPLACE-BIDDER-DID/$BID/" -e "s/2026-11-01T00:00:00Z/$NOW/" \
-  examples/infra/vouch.yaml | k root:qs apply -f -
-sed -e "s/REPLACE-REQUESTER-DID/$DID/" -e "s/2026-11-01T00:00:00Z/$NOW/" \
-  examples/infra/vouch-bidder-operator.yaml | k root:bidder-1 apply -f -
-k root:qs get atprotorecords.socialweb.computer vouch-bidder -o jsonpath='{.status.phase} {.status.uri}{"\n"}'
-k root:bidder-1 get atprotorecords.socialweb.computer operator-vouch-requester -o jsonpath='{.status.phase} {.status.uri}{"\n"}'
+k root:bidder-1 get atprotorecords.socialweb.computer -l apps.socialweb.computer/record-repo=operator \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.uri}{"\n"}{end}'
+k root:qs get atprotorecords.socialweb.computer network-vouch-bidder-1 -o jsonpath='{.status.phase} {.status.uri}{"\n"}'
 ```
 
 On prod the same two records are written by people with their own accounts: [quickstart-prod.md](quickstart-prod.md) section 2.

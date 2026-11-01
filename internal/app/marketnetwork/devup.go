@@ -55,7 +55,6 @@ func defaultNetworkValues() map[string]any {
 		"bidder": map[string]any{
 			"kind":    string(v1alpha1.ApplicationKindMarketBidder),
 			"profile": NetworkProfile,
-			"policy":  "open",
 			"kcp":     map[string]any{"guestImageSource": ""},
 		},
 		"gateway": map[string]any{
@@ -91,6 +90,7 @@ type BidderVMDefaults struct {
 	Handle           string
 	GuestNetwork     *v1alpha1.GuestNetworkOptions
 	ComputeKinds     []string
+	Policy           string
 }
 
 func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
@@ -109,6 +109,9 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	}
 	if d.GuestNetwork != nil {
 		a.GuestNetwork = a.GuestNetwork.WithDefaults(d.GuestNetwork)
+	}
+	if d.Policy != "" {
+		a.Policy = d.Policy
 	}
 	if len(d.ComputeKinds) > 0 {
 		a.ComputeKinds = append([]string(nil), d.ComputeKinds...)
