@@ -47,8 +47,10 @@ const (
 	CollectionInfra                 = "computer.socialweb.infra"
 	CollectionEphemeralInfra        = "computer.socialweb.ephemeralInfra"
 	CollectionIngressWebRTC         = "com.publicdomainrelay.temp.ingress.webRTC"
+	CollectionTangledVouch          = "sh.tangled.graph.vouch"
 
 	RepoIngressWebRTCCreate = "repo:" + CollectionIngressWebRTC + "?action=create"
+	RepoTangledVouchWrite   = "repo:" + CollectionTangledVouch + "?action=create&action=update"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -80,6 +82,7 @@ var (
 		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint, RPCAtircRevoke},
+		[]string{RepoTangledVouchWrite},
 	)
 
 	BidderOAuthScope = dedupeScopes(
@@ -138,7 +141,7 @@ var (
 	)
 )
 
-var OptionalScopes = []string{RPCAtircRevoke}
+var OptionalScopes = []string{RPCAtircRevoke, RepoTangledVouchWrite}
 
 func RequiredScopes(requested []string) []string {
 	out := make([]string, 0, len(requested))
