@@ -308,13 +308,24 @@ items:
     status: proposed
   - id: S11-EPHEMERAL-INGRESS
     title: "An ingress Exposure with an ephemeral key, and a Pds whose URL, handle and account follow it"
-    files: [api/exposure, internal/exposure/registrar.go, internal/stack/componentcore/exposure_identity.go, internal/app/compose/pds.go, internal/services/pds, internal/atproto/pds/files/keys.go]
+    files: [api/exposure, api/v1alpha1, internal/atproto/ingress/ephemeral.go, internal/exposure/registrar.go, internal/app/compose/exposures.go, internal/services/pds, internal/atproto/pds/files/memory.go, internal/atproto/pds/wellknown.go, internal/atproto/pds/plcsubmit, internal/stack/ephemeralpds]
     work: >
-      D7: Exposure ingress.key Ephemeral (keypair in memory, status.ingress.url); the Pds reads its public URL
-      from that status and rebuilds its OAuth issuer and well-known answers when it changes; a memory
-      RepoKeyStore; an ephemeral account mode that creates the did:plc only once the URL is known and
-      tombstones it at stop.
-    status: proposed
+      D7: Exposure spec.ingressKey Ephemeral (ingress.EphemeralKeypair in memory, never written; the reported
+      status.ingress host and url are <did:key label>.<ingress host>, new on every registration);
+      IngressXrpcConfig.ephemeralKey makes compose.IngressExposure ephemeral. The composed apps already read the
+      Pds's public URL from its ingress Exposure status and re-apply the Pds with it (port 0 rule), and a Pds
+      spec change restarts it through its controller. PdsSpec.ephemeral keeps the session secret, PLC rotation
+      key, OAuth signer and repo keys in memory (files.MemoryRepoKeyStore), keeps its data in a fresh dir
+      removed at stop and tombstones every DID it created when it stops (plcsubmit Tombstone).
+      /.well-known/atproto-did answers the account whose handle is the request host, so handle = run-time host
+      resolves. The in-process form for test/integration and the live acceptance is
+      internal/stack/ephemeralpds.Start: a pds.Server behind an ingress subscriber with an ephemeral key, the
+      account (handle = host, did:plc genesis at the run-time URL) created once registered, Close tombstones.
+      Read live 2026-11-01 against xrpc.fedproxy.com and plc.directory: registered in 1.1 s, atproto-did,
+      _health and oauth-authorization-server answered 200 through the ingress, the PLC document named the
+      run-time URL, and after Close plc.directory answered 404 "DID not available". Left: the composed
+      MarketRequester does not yet derive its handle from the ephemeral host or set PdsSpec.ephemeral.
+    status: doing
   - id: S10-PROTOCOL-NOTE
     title: "The protocol written for discussion outside this repository"
     files: [docs/protocol/workload-oauth.md]

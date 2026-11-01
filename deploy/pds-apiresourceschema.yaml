@@ -168,6 +168,8 @@ spec:
                             required:
                               - kind
                               - name
+                          ephemeralKey:
+                            type: boolean
                       opentunnel:
                         type: object
                         properties:
@@ -399,6 +401,8 @@ spec:
                     items:
                       type: string
                     x-kubernetes-list-type: set
+              ephemeral:
+                type: boolean
           status:
             type: object
             properties:

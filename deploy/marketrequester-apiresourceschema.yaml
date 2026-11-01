@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-37.marketrequesters.socialweb.computer
+  name: v1alpha1-38.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -160,6 +160,8 @@ spec:
                             required:
                               - kind
                               - name
+                          ephemeralKey:
+                            type: boolean
                       opentunnel:
                         type: object
                         properties:
@@ -409,6 +411,8 @@ spec:
                         required:
                           - kind
                           - name
+                      ephemeralKey:
+                        type: boolean
                   opentunnel:
                     type: object
                     properties:
@@ -511,6 +515,8 @@ spec:
                         required:
                           - kind
                           - name
+                      ephemeralKey:
+                        type: boolean
                   opentunnel:
                     type: object
                     properties:
@@ -737,6 +743,8 @@ spec:
                               required:
                                 - kind
                                 - name
+                            ephemeralKey:
+                              type: boolean
                         opentunnel:
                           type: object
                           properties:

@@ -571,6 +571,8 @@ type PdsSpec struct {
 	ContactEmail string `json:"contactEmail,omitempty"`
 
 	OAuth *PdsOAuth `json:"oauth,omitempty"`
+
+	Ephemeral bool `json:"ephemeral,omitempty"`
 }
 
 type PdsOAuth struct {

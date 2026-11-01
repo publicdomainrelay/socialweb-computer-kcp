@@ -30,6 +30,8 @@ const (
 	relayMaxBody = 8 << 20
 
 	DefaultIngressName = "dispatcher"
+
+	EphemeralServiceAuthTTL = 5 * time.Minute
 )
 
 var (
@@ -70,6 +72,8 @@ type IngressSpec struct {
 	IngressDial string
 
 	PublicHost string
+
+	EphemeralKey bool
 
 	Path string
 
@@ -117,7 +121,7 @@ func NewSubscriberRegistrar(registry *component.Registry, b *bus.Bus, identity I
 }
 
 func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (IngressRegistration, error) {
-	if r == nil || r.identity == nil {
+	if r == nil || (r.identity == nil && !spec.EphemeralKey) {
 		return nil, errors.New("no ingress identity is configured")
 	}
 	if r.registry == nil {
@@ -152,18 +156,12 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 			return nil, err
 		}
 	}
-	keypair, err := r.identity.Keypair(ctx, spec.Workspace, spec.Exposure)
+	aud := "did:web:" + audienceHost
+	keypair, getToken, err := r.keypair(ctx, spec, aud)
 	if err != nil {
-		return nil, fmt.Errorf("resolving the ingress keypair: %w", err)
-	}
-	if keypair == nil {
-		return nil, errors.New("the ingress identity returned no keypair")
+		return nil, err
 	}
 	did := keypair.DID()
-	aud := "did:web:" + audienceHost
-	getToken := func(ctx context.Context, nsid string) (string, error) {
-		return r.identity.ServiceAuthToken(ctx, spec.Workspace, spec.Exposure, aud, nsid)
-	}
 	handler := r.handler(spec.Target, spec.Handler)
 	tunnel := r.tunnel(spec.Target, spec.Handler, spec.Caller())
 	wsTarget := r.wsTarget(spec.Target)
@@ -195,6 +193,28 @@ func (r *SubscriberRegistrar) Register(ctx context.Context, spec IngressSpec) (I
 	raw := scheme + "://" + urlHost + path
 	route := exposurev1alpha1.ExposureIngress{Host: urlHost, Did: did, Relay: subscriber.Relay(), URL: raw}
 	return &subscriberRegistration{url: raw, route: route, subscriber: subscriber}, nil
+}
+
+func (r *SubscriberRegistrar) keypair(ctx context.Context, spec IngressSpec, aud string) (ingress.Keypair, func(context.Context, string) (string, error), error) {
+	if spec.EphemeralKey {
+		keypair, err := ingress.NewEphemeralKeypair()
+		if err != nil {
+			return nil, nil, err
+		}
+		return keypair, func(_ context.Context, nsid string) (string, error) {
+			return keypair.ServiceAuthToken(aud, nsid, EphemeralServiceAuthTTL)
+		}, nil
+	}
+	keypair, err := r.identity.Keypair(ctx, spec.Workspace, spec.Exposure)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving the ingress keypair: %w", err)
+	}
+	if keypair == nil {
+		return nil, nil, errors.New("the ingress identity returned no keypair")
+	}
+	return keypair, func(ctx context.Context, nsid string) (string, error) {
+		return r.identity.ServiceAuthToken(ctx, spec.Workspace, spec.Exposure, aud, nsid)
+	}, nil
 }
 
 func (r *SubscriberRegistrar) proxyHost(spec IngressSpec) (string, bool, error) {
@@ -256,9 +276,6 @@ func endpointHost(endpoint component.Endpoint) (string, bool, bool) {
 
 func (r *SubscriberRegistrar) handler(target component.Key, name string) func(context.Context, *ingress.Request) (*ingress.Response, error) {
 	return func(ctx context.Context, request *ingress.Request) (*ingress.Response, error) {
-		if request == nil {
-			return nil, errors.New("the ingress request is empty")
-		}
 		registry := r.bus
 		if registry == nil {
 			return nil, errors.New("the handler registry is not configured")
@@ -267,54 +284,71 @@ func (r *SubscriberRegistrar) handler(target component.Key, name string) func(co
 		if !ok {
 			return nil, fmt.Errorf("no HTTP handler %q is registered for %s/%s", HandlerName(name), target.Kind, target.Name)
 		}
-		path := request.Path
-		path = cmp.Or(path, "/")
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		if len(request.Params) > 0 {
-			values := url.Values{}
-			for key, value := range request.Params {
-				values.Set(key, value)
-			}
-			path += "?" + values.Encode()
-		}
-		body := request.RawBody
-		if body == "" && len(request.Body) > 0 {
-			body = string(request.Body)
-		}
-		req, err := http.NewRequestWithContext(ctx, request.Method, "http://"+strings.ToLower(target.Kind+"."+target.Name)+path, strings.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		for key, value := range request.Headers {
-			req.Header.Set(key, value)
-		}
-		if host := strings.TrimSpace(request.Headers["host"]); host != "" {
-			req.Host = host
-		}
-		if req.Host != "" {
-			if req.Header.Get("X-Forwarded-Host") == "" {
-				req.Header.Set("X-Forwarded-Host", req.Host)
-			}
-			if req.Header.Get("X-Forwarded-Proto") == "" {
-				req.Header.Set("X-Forwarded-Proto", "https")
-			}
-		}
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, req.WithContext(component.WithCaller(req.Context(), target)))
-		result := recorder.Result()
-		defer result.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(result.Body, relayMaxBody))
-		if err != nil {
-			return nil, err
-		}
-		headers := map[string]string{}
-		for key := range result.Header {
-			headers[strings.ToLower(key)] = result.Header.Get(key)
-		}
-		return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type"), Headers: headers}, nil
+		base := "http://" + strings.ToLower(target.Kind+"."+target.Name)
+		wrapped := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			handler.ServeHTTP(w, req.WithContext(component.WithCaller(req.Context(), target)))
+		})
+		return ServeIngressRequest(ctx, wrapped, base, request)
 	}
+}
+
+func IngressHandler(handler http.Handler, base string) func(context.Context, *ingress.Request) (*ingress.Response, error) {
+	return func(ctx context.Context, request *ingress.Request) (*ingress.Response, error) {
+		return ServeIngressRequest(ctx, handler, base, request)
+	}
+}
+
+func ServeIngressRequest(ctx context.Context, handler http.Handler, base string, request *ingress.Request) (*ingress.Response, error) {
+	if request == nil {
+		return nil, errors.New("the ingress request is empty")
+	}
+	path := request.Path
+	path = cmp.Or(path, "/")
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	if len(request.Params) > 0 {
+		values := url.Values{}
+		for key, value := range request.Params {
+			values.Set(key, value)
+		}
+		path += "?" + values.Encode()
+	}
+	body := request.RawBody
+	if body == "" && len(request.Body) > 0 {
+		body = string(request.Body)
+	}
+	req, err := http.NewRequestWithContext(ctx, request.Method, strings.TrimRight(base, "/")+path, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range request.Headers {
+		req.Header.Set(key, value)
+	}
+	if host := strings.TrimSpace(request.Headers["host"]); host != "" {
+		req.Host = host
+	}
+	if req.Host != "" {
+		if req.Header.Get("X-Forwarded-Host") == "" {
+			req.Header.Set("X-Forwarded-Host", req.Host)
+		}
+		if req.Header.Get("X-Forwarded-Proto") == "" {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		}
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	result := recorder.Result()
+	defer result.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(result.Body, relayMaxBody))
+	if err != nil {
+		return nil, err
+	}
+	headers := map[string]string{}
+	for key := range result.Header {
+		headers[strings.ToLower(key)] = result.Header.Get(key)
+	}
+	return &ingress.Response{Status: result.StatusCode, Body: json.RawMessage(raw), ContentType: result.Header.Get("Content-Type"), Headers: headers}, nil
 }
 
 func (r *SubscriberRegistrar) wsTarget(target component.Key) func() *ingress.Target {

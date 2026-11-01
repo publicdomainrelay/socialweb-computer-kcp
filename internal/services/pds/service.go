@@ -162,6 +162,14 @@ func (s *Service) Start(ctx context.Context) error {
 		return err
 	}
 	defer unlock()
+	var keys *ephemeralKeys
+	if s.spec.Ephemeral {
+		if keys, err = newEphemeralKeys(stateDir); err != nil {
+			return err
+		}
+		defer keys.remove()
+		stateDir = keys.dir
+	}
 	var (
 		repoStore    *repo.SQLiteStore
 		accountStore *atpds.Store
@@ -220,15 +228,20 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 
 	var sessionSecret []byte
-	if s.mode == atpds.ModeFull {
+	switch {
+	case keys != nil:
+		sessionSecret = keys.sessionSecret
+	case s.mode == atpds.ModeFull:
 		sessionSecret, err = files.SessionSecret(stateDir, s.componentPath(SessionSecretFile))
 		if err != nil {
 			return err
 		}
 	}
 
-	keyStore, err := files.RepoKeyStore(s.componentPath(RepoKeyDir))
-	if err != nil {
+	var keyStore atpds.RepoKeyStore
+	if keys != nil {
+		keyStore = keys.repoKeys
+	} else if keyStore, err = files.RepoKeyStore(s.componentPath(RepoKeyDir)); err != nil {
 		return err
 	}
 	if s.mode == atpds.ModeFull && keyStore == nil {
@@ -240,13 +253,18 @@ func (s *Service) Start(ctx context.Context) error {
 	var submitter atpds.PLCSubmitter
 	var rotation atcrypto.PrivateKey
 	if s.mode == atpds.ModeFull && plcURL != "" {
-		rotation, err = files.RotationKey(stateDir, s.componentPath(RotationKeyFile))
+		if keys != nil {
+			rotation = keys.rotation
+		} else if rotation, err = files.RotationKey(stateDir, s.componentPath(RotationKeyFile)); err != nil {
+			return err
+		}
+		plcSubmitter, err := plcsubmit.New(plcURL, rotation, plcClient)
 		if err != nil {
 			return err
 		}
-		submitter, err = plcsubmit.New(plcURL, rotation, plcClient)
-		if err != nil {
-			return err
+		submitter = plcSubmitter
+		if keys != nil {
+			keys.plc = plcSubmitter
 		}
 	}
 	if s.mode == atpds.ModeFull && submitter == nil && !s.spec.AllowExplicitDID {
@@ -261,7 +279,7 @@ func (s *Service) Start(ctx context.Context) error {
 		rotationDID = pub.DIDKey()
 	}
 
-	oauthConfig, err := s.oauthConfig(stateDir, baseURL)
+	oauthConfig, err := s.oauthConfig(stateDir, baseURL, keys)
 	if err != nil {
 		return err
 	}
@@ -329,6 +347,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	cancelSync()
 	wg.Wait()
+	if keys != nil {
+		keys.tombstone(context.WithoutCancel(ctx), log)
+	}
 	s.mu.Lock()
 	s.started = false
 	s.stopCh = nil
@@ -354,14 +375,19 @@ func (s *Service) syncServiceEndpoints(ctx context.Context, store *atpds.Store, 
 	}
 }
 
-func (s *Service) oauthConfig(stateDir, baseURL string) (*atpds.OAuthConfig, error) {
+func (s *Service) oauthConfig(stateDir, baseURL string, keys *ephemeralKeys) (*atpds.OAuthConfig, error) {
 	if s.mode != atpds.ModeFull || s.spec.OAuth == nil {
 		return nil, nil
 	}
 	opts := s.spec.OAuth
-	signerKey, err := files.OAuthSigner(stateDir)
-	if err != nil {
-		return nil, err
+	var signerKey atcrypto.PrivateKey
+	if keys != nil {
+		signerKey = keys.oauthSigner
+	} else {
+		var err error
+		if signerKey, err = files.OAuthSigner(stateDir); err != nil {
+			return nil, err
+		}
 	}
 	serviceDID := s.serviceDID()
 	if serviceDID == "" {
