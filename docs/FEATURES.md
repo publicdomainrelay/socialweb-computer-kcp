@@ -2,7 +2,7 @@
 
 What socialweb-computer supports today, how far each item is proven, and where it is documented. Releases at the
 time of writing: socialweb-computer rc159 (`ec0f4849`) on the gateway, the ssh gateway and the bidders local, hat-9,
-hat-7; page-rc143 on `shell.socialweb.computer`; atirc v0.1.0-5a8dfa2 on irc.fedfork.com.
+hat-7, and rc162 for the CLI (`run requester`, `install requester`, `run request`); page-rc143 on `shell.socialweb.computer`; atirc v0.1.0-5a8dfa2 on irc.fedfork.com.
 
 Proof levels: **prod** = proven on the production gateway and bidders with real accounts; **local** = proven in a
 market network of one host (`dev up`); **built** = in the code, not yet proven live.
