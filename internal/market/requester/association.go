@@ -37,6 +37,8 @@ const (
 
 var errAssociationRefused = errors.New("requester: the association is refused")
 
+const stepBindAtirc = "bind the atirc token to the association"
+
 type contractAssociation struct {
 	subject string
 
@@ -224,7 +226,9 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 		}
 	}
 	if step, err := r.finishAssociation(ctx, contract, state); err != nil {
-		r.associationFailed(ctx, step, err)
+		if r.associationFailed(ctx, step, err) && step == stepBindAtirc && fromGuest(contract) {
+			r.abandonUnboundToken(ctx, contract)
+		}
 		return
 	}
 	r.mu.Lock()
@@ -240,7 +244,7 @@ func (r *contractRunner) finishAssociation(ctx context.Context, contract v1alpha
 		return "", nil
 	}
 	if err := r.bindAtircToken(ctx, contract, current.ref, current.expiresAt); err != nil {
-		return "bind the atirc token to the association", err
+		return stepBindAtirc, err
 	}
 	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
 		(state != nil && state.SecretsApplied != nil)) {
