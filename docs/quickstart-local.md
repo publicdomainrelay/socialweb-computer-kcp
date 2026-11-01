@@ -102,6 +102,9 @@ EOF
 k root get marketnetworks.socialweb.computer network -o json | jq -r '.status.apps[] | select(.name=="qs") | "\(.phase) \(.did)"'
 ```
 
+- the last line prints nothing until the network lists the app, then `Pending`, then `Ready <did>`; run it again until it
+  reads Ready before section 6
+
 Or `$SWC run requester --name qs --network $I --state-dir "$ST"` in its own terminal: the same child application, plus
 a ready file and a kubeconfig of the workspace `root:qs` (`$ST/requesters/qs/`; [quickstart-prod.md](quickstart-prod.md)
 section 7). A restart must repeat `--network $I`, and must wait after the Ctrl-C until the child's dev workspace is gone
@@ -116,7 +119,7 @@ What it composes in `root:qs` (read them, do not write them):
 | `MarketIdentity requester` | the requester's DID; mode `localRepo` (its own Pds component `pds` in `root:qs`) |
 | `AtprotoRepo repo-<did with - for :>` | the requester's own repo |
 | `OpenBaoServer requester` | `status.clients[name=requester]`: kv mount `requester`, cert auth role `requester` |
-| `PolicyEngine` | runs every policy decision |
+| `PolicyEngine policy-engine` (`policyengines.policy.socialweb.computer`) | runs every policy decision |
 
 ### Vouches
 
