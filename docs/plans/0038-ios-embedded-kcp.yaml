@@ -61,7 +61,7 @@ items:
   - id: I4-SOCIALWEB-IOS
     title: "socialweb builds for ios/arm64: the MarketRequester root and Requester component compose in the app's kcp (comms Firehose, no ingress), with ios build tags for host-only packages; build gate covers ios/arm64"
     owner: linux-kcp
-    status: todo
+    status: done
   - id: I5-OAUTH
     title: "OAuth sign-in in the app with the requester scope plus chat.atirc.revoke (28); client metadata generated from requester-scope.txt; MarketIdentity Ready in the embedded kcp"
     owner: atirc-ios-client-dev
