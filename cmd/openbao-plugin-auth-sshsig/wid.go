@@ -117,6 +117,49 @@ func pathWIDToken(b *backend) *framework.Path {
 	}
 }
 
+func pathRoleWID(b *backend) *framework.Path {
+	return &framework.Path{
+		Pattern: "role/" + framework.GenericNameRegex("name") + "/wid$",
+		Fields: map[string]*framework.FieldSchema{
+			"name":        {Type: framework.TypeString, Description: "Name of the role.", Required: true},
+			"wid_subject": {Type: framework.TypeString, Description: "The sub of the workload identity tokens of this role.", Required: true},
+			"wid_claims":  {Type: framework.TypeKVPairs, Description: "Extra string claims of the workload identity tokens; iss, sub, aud, exp, nbf, iat and jti are refused."},
+		},
+		Operations: map[logical.Operation]framework.OperationHandler{
+			logical.UpdateOperation: &framework.PathOperation{Callback: b.roleWIDWrite},
+		},
+		HelpSynopsis: "Sets the workload subject and claims of an existing role, and nothing else of it.",
+	}
+}
+
+func (b *backend) roleWIDWrite(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	name := d.Get("name").(string)
+	subject := strings.TrimSpace(d.Get("wid_subject").(string))
+	if subject == "" || len(subject) > 512 {
+		return logical.ErrorResponse("wid_subject must be 1 to 512 characters"), nil
+	}
+	claims := map[string]string{}
+	if raw, ok := d.GetOk("wid_claims"); ok {
+		claims = raw.(map[string]string)
+	}
+	for k := range claims {
+		if widReservedClaims[k] {
+			return logical.ErrorResponse(fmt.Sprintf("wid_claims may not set %q", k)), nil
+		}
+	}
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	r, err := getRole(ctx, req.Storage, name)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return logical.ErrorResponse(fmt.Sprintf("role %q does not exist", name)), nil
+	}
+	r.WIDSubject, r.WIDClaims = subject, claims
+	return nil, putRole(ctx, req.Storage, name, r)
+}
+
 func pathWIDDiscovery(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: `wid/\.well-known/openid-configuration$`,

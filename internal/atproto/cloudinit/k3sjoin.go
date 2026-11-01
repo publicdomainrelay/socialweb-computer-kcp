@@ -27,7 +27,7 @@ const (
 
 	NodeKVMount = "socialweb-nodes"
 
-	NodeJWTUserClaim = "wid_sub"
+	NodeJWTUserClaim = "sub"
 
 	NodeJWTMountPrefix = "jwt-"
 

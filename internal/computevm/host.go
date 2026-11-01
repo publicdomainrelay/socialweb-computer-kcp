@@ -64,8 +64,6 @@ type Host struct {
 
 	servers kube.Resource
 
-	grants kube.Resource
-
 	syncs kube.Resource
 }
 
@@ -107,7 +105,7 @@ func Open(ctx context.Context, c Config) (*Host, error) {
 		return nil, err
 	}
 	h := &Host{c: c, Rest: restCfg, VMs: dc.Resource(GVR), Backends: dc.Resource(v1alpha1.FirecrackerVMGVR),
-		HostProcesses: dc.Resource(hostprocess.GVR), servers: dc.Resource(openbaoctl.GVR), grants: dc.Resource(openbaoctl.GrantGVR),
+		HostProcesses: dc.Resource(hostprocess.GVR), servers: dc.Resource(openbaoctl.GVR),
 		syncs: dc.Resource(statesync.StateSyncGVR)}
 	return h, nil
 }

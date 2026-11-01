@@ -291,7 +291,6 @@ func (c *Controller) release(ctx context.Context, req ctlruntime.Request, vm *v1
 		return ctlruntime.Result{Waiting: true}, nil
 	}
 	c.host.DropGuestLogin(ctx, *vm)
-	c.host.DropGuestGrants(ctx, vm.Name)
 	c.declare(ctx, req, vm.Name)
 	c.log.Info("released: the backend is gone and the finalizer is dropped", "computevm", vm.Name)
 	return ctlruntime.Result{}, nil

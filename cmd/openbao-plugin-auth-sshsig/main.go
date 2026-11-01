@@ -29,6 +29,7 @@ func factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend,
 		Paths: []*framework.Path{
 			pathRoleList(b),
 			pathRole(b),
+			pathRoleWID(b),
 			pathBind(b),
 			pathChallenge(b),
 			pathLogin(b),

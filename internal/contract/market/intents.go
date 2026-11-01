@@ -16,8 +16,6 @@ const (
 
 	KindComputeVM = "ComputeVM"
 
-	KindGuestIdentityGrant = "GuestIdentityGrant"
-
 	KindStateSync = "StateSync"
 
 	KindComputeContract = "ComputeContract"
@@ -92,7 +90,6 @@ type GuestIntents interface {
 
 	ApplyComputeVMPublished(ctx context.Context, name string, published v1alpha1.ComputeVMPublished) error
 
-	CreateGuestIdentityGrant(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error
 }
 
 type StateSyncIntents interface {

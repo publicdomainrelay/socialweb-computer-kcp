@@ -14,8 +14,6 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
-	reporemote "github.com/johnandersen777/socialweb-computer-kcp/internal/atprotorepo/remote"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
@@ -36,8 +34,6 @@ type Service struct {
 	trust *component.Trust
 
 	stateDir string
-
-	grantSync time.Duration
 
 	issuerRetry time.Duration
 
@@ -185,7 +181,7 @@ func (s *Service) prepare(ctx context.Context) error {
 	if s.deps.Bus == nil {
 		return errors.New("guestcontrolplane: the handler registry is not available")
 	}
-	inputs, guests, grants, err := s.handles(ctx)
+	inputs, guests, err := s.handles(ctx)
 	if err != nil {
 		return err
 	}
@@ -194,15 +190,11 @@ func (s *Service) prepare(ctx context.Context) error {
 		DID:             s.did(),
 		Mount:           s.spec.GuestLoginMount,
 		Timeout:         DefaultOpenBaoTimeout,
-		GrantSync:       s.grantSync,
 		IssuerRetry:     s.issuerRetry,
 		HostKeyAttempts: int(ptr.Deref(s.spec.HostKeyAttempts, 0)),
 	}, guestplane.Deps{
-		Inputs: inputs,
-		Guests: guests,
-		Grants: grants,
-		RBAC: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: ingress.NewDirectory(s.network().PLCDirectoryURL),
-			HTTP: networkHTTPClient(s.deps.Hosts, s.network(), s.trust, DefaultOpenBaoTimeout)}),
+		Inputs:         inputs,
+		Guests:         guests,
 		FallbackIssuer: s.relayURL,
 		Publish:        s.publishGuestEvent,
 		Log:            s.log,
@@ -231,22 +223,18 @@ func (s *Service) prepare(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) handles(ctx context.Context) (guestcp.Source, guestcp.Guests, guestcp.Grants, error) {
+func (s *Service) handles(ctx context.Context) (guestcp.Source, guestcp.Guests, error) {
 	self := s.self()
 	ctx = bus.WithCallerLabels(ctx, self, s.deps.Labels)
 	inputs, err := bus.Resolve[guestcp.Source](ctx, s.deps.Bus, self, self, bus.Capability{Name: guestcp.CapabilityInputs})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("guestcontrolplane: resolving the guest inputs: %w", err)
+		return nil, nil, fmt.Errorf("guestcontrolplane: resolving the guest inputs: %w", err)
 	}
 	guests, err := bus.Resolve[guestcp.Guests](ctx, s.deps.Bus, self, self, bus.Capability{Name: guestcp.CapabilityGuests})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("guestcontrolplane: resolving the guest report writer: %w", err)
+		return nil, nil, fmt.Errorf("guestcontrolplane: resolving the guest report writer: %w", err)
 	}
-	grants, err := bus.Resolve[guestcp.Grants](ctx, s.deps.Bus, self, self, bus.Capability{Name: guestcp.CapabilityGrants})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("guestcontrolplane: resolving the grant writer: %w", err)
-	}
-	return inputs, guests, grants, nil
+	return inputs, guests, nil
 }
 
 func (s *Service) startRelay(ctx context.Context, plane *guestplane.Plane) error {

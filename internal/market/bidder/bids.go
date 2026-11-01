@@ -410,7 +410,7 @@ func (b *Bidder) recordPublishedBid(ctx context.Context, bid *v1alpha1.Bid, ref 
 
 func (b *Bidder) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now time.Time) (market.StrongRef, error) {
 	rkey := bid.Name
-	collection, config, err := b.guests.BidConfig(b.cfg.GuestURL, b.cfg.DID, guestseed.AcceptPathVM, now.Format(time.RFC3339))
+	collection, config, err := b.guests.BidConfig(b.cfg.GuestURL, b.cfg.GuestLoginMount, b.cfg.DID, guestseed.AcceptPathVM, now.Format(time.RFC3339))
 	if err != nil {
 		return market.StrongRef{}, err
 	}

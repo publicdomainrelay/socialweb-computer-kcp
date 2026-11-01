@@ -34,24 +34,6 @@ func (v vmStore) RecordGuest(ctx context.Context, name string, report v1alpha1.C
 	return v.p.deps.Guests.RecordGuest(ctx, name, report)
 }
 
-type grantStore struct {
-	p *Plane
-}
-
-var _ guestidentity.GrantStore = grantStore{}
-
-func (g grantStore) List(context.Context) ([]v1alpha1.GuestIdentityGrant, error) {
-	return g.p.grants(), nil
-}
-
-func (g grantStore) Apply(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {
-	return g.p.deps.Grants.Apply(ctx, grant)
-}
-
-func (g grantStore) Delete(ctx context.Context, name string) error {
-	return g.p.deps.Grants.Delete(ctx, name)
-}
-
 func (p *Plane) withGuestLogin(reply guestidentity.Reply) guestidentity.Reply {
 	if reply.Status != http.StatusOK {
 		return reply
@@ -68,7 +50,7 @@ func (p *Plane) withGuestLogin(reply guestidentity.Reply) guestidentity.Reply {
 	if vm == nil {
 		return reply
 	}
-	ref, err := guestidentity.GuestLoginRef(*vm, p.guestLoginScopes(name))
+	ref, err := guestidentity.GuestLoginRef(*vm, nil)
 	if err != nil {
 		return reply
 	}
@@ -79,15 +61,4 @@ func (p *Plane) withGuestLogin(reply guestidentity.Reply) guestidentity.Reply {
 	}
 	reply.Body = raw
 	return reply
-}
-
-func (p *Plane) guestLoginScopes(name string) []string {
-	scopes := []string{}
-	for _, grant := range p.grants() {
-		if grant.Spec.ComputeVMRef.Name != name {
-			continue
-		}
-		scopes = append(scopes, grant.Spec.Scopes...)
-	}
-	return scopes
 }

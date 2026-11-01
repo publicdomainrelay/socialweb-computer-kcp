@@ -204,7 +204,6 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		return "", err
 	}
 	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID, req.acceptedAt)
-	created := true
 	if err := b.intents.CreateComputeVM(ctx, *vm); err != nil {
 		if !errors.Is(err, contract.ErrExists) {
 			return "", fmt.Errorf("bidder: creating the ComputeVM: %w", err)
@@ -213,13 +212,6 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		if !found || b.guests.AcceptKeyOf(&existing) != acceptKey || !b.owns(existing.Spec.Owner.Handle) {
 			return "", fmt.Errorf("bidder: creating the ComputeVM: %w", err)
 		}
-		created = false
-	}
-	if err := b.registerGrant(ctx, name, req.requesterDID, record.Role); err != nil {
-		if created {
-			b.abandon(ctx, name)
-		}
-		return "", err
 	}
 	b.log.Info("a guest ComputeVM is applied", "computevm", name, "cpus", record.CPUs, "role", record.Role, "requester", req.requesterDID)
 	return name, nil
@@ -307,17 +299,6 @@ func (b *Bidder) checkCapacity() error {
 	}))
 	if int32(live) >= limit {
 		return fmt.Errorf("bidder: the %d guest quota is full", limit)
-	}
-	return nil
-}
-
-func (b *Bidder) registerGrant(ctx context.Context, name, requesterDID, role string) error {
-	grant, err := b.guests.Grant(b.cfg.DID, requesterDID, role, name)
-	if err != nil {
-		return err
-	}
-	if err := b.intents.CreateGuestIdentityGrant(ctx, grant); err != nil && !errors.Is(err, contract.ErrExists) {
-		return fmt.Errorf("bidder: writing the guest identity grant: %w", err)
 	}
 	return nil
 }

@@ -98,7 +98,6 @@ const (
 	DumbpipeVersionDefault = "0.39.0"
 	GuestLoginScriptPath   = "/usr/local/bin/guest-login.sh"
 	GuestLoginUnit         = "guest-login.service"
-	GuestLoginTokenPath    = "/root/secrets/openbao/token"
 	GuestLoginNamespace    = "prove-sshd"
 	GuestLoginDefaultMount = "sshsig"
 	PoweroffEndsVMModule   = "poweroff-ends-vm"

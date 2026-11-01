@@ -29,8 +29,6 @@ const (
 
 	GuestLoginUnit = cloudinit.GuestLoginUnit
 
-	GuestLoginTokenPath = cloudinit.GuestLoginTokenPath
-
 	GuestLoginNamespace = cloudinit.GuestLoginNamespace
 
 	GuestLoginDefaultMount = cloudinit.GuestLoginDefaultMount
@@ -499,11 +497,6 @@ func validateGuestLogin(opts GuestLoginOptions) error {
 	}
 	if opts.SSHDir != "" {
 		if err := checkAbsolute(opts.SSHDir); err != nil {
-			return err
-		}
-	}
-	if opts.TokenPath != "" {
-		if err := checkAbsolute(opts.TokenPath); err != nil {
 			return err
 		}
 	}

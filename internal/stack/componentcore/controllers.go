@@ -36,7 +36,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/contractevent"
 	eventsctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/events"
 	exposurectl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/exposure"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/guestidentitygrant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostinstall"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/hostrelease"
 	infractl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/infra"
@@ -304,13 +303,7 @@ func (c *Core) registerHost(mgr *ctlruntime.Manager, clients *workspaceClients, 
 		}
 	}
 	if cfg.OpenBao != nil {
-		servers, err := openbaoserver.Register(mgr, openbaoserver.Options{Servers: cfg.OpenBao, Grants: guestGrants{clients: clients}, Scope: scope,
-			Log: cfg.Log})
-		if err != nil {
-			return err
-		}
-		if _, err := guestidentitygrant.Register(mgr, guestidentitygrant.Options{Outcomes: servers, Events: servers.GrantEvents(), Scope: scope,
-			Log: cfg.Log}); err != nil {
+		if _, err := openbaoserver.Register(mgr, openbaoserver.Options{Servers: cfg.OpenBao, Scope: scope, Log: cfg.Log}); err != nil {
 			return err
 		}
 	}

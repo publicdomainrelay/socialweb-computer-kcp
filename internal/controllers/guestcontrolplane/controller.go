@@ -105,9 +105,6 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		ctlruntime.WatchesIn(ComputeVMExport, func(_ context.Context, src ctlruntime.Request, _ *v1alpha1.ComputeVM) []ctlruntime.Request {
 			return ctl.planesIn(src.Cluster)
 		}),
-		ctlruntime.WatchesIn(ComputeVMExport, func(_ context.Context, src ctlruntime.Request, _ *v1alpha1.GuestIdentityGrant) []ctlruntime.Request {
-			return ctl.planesIn(src.Cluster)
-		}),
 		ctlruntime.WatchesIn(IdentityExport, func(_ context.Context, src ctlruntime.Request, _ *v1alpha1.MarketIdentity) []ctlruntime.Request {
 			return ctl.planesIn(src.Cluster)
 		}),
@@ -139,7 +136,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	if c.feedFor(req.Workspace, object.Name).publish(in) {
 		c.log.Info("the guest control plane inputs changed", "workspace", req.Workspace, "name", object.Name,
-			"computevms", len(in.ComputeVMs), "grants", len(in.Grants), "did", in.DID, "issuer", in.Issuer, "openbao", in.OpenBao != nil)
+			"computevms", len(in.ComputeVMs), "did", in.DID, "issuer", in.Issuer, "openbao", in.OpenBao != nil)
 	}
 	return ctlruntime.Result{}, nil
 }
@@ -180,11 +177,6 @@ func (c *Controller) inputs(ctx context.Context, workspace string, object *v1alp
 		return guestcp.Inputs{}, fmt.Errorf("listing the ComputeVMs: %w", err)
 	}
 	in.ComputeVMs = vms.Items
-	var grants v1alpha1.GuestIdentityGrantList
-	if err := c.store.List(ctx, workspace, &grants); err != nil {
-		return guestcp.Inputs{}, fmt.Errorf("listing the GuestIdentityGrants: %w", err)
-	}
-	in.Grants = grants.Items
 	return in, nil
 }
 
