@@ -25,6 +25,8 @@ const (
 	maxWatchedRecords = 512
 
 	maxDeletedRecords = 256
+
+	maxGoneNoted = 1024
 )
 
 var ErrMatchPending = errors.New("eventstream: the record watch match is not resolved")
@@ -55,12 +57,14 @@ type Sink struct {
 	mu sync.Mutex
 
 	pending Pending
+
+	gone map[string]struct{}
 }
 
 var _ events.Sink = (*Sink)(nil)
 
 func (w *Watches) NewSink(name string, matches MatchesFunc, flushed func()) *Sink {
-	s := &Sink{w: w, name: strings.TrimSpace(name), matches: matches, pending: newPending()}
+	s := &Sink{w: w, name: strings.TrimSpace(name), matches: matches, pending: newPending(), gone: map[string]struct{}{}}
 	s.flush = debounce.New(w.flushDelay, flushed)
 	return s
 }
@@ -100,9 +104,16 @@ func (s *Sink) Deliver(ctx context.Context, event events.Event) error {
 			path := pdsclient.RepoPath{Repo: repo, Collection: syntax.NSID(collection), Rkey: syntax.RecordKey(rkey)}
 			record, err := s.w.getWatchedRecord(ctx, repo, path, expected)
 			if err != nil {
+				if recordGone(err) {
+					s.noteGone(uri, op.CID, err)
+					continue
+				}
 				s.w.log.Warn("fetching a watched record", "uri", uri, "err", err.Error())
 				continue
 			}
+			s.mu.Lock()
+			delete(s.gone, uri)
+			s.mu.Unlock()
 			if record.URI.String() != uri {
 				s.w.log.Warn("a watched record came back under another URI", "uri", uri, "got", record.URI.String())
 				continue
@@ -138,6 +149,28 @@ func (s *Sink) Deliver(ctx context.Context, event events.Event) error {
 	s.mu.Unlock()
 	s.flush.Mark()
 	return nil
+}
+
+func recordGone(err error) bool {
+	var xrpc *pdsclient.XRPCError
+	return errors.As(err, &xrpc) && (xrpc.Code == "RecordNotFound" || xrpc.Code == "RepoNotFound" || xrpc.StatusCode == http.StatusNotFound)
+}
+
+func (s *Sink) noteGone(uri, cid string, err error) {
+	s.mu.Lock()
+	_, noted := s.gone[uri]
+	if !noted {
+		if len(s.gone) >= maxGoneNoted {
+			clear(s.gone)
+		}
+		s.gone[uri] = struct{}{}
+	}
+	s.mu.Unlock()
+	if noted {
+		return
+	}
+	s.w.log.Info("a watched record op names a record its PDS no longer holds; the op is skipped", "watch", s.name, "uri", uri, "cid", cid,
+		"err", err.Error())
 }
 
 func (s *Sink) Take() Pending {
@@ -230,6 +263,9 @@ func (w *Watches) forgetAuthorPDS(ctx context.Context, did syntax.DID) {
 func pdsEndpointStale(err error) bool {
 	var xrpc *pdsclient.XRPCError
 	if !errors.As(err, &xrpc) {
+		return false
+	}
+	if xrpc.Code == "RecordNotFound" {
 		return false
 	}
 	switch xrpc.StatusCode {

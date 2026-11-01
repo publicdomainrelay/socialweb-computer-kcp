@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -205,21 +206,28 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		Conditions: slices.Clone(v.status.Conditions)}
 	var rec *recordSync
 	var recordErr error
+	backoff := false
 	if v.spec.Record != nil {
 		rec, err = r.syncRecord(ctx, req, v, now)
+		reason, isUnresolved := Unresolved(err)
+		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
 		if err != nil {
-			reason := "RecordUnavailable"
+			syncedReason := "RecordUnavailable"
 			if errors.Is(err, ErrRepoNoDID) {
-				reason = "RepoPending"
+				syncedReason = "RepoPending"
 			}
-			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, reason, err.Error())
+			if isUnresolved {
+				syncedReason = reason
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, syncedReason, err.Error())
 			recordErr = err
-			if errors.Is(err, ErrRepoNoDID) {
+			if errors.Is(err, ErrRepoNoDID) || isUnresolved {
 				recordErr = nil
 			}
+			backoff = isUnresolved
 			if !Publishing(v.spec.Record) {
 				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-				return ctlruntime.Result{}, errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+				return ctlruntime.Result{Backoff: backoff}, errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
 			}
 		}
 	}
@@ -298,12 +306,30 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			r.c.log.Info("infra_ephemeral_ended", "workspace", req.Workspace, "name", req.Name, "reason", end.Reason)
 			return ctlruntime.Result{}, req.Delete(ctx, obj)
 		}
-		return ctlruntime.Result{}, nil
+		return ctlruntime.Result{Backoff: backoff}, nil
 	}
 	if v.ephemeral != nil {
-		return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second)}, nil
+		return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second), Backoff: backoff}, nil
 	}
-	return ctlruntime.Result{}, nil
+	return ctlruntime.Result{Backoff: backoff}, nil
+}
+
+func (r *reconciler[T]) noteUnresolved(req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, isUnresolved bool, reason string, err error) {
+	prior := meta.FindStatusCondition(v.status.Conditions, v1alpha1.InfraConditionRecordUnresolved)
+	if !isUnresolved {
+		if prior == nil {
+			return
+		}
+		meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraConditionRecordUnresolved)
+		if prior.Status == metav1.ConditionTrue {
+			r.c.log.Info("infra_record_resolved", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+		}
+		return
+	}
+	conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordUnresolved, true, reason, err.Error())
+	if prior == nil || prior.Status != metav1.ConditionTrue || prior.Reason != reason || prior.Message != err.Error() {
+		r.c.log.Info("infra_record_unresolved", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", err.Error())
+	}
 }
 
 func summary(statuses []v1alpha1.InfraContractStatus) string {

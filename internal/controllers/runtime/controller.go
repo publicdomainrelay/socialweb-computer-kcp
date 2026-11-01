@@ -45,6 +45,8 @@ type Result struct {
 	RequeueAfter time.Duration
 
 	Waiting bool
+
+	Backoff bool
 }
 
 type Reconciler[T Object] interface {
@@ -501,6 +503,11 @@ func (a *adapter[T]) reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 	if s.finalizer != "" && !res.Waiting && !obj.GetDeletionTimestamp().IsZero() && controllerutil.ContainsFinalizer(obj, s.finalizer) {
 		if err := req.applyFinalizer(ctx, obj, false); err != nil {
 			return reconcile.Result{}, a.failed(ctx, mcreq, req.Workspace, req.Name, err)
+		}
+	}
+	if res.Backoff {
+		if _, next := a.limiter.peek(mcreq); res.RequeueAfter <= 0 || res.RequeueAfter > next {
+			return reconcile.Result{Requeue: true}, nil //nolint:staticcheck
 		}
 	}
 	return reconcile.Result{RequeueAfter: res.RequeueAfter}, nil

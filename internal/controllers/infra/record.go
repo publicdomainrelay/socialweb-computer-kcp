@@ -32,6 +32,26 @@ const RepoKind = "AtprotoRepo"
 
 var ErrRepoNoDID = errors.New("reports no did yet")
 
+var ErrRecordUnresolved = errors.New("infra: the record's repo cannot be resolved")
+
+type unresolved struct {
+	reason string
+
+	err error
+}
+
+func (e unresolved) Error() string { return e.err.Error() }
+
+func (e unresolved) Unwrap() []error { return []error{ErrRecordUnresolved, e.err} }
+
+func Unresolved(err error) (string, bool) {
+	var u unresolved
+	if errors.As(err, &u) {
+		return u.reason, true
+	}
+	return "", false
+}
+
 type recordSync struct {
 	action infra.Action
 
@@ -77,6 +97,9 @@ func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commo
 		return "", nil, err
 	}
 	repo, err := kube.Get[v1alpha1.AtprotoRepo](ctx, dyn.Resource(v1alpha1.AtprotoRepoGVR), ref.Name)
+	if apierrors.IsNotFound(err) {
+		return "", nil, unresolved{reason: "RepoNotFound", err: fmt.Errorf("infra: the AtprotoRepo %s does not exist", ref.String())}
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("infra: reading the AtprotoRepo %s: %w", ref.String(), err)
 	}
@@ -86,7 +109,7 @@ func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commo
 	}
 	reader, err := bus.Resolve[atprotorepo.RecordReader](ctx, b, self, ref, bus.Capability{Name: atprotorepo.CapabilityRead, Scope: []string{nsid}})
 	if err != nil {
-		return "", nil, fmt.Errorf("infra: the repo.read handle of %s: %w", ref.String(), err)
+		return "", nil, unresolved{reason: "RepoUnreadable", err: fmt.Errorf("infra: the repo.read handle of %s: %w", ref.String(), err)}
 	}
 	return did, reader, nil
 }
@@ -105,7 +128,7 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	nsid := v.kind.NSID()
 	repo, err := RepoRef(req.Workspace, b.RepoRef)
 	if err != nil {
-		return nil, err
+		return nil, unresolved{reason: "RepoRefInvalid", err: err}
 	}
 	r.c.bindRepo(string(v.kind), req, repo)
 	did, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, nsid)

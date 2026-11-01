@@ -245,4 +245,6 @@ const (
 	InfraConditionSyncConflict = "SyncConflict"
 
 	InfraConditionRecordValid = "RecordValid"
+
+	InfraConditionRecordUnresolved = "RecordUnresolved"
 )
