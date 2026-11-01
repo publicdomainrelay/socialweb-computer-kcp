@@ -44,6 +44,7 @@ func scopeMemoKey(workflow json.RawMessage, inputs map[string]any) string {
 }
 
 func bindCacheKey(inputs map[string]any, workflow json.RawMessage, workflowCR *policyv1alpha1.PolicyWorkflow, requestContext map[string]any) {
+	caller := stringInput(inputs, CacheKeyInput)
 	delete(inputs, CacheKeyInput)
 	if !declaresInput(workflow, CacheKeyInput) {
 		return
@@ -72,7 +73,11 @@ func bindCacheKey(inputs map[string]any, workflow json.RawMessage, workflowCR *p
 		data := entry[file].Data
 		digest.Write([]byte(file + ":" + strconv.Itoa(len(data)) + ":" + data))
 	}
-	inputs[CacheKeyInput] = "engine/" + hex.EncodeToString(digest.Sum(nil))
+	bound := "engine:" + hex.EncodeToString(digest.Sum(nil))
+	if caller != "" {
+		bound = caller + "|" + bound
+	}
+	inputs[CacheKeyInput] = bound
 }
 
 func withoutTrust(value models.Cache) models.Cache {
