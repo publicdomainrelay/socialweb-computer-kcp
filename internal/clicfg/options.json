@@ -806,6 +806,66 @@
     "compute-kinds": {
       "type": "string",
       "description": "run bidder, install bidder and dev up --profile market-network: comma-separated compute kinds the bidder serves (vm, deno; spec.computeKinds of the MarketBidder, on every network bidder for dev up); unset, vm only; install bidder writes it to config.json. For run bidder without --network, no vm makes it a deno sandbox bidder, which needs --host-backend=proc and --fg"
+    },
+    "oauth-pds": {
+      "type": "string",
+      "description": "oauth allow and revoke: the account's PDS URL (our PDS); the record is written there through a session signed in with ATPROTO_PASSWORD, and the PDS service DID is read from its describeServer"
+    },
+    "oauth-account": {
+      "type": "string",
+      "description": "oauth allow, revoke and approve: the account DID whose com.fedproxy.rbac record grants the workload"
+    },
+    "oauth-role": {
+      "type": "string",
+      "description": "oauth allow, revoke and approve: the role name, which is the com.fedproxy.rbac record key; the workload token's audience is <account>#role/<role>"
+    },
+    "oauth-issuer": {
+      "type": "string",
+      "description": "oauth allow: the workload's OIDC issuer URL (https; the iss of its tokens)"
+    },
+    "oauth-subject": {
+      "type": "string",
+      "description": "oauth allow: the workload's subject (the sub of its tokens)"
+    },
+    "oauth-client": {
+      "type": "string",
+      "description": "oauth allow: the OAuth client_id URL(s) the workload may approve, comma-separated"
+    },
+    "oauth-scope": {
+      "type": "string",
+      "description": "oauth allow: the scopes the workload may approve, comma-separated; unset takes the client metadata's scope without transition:* and repo:com.fedproxy.rbac"
+    },
+    "oauth-redirect-uri": {
+      "type": "string",
+      "description": "oauth allow: pin the client's redirect_uri"
+    },
+    "oauth-service": {
+      "type": "string",
+      "description": "oauth allow: the PDS service DID the record protects; unset reads it from --oauth-pds describeServer"
+    },
+    "oauth-print": {
+      "type": "boolean",
+      "description": "oauth allow: print the record JSON and write nothing"
+    },
+    "oauth-login": {
+      "type": "string",
+      "description": "oauth approve: the app's sign-in URL that answers a redirect to the PDS authorize page when given ?handle=, e.g. https://irc.fedfork.com/login"
+    },
+    "oauth-login-handle": {
+      "type": "string",
+      "description": "oauth approve: the handle or DID typed into the app's sign-in; default the account DID"
+    },
+    "oauth-token-command": {
+      "type": "string",
+      "description": "oauth approve: the command that prints a workload JWT for the audience given as its last argument; default /usr/local/bin/guest-login.sh token"
+    },
+    "oauth-token-file": {
+      "type": "string",
+      "description": "oauth approve: read the workload JWT from this file instead of running a command"
+    },
+    "oauth-jar": {
+      "type": "string",
+      "description": "oauth approve: write the app's cookies (its signed-in session) to this file, mode 0600, as [{url, name, value}]"
     }
   }
 }
