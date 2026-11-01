@@ -142,7 +142,7 @@
     },
     "fg": {
       "type": "boolean",
-      "description": "dev up: keep the instance bound to this terminal; devsup dies with dev up and Ctrl-C is dev down"
+      "description": "dev up: keep the instance bound to this terminal; devsup dies with dev up and Ctrl-C is dev down. run requester always stays in the foreground and takes --fg as a no-op (the form an installed unit passes)"
     },
     "binary": {
       "type": "string",
@@ -567,7 +567,7 @@
     },
     "network": {
       "type": "string",
-      "description": "run request and run bidder: the market network instance (dev up --profile market-network) whose MarketNetwork hosts this invocation or bidder as a child application; unset, a requester invocation is a standalone instance under <state-dir>/requests"
+      "description": "run request, run requester and run bidder: the market network instance (dev up --profile market-network) whose MarketNetwork hosts this invocation or bidder as a child application; unset, a requester invocation is a standalone instance under <state-dir>/requests"
     },
     "market-network-file": {
       "type": "string",
@@ -576,7 +576,7 @@
     },
     "name": {
       "type": "string",
-      "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
+      "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run requester: the requester's name, a DNS label (default requester), its state under <state-dir>/requesters/<name>; env, ssh and proxy take it as their argument. run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
     },
     "identity": {
       "type": "string",
@@ -648,6 +648,10 @@
     "skip-ssh": {
       "type": "boolean",
       "description": "run request, resume: do not open an ssh session once the guest is on the network"
+    },
+    "ready-file": {
+      "type": "string",
+      "description": "run requester: the ready file, written once the MarketRequester root is Ready (to <path>.tmp, then renamed; mode 0600) and rewritten on every restart and when one of its fields changes; removed on a clean stop. JSON {schema, name, pid, startedAt, kcpUrl, kubeconfig, workspace, did, handle, identityMode, pdsUrl, ingress {pds, requester}, sshPublicKey}: paths and public values only, never a token, key or password. <state-dir>/requesters/<name>/ready.json is always written; this names a second copy. run requester env|ssh|proxy read it (default that same path)"
     },
     "contract-timeout": {
       "type": "string",

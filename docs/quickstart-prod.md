@@ -5,9 +5,10 @@
 - prod means: prod bidders (each runs `bidder-tangled-vouch`), plc.directory, the did:key ingress relay at
   xrpc.fedproxy.com, the relay at relay.mini-cloud-0002.chadig.com, irc.fedfork.com for atirc, a real atproto account
 - what works today: the browser page (section 3), the CLI per contract (section 4), the agent join (section 5), tenant clusters
-  through the prod gateway (section 6)
-- what is planned: a long-lived requester you run from the CLI or install as a systemd unit, so `kubectl apply` works against
-  prod bidders from your own host (section 7, plan [0039](plans/0039-long-lived-requester.yaml)); not implemented yet
+  through the prod gateway (section 6), a long-lived requester from the CLI that `kubectl apply` works against (section 7,
+  `run requester`)
+- what is planned: installing that requester as a systemd unit, the gateway in it, and the atirc agent from a local PDS
+  (section 7, plan [0039](plans/0039-long-lived-requester.yaml))
 - acceptance: [acceptance/0012-infra-quickstart.md](acceptance/0012-infra-quickstart.md) "Prod Step For The Agent Join" and
   "Prod Readings"; the runbook rules of [acceptance/README.md](acceptance/README.md) apply (announce on atirc first, release
   what you rent, no secret on any terminal)
@@ -18,10 +19,10 @@ flowchart TD
   V --> PAGE["browser page shell.socialweb.computer<br/>kubectl terminal, page's own kcp"]
   V --> CLI["CLI per contract<br/>run request --hold [--agent]"]
   V --> GW["prod gateway XRPC<br/>createCluster / getKubeconfig"]
-  V -.-> LL["planned: run requester (plan 0039)<br/>long-lived kcp, ready file, kubectl apply"]
+  V --> LL["run requester<br/>long-lived kcp, ready file, kubectl apply"]
   PAGE --> HELD["ComputeContract Held on a prod bidder"]
   CLI --> HELD
-  LL -.-> HELD
+  LL --> HELD
   GW --> K8S["tenant k3s, nodes rented through the gateway Infra"]
   HELD --> AG["agent VM: requester mints at irc.fedfork.com,<br/>guest.agentStart, nick joins"]
 ```
@@ -135,38 +136,72 @@ kubectl --kubeconfig "$W/kubeconfig" apply -f examples/infra/k8s-cluster.yaml
 - a pod that does not fit makes a NodeClaim; the gateway's Infra `nodes-<hex>` rents the node from a prod bidder
 - running the gateway (cluster control plane and node market) inside your own requester is plan 0039 item C-GATEWAY-COMPOSE
 
-## 7. Planned: A Long-Lived Requester From The CLI (plan 0039)
+## 7. A Long-Lived Requester From The CLI: run requester
 
-Not implemented. This section is the target shape; plan [0039](plans/0039-long-lived-requester.yaml) holds the items, and
-the acceptance runbook `docs/acceptance/0013-mixed-prod.md` (item F-MIXED-PROD, not written yet) will prove it.
+`socialweb-computer run requester` (plan [0039](plans/0039-long-lived-requester.yaml) item A-RUN-REQUESTER) brings up the
+same MarketRequester root as `run request` in a kcp of its own and keeps it up: no contract of its own, every listener on
+port 0, state under `<state-dir>/requesters/<name>`. You `kubectl apply` Infra, EphemeralInfra or ComputeContract objects
+against it, and its requester rents them from prod bidders under the default policy.
 
 ```bash
 ST=~/.tmp/lr; mkdir -p "$ST"; chmod 700 "$ST"
-$SWC run requester --name me --state-dir "$ST" --ready-file "$ST/ready.json" -- --atproto-oauth-qr &
-until [ -s "$ST/ready.json" ]; do sleep 1; done          # written atomically once the root is Ready
-export KUBECONFIG=$(jq -r .kubeconfig "$ST/ready.json")
-kubectl get marketrequesters.socialweb.computer app -o jsonpath='{.status.did}{"\n"}'
-kubectl apply -f examples/infra/mixed-prod.yaml           # VM + deno + agent against your bidder
+$SWC run requester --name me --state-dir "$ST" -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
+# sign in from the pendingAction url in the log (QR or scripts/oauth-signin.ts); never paste it anywhere
+R=$ST/requesters/me/ready.json
+until [ -s "$R" ]; do sleep 1; done                       # written atomically once the root is Ready
+eval "$($SWC run requester env me --state-dir "$ST")"     # KUBECONFIG of the requester workspace, the DID
+kubectl get marketrequesters.socialweb.computer app -o jsonpath='{.status.phase} {.status.did}{"\n"}'
+sed "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat "$(jq -r .sshPublicKey "$R")")|" \
+  examples/infra/vm.yaml | kubectl apply -f -             # pin a bidder with bidderDids when you need one
+kubectl wait infras.socialweb.computer/quickstart-vm --for=jsonpath='{.status.phase}'=Deployed --timeout=3m
+$SWC run requester ssh me --state-dir "$ST" --contract infra-quickstart-vm-vm1 --exec 'cat /root/quickstart'
+$SWC run requester ssh me --state-dir "$ST" --contract infra-quickstart-vm-vm1 --transport webrtc --exec 'uname -m'
+kubectl delete infras.socialweb.computer quickstart-vm    # releases the contract first
+kill -INT %1                                              # Ctrl-C: stops the kcp, removes the ready file, keeps the state
 ```
 
-- `run requester` (item A-RUN-REQUESTER): one MarketRequester root in a kcp of its own, in the foreground, every listener
-  on port 0; the ready file names the bound kcp address, the kubeconfig path, the workspace, the DID and handle, and the
-  requester ingress URL; the state dir survives restarts (the same DID, contracts, vault)
-- identity: OAuth QR or browser, an existing account on a remote PDS with an app password, or a local PDS (items
-  A-RUN-REQUESTER, D-AGENT-IDENTITY)
-- `install requester` (item B-INSTALL-REQUESTER): the same root as a systemd user unit in `socialweb.slice` of an account
-  that install creates when asked, with `config.json` and `upgrade`, as `install bidder` does
+- identity, after `--` (the MarketRequesterSpec options of `run request`, parsed by the same code): `--atproto-oauth-qr`,
+  `--atproto-oauth`, or an existing account with an app password (`--atproto-identity-mode pdsAccount --atproto-handle
+  <handle> --atproto-pds-url <pds>`, the password through the environment); without one it is a local PDS (`localRepo`,
+  `--identity <name>` before `--` reuses a stored one); comms, ingress, requester ingress and `--secrets-fallback` too. A
+  contract option (`--vm-name`, `--tunnel`, `--hold`, ...) is refused: contracts are kubectl objects here
+- the ready file (`<dir>/ready.json`, and a second copy at `--ready-file <path>`): written to `<path>.tmp` then renamed,
+  mode 0600, once the root is Ready; rewritten on every restart and when a field changes; removed on a clean stop.
+  `{schema: 1, name, pid, startedAt, kcpUrl, kubeconfig, workspace, did, handle, identityMode, pdsUrl, ingress {pds,
+  requester}, sshPublicKey}`: the bound kcp front, the path of a kubeconfig for the requester's workspace, the public
+  ingress URLs from the Exposure status, the path of the requester's ssh public key; never a token, key or password. The
+  same JSON (plus mode, network, instance, readyFile, restarted, seconds) is the summary on stdout
+- foreground only: it blocks until Ctrl-C (or SIGTERM), then stops its kcp and keeps its state; `--fg` is accepted (the
+  installed unit form). A second `run requester` on the same name is refused while the first holds `<dir>/owner.lock`
+- restart: the same command (or the same command with nothing after `--`) adopts the units and keeps the DID, the vault
+  and every contract; a Held contract stays Held across the restart and ssh works again. `<dir>/requester.json` records
+  the first start's network, `--identity` and options; a restart with other options is refused (start a new name)
+- `run requester env <name>` prints `KUBECONFIG`, `SOCIALWEB_KCP_HOST`, `SOCIALWEB_KCP_WORKSPACE`, the DID and the ssh public
+  key path from the ready file (`--json`); `run requester ssh <name> --contract <cc>` is the `run request ssh` code over
+  any Held contract, with the requester's own key and `StrictHostKeyChecking=yes` against the guest's reported host keys
+  (`--transport webrtc` needs a webrtc tunnel on the contract, as in `vm.yaml`)
+- vouches: as section 2; the requester's own record for the bidder can be the `vouch.yaml` AtprotoRecord applied into
+  this kcp (its repo is `repo-<did with - for :>`)
+- proven (2026-11-01, own market network, `--network`, bidder policy `bidder-tangled-vouch`): ready 11 s, `vm.yaml`
+  Deployed 20 s after the apply, ssh over iroh and webrtc printed `quickstart-vm-ok`; Ctrl-C and restart: same DID, ready
+  file rewritten in 1.4 s, contract still Held, ssh again. The standalone path against prod bidders with an OAuth QR
+  sign-in is the lead's run (acceptance rules)
+
+Still planned in plan 0039:
+
+- `install requester` (item B-INSTALL-REQUESTER): the same process as a systemd user unit in `socialweb.slice` of an
+  account that install creates when asked, with `config.json` and `upgrade`, as `install bidder` does
 - the gateway in the same kcp (item C-GATEWAY-COMPOSE): `kubectl apply` a Cluster, its k3s control plane runs as
   HostProcesses of the requester's core, and its nodes are rented by the same requester
 - the atirc agent (items D-AGENT-IDENTITY, D-AGENT-INGRESS): which identity mints, and the ingress options
   (`--requester-ingress-provider`, `--ingress-xrpc-host`, `--ingress-public-host`, opentunnel) for a local PDS
-- `examples/infra/mixed-prod.yaml` (item F-MIXED-PROD, not written yet) is the file the acceptance applies
+- `examples/infra/mixed-prod.yaml` and acceptance `docs/acceptance/0013-mixed-prod.md` (item F-MIXED-PROD, not written yet)
 
 ## Not Supported On Prod Today
 
 | gap | where it is planned |
 |---|---|
-| `kubectl apply` of an Infra against prod bidders from your own host (no long-lived CLI requester root outside the page and the iOS app) | plan 0039 A-RUN-REQUESTER, B-INSTALL-REQUESTER |
+| `run requester` as an installed systemd unit (today it runs in your terminal) | plan 0039 B-INSTALL-REQUESTER |
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
 | an atirc agent from a local PDS identity | plan 0039 D-AGENT-IDENTITY, D-AGENT-INGRESS |
 | `vouch-bidder-operator.yaml` on an installed bidder | plan 0039 F3-BIDDER-OPERATOR-REPO |

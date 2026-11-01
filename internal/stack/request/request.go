@@ -121,7 +121,11 @@ type Summary struct {
 }
 
 func WriteInvocation(inv Invocation) error {
-	return fsx.WriteJSON(filepath.Join(Dir(inv.StateRoot, inv.Name), InvocationFile), inv, 0o600)
+	return WriteInvocationIn(Dir(inv.StateRoot, inv.Name), inv)
+}
+
+func WriteInvocationIn(dir string, inv Invocation) error {
+	return fsx.WriteJSON(filepath.Join(dir, InvocationFile), inv, 0o600)
 }
 
 func ReadInvocation(stateRoot, name string) (Invocation, error) {
@@ -301,6 +305,16 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 		return err
 	}
 	return failed
+}
+
+func (k *Kcp) FollowRoot(ctx context.Context, each func(*v1alpha1.MarketRequester)) error {
+	_, err := kube.Await(ctx, k.dyn.Resource(compose.MarketRequesterGVR), RootName, 0, func(o *v1alpha1.MarketRequester) (bool, error) {
+		if o != nil {
+			each(o)
+		}
+		return false, nil
+	})
+	return err
 }
 
 func (k *Kcp) Contract(ctx context.Context) (*v1alpha1.ComputeContract, error) {
