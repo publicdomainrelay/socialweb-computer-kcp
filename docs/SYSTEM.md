@@ -303,7 +303,7 @@ flowchart TD
 ### Secrets
 
 - `spec.secretsRef`: bundle `[{path, value, mode}]` in the requester's OpenBao
-- primary: getSecrets on requester ingress, auth = guest workload identity token (bidder OpenBao identity engine via GuestControlPlane proxy, GuestIdentityGrant)
+- primary: getSecrets on requester ingress, auth = guest workload identity JWT (the bidder OpenBao sshsig plugin issuer `wid/token`, via the GuestControlPlane proxy; the requester checks `iss`, `aud` and `sub`)
 - fallback `secretsFallback: Sealed` (browser page): only on demand, after `guest.secretsRequested`; sealed to the guest's key as ContractEvent `secrets-<contract>`
 - never send a sealed bundle unasked
 - condition `SecretsApplied` reason `GetSecrets` or `SealedFallback`

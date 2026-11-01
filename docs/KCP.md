@@ -62,7 +62,7 @@
 | `clusters` | Cluster, Node, NodeClaim, ClusterLink, ClusterClientCertificate | `cluster` type, `socialweb-application` type |
 | `atprotoidentities` | AtprotoIdentity | `account` type, `socialweb-application` type |
 | `marketidentities` | MarketIdentity, AtprotoRecord, AtprotoRecordWatch | gateway `root:app` (`deploy/apps/gateway`), application type |
-| `computevms` | ComputeVM, FirecrackerVM, Bid, GuestIdentityGrant | `bidder` type, `root` (`computevms-binding.yaml`) |
+| `computevms` | ComputeVM, FirecrackerVM, Bid | `bidder` type, `root` (`computevms-binding.yaml`) |
 | `computecontracts` | ComputeContract, ContractEvent, Infra, EphemeralInfra, InfraCollection, EphemeralInfraCollection | requester and gateway bindings |
 | `hostprocesses` | HostProcess, Postgres, OpenBaoServer, RemoteOpenBao, Vault | `root` (`hostprocesses-binding.yaml`), `bidder` type |
 | `events` | EventStream, EventSource, Pds/Relay/JetstreamEventSource | `root` (`events-binding.yaml`) |
@@ -263,7 +263,6 @@ sequenceDiagram
 | Bid | socialweb.computer / computevms | 9 | one bid per RFP (name = bid rkey); owns its ComputeVM; status by bidder | Bidder |
 | ComputeVM | / computevms | 17 | abstract VM: size, owner, requester, userData ref, contract refs, release | Bidder |
 | FirecrackerVM | / computevms | 7 | concrete firecracker backend (unit, network, image) | ComputeVM controller |
-| GuestIdentityGrant | / computevms | 3 | guest workload identity grant (entity, api, scopes, claims) | Bidder, GuestControlPlane |
 | StateSync | socialweb.computer / applications | 1 | durable outbox (vm.terminated, market inbox) | roles, controllers |
 
 ### Identity, repos, records

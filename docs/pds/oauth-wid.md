@@ -273,7 +273,12 @@ checks signatures itself.
   PAR, so a caller cannot widen the client, redirect or scope.
 - Exchanged tokens are single use, 5 minutes, DPoP bound and limited by `lxm` to the approve call.
 
-## Not done
+## The browser page
 
-- The browser page field "Allow OAuth apps" lives in the separate page repository
-  (johnandersen777/kcp); this session could not attach it. The iOS app is future work.
+`spec.oauthClients` is part of the contract template, so Infra, EphemeralInfra and the browser page
+(which requests VMs through an EphemeralInfra template) carry it. The page's "Allow OAuth apps"
+field (Compute block, one app per line: client_id, then scopes) lives in the page repository
+(johnandersen777/kcp, branch kcp-wasm-memory-storage-1); the change is
+[browser-page-oauth-clients.patch](browser-page-oauth-clients.patch) (`git am` it there). The page's
+own identity is oauthBrowser today, so its requests with apps listed are refused until the page
+signs in with an account on a socialweb-computer PDS. The iOS app is future work.

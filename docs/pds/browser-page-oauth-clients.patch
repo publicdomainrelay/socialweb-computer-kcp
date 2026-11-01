@@ -1,0 +1,178 @@
+From d8eb5ce775cffe8b84c6f5ce7303e24ba8f26237 Mon Sep 17 00:00:00 2001
+From: johnandersen777 <johnandersen777@users.noreply.github.com>
+Date: Sun, 1 Nov 2026 23:22:02 +0000
+Subject: [PATCH] browser page: Allow OAuth apps on Request VM
+ (spec.oauthClients)
+
+A field under Compute, one app per line (client_id, then scopes), maps to
+the EphemeralInfra contract template's oauthClients, which the requester turns
+into a com.fedproxy.rbac role the VM's workload identity uses to approve those
+OAuth sign-ins as the signed-in account (socialweb-computer-kcp plan 0040,
+docs/pds/oauth-wid.md). Needs an account on a socialweb-computer PDS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01XtTWStqstmFZHUkRsRsthA
+---
+ scripts/browser/app.html        |  3 +++
+ scripts/browser/app.js          |  7 +++++-
+ scripts/browser/vmshell.js      | 42 ++++++++++++++++++++++++++++++---
+ scripts/browser/vmshell_test.js | 28 ++++++++++++++++++++++
+ 4 files changed, 76 insertions(+), 4 deletions(-)
+
+diff --git a/scripts/browser/app.html b/scripts/browser/app.html
+index cffe5bc..c4ab8cb 100644
+--- a/scripts/browser/app.html
++++ b/scripts/browser/app.html
+@@ -377,6 +377,9 @@
+             <option value="Both">Ingress: XRPC endpoints on the relay plus the streams</option>
+           </select>
+         </label>
++        <label><span>Allow OAuth apps</span>
++          <textarea id="compute-oauth" rows="2" placeholder="https://irc.fedfork.com/oauth/client-metadata* atproto repo:com.vibescrobble.scrobble?action=create" title="One app per line: its client_id, then the scopes the VM may approve as you. Needs an account on a socialweb-computer PDS (Local PDS); a bsky.social account is refused."></textarea>
++        </label>
+         <button id="compute-request" type="button" disabled>Request VM</button>
+         <button id="compute-testpeer" type="button" hidden>Connect test peer</button>
+         <div id="compute-status" class="app-status">sign in to request a VM</div>
+diff --git a/scripts/browser/app.js b/scripts/browser/app.js
+index c73e9e3..7415f66 100644
+--- a/scripts/browser/app.js
++++ b/scripts/browser/app.js
+@@ -2349,6 +2349,7 @@ function initSocialwebUI() {
+ // here loads kubectl: kcpREST talks to kcp directly.
+ 
+ const computeRequestEl = document.getElementById("compute-request");
++const computeOAuthEl = document.getElementById("compute-oauth");
+ const computeStatusEl = document.getElementById("compute-status");
+ const computeListEl = document.getElementById("compute-list");
+ const vmshellIngressEl = document.getElementById("compute-ingress");
+@@ -2597,7 +2598,11 @@ async function requestVM() {
+         bundle: vmshell.secretsBundle(token),
+       });
+     }
+-    const { contract, secret } = vmshell.infraContract({ infra: infraName, short, wootty, sshKeys });
++    const oauthClients = vmshell.parseOAuthClients(computeOAuthEl?.value ?? "");
++    if (oauthClients.length > 0) {
++      addLog("info", `${name} may approve OAuth sign-ins as you for ${oauthClients.map((c) => c.clientId).join(", ")}`);
++    }
++    const { contract, secret } = vmshell.infraContract({ infra: infraName, short, wootty, sshKeys, oauthClients });
+     await setInfraContract(infraName, contract, secret);
+     setAppStatus(computeStatusEl, `${name} requested; waiting for bids`, "ok");
+     addLog("ok", `ComputeContract ${name} requested from discovered bidders with ${shells}`);
+diff --git a/scripts/browser/vmshell.js b/scripts/browser/vmshell.js
+index 228549b..de5a15e 100644
+--- a/scripts/browser/vmshell.js
++++ b/scripts/browser/vmshell.js
+@@ -193,9 +193,9 @@ export function infraContractName(infra, short) {
+  * the VM short; cc is the ComputeContract name it becomes. The template is
+  * the one contractManifest builds.
+  */
+-export function infraContract({ infra, short, wootty = false, sshKeys = [] }) {
++export function infraContract({ infra, short, wootty = false, sshKeys = [], oauthClients = [] }) {
+   const cc = infraContractName(infra, short);
+-  const { spec } = contractManifest({ name: cc, wootty, sshKeys });
++  const { spec } = contractManifest({ name: cc, wootty, sshKeys, oauthClients });
+   const { secretsRef, ...template } = spec;
+   return {
+     cc,
+@@ -209,7 +209,7 @@ export function infraContract({ infra, short, wootty = false, sshKeys = [] }) {
+  * the page's key) and, with wootty, the opentunnel wootty tunnel and the
+  * secretsRef of its token bundle.
+  */
+-export function contractManifest({ name, ownerDid, wootty = false, sshKeys = [] }) {
++export function contractManifest({ name, ownerDid, wootty = false, sshKeys = [], oauthClients = [] }) {
+   // No bidderDids: the requester's discovery picks the bidders.
+   const spec = { vmName: name };
+   spec.tunnels = [{ tag: SSH_TAG, port: 22, transport: "webrtc" }];
+@@ -218,6 +218,7 @@ export function contractManifest({ name, ownerDid, wootty = false, sshKeys = []
+     spec.tunnels.unshift({ tag: WOOTTY_TAG, port: WOOTTY_PORT, transport: "opentunnel", shell: { envFile: WOOTTY_ENV } });
+   }
+   if (sshKeys.length > 0) spec.sshAuthorizedKeys = sshKeys;
++  if (oauthClients.length > 0) spec.oauthClients = oauthClients;
+   if (ownerDid) spec.ownerDid = ownerDid;
+   return {
+     apiVersion: "socialweb.computer/v1alpha1",
+@@ -251,3 +252,38 @@ export function shellLink(contract, token) {
+   url.hash = `token=${encodeURIComponent(token)}`;
+   return url.toString();
+ }
++
++/**
++ * The "Allow OAuth apps" field: one app per line, its client_id URL then the
++ * atproto scopes the VM's workload identity may approve as the signed-in
++ * account (spaces or commas between them; none means atproto). A * in the
++ * client_id matches a keyed client_id. Full-access and rbac scopes are refused
++ * here as the requester refuses them (docs/pds/oauth-wid.md of
++ * socialweb-computer-kcp).
++ */
++export function parseOAuthClients(text) {
++  const out = [];
++  const seen = new Set();
++  for (const raw of String(text ?? "").split("\n")) {
++    const line = raw.trim();
++    if (!line || line.startsWith("#")) continue;
++    const [clientId, ...rest] = line.split(/[\s,]+/).filter(Boolean);
++    let url;
++    try {
++      url = new URL(clientId.replaceAll("*", "x"));
++    } catch {
++      throw new Error(`OAuth app ${clientId}: not a URL`);
++    }
++    if (url.protocol !== "https:") throw new Error(`OAuth app ${clientId}: not an https client_id`);
++    if (seen.has(clientId)) throw new Error(`OAuth app ${clientId}: listed twice`);
++    seen.add(clientId);
++    const scopes = rest.length > 0 ? [...new Set(rest)] : ["atproto"];
++    for (const scope of scopes) {
++      if (scope.startsWith("transition:") || scope.startsWith("repo:*") || scope.startsWith("repo:com.fedproxy.rbac")) {
++        throw new Error(`OAuth app ${clientId}: ${scope} is a scope a workload may not approve`);
++      }
++    }
++    out.push({ clientId, scopes });
++  }
++  return out;
++}
+diff --git a/scripts/browser/vmshell_test.js b/scripts/browser/vmshell_test.js
+index c4fd17b..8349629 100644
+--- a/scripts/browser/vmshell_test.js
++++ b/scripts/browser/vmshell_test.js
+@@ -9,6 +9,7 @@ import {
+   finishedInfraContracts,
+   fnv1a64,
+   infraContract,
++  parseOAuthClients,
+   infraRecordURI,
+   infraRepoRef,
+   originInfraName,
+@@ -194,3 +195,30 @@ Deno.test("finishedInfraContracts marks only terminal requested entries", () =>
+   const done = finishedInfraContracts(infra, contracts);
+   assert(done.length === 1 && done[0].name === "vmshell-a", JSON.stringify(done));
+ });
++
++Deno.test("parseOAuthClients: one app per line, scopes after it, atproto by default", () => {
++  const out = parseOAuthClients(
++    "https://irc.fedfork.com/oauth/client-metadata* atproto,repo:com.vibescrobble.scrobble?action=create\n\n# note\nhttps://app.example/client.json",
++  );
++  if (out.length !== 2) throw new Error(JSON.stringify(out));
++  if (out[0].clientId !== "https://irc.fedfork.com/oauth/client-metadata*") throw new Error(out[0].clientId);
++  if (out[0].scopes.join(" ") !== "atproto repo:com.vibescrobble.scrobble?action=create") throw new Error(out[0].scopes.join(" "));
++  if (out[1].scopes.join(" ") !== "atproto") throw new Error(out[1].scopes.join(" "));
++});
++
++Deno.test("parseOAuthClients: refuses http, full access and rbac scopes", () => {
++  for (const bad of ["http://app.example/c.json", "https://app.example/c.json transition:generic", "https://app.example/c.json repo:com.fedproxy.rbac"]) {
++    let threw = false;
++    try {
++      parseOAuthClients(bad);
++    } catch {
++      threw = true;
++    }
++    if (!threw) throw new Error(`accepted ${bad}`);
++  }
++});
++
++Deno.test("infraContract: oauthClients reach the contract template", () => {
++  const out = infraContract({ infra: "s1", short: "vmshell-abc", oauthClients: [{ clientId: "https://app.example/c.json", scopes: ["atproto"] }] });
++  if (out.contract.oauthClients?.[0]?.clientId !== "https://app.example/c.json") throw new Error(JSON.stringify(out.contract));
++});
+-- 
+2.43.0
+
