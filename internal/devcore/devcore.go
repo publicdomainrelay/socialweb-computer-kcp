@@ -446,7 +446,7 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = vaultlayout.RootServerName
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope
-	case rec.Role == devinstance.RoleRequester:
+	case cfg.Application != nil && cfg.Application.Role == table.RoleRequester, rec.Role == devinstance.RoleRequester:
 		out.CredentialClient = marketrequester.RequesterVaultClient
 		out.CredentialServer = marketrequester.RequesterVaultServer
 		out.OAuthScopes = atprotooauth.RequesterOAuthScope

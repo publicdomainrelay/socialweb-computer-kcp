@@ -3,7 +3,11 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,18 +21,24 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
 const (
 	requesterVerb      = "run requester"
 	requesterReadyRead = 10 * time.Second
+	requesterRootApply = 3 * time.Minute
 )
 
 var requesterOptions = []string{backendOpt, "network", "name", "identity", "state-dir", "ready-file", "fg", "ready-timeout", "network-timeout",
-	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level"}
+	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix"}
+
+var requesterPasswordOptions = []string{"name", "state-dir", "network-timeout"}
 
 var requesterHelperOptions = []string{"name", "state-dir", "ready-file", "json"}
 
@@ -215,6 +225,14 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 	if len(pos) > 0 {
 		return a.fail(exitRefused, "run requester: unexpected %q; MarketRequester options go after --", strings.Join(pos, " "))
 	}
+	backend := hostsvc.BackendProc
+	if b := vals.String(backendOpt); b != "" {
+		parsed, err := hostsvc.ParseBackend(b)
+		if err != nil {
+			return a.fail(exitRefused, "run requester: %v", err)
+		}
+		backend = parsed
+	}
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
 		return a.fail(exitRefused, "run requester: ssh-keygen is not on PATH; install the OpenSSH client (apt install openssh-client, dnf install openssh-clients)")
 	}
@@ -224,6 +242,9 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		return a.fail(exitRefused, "run requester: %v", err)
 	}
 	network := strings.TrimSpace(vals.String("network"))
+	if network != "" && backend == hostsvc.BackendSystemdUser {
+		return a.fail(exitRefused, "run requester: --network places the requester under the market network's devsup; pass --host-backend=proc")
+	}
 	idName := strings.TrimSpace(vals.String("identity"))
 	parsed, err := parseRequesterSpec(pass, requesterVerb, requesterOptions, network != "", nil)
 	if err != nil {
@@ -311,6 +332,16 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		}
 		fresh = !found
 	}
+	if backend == hostsvc.BackendSystemdUser {
+		r.log("run requester: the installed requester; its unit stops the core and keeps its kcp units and state", "dir", dir, "restart", restarted)
+		return r.installedCore(ctx, stateRoot, func(ctx context.Context, rec devinstance.Record, notifyReady func() error) error {
+			r.inv.Instance, r.summary.Instance, r.summary.KcpURL = rec.Layout.ID, rec.Layout.ID, rec.KcpURL
+			if err := r.attach(ctx, rec.AdminKubeconfig); err != nil {
+				return err
+			}
+			return r.serve(ctx, started, readyFile, pub, restarted, notifyReady)
+		})
+	}
 	r.log("run requester: a long-lived requester; Ctrl-C stops its kcp and keeps its state", "dir", dir, "mode", mode, "network", network, "restart", restarted)
 	if err := r.start(ctx, fresh); err != nil {
 		r.stop(context.WithoutCancel(ctx), false)
@@ -319,28 +350,128 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		}
 		return a.fail(exitFailed, "run requester: %v", err)
 	}
-	if err := r.checkIdentity(); err != nil {
-		r.stop(context.WithoutCancel(ctx), false)
+	err = r.serve(ctx, started, readyFile, pub, restarted, func() error { return nil })
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
+	defer cancel()
+	r.stop(dctx, false)
+	if err != nil {
 		return a.fail(exitFailed, "run requester: %v", err)
 	}
+	return exitOK
+}
+
+func (r *requesterRun) attach(ctx context.Context, kubeconfig string) error {
+	k, err := request.OpenKcp(kubeconfig, "")
+	if err != nil {
+		return err
+	}
+	r.kubeconfig, r.workspace = kubeconfig, ""
+	r.kcp = k.ForContract(r.target)
+	if err := applyRequesterRoot(ctx, k, r.root, r.a.log); err != nil {
+		return err
+	}
+	r.summary.KcpRunning = true
+	r.log("the requester's kcp runs", "kcp", r.summary.KcpURL, "instance", r.inv.Instance)
+	if err := r.signIn(ctx, true); err != nil {
+		return fmt.Errorf("signing in: %w", err)
+	}
+	if err := r.kcp.WaitReady(ctx, r.networkTimeout, func(st v1alpha1.ApplicationStatus) {
+		r.log("requester", "phase", string(st.Phase), "message", st.Message, "components", len(st.Components))
+	}); err != nil {
+		return err
+	}
+	return request.WriteInvocationIn(r.home(), r.inv)
+}
+
+func applyRequesterRoot(ctx context.Context, k *request.Kcp, spec v1alpha1.MarketRequesterSpec, log *slog.Logger) error {
+	started := time.Now()
+	delay := time.Second
+	for attempt := 1; ; attempt++ {
+		actx, cancel := context.WithTimeout(ctx, requesterRootApply)
+		err := k.ApplyRoot(actx, spec)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if time.Since(started) >= requesterRootApply {
+			return fmt.Errorf("applying the MarketRequester root object after %d attempts: %w", attempt, err)
+		}
+		log.Warn("applying the MarketRequester root object; retrying", "attempt", attempt, "err", err.Error())
+		t := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
+		delay = min(2*delay, 15*time.Second)
+	}
+}
+
+func (r *requesterRun) installedCore(ctx context.Context, stateRoot string, serve func(context.Context, devinstance.Record, func() error) error) int {
+	a, vals := r.a, r.vals
+	exes := map[string]devinstance.Executable{}
+	for _, x := range []struct{ name, option string }{{request.ExeKcp, "kcp-path"}, {request.ExeKine, "kine-path"}, {"bao", "bao-path"},
+		{sshgateway.DumbpipeExecutable, "dumbpipe-path"}} {
+		e, err := a.optionalExe(ctx, vals, x.name, x.option)
+		if err != nil {
+			return a.fail(exitRefused, "run requester: %v", err)
+		}
+		if e.Path != "" {
+			exes[x.name] = e
+		}
+	}
+	plugins, err := a.openBaoPluginExes(vals)
+	if err != nil {
+		return a.fail(exitRefused, "run requester: %v", err)
+	}
+	maps.Copy(exes, plugins)
+	exe, err := selfExe()
+	if err != nil {
+		return a.fail(exitFailed, "run requester: %v", err)
+	}
+	exes["socialweb-computer"] = devinstance.Executable{Path: exe}
+	readyTimeout, err := time.ParseDuration(vals.String("ready-timeout"))
+	if err != nil || readyTimeout < 0 {
+		return a.fail(exitRefused, "run requester: ready-timeout %q: want a positive duration", vals.String("ready-timeout"))
+	}
+	prefix := vals.String("unit-prefix")
+	m, err := hostsvc.Open(ctx, hostsvc.Config{Backend: hostsvc.BackendSystemdUser, UnitPrefix: prefix})
+	if err != nil {
+		return a.fail(exitFailed, "run requester: the systemd-user backend: %v", err)
+	}
+	defer m.Close()
+	err = request.RunCore(ctx, request.CoreConfig{StateDir: stateRoot, Prefix: prefix, Name: r.inv.Name, Executables: exes,
+		ReadyTimeout: readyTimeout, Log: a.log, Serve: serve}, m)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return a.fail(exitFailed, "run requester: %v", err)
+	}
+	return exitOK
+}
+
+func (r *requesterRun) serve(ctx context.Context, started time.Time, readyFile, pub string, restarted bool, notifyReady func() error) error {
+	dir := r.dir
+	if err := r.checkIdentity(); err != nil {
+		return err
+	}
 	if err := request.WriteWorkspaceKubeconfig(filepath.Join(dir, request.KubeconfigFile), r.kubeconfig, r.workspace); err != nil {
-		r.stop(context.WithoutCancel(ctx), false)
-		return a.fail(exitFailed, "run requester: the workspace kubeconfig: %v", err)
+		return fmt.Errorf("the workspace kubeconfig: %w", err)
 	}
 	st, err := r.kcp.Root(ctx)
 	if err != nil {
-		r.stop(context.WithoutCancel(ctx), false)
-		return a.fail(exitFailed, "run requester: %v", err)
+		return err
 	}
 	ready := r.ready(ctx, st)
 	if err := r.writeReady(ready); err != nil {
-		r.stop(context.WithoutCancel(ctx), false)
-		return a.fail(exitFailed, "run requester: the ready file: %v", err)
+		return fmt.Errorf("the ready file: %w", err)
 	}
 	r.log("the requester is Ready; the ready file is written", "readyFile", readyFile, "did", ready.Did, "kcp", ready.KcpURL, "workspace", ready.Workspace,
 		"sshPublicKey", pub)
-	a.printJSON(requesterSummary{Ready: ready, Mode: mode, Network: network, Instance: r.inv.Instance, ReadyFile: readyFile, Restarted: restarted,
+	r.a.printJSON(requesterSummary{Ready: ready, Mode: r.inv.Mode, Network: r.inv.Network, Instance: r.inv.Instance, ReadyFile: readyFile, Restarted: restarted,
 		Seconds: time.Since(started).Seconds()})
+	if err := notifyReady(); err != nil {
+		return err
+	}
 	follow, stopFollow := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -360,9 +491,43 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 			r.a.log.Warn("removing the ready file", "path", path, "err", err.Error())
 		}
 	}
-	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fgDownTimeout)
-	defer cancel()
-	r.stop(dctx, false)
+	return nil
+}
+
+func runRequesterPassword(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	pos, pass := splitWords(rest)
+	if len(pos) != 1 || len(pass) > 0 {
+		return a.fail(exitRefused, "run requester password <name>: one requester name; the app password comes on stdin")
+	}
+	_, dir, err := requesterHome(a, vals, pos[0])
+	if err != nil {
+		return a.fail(exitRefused, "run requester password: %v", err)
+	}
+	timeout, err := time.ParseDuration(vals.String("network-timeout"))
+	if err != nil {
+		return a.fail(exitRefused, "run requester password: network-timeout: %v", err)
+	}
+	var rec devinstance.Record
+	if err := fsx.ReadJSON(filepath.Join(request.InstanceStateDirIn(dir, pos[0]), "instance.json"), &rec); err != nil || rec.AdminKubeconfig == "" {
+		return a.fail(exitRefused, "run requester password: the requester %s has no running kcp to hold the password (start it first): %v", pos[0], err)
+	}
+	b, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+	if err != nil {
+		return a.fail(exitFailed, "run requester password: reading stdin: %v", err)
+	}
+	password := strings.TrimSpace(string(b))
+	if password == "" {
+		return a.fail(exitRefused, "run requester password: stdin held no password")
+	}
+	k, err := request.OpenKcp(rec.AdminKubeconfig, rec.BaseWorkspace)
+	if err != nil {
+		return a.fail(exitFailed, "run requester password: %v", err)
+	}
+	ref, err := k.PutPdsAccountPassword(ctx, password, timeout)
+	if err != nil {
+		return a.fail(exitFailed, "run requester password: %v", err)
+	}
+	a.printJSON(map[string]string{"name": pos[0], "mount": ref.Mount, "path": ref.Path})
 	return exitOK
 }
 

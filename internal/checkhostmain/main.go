@@ -15,7 +15,7 @@ import (
 
 const usage = `socialweb-computer check-host - probe the production host contract as the account
 
-  socialweb-computer check-host -role gateway|bidder -state-dir <state> [-pasta <path>] [-asset-cache <dir>] [-json]
+  socialweb-computer check-host -role gateway|bidder|requester -state-dir <state> [-pasta <path>] [-asset-cache <dir>] [-json]
 
 install runs it as the account after it creates the account. Each check names its fix (docs/host-contract.md).
 

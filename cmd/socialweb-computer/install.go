@@ -2,22 +2,31 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/buildstamp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/foldmain"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostcontract"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/install"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
 var installOptions = []string{backendOpt, "handle", "account", "state-dir", "vm-slots", "dry-run", "adopt-account", "json", "root", "unit-prefix", "allow-dev-binary",
 	install.OptKcpFront, install.OptTLSFront, install.OptCertFront, install.OptSpecFile, install.OptGuestImg, install.OptGuestImgBase, install.OptReadyTimeout, install.OptNetworkTimeout, install.OptNoGuestLANUDP, install.OptGuestHostUDP, install.OptBidderPolicy}
+
+var installRequesterOptions = []string{backendOpt, "name", "account", "state-dir", "dry-run", "adopt-account", "json", "root", "unit-prefix", "allow-dev-binary",
+	install.OptReadyTimeout, install.OptNetworkTimeout}
 
 var uninstallOptions = []string{"account", "purge", "force", "json", "root"}
 
@@ -62,7 +71,14 @@ func printSteps(a *app, rep install.Report) {
 func runInstall(role hostcontract.Role) verbFunc {
 	verb := "install " + string(role)
 	return func(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
-		if len(rest) > 0 {
+		var names []string
+		var records map[string][]byte
+		if role == hostcontract.RoleRequester {
+			var err error
+			if names, records, err = requesterInstallRecords(vals, rest); err != nil {
+				return a.fail(exitRefused, "%s: %v", verb, err)
+			}
+		} else if len(rest) > 0 {
 			return a.fail(exitRefused, "%s: unexpected arguments %q", verb, rest)
 		}
 		if vals.String(backendOpt) == "proc" {
@@ -96,17 +112,20 @@ func runInstall(role hostcontract.Role) verbFunc {
 			return ""
 		}
 		for _, k := range install.Passed {
+			if role == hostcontract.RoleRequester {
+				continue
+			}
 			if v := passed(k); v != "" {
 				listen[k] = v
 			}
 		}
 		rep, err := install.Install(ctx, install.Options{
-			Role: role, Handles: splitHandles(vals.String("handle")), Account: installAccount(vals, staged),
-			StateDir: vals.String("state-dir"), Binary: exe, VMSlots: vals.Int("vm-slots"), DryRun: dry,
+			Role: role, Handles: installHandles(role, vals), Names: names, RequesterRecords: records, Account: installAccount(vals, staged),
+			StateDir: vals.String("state-dir"), Binary: exe, VMSlots: installVMSlots(role, vals), DryRun: dry,
 			AdoptAccount: vals.Bool("adopt-account"), HostBackend: vals.String(backendOpt), Out: a.stdout,
 			Root: root, Staged: staged, UnitPrefix: vals.String("unit-prefix"), Settings: listen,
 			ReadyTimeout: passed(install.OptReadyTimeout), NetworkTimeout: passed(install.OptNetworkTimeout),
-			GuestImageBase: vals.String(install.OptGuestImgBase), GuestImageBaseResolved: true,
+			GuestImageBase: installGuestImageBase(role, vals), GuestImageBaseResolved: true,
 		}, sys)
 		return installExit(a, verb, rep, err, vals.Bool("json"))
 	}
@@ -164,8 +183,8 @@ func (a *app) upgradeOptions(ctx context.Context, verb string, vals clicfg.Value
 	if err != nil {
 		return install.UpgradeOptions{}, fmt.Errorf("%s: the invoking account: %w", verb, err)
 	}
-	home := u.HomeDir
-	if root := vals.String("root"); install.Rooted(root) {
+	home, root := u.HomeDir, vals.String("root")
+	if install.Rooted(root) {
 		sys, err := a.installSystem(ctx, root)
 		if err != nil {
 			return install.UpgradeOptions{}, err
@@ -179,7 +198,7 @@ func (a *app) upgradeOptions(ctx context.Context, verb string, vals clicfg.Value
 		}
 		home = acct.Home
 	}
-	return install.UpgradeOptions{StateDir: state, Home: home, RuntimeDir: install.OwnRuntimeDir(), Out: a.stdout,
+	return install.UpgradeOptions{StateDir: state, Home: home, Account: u.Username, Root: root, RuntimeDir: install.OwnRuntimeDir(), Out: a.stdout,
 		SelfCheck: install.SelfCheck, Restart: install.RestartOwnUnits}, nil
 }
 
@@ -225,4 +244,61 @@ func installAccount(vals clicfg.Values, staged bool) string {
 		return u.Username
 	}
 	return ""
+}
+
+func installHandles(role hostcontract.Role, vals clicfg.Values) []string {
+	if role == hostcontract.RoleRequester {
+		return nil
+	}
+	return splitHandles(vals.String("handle"))
+}
+
+func installVMSlots(role hostcontract.Role, vals clicfg.Values) int {
+	if role == hostcontract.RoleRequester {
+		return 0
+	}
+	return vals.Int("vm-slots")
+}
+
+func installGuestImageBase(role hostcontract.Role, vals clicfg.Values) string {
+	if role == hostcontract.RoleRequester {
+		return ""
+	}
+	return vals.String(install.OptGuestImgBase)
+}
+
+func requesterInstallRecords(vals clicfg.Values, rest []string) ([]string, map[string][]byte, error) {
+	pos, pass := splitWords(rest)
+	if len(pos) > 0 {
+		return nil, nil, fmt.Errorf("unexpected %q; MarketRequester options go after --", strings.Join(pos, " "))
+	}
+	parsed, err := compose.ParseAppArgs(marketrequester.RequesterApp, pass)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !slices.ContainsFunc(parsed, func(p compose.AppArg) bool { return p.To == "spec.identity.mode" }) {
+		pass = append([]string{"--atproto-oauth-qr"}, pass...)
+	}
+	for _, p := range parsed {
+		if p.Name == "atproto-password" {
+			return nil, nil, errors.New("--atproto-password: an installed requester never takes a password as an option; after install, run as the account: socialweb-computer run requester password <name> < <file holding the app password>")
+		}
+	}
+	spec, err := parseRequesterSpec(pass, "install requester", installRequesterOptions, false, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	names := splitHandles(vals.String("name"))
+	records := map[string][]byte{}
+	for _, n := range names {
+		if err := request.CheckName(n); err != nil {
+			return nil, nil, err
+		}
+		b, err := json.MarshalIndent(request.RequesterRecord{Schema: request.RequesterSchema, Name: n, Spec: spec, CreatedAt: time.Now().UTC().Truncate(time.Second)}, "", "  ")
+		if err != nil {
+			return nil, nil, err
+		}
+		records[n] = append(b, '\n')
+	}
+	return names, records, nil
 }

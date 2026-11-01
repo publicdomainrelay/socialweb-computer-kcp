@@ -1,0 +1,28 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: HostProcess
+metadata:
+  name: requester-lr2
+spec:
+  unit: REPLACE-HP-PREFIXrequester-lr2.service
+  description: "run requester lr2, placed by the core of this account"
+  asset:
+    name: socialweb-computer
+    sha256: ""
+  argv:
+    - run
+    - requester
+    - --name
+    - lr2
+    - --state-dir
+    - REPLACE-STATE-DIR
+    - --fg
+    - --
+    - --atproto-oauth-qr
+  slice: socialweb.slice
+  restartPolicy: Always
+  stop:
+    signal: SIGTERM
+    graceSeconds: 300
+  readiness:
+    exec: ["test", "-s", "REPLACE-STATE-DIR/requesters/lr2/ready.json"]
+  placement: supervisor

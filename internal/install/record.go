@@ -23,23 +23,24 @@ const (
 )
 
 const (
-	StepAccount    = "account"
-	StepSubuid     = "subuid"
-	StepSubgid     = "subgid"
-	StepKVM        = "kvm-group"
-	StepDelegation = "delegation-drop-in"
-	StepAppArmor   = "apparmor-profile"
-	StepPassword   = "node-password"
-	StepStateDir   = "state-dir"
-	StepBinary     = "binary"
-	StepConfig     = "config"
-	StepUnitFiles  = "unit-files"
-	StepLinger     = "linger"
-	StepUnits      = "core-units"
-	StepGuestImage = "guest-image"
-	StepBringUp    = "bring-up"
-	StepCheckHost  = "check-host"
-	recordMode     = 0o644
+	StepAccount         = "account"
+	StepSubuid          = "subuid"
+	StepSubgid          = "subgid"
+	StepKVM             = "kvm-group"
+	StepDelegation      = "delegation-drop-in"
+	StepAppArmor        = "apparmor-profile"
+	StepPassword        = "node-password"
+	StepStateDir        = "state-dir"
+	StepBinary          = "binary"
+	StepConfig          = "config"
+	StepUnitFiles       = "unit-files"
+	StepLinger          = "linger"
+	StepUnits           = "core-units"
+	StepGuestImage      = "guest-image"
+	StepBringUp         = "bring-up"
+	StepCheckHost       = "check-host"
+	StepRequesterRecord = "requester-record"
+	recordMode          = 0o644
 )
 
 type Record struct {
@@ -49,6 +50,7 @@ type Record struct {
 	StateDir    string            `json:"stateDir"`
 	UnitPrefix  string            `json:"unitPrefix,omitempty"`
 	Handles     []string          `json:"handles,omitempty"`
+	Names       []string          `json:"names,omitempty"`
 	Steps       map[string]string `json:"steps"`
 	SubidLines  map[string]string `json:"subidLines,omitempty"`
 	CreatedDirs []string          `json:"createdDirs,omitempty"`
@@ -106,6 +108,22 @@ func (r *Record) addUnitFile(p string) {
 	}
 	r.UnitFiles = append(r.UnitFiles, p)
 	sort.Strings(r.UnitFiles)
+}
+
+func (r *Record) Instances() []string {
+	if r.Role == hostcontract.RoleRequester {
+		return r.Names
+	}
+	return r.Handles
+}
+
+func (r *Record) addNames(ns []string) {
+	for _, n := range ns {
+		if !slices.Contains(r.Names, n) {
+			r.Names = append(r.Names, n)
+		}
+	}
+	sort.Strings(r.Names)
 }
 
 func (r *Record) addHandles(hs []string) {

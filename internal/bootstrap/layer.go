@@ -26,6 +26,10 @@ const (
 	DropInName           = "socialweb-bootstrap.conf"
 	InstallFrontAddr     = "127.0.0.1:0"
 	PendingFrontURL      = "https://front.pending.invalid"
+	RequestersDir        = "requesters"
+	RequesterInstanceSub = "dev"
+	RequesterReadyFile   = "ready.json"
+	RequesterRecordFile  = "requester.json"
 )
 
 type Params struct {
@@ -77,9 +81,16 @@ func (c Config) Params(a table.App) Params {
 	return p
 }
 
+func RequesterInstanceDir(state, name string) string {
+	return filepath.Join(state, RequestersDir, name, RequesterInstanceSub, name)
+}
+
 func AppDir(a table.App, state string) string {
-	if a.Role == table.RoleBidder {
+	switch a.Role {
+	case table.RoleBidder:
 		return filepath.Join(state, "handles", a.Key, "kcp")
+	case table.RoleRequester:
+		return filepath.Join(RequesterInstanceDir(state, a.Name), "kcp")
 	}
 	return filepath.Join(state, "kcp")
 }
@@ -125,7 +136,7 @@ func (p Params) storeConfig(unit string, in pgunit.Install) kcpdatastore.Postgre
 func (p Params) Postgres() (pgunit.Install, error) { return pgunit.FromRoot(p.PostgresRoot) }
 
 func (p Params) shape() kcpserver.Shape {
-	if p.App.Role == table.RoleBidder && !p.App.DevCore {
+	if p.App.SingleSlot() && !p.App.DevCore {
 		return kcpserver.ShapeSingle
 	}
 	return kcpserver.ShapeBlueGreen
