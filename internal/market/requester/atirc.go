@@ -81,7 +81,8 @@ type atircIssuer struct {
 func (r *contractRunner) atircIssuer(ctx context.Context, contract v1alpha1.ComputeContract) (atircIssuer, error) {
 	q := r.q
 	if ref := q.cfg.Spec.AtircParentRef; ref != nil {
-		if contract.Spec.SecretsRef == nil || ref.Mount != contract.Spec.SecretsRef.Mount || ref.Path != AtircParentPath {
+		if contract.Spec.SecretsRef == nil || ref.Mount != contract.Spec.SecretsRef.Mount || ref.Path != AtircParentPath ||
+			!sameVault(ref.Vault, contract.Spec.SecretsRef.Vault) {
 			return atircIssuer{}, fmt.Errorf("spec.atircParentRef %s/%s is not %s in the requester's own mount", ref.Mount, ref.Path, AtircParentPath)
 		}
 		if q.deps.Vault == nil {
@@ -277,19 +278,29 @@ func releaseTokenPaths(contract v1alpha1.ComputeContract) []string {
 	return paths
 }
 
+func sameVault(a, b *commonv1.ObjectRef) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+type atircReleaseMarker struct {
+	Paths []string `json:"paths"`
+
+	StartedAt int64 `json:"startedAt"`
+}
+
 func (r *contractRunner) revokeAtircToken(ctx context.Context) {
 	contract := r.snapshot()
 	paths := releaseTokenPaths(contract)
 	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil || len(paths) == 0 {
 		return
 	}
-	if err := r.setReleaseMarker(ctx, contract, paths); err != nil {
-		r.log().Warn("requester_atirc_release_marker_failed", "err", err.Error())
-	}
-	r.q.startReleaseRevokes(r, contract, paths)
+	r.q.startReleaseRevokes(r, contract, &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}, true)
 }
 
-func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1.ComputeContract, paths []string) error {
+func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1.ComputeContract, marker *atircReleaseMarker) error {
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	ref := *contract.Spec.SecretsRef
@@ -297,19 +308,17 @@ func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1
 	if err != nil {
 		return err
 	}
-	var raw []byte
-	if paths != nil {
-		if raw, err = json.Marshal(paths); err != nil {
-			return err
-		}
-	}
 	next := make(map[string]any, len(data)+1)
 	for k, v := range data {
 		if k != atircReleaseKey {
 			next[k] = v
 		}
 	}
-	if paths != nil {
+	if marker != nil {
+		raw, err := json.Marshal(marker)
+		if err != nil {
+			return err
+		}
 		next[atircReleaseKey] = string(raw)
 	} else if _, had := data[atircReleaseKey]; !had {
 		return nil
@@ -317,7 +326,7 @@ func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1
 	return kv.Write(ctx, ref.Mount, ref.Path, next)
 }
 
-func (r *contractRunner) releaseMarker(ctx context.Context, contract v1alpha1.ComputeContract) ([]string, error) {
+func (r *contractRunner) releaseMarker(ctx context.Context, contract v1alpha1.ComputeContract) (*atircReleaseMarker, error) {
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	_, data, _, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
@@ -328,21 +337,56 @@ func (r *contractRunner) releaseMarker(ctx context.Context, contract v1alpha1.Co
 	if text == "" {
 		return nil, nil
 	}
-	var paths []string
-	if err := json.Unmarshal([]byte(text), &paths); err != nil {
+	var marker atircReleaseMarker
+	if err := json.Unmarshal([]byte(text), &marker); err != nil {
 		return nil, err
 	}
-	return paths, nil
+	return &marker, nil
 }
 
-func (q *Requester) startReleaseRevokes(r *contractRunner, contract v1alpha1.ComputeContract, paths []string) {
+func (q *Requester) startReleaseRevokes(r *contractRunner, contract v1alpha1.ComputeContract, marker *atircReleaseMarker, write bool) {
 	if _, running := q.releaseRevoking.LoadOrStore(contract.Name, true); running {
 		return
 	}
 	go func() {
 		defer q.releaseRevoking.Delete(contract.Name)
-		r.releaseRevokes(contract, paths)
+		if write && !r.writeReleaseMarker(contract, marker) {
+			return
+		}
+		r.releaseRevokes(contract, marker)
 	}()
+}
+
+func (r *contractRunner) writeReleaseMarker(contract v1alpha1.ComputeContract, marker *atircReleaseMarker) bool {
+	stop := r.q.runContext()
+	for attempt := 1; ; attempt++ {
+		ctx, cancel := context.WithTimeout(stop, atircCallTimeout)
+		err := r.setReleaseMarker(ctx, contract, marker)
+		cancel()
+		if err == nil {
+			return true
+		}
+		r.q.log.Warn("requester_atirc_release_marker_failed", "contract", r.name, "attempt", attempt, "err", err.Error())
+		if !r.waitRetry(stop, attempt) {
+			return false
+		}
+		if !r.q.now().Before(time.Unix(marker.StartedAt, 0).Add(AtircTokenLifetime)) {
+			r.q.log.Warn("requester_atirc_release_revoke_gave_up", "contract", r.name, "step", "the release marker")
+			return false
+		}
+	}
+}
+
+func (r *contractRunner) waitRetry(stop context.Context, attempt int) bool {
+	timer := time.NewTimer(min(associationRetryFirst<<min(attempt-1, 10), associationRetryMax))
+	defer timer.Stop()
+	select {
+	case <-stop.Done():
+		r.q.log.Info("requester_atirc_release_revoke_left_for_restart", "contract", r.name)
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
@@ -354,29 +398,29 @@ func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
 	}
 	r := newContractRunner(q, contract)
 	go func() {
-		defer q.releaseRevoking.Delete(contract.Name)
 		ctx, cancel := context.WithTimeout(q.runContext(), atircCallTimeout)
-		paths, err := r.releaseMarker(ctx, contract)
+		marker, err := r.releaseMarker(ctx, contract)
 		cancel()
+		q.releaseRevoking.Delete(contract.Name)
 		if err != nil {
 			q.log.Warn("requester_atirc_release_marker_failed", "contract", contract.Name, "err", err.Error())
 			return
 		}
-		if len(paths) > 0 {
-			q.log.Info("requester_atirc_release_revoke_resumed", "contract", contract.Name, "paths", paths)
-			r.releaseRevokes(contract, paths)
+		if marker != nil && len(marker.Paths) > 0 {
+			q.log.Info("requester_atirc_release_revoke_resumed", "contract", contract.Name, "paths", marker.Paths)
+			q.startReleaseRevokes(r, contract, marker, false)
 		}
 	}()
 }
 
-func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, paths []string) {
+func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, marker *atircReleaseMarker) {
 	stop := r.q.runContext()
 	done := map[string]bool{}
-	giveUp := r.q.now().Add(AtircTokenLifetime)
+	giveUp := time.Unix(marker.StartedAt, 0).Add(AtircTokenLifetime)
 	for attempt := 1; ; attempt++ {
 		ctx, cancel := context.WithTimeout(stop, atircCallTimeout)
 		left := 0
-		for _, path := range paths {
+		for _, path := range marker.Paths {
 			if !done[path] {
 				done[path] = r.revokeEnvToken(ctx, contract, path)
 			}
@@ -384,27 +428,24 @@ func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, paths
 				left++
 			}
 		}
+		cleared := true
 		if left == 0 {
 			if err := r.setReleaseMarker(ctx, contract, nil); err != nil {
-				r.q.log.Warn("requester_atirc_release_marker_failed", "contract", r.name, "err", err.Error())
+				cleared = false
+				r.q.log.Warn("requester_atirc_release_marker_failed", "contract", r.name, "step", "clear", "err", err.Error())
 			}
 		}
 		cancel()
 		r.q.log.Info("requester_atirc_release_revoke", "contract", r.name, "attempt", attempt, "left", left)
-		if left == 0 {
+		if left == 0 && cleared {
 			return
 		}
 		if !r.q.now().Before(giveUp) {
 			r.q.log.Warn("requester_atirc_release_revoke_gave_up", "contract", r.name, "left", left)
 			return
 		}
-		timer := time.NewTimer(min(associationRetryFirst<<min(attempt-1, 10), associationRetryMax))
-		select {
-		case <-stop.Done():
-			timer.Stop()
-			r.q.log.Info("requester_atirc_release_revoke_left_for_restart", "contract", r.name, "left", left)
+		if !r.waitRetry(stop, attempt) {
 			return
-		case <-timer.C:
 		}
 	}
 }
@@ -426,21 +467,27 @@ func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.C
 	if token == "" {
 		return true
 	}
-	if subhandle == "" {
+	derived := subhandle == ""
+	if derived {
 		subhandle = r.legacySubhandle(contract, path)
 	}
 	if subhandle == "" {
 		r.q.log.Warn("requester_atirc_revoke_failed", "contract", r.name, "path", path, "step", "the token names no subhandle and none can be derived")
 		return false
 	}
-	exp, ok := atircTokenExp(token, env)
-	if !ok {
-		exp = r.q.now().Add(AtircTokenLifetime)
-	}
-	if !r.q.now().Before(exp) {
+	if exp, ok := atircTokenExp(token, env); ok && !r.q.now().Before(exp) {
 		return true
 	}
-	return r.revokeAtircSubhandle(ctx, token, subhandle) == nil
+	revoked, err := r.revokeAtircSubhandle(ctx, token, subhandle)
+	if err != nil {
+		return false
+	}
+	if !revoked && derived {
+		r.q.log.Warn("requester_atirc_revoke_unconfirmed", "contract", r.name, "path", path, "subhandle", subhandle,
+			"reason", "a derived subhandle answered 401; the token stays pending until it expires")
+		return false
+	}
+	return true
 }
 
 func (r *contractRunner) legacySubhandle(contract v1alpha1.ComputeContract, path string) string {
@@ -462,7 +509,7 @@ func (r *contractRunner) legacySubhandle(contract v1alpha1.ComputeContract, path
 	return atircChild(label, uriRKey(state.RFPURI), handle)
 }
 
-func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhandle string) error {
+func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhandle string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
 	defer cancel()
 	var out struct {
@@ -473,13 +520,13 @@ func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhan
 	switch {
 	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized:
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "already", true)
-		return nil
+		return false, nil
 	case err != nil:
 		r.log().Warn("requester_atirc_revoke_failed", "subhandle", subhandle, "step", "revoke", "err", err.Error())
-		return err
+		return false, err
 	}
 	r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "revokedAt", time.Unix(out.RevokedAt, 0).UTC().Format(time.RFC3339))
-	return nil
+	return true, nil
 }
 
 func (r *contractRunner) readAtircBundle(ctx context.Context, ref commonv1.SecretRef) (vault.KV, map[string]any, []SecretEntry, error) {

@@ -74,7 +74,7 @@ type contractRunner struct {
 
 	associationKick chan struct{}
 
-	bundleMu sync.Mutex
+	bundleMu *sync.Mutex
 
 	associationRecords map[string]string
 
@@ -93,6 +93,8 @@ func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contrac
 		done:      make(chan struct{}),
 
 		associationKick: make(chan struct{}, 1),
+
+		bundleMu: q.bundleLock(contract.Name),
 	}
 	if contract.Status.Chosen != nil {
 		chosen := *contract.Status.Chosen

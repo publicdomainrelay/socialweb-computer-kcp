@@ -266,6 +266,8 @@ type Requester struct {
 
 	releaseRevoking sync.Map
 
+	bundleLocks sync.Map
+
 	waiting map[string]bool
 
 	settled map[string]bool
@@ -854,4 +856,9 @@ func (q *Requester) guestCAPEM() string {
 
 func (q *Requester) guestKeyDir() string {
 	return q.cfg.stateFile("guest-keys")
+}
+
+func (q *Requester) bundleLock(contract string) *sync.Mutex {
+	lock, _ := q.bundleLocks.LoadOrStore(contract, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }

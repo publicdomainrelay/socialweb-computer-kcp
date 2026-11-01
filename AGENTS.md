@@ -222,9 +222,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `run request` writes it from that file) mints its own agents' tokens below that subhandle with the
     parent token as bearer instead of service auth. Release revokes the agent and the guest requester
     tokens in the background with a backoff capped at 5 min until each is revoked or expired (24h at
-    most), stops with the requester and resumes after a restart from a marker in the bundle secret;
-    revoking a subhandle revokes every token below it. `spec.atircParentRef` must name
-    `identity/atirc-parent` in the requester's own mount.
+    most after release, from the release time kept in a marker in the bundle secret), starts only
+    once that marker is written, stops with the requester and resumes after a restart from the marker;
+    a 401 counts as revoked only for a subhandle read from the env file. Every read-modify-write of a
+    contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
+    token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
+    vault and mount.
     `run request --associate <did>|guest` asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
