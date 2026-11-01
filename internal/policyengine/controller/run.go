@@ -70,6 +70,7 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 		}
 		return failedOutcome(contextErr), nil
 	}
+	bindCacheKey(inputs, workflowRaw, workflowCR, requestContext)
 	request := &PolicyEngineRequest{
 		Inputs:   inputs,
 		Workflow: workflowRaw,

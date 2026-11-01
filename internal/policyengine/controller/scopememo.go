@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	policyv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/policy/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -36,8 +37,28 @@ func scopeMemoKey(workflow json.RawMessage, inputs map[string]any) string {
 	if key == "" {
 		return ""
 	}
-	sum := sha256.Sum256(workflow)
-	return "scope-verdict/" + hex.EncodeToString(sum[:8]) + "/" + key
+	return "scope-verdict/" + key
+}
+
+func bindCacheKey(inputs map[string]any, workflow json.RawMessage, workflowCR *policyv1alpha1.PolicyWorkflow, requestContext map[string]any) {
+	key := stringInput(inputs, CacheKeyInput)
+	if key == "" {
+		return
+	}
+	digest := sha256.New()
+	digest.Write(workflow)
+	if workflowCR != nil && workflowCR.Spec.RecordRef != nil {
+		digest.Write([]byte("\x00" + workflowCR.Spec.RecordRef.URI + "\x00" + workflowCR.Spec.RecordRef.CID))
+	}
+	digest.Write([]byte("\x00trust\x00"))
+	if seeded, ok := cacheFromAny(requestContext["cache"]); ok {
+		entry := seeded["trust/"+stringInput(inputs, "counterparty-did")]
+		for _, file := range []string{"operatorOf.json", "vouchedBy.json", "trustedOperators.json"} {
+			digest.Write([]byte("\x00" + file + "\x00" + entry[file].Data))
+		}
+	}
+	sum := digest.Sum(nil)
+	inputs[CacheKeyInput] = key + "|bind:" + hex.EncodeToString(sum[:12])
 }
 
 func (e *Engine) scopeTTL(allow bool) time.Duration {
