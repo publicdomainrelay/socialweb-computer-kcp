@@ -707,6 +707,8 @@ type MarketRequesterSpec struct {
 
 	Association *commonv1.AssociationPolicy `json:"association,omitempty"`
 
+	Retention *RequesterRetention `json:"retention,omitempty"`
+
 	Options []ApplicationOption `json:"options,omitempty"`
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`

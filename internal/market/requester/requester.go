@@ -279,6 +279,8 @@ type Requester struct {
 
 	orphanSweep sync.Once
 
+	retentionOnce sync.Once
+
 	runnerEnded chan struct{}
 
 	waiting map[string]bool

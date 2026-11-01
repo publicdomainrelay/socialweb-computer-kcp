@@ -286,6 +286,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
 		AtircMintedRef:       &commonv1.SecretRef{Mount: plan.Vault.MountOr(RequesterVaultClient), Path: role.AtircMintedPath},
 		SuspendParticipation: o.Spec.Suspend,
+		Retention:            o.Spec.Retention.DeepCopy(),
 	}
 	out := []compose.Desired{compose.PolicyEngineDesired()}
 	if plan.Local {

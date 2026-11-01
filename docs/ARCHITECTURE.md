@@ -4522,6 +4522,64 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **The requester sweeps its own finished market and compute records after 30 days, dry-run by
+  default (rc137, owner ask ae7ad38d, 2026-10-31).** Before: alice's repo held about 1076
+  compute.vm, 1074 market.rfp, 672 market.event, 462 market.accept, 417 vm.delete and 794
+  policy.ghalite records from testing, and nothing ever deleted one. Decided: every requester
+  (CLI, gateway, page, iOS: they share `internal/market/requester`) runs one sweep 5 min after
+  its controllers are synced (`RetentionStartDelay`; later when the state dir marker
+  `retention-last-run` says the last sweep was under 24 h ago) and then once per 24 h
+  (`RetentionInterval`, the ticker of `deploy/obligations.txt`). Requester `spec.retention`
+  (`MarketRequester` passes it through) holds `mode` (`DryRun`, the default on every host, or
+  `Delete`), `days` (default 30, 0 turns the market sweep off), `infraDays` (default 7, 0 turns the
+  ephemeralInfra sweep off), `delaySeconds` (the first sweep's delay; set, it also skips the marker)
+  and `keep` (an at-uri, `collection/rkey`, a collection, or a prefix
+  ending in `*`); `run request -- --retention-mode Delete --retention-days N
+  --retention-infra-days N --retention-delay-seconds N --retention-keep a,b` sets them. The sweep is an allowlist of churn collections in the requester's own repo only:
+  market.accept, market.event (only an envelope whose receipt is in another repo and whose payload
+  is one of the requester's own vm.delete or guest.* payloads), market.rfp, compute.vm,
+  policy.ghalite, vm.delete, the requester-written guest.* payloads (publicKey, signalWebRTC,
+  secrets, agentStart, secretsUpdated, r2Start, r2Release) and computer.socialweb.ephemeralInfra.
+  Never swept: market.association and associationRequest (standing and contract-scoped
+  records; release deletes its own), every badgeBlueKeys record including the market_requester
+  key claims (a page tab or the iOS app keeps one for weeks), ingress.webRTC (the `webrtc`
+  descriptor is standing and the offers name no contract), fedproxy RBAC (release deletes its
+  own), config.wif.simple, computer.socialweb.infra, market.bid and market.receipt (bidder-written,
+  even in a repo a bidder role shares), offering, heartbeat, vouch and every app.bsky or tangled
+  record; any rkey `self` or starting `fixture-` (declared test-account state) in any collection.
+  Age is the record's `createdAt`, the TID rkey time only when it has none. A record goes only when
+  it is older than the retention, no ComputeContract of this kcp that is not finished (Released or
+  Failed, `status.atircRevokes` Done or Abandoned, or no agent and no association) names it in its
+  status or its runner state, and its thread is proven finished in the repos: an event, by the
+  bidder's vm.terminated for its receipt (one getRecord at the deterministic termination rkey)
+  older than `RetentionTokenBound` (48 h, twice the atirc token lifetime, so every token leased to
+  it expired); an accept, the same for the receipt at `ReceiptRKey(accept)`, or, with no
+  vm.terminated, a 400/404 for that receipt while its bid reads back from the same bidder repo (the
+  bidder never provisioned); an RFP, when every accept naming it is finished, and its compute.vm
+  and policies with it unless another RFP that is not finished names them. An RFP, compute.vm or
+  policy whose rkey is not its own TID (an owner-session rkey a later session may reuse) is kept.
+  Deletes run payload before envelope and dependents before the RFP, so an interrupted run leaves
+  the root for the next one. An ephemeralInfra record goes when it is older than `infraDays`, no
+  ComputeContract of this kcp is labelled with or owned by an EphemeralInfra of its name, it ended
+  (status.endedAt, else status.expiresAt, else createdAt plus ttlSeconds) more than 48 h ago, and
+  every contract it lists is Released, has no receipt, or has a vm.terminated (a stale Requesting
+  entry counts only that way; the record is never rewritten). listRecords is used here, and only
+  here, as the enumeration of a rare GC: paged at 100, every swept collection listed once per run,
+  at most `RetentionListCap` 20000 records, and when a listing is cut nothing is deleted that run
+  (`requester_retention_skipped`). Point reads at bidder repos are paced at 10/s
+  (`RetentionReadGap`) and cached per run; deletes at 1/s (`RetentionDeleteGap`, the bsky PDS
+  write budget) and at most `RetentionDeleteCap` 2000 per run. An OAuth requester deletes a
+  collection only when its session was granted `repo:<collection>?action=delete`
+  (`noDeleteScope` counts the rest; `RequesterOAuthScope` grants no delete on the market and compute
+  collections yet, so the scope is the step before `Delete` on an OAuth requester). Each run logs one
+  `requester_retention_run` line: mode, the listed, would, deleted and noDeleteScope counts per
+  collection, failed, the kept counts per reason, reads, seconds and up to 20 candidate at-uris. The
+  requester holds no AtprotoRecord view (a page or iOS kcp never holds the gateway's declared
+  objects), so the `socialweb.computer/declared-state` label is not read; the allowlist, the
+  `fixture-` and `self` rkeys and `keep` stand for it. ponytail: an AtprotoRecord subscription in
+  marketintents would let the sweep read that label, and an EphemeralInfra subscription would see a
+  live EphemeralInfra that has no ComputeContract yet.
+
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app
   launches stalled with `Workspace [app] in root for Ready after 1m0s (last error: Workspace app
