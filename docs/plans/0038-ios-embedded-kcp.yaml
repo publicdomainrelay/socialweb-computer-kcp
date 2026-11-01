@@ -73,11 +73,11 @@ items:
   - id: I7-AGENTS
     title: "Agents section: launch an agent VM through the market request flow (EphemeralInfra, ComputeContract with spec.agent), leased token row, Release, revoke; release finished in background time or on next launch"
     owner: atirc-ios-client-dev
-    status: todo
+    status: doing
   - id: I8-ASK-OWNER
     title: "Pending owner questions list, answer sheet and local notification on a new ask (chat.atirc.ask/questions/answer/decide/owner_mode)"
     owner: atirc-ios-client-dev
-    status: doing
+    status: done
   - id: I9-E2E
     title: "End to end on a device: sign in, launch an agent, agent joins the owner channel on its leased token, release, token dead by revoke and by lease; hosts clean"
     owner: linux-kcp
