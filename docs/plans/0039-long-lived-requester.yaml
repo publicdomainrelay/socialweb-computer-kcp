@@ -393,7 +393,7 @@ items:
       Deployed with quickstart-deno-ok; without the flag it prints [vm] or nothing and a deno contract gets no bid.
     risks:
       - "A MarketNetwork schema change: every dev network must be brought down and up again after the bump (not a dev restart)."
-    status: todo
+    status: done
 
   - id: F2-VOUCH-SCOPE
     title: "vouch.yaml through an OAuth or pdsAccount requester repo: the optional vouch scope and Retain"

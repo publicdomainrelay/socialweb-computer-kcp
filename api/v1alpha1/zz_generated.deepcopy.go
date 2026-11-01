@@ -6683,6 +6683,11 @@ func (in *NetworkApp) DeepCopyInto(out *NetworkApp) {
 		*out = new(KcpProvider)
 		**out = **in
 	}
+	if in.ComputeKinds != nil {
+		in, out := &in.ComputeKinds, &out.ComputeKinds
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Options != nil {
 		in, out := &in.Options, &out.Options
 		*out = make([]ApplicationOption, len(*in))

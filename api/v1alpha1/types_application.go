@@ -876,6 +876,8 @@ type NetworkApp struct {
 
 	Kcp *KcpProvider `json:"kcp,omitempty"`
 
+	ComputeKinds []string `json:"computeKinds,omitempty" apigen:"listType=set"`
+
 	Options []ApplicationOption `json:"options,omitempty"`
 
 	Quota *ApplicationQuota `json:"quota,omitempty"`

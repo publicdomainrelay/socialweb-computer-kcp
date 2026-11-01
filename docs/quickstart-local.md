@@ -55,13 +55,15 @@ I=qs                                    # instance name, unique on the host
 ST=/var/tmp/qs-state                    # short: tenant socket paths must fit in 107 bytes
 mkdir -p "$ST"
 echo '{"bidder":{"kcp":{"handle":"{app}.qs.bob.test"}}}' > "$ST/app-values.json"
-$SWC dev up --instance $I --profile market-network --host-backend proc --bidders 1 --with-gateway \
+$SWC dev up --instance $I --profile market-network --host-backend proc --bidders 1 --with-gateway --compute-kinds vm,deno \
   --guest-image-source file:///var/lib/socialweb-computer/guest-image --vm-host-backend systemd-user \
   --app-values "$ST/app-values.json" --ready-timeout 90s --network-timeout 6m --state-dir "$ST"
 $SWC dev status --instance $I --state-dir "$ST" | jq -r '.network.status.phase, (.network.status.apps[] | "\(.name) \(.phase)")'
 ```
 
 - one kcp, workspace `root` holds `MarketNetwork network`; children: `root:bidder-1` (MarketBidder), `root:gateway` (Gateway + tenant cluster `tenant` at zero nodes)
+- `--compute-kinds vm,deno` sets `spec.computeKinds` on every network bidder's MarketBidder (the same values and check
+  as `run bidder --compute-kinds`); without it a network bidder serves `vm` only and a deno contract gets no bid
 - `--guest-image-source` names a guest image dir (`image.json`, `rootfs.ext4`, `vmlinux`); without it `dev up` fetches the pinned one
 - Ready when `.network.status.phase` is `Ready` (about 35 s on hat-8)
 - `dev up` gives its own dev bidders a bidder policy of its choosing; the bidder also runs the contract's attached
@@ -281,18 +283,11 @@ kubectl --kubeconfig "$TK" logs deploy/quickstart-k8s
 
 `computeKind: deno` runs `userData` as a Deno program on the bidder host (no VM): `deno run --no-remote --deny-net
 --deny-run --deny-ffi`, read and write of its own work dir only, at most 2 minutes. The ComputeVM gets backend
-`DenoSandbox`. A bidder serves `deno` only when told to. `dev up` gives no flag for it yet (plan
-[0039](plans/0039-long-lived-requester.yaml) item E-DEV-COMPUTE-KINDS); set the MarketBidder field yourself (own field
-manager, the network keeps it):
+`DenoSandbox`. A bidder serves `deno` only when told to: `dev up --compute-kinds vm,deno` (section 2) sets it on the
+network bidders.
 
 ```bash
-k root:bidder-1 apply --server-side --field-manager quickstart/compute-kinds -f - <<'EOF'
-apiVersion: socialweb.computer/v1alpha1
-kind: MarketBidder
-metadata: {name: app}
-spec:
-  computeKinds: [vm, deno]
-EOF
+k root:bidder-1 get marketbidders.socialweb.computer app -o jsonpath='{.spec.computeKinds}{"\n"}'   # ["vm","deno"]
 k root:qs apply -f examples/infra/deno-sandbox.yaml
 k root:qs wait ephemeralinfras.socialweb.computer/quickstart-deno --for=jsonpath='{.status.phase}'=Deployed --timeout=2m
 k root:qs get computecontracts.socialweb.computer einfra-quickstart-deno-sbx1 -o jsonpath='{.status.contract.sandbox}{"\n"}'
@@ -355,7 +350,6 @@ Each one is an item of plan [0039](plans/0039-long-lived-requester.yaml):
 
 | gap | plan 0039 item |
 |---|---|
-| a `dev up` flag for deno on network bidders (set `MarketBidder.spec.computeKinds`, section 7) | E-DEV-COMPUTE-KINDS |
 | an atirc agent join from a local requester (needs a DID irc.fedfork.com resolves and service auth) | D-AGENT-IDENTITY, D-AGENT-INGRESS |
 | creating a tenant cluster by writing an object: the gateway composes the cluster's Infra from NodeClaims; a Cluster you apply needs the gateway in your own requester kcp | C-GATEWAY-COMPOSE |
 | applying an Infra against prod bidders from the CLI (no long-lived requester root outside the page and the iOS app) | A-RUN-REQUESTER ([quickstart-prod.md](quickstart-prod.md) section 6) |

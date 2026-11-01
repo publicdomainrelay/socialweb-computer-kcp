@@ -45,16 +45,16 @@ sequenceDiagram
 Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) ...`).
 `k <ws> ...` is the helper of quickstart-local section 3.
 
-1. `dev up --instance qs1 --profile market-network --host-backend proc --bidders 1 --with-gateway ...` (quickstart-local section 2);
-   `dev status` phase Ready.
+1. `dev up --instance qs1 --profile market-network --host-backend proc --bidders 1 --with-gateway --compute-kinds vm,deno ...`
+   (quickstart-local section 2); `dev status` phase Ready; `MarketBidder app` `spec.computeKinds` in `root:bidder-1` is
+   `["vm","deno"]`.
 2. Add the requester app `qs` to `MarketNetwork.spec.apps`; wait `.status.apps[qs]` Ready with a did.
 3. Vouches (quickstart-local section 4): [vouch.yaml](../../examples/infra/vouch.yaml) in `root:qs` (requester -> bidder) and
    [vouch-bidder-operator.yaml](../../examples/infra/vouch-bidder-operator.yaml) in `root:bidder-1` (bidder operator -> requester);
    both AtprotoRecords Applied. Wait 5 minutes if any contract was denied before.
 4. VM: apply `vm.yaml` (your key in), `kubectl wait ... phase=Deployed`, ssh over iroh, read `/root/quickstart`.
 5. k8s: apply `k8s-cluster.yaml` to the tenant kubeconfig; read the gateway Infra `nodes-<hex>`, node Ready, pod logs.
-6. Deno: set `MarketBidder app` `spec.computeKinds: [vm, deno]` in `root:bidder-1`; apply `deno-sandbox.yaml`; read
-   `status.contract.sandbox`.
+6. Deno: apply `deno-sandbox.yaml`; read `status.contract.sandbox`.
 7. Agent: write `agent-bundle.json` into the requester OpenBao (quickstart-local section 4); apply `agent-vm.yaml`; read the
    requester log for `requester_atirc_*`; on prod apply `agent-start.yaml` and watch the channel for the nick JOIN.
 8. Release: patch each contract `state: Released` (or delete the object); delete the Deployment; `dev down`; release
@@ -136,7 +136,7 @@ No token or key material in any log (plaintext check 0 on every log file).
 | `dev up` exit 1: gateway `Requester ... names no identity DID or handle` | before rc156: a component Failed for a moment at start; rc156 `dev up` waits 1 min on a Failed component |
 | `no bids received within 30s`; bidder Bid `policy rejected ... not vouched` (requester-tangled-vouch) | the bidder runs the RFP's attached policy as itself (`self-did` = bidder, `counterparty-did` = requester, PolicyWorkflowRun in `root:bidder-1`): the bidder operator has not vouched the requester; apply vouch-bidder-operator.yaml; denials are cached 5 min |
 | requester -> bidder vouch alone, still `not vouched` | expected: that is the requester's own direction; the bidder-side run needs the operator -> requester record |
-| deno contract `no bids` | the bidder does not serve `deno`: `MarketBidder.spec.computeKinds` |
+| deno contract `no bids` | the bidder does not serve `deno`: `dev up` without `--compute-kinds vm,deno` (`MarketBidder.spec.computeKinds`) |
 | agent contract fails before the RFP: `an agent needs its token in spec.secretsRef` | add `spec.secrets` for the contract |
 | agent mint error | the bundle path is not in the vault (write it first), or the local requester DID is unknown to irc.fedfork.com (prod step) |
 | `Using secret key ...` on the terminal | dumbpipe's own ephemeral key on stderr: `2>/dev/null` in the ProxyCommand |

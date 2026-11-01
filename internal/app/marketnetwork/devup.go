@@ -90,6 +90,7 @@ type BidderVMDefaults struct {
 	VmHostBackend    string
 	Handle           string
 	GuestNetwork     *v1alpha1.GuestNetworkOptions
+	ComputeKinds     []string
 }
 
 func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
@@ -108,6 +109,9 @@ func (d BidderVMDefaults) fill(a *v1alpha1.NetworkApp) {
 	}
 	if d.GuestNetwork != nil {
 		a.GuestNetwork = a.GuestNetwork.WithDefaults(d.GuestNetwork)
+	}
+	if len(d.ComputeKinds) > 0 {
+		a.ComputeKinds = append([]string(nil), d.ComputeKinds...)
 	}
 }
 

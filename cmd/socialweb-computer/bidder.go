@@ -275,16 +275,11 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)
 		}
 	}
-	r.computeKinds = splitList(vals.String("compute-kinds"))
+	if r.computeKinds, err = computeKindsFlag(vals); err != nil {
+		return a.fail(exitRefused, "run bidder: %v", err)
+	}
 	if len(r.computeKinds) == 0 {
 		r.computeKinds = []string{string(v1alpha1.ComputeKindVM)}
-	}
-	for _, k := range r.computeKinds {
-		switch v1alpha1.ComputeKind(k) {
-		case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
-		default:
-			return a.fail(exitRefused, "run bidder: --compute-kinds %q: want vm or deno", k)
-		}
 	}
 	if r.policy == "" {
 		r.policy = vals.String("bidder-policy")
@@ -420,6 +415,21 @@ func (r *bidderRun) spec() (v1alpha1.MarketBidderSpec, error) {
 		ComputeKinds: r.computeKinds})
 }
 
+func computeKindsFlag(vals clicfg.Values) ([]string, error) {
+	var kinds []string
+	for _, k := range splitList(vals.String("compute-kinds")) {
+		switch v1alpha1.ComputeKind(k) {
+		case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
+		default:
+			return nil, fmt.Errorf("--compute-kinds %q: want vm or deno", k)
+		}
+		if !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
+		}
+	}
+	return kinds, nil
+}
+
 func (r *bidderRun) servesVM() bool {
 	for _, k := range r.computeKinds {
 		if k == string(v1alpha1.ComputeKindVM) {
@@ -471,7 +481,7 @@ func (r *bidderRun) inNetwork(ctx context.Context) int {
 		return r.a.fail(exitRefused, "run bidder: --name: %v", err)
 	}
 	app, err := marketnetwork.NetworkBidderApp(name, nil, marketnetwork.BidderVMDefaults{GuestImageSource: r.vals.String("guest-image-source"),
-		VmHostBackend: r.vals.String("vm-host-backend"), Handle: r.handle})
+		VmHostBackend: r.vals.String("vm-host-backend"), Handle: r.handle, ComputeKinds: r.computeKinds})
 	if err != nil {
 		return r.a.fail(exitRefused, "run bidder: %v", err)
 	}
