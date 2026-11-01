@@ -4105,10 +4105,15 @@ fail, rather than the code read against this document alone.
   `/proc/self/exe` (one sha256 per process, `internal/kit/selfexe`; the open fd stays the running inode
   across an upgrade's rename) as `socialweb-computer-x86_64`, streamed by `http.ServeContent`, never held
   in memory. `setup-guest-binaries.service` fetches, checks the sha256 and installs it like every other
-  guest binary. linux/amd64 bidders only; any other bidder has no pin and the provisioning fails with
-  "serves no socialweb-computer download". Open: no live run yet (instrument: a V1 guest that runs
-  `socialweb-computer version`); the bid is not refused up front on a bidder that cannot serve it; a guest
-  disk needs about 600 MB free; a non-release (dev) binary in a guest lacks its embedded assets.
+  guest binary. A bidder accepts only the tools in `guestseed.GuestTools`. linux/amd64 bidders only: a
+  bidder with no pin for a requested tool refuses the bid up front (`bidder_guest_tools_unserved`, Bid
+  Failed GuestToolsUnserved, no bid record). Both run in the one core process of the bidder stack
+  (`internal/stack/bidder/core.go`, componentcore), so the pin in user_data and the served file are one
+  hash. The guest script now ends for good (exit 2, `RestartPreventExitStatus=2`) when a requested
+  binary has no pin for the guest's arch, or when every attempt got HTTP 404 (the bidder's download set
+  changed after provisioning, e.g. an upgrade swapped its binary); other failures still exit 1 and the
+  unit retries. Open: no live run yet (instrument: a V1 guest that runs `socialweb-computer version`); a
+  guest disk needs about 600 MB free; a non-release (dev) binary in a guest lacks its embedded assets.
 - **Opened 2026-10-25 (plan 0034 follow-ups; the text and closing instrument of each is in `NEXT.yaml`).**
   RELAY-SSH-ROUTE: fedproxy's atprp-ssh-relay lets a dead `-R` session take the Caddy route of a live
   one and deletes the live route when the dead one is reaped; fix on branch fix/ssh-session-drop.

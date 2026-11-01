@@ -17,7 +17,18 @@ type Pin struct {
 	Size int64
 }
 
-var pin = sync.OnceValues(func() (Pin, error) {
+var (
+	mu sync.Mutex
+
+	cached *Pin
+)
+
+func Sum() (Pin, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if cached != nil {
+		return *cached, nil
+	}
 	f, err := os.Open(Path)
 	if err != nil {
 		return Pin{}, fmt.Errorf("selfexe: %w", err)
@@ -28,9 +39,6 @@ var pin = sync.OnceValues(func() (Pin, error) {
 	if err != nil {
 		return Pin{}, fmt.Errorf("selfexe: hashing %s: %w", Path, err)
 	}
-	return Pin{Sha256: hex.EncodeToString(h.Sum(nil)), Size: n}, nil
-})
-
-func Sum() (Pin, error) {
-	return pin()
+	cached = &Pin{Sha256: hex.EncodeToString(h.Sum(nil)), Size: n}
+	return *cached, nil
 }
