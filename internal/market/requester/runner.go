@@ -216,12 +216,16 @@ func (r *contractRunner) Run(ctx context.Context) {
 		r.runAdopt(ctx, contract)
 		return
 	}
-	if err := CheckTokenPaths(contract, nil); err != nil {
-		r.log().Warn("requester_contract_refused", "err", err.Error())
-		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+err.Error(), r.stateCopy(), nil, nil, "refused", 1)
-		return
-	}
 	state := r.stateCopy()
+	tokenPathConflict := CheckTokenPaths(contract, nil)
+	if tokenPathConflict != nil {
+		if (state == nil || state.RFPURI == "") && !r.released() {
+			r.log().Warn("requester_contract_refused", "err", tokenPathConflict.Error())
+			r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+tokenPathConflict.Error(), state, nil, nil, "refused", 1)
+			return
+		}
+		r.log().Warn("requester_contract_token_path_conflict", "err", tokenPathConflict.Error())
+	}
 	if contract.Status.Phase == v1alpha1.ComputeContractReleased && state != nil && state.Receipt != nil {
 		r.resumeReleased(ctx, state)
 		return

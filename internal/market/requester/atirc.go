@@ -168,6 +168,9 @@ func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract
 
 func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, path, label, uri string, deadline time.Time) error {
 	q := r.q
+	if err := CheckTokenPaths(contract, nil); err != nil {
+		return fmt.Errorf("no token is minted: %w", err)
+	}
 	switch {
 	case q.deps.VaultWrite == nil:
 		return errors.New("the requester has no vault write handle")
