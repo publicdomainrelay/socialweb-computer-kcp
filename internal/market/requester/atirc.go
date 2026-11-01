@@ -232,6 +232,9 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if token == "" || strings.ContainsAny(token, " \t\r\n") {
 		return errors.New(r.atircBase() + " answered no token")
 	}
+	if claimed, ok := atircTokenExp(token, ""); ok {
+		exp = claimed
+	}
 	current.Value = withAtircToken(current.Value, token, subhandle, exp)
 	current.Mode = "0600"
 	if at < 0 {
