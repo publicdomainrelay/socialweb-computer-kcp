@@ -73,6 +73,8 @@ const (
 
 	AgentEnvStampPath = AgentEnvStampDir + "/env.sha256"
 
+	AgentEnvSnapshotPath = AgentEnvStampDir + "/env"
+
 	AtircBinary = "/usr/local/bin/atirc"
 
 	GuestAgentAgentPath = GuestAgentConfigDir + "/agent.json"
@@ -125,7 +127,6 @@ func agentPatch(opts AgentOptions) (UserDataPatch, error) {
 				},
 				[]string{
 					"Type=simple",
-					"EnvironmentFile=-" + opts.envFile(),
 					"ExecStart=" + AgentRunPath + " " + opts.envFile(),
 					"Restart=always",
 					"RestartSec=30",
@@ -166,7 +167,7 @@ func agentPatch(opts AgentOptions) (UserDataPatch, error) {
 const agentEnvRestartScript = `#!/usr/bin/env bash
 set -euo pipefail
 ENV_FILE="$1"
-now="$(sha256sum < "${ENV_FILE}" 2>/dev/null || true)"
+now="$(sha256sum < "${ENV_FILE}" 2>/dev/null || sha256sum < /dev/null)"
 if [ "${now}" = "$(cat "` + AgentEnvStampPath + `" 2>/dev/null || true)" ]; then
   exit 0
 fi
@@ -178,7 +179,12 @@ const agentRunScript = `#!/usr/bin/env bash
 set -euo pipefail
 ENV_FILE="$1"
 install -d -m 0700 -o root -g root "` + AgentEnvStampDir + `"
-{ sha256sum < "${ENV_FILE}" 2>/dev/null || true; } > "` + AgentEnvStampPath + `"
+if [ -f "${ENV_FILE}" ]; then cp -f "${ENV_FILE}" "` + AgentEnvSnapshotPath + `"; else : > "` + AgentEnvSnapshotPath + `"; fi
+chmod 0600 "` + AgentEnvSnapshotPath + `"
+sha256sum < "` + AgentEnvSnapshotPath + `" > "` + AgentEnvStampPath + `"
+set -a
+. "` + AgentEnvSnapshotPath + `"
+set +a
 if [ ! -f "` + GuestSecretsReadyPath + `" ] && [ ! -f "` + SecretsDoneStamp + `" ]; then
   echo "atirc-agent: the secrets bundle is not written yet (` + GuestSecretsReadyPath + `); the agent waits" >&2
   exit 1
