@@ -1,0 +1,1 @@
+{"$type": "com.publicdomainrelay.temp.market.policies.denoWorker", "name": "allow-all", "code": "self.postMessage({ allow: true, violations: [] });"}
