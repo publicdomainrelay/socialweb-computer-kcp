@@ -118,7 +118,7 @@ contract.
 
 | Path | Account | Held | Agent | Release |
 | --- | --- | --- | --- | --- |
-| CLI `run request --hold --agent` | alice | 04:05Z, local bidder | `aliceoa-3mz7vzp2j2v2b` joined; answered `x86_64 fc-lpfuqerea3de-1a35a0de` over atirc | token revoked 04:09:57 before vm.delete; first `release` exited 0 while Releasing, a second `release` finished it (open defect) |
+| CLI `run request --hold --agent` | alice | 04:05Z, local bidder | `aliceoa-3mz7vzp2j2v2b` joined; answered `x86_64 fc-lpfuqerea3de-1a35a0de` over atirc | token revoked 04:09:57 before vm.delete; the `--hold` process stopped the invocation kcp 130 ms into the release, so the first `release` failed while Releasing and a second `release` finished it (fixed after rc156: one owner per invocation kcp) |
 | page terminal, kubectl EphemeralInfra `qsprod` | hat | created 04:10:19, Held 04:11:00, local bidder | `hat-3mz7wtwqt2c2r` joined; ssh `uname -a` from the page terminal | revoked, then Released 04:12:55 |
 
 No token or key material in any log (plaintext check 0 on every log file).
@@ -142,4 +142,4 @@ No token or key material in any log (plaintext check 0 on every log file).
 | `Using secret key ...` on the terminal | dumbpipe's own ephemeral key on stderr: `2>/dev/null` in the ProxyCommand |
 | EphemeralInfra `endWhen: Complete` stays `Released` until its ttl | fixed in rc156: it ends in the pass that sees every contract Released or Failed (released 04:02:28, gone 04:02:30) |
 | released DenoSandbox ComputeVM stays `Running` with `spec.release` set | fixed in rc156: the bidder terminates and deletes it like a VM (released 04:01:45, gone 04:01:47) |
-| `run request release` exits 0 while the contract is still `Releasing`, the VM keeps running | open defect (2026-11-01 prod, `--hold --agent`); run `run request release` again |
+| `run request release` beside a running `--hold` fails while `Releasing`, the VM keeps running | rc156 and earlier: the `--hold` process stopped the shared kcp when the contract left Held; fixed after rc156 (`requests/<name>/owner.lock`); on an older build run `run request release` again |
