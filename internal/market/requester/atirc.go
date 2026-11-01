@@ -275,7 +275,6 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 	if err == nil {
 		err = r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}, lease)
 	}
-	r.mintHoldEnded(ctx)
 	if err == nil {
 		return
 	}
@@ -318,28 +317,13 @@ func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract
 	return r.writeAtircToken(ctx, contract, cloudinit.GuestRequesterAtircEnvFile, "r2", state.Accept.URI, deadline, lease)
 }
 
-func (r *contractRunner) mintHoldEnded(ctx context.Context) {
-	r.mu.Lock()
-	secrets := r.secrets
-	r.mu.Unlock()
-	if !secrets.mintAttempted() || !r.q.cfg.SealedSecrets() {
-		return
-	}
-	contract := r.snapshot()
-	if grant := r.grantValue(); grant != nil {
-		contract.Status.Grant = grant
-	}
-	if err := r.q.sealGuestSecrets(ctx, contract); err != nil && ctx.Err() == nil {
-		r.log().Warn("requester_guest_secrets_seal_failed", "err", err)
-	}
-}
-
-func (r *contractRunner) mintedEntry(ctx context.Context, contract v1alpha1.ComputeContract, entry SecretEntry) {
+func (r *contractRunner) mintedEntry(ctx context.Context, contract v1alpha1.ComputeContract, entry SecretEntry, fresh bool) {
 	r.addSecretEntries(entry)
 	r.mu.Lock()
 	secrets := r.secrets
 	r.mu.Unlock()
-	if !secrets.minted(entry.Path) {
+	withheld := secrets.minted(entry.Path)
+	if entry.Path == cloudinit.GuestRequesterAtircEnvFile || (!withheld && !fresh) {
 		return
 	}
 	if err := r.notifySecretsUpdated(ctx, contract, commonv1.StrongRef{URI: entry.Path}); err != nil {
@@ -436,7 +420,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	}
 	if token := atircToken(current.Value); token != "" {
 		if exp, ok := atircTokenExp(token, current.Value); ok && q.now().Before(exp) {
-			r.mintedEntry(ctx, contract, current)
+			r.mintedEntry(ctx, contract, current, false)
 			return nil
 		}
 	}
@@ -495,7 +479,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
 		return fmt.Errorf("write the bundle: %w", err)
 	}
-	r.mintedEntry(ctx, contract, current)
+	r.mintedEntry(ctx, contract, current, true)
 	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339), "leased", lease != nil)
 	return nil
 }

@@ -57,11 +57,7 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	if !secretsRequestPending(state) {
 		return nil
 	}
-	held := q.runnerSecrets(contract.Name)
-	if held.mintHeld() {
-		q.log.Info("requester_guest_secrets_waiting_for_token", "contract", contract.Name)
-		return nil
-	}
+	runnerSecrets := q.runnerSecrets(contract.Name)
 	q.sealMu.Lock()
 	defer q.sealMu.Unlock()
 	key, ok := q.latestGuestSecretsKey(contract)
@@ -83,7 +79,7 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	if err != nil {
 		return err
 	}
-	entries = held.servable(entries)
+	entries = runnerSecrets.servable(entries)
 	plaintext, err := json.Marshal(entries)
 	if err != nil {
 		return err

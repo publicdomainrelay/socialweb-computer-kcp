@@ -11544,11 +11544,11 @@ the requester_associate record for the r2 token, and the accept uri. The server 
 bearer's chain, so the signed claim `leases` is root to leaf; the requester accepts a token only when
 `leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
 mint. A token with no `leases` claim (an older server) or a 400 naming the lease (then a plain mint)
-is kept and logged once (`requester_atirc_lease_unsupported`). The agent envFile entry is withheld
-until its first mint attempt ends: getSecrets answers 503 TokenPending (setup-secrets retries every
-5 s) and no sealed bundle is sent; the first attempt ends the hold and reseals a pending sealed
-request. An entry with no minted token is never served; a later retry that mints it publishes
-guest.secretsUpdated so the guest fetches the bundle again. Index before mint, no mint after the
+is kept and logged once (`requester_atirc_lease_unsupported`). Until the agent token is minted,
+getSecrets and the sealed fallback serve the bundle without the agent envFile entry; a whole-bundle
+503 would outlast setup-secrets (10 tries 5 s apart, a oneshot with no restart) and leave the guest
+with no secrets. Every fresh mint of that entry publishes guest.secretsUpdated, whether or not the
+guest fetched before it, so the guest fetches the bundle again. Index before mint, no mint after the
 release started, `atircMinted` and the release revoke are unchanged. UUID, manual and plain tokens
 are unchanged.
 

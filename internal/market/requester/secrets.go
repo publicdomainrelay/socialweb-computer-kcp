@@ -64,10 +64,6 @@ type secretsState struct {
 	once sync.Once
 
 	unminted map[string]bool
-
-	mintTried bool
-
-	servedUnminted bool
 }
 
 func (s *secretsState) withholdUnminted(paths ...string) {
@@ -81,26 +77,6 @@ func (s *secretsState) withholdUnminted(paths ...string) {
 	}
 }
 
-func (s *secretsState) mintHeld() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.unminted) > 0 && !s.mintTried
-}
-
-func (s *secretsState) mintAttempted() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	held := len(s.unminted) > 0 && !s.mintTried
-	s.mintTried = true
-	return held
-}
-
 func (s *secretsState) minted(path string) bool {
 	if s == nil {
 		return false
@@ -111,7 +87,7 @@ func (s *secretsState) minted(path string) bool {
 		return false
 	}
 	delete(s.unminted, path)
-	return s.servedUnminted
+	return true
 }
 
 func (s *secretsState) servable(entries []SecretEntry) []SecretEntry {
@@ -130,7 +106,6 @@ func (s *secretsState) servableLocked(entries []SecretEntry) []SecretEntry {
 	out := make([]SecretEntry, 0, len(entries))
 	for _, entry := range entries {
 		if s.unminted[entry.Path] {
-			s.servedUnminted = true
 			continue
 		}
 		out = append(out, entry)
@@ -191,7 +166,6 @@ func (s *secretsState) fetch(ctx context.Context, authorization string) ([]Secre
 	s.mu.Lock()
 	issuer, audience, subject, verifier := s.issuer, s.audience, s.subject, s.verifier
 	already := s.fetchedAt
-	held := len(s.unminted) > 0 && !s.mintTried
 	s.mu.Unlock()
 	if verifier == nil || issuer == "" || audience == "" || subject == "" {
 		s.log.Warn("the secrets server is not ready", "contract", s.name)
@@ -210,10 +184,6 @@ func (s *secretsState) fetch(ctx context.Context, authorization string) ([]Secre
 	if got, _ := claims[cloudinit.NodeJWTUserClaim].(string); got != subject {
 		s.log.Warn("the guest's secrets token names another subject", "contract", s.name, "subject", subject)
 		return nil, &RequestError{Status: http.StatusUnauthorized, Code: "InvalidToken"}
-	}
-	if held {
-		s.log.Info("the guest's secrets wait for the atirc token mint after the receipt", "contract", s.name)
-		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "TokenPending"}
 	}
 	s.mu.Lock()
 	entries := s.servableLocked(append([]SecretEntry(nil), s.entries...))

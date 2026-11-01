@@ -190,8 +190,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `spec.secretsRef`. The requester mints a long atirc token after the receipt is verified (only for
     spec.agent), leased to the contract (chat.atirc.mint `lease`: the receipt and the bidder's
     vm.terminated at-uri, plus the association for the r2 token), and writes `ATIRC_TOKEN` into the
-    bundle entry at envFile, which getSecrets and the sealed fallback withhold (503 TokenPending, no
-    seal) until that first mint attempt ends; user_data installs `atirc-agent.service`
+    bundle entry at envFile; getSecrets and the sealed fallback serve the bundle without that entry
+    until it is minted, and every fresh mint publishes guest.secretsUpdated so the guest fetches
+    again; user_data installs `atirc-agent.service`
     and `/etc/socialweb-guest-agent/agent.json` but never starts the unit. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
