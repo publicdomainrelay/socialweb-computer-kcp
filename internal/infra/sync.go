@@ -18,6 +18,10 @@ const (
 	ActionDelete Action = "Delete"
 
 	ActionInvalid Action = "Invalid"
+
+	ActionEnded Action = "Ended"
+
+	ActionReserved Action = "Reserved"
 )
 
 type Record struct {
@@ -28,6 +32,10 @@ type Record struct {
 	Hash string
 
 	Err error
+
+	Ended bool
+
+	Reserved bool
 }
 
 type SyncInput struct {
@@ -48,6 +56,12 @@ func Decide(in SyncInput) Action {
 	var stored v1alpha1.InfraRecordStatus
 	if in.Stored != nil && in.Stored.URI == in.URI {
 		stored = *in.Stored
+	}
+	switch {
+	case in.Record.Reserved:
+		return ActionReserved
+	case in.Record.Present && in.Record.Ended:
+		return ActionEnded
 	}
 	if in.Publish {
 		switch {

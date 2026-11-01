@@ -30,6 +30,8 @@ type AtprotoRecordWatchSpec struct {
 
 	Collection string `json:"collection"`
 
+	Rkeys []string `json:"rkeys,omitempty" apigen:"listType=set"`
+
 	Match []AtprotoRecordMatch `json:"match,omitempty"`
 
 	Source AtprotoRecordWatchSource `json:"source"`

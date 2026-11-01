@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -101,6 +102,12 @@ type recordSync struct {
 	write bool
 
 	swapCid string
+
+	recorded infra.Decoded
+}
+
+func recordURI(did, nsid, rkey string) string {
+	return "at://" + did + "/" + nsid + "/" + rkey
 }
 
 func RepoRef(workspace string, ref commonv1.ObjectRef) (commonv1.ObjectRef, error) {
@@ -114,7 +121,7 @@ func RepoRef(workspace string, ref commonv1.ObjectRef) (commonv1.ObjectRef, erro
 	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RepoKind, Name: strings.TrimSpace(ref.Name), Workspace: ref.InWorkspace(workspace)}, nil
 }
 
-func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commonv1.ObjectRef, nsid string) (string, atprotorepo.RecordReader, error) {
+func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commonv1.ObjectRef, nsids ...string) (string, atprotorepo.RecordReader, error) {
 	dyn, err := dynamic(ref.Workspace)
 	if err != nil {
 		return "", nil, err
@@ -134,7 +141,7 @@ func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commo
 		}
 		return "", nil, fmt.Errorf("infra: the AtprotoRepo %s %w", ref.String(), ErrRepoNoDID)
 	}
-	reader, err := bus.Resolve[atprotorepo.RecordReader](ctx, b, self, ref, bus.Capability{Name: atprotorepo.CapabilityRead, Scope: []string{nsid}})
+	reader, err := bus.Resolve[atprotorepo.RecordReader](ctx, b, self, ref, bus.Capability{Name: atprotorepo.CapabilityRead, Scope: nsids})
 	if err != nil {
 		return "", nil, unresolved{reason: "RepoUnreadable", err: fmt.Errorf("infra: the repo.read handle of %s: %w", ref.String(), err)}
 	}
@@ -159,20 +166,6 @@ func backendGone(ctx context.Context, dynamic kube.Factory, workspace string, re
 	return apierrors.IsNotFound(err)
 }
 
-func collectionOwned(obj metav1.Object) bool {
-	_, ok := collectionOwner(obj)
-	return ok
-}
-
-func collectionOwner(obj metav1.Object) (string, bool) {
-	for _, o := range obj.GetOwnerReferences() {
-		if o.Controller != nil && *o.Controller && (o.Kind == CollectionKind || o.Kind == EphemeralCollectionKind) {
-			return o.Name, true
-		}
-	}
-	return "", false
-}
-
 func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, v view, now time.Time) (*recordSync, error) {
 	b := v.spec.Record
 	nsid := v.kind.NSID()
@@ -185,7 +178,11 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	if err != nil {
 		return nil, err
 	}
-	rkey := v.object.GetName()
+	name := v.object.GetName()
+	uid := string(v.object.GetUID())
+	rkey := name
+	stored := v.status.Record
+	fresh := stored == nil || strings.TrimSpace(stored.URI) == "" || stored.Direction == v1alpha1.InfraSyncRetained
 	follow := strings.TrimSpace(b.URI) != ""
 	if follow {
 		uri, err := syntax.ParseATURI(strings.TrimSpace(b.URI))
@@ -196,29 +193,62 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 			return nil, fmt.Errorf("infra: spec.record.uri %s is not a %s record of the repo %s", b.URI, nsid, did)
 		}
 		rkey = uri.RecordKey().String()
+	} else if !fresh {
+		if uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI)); err == nil && uri.Authority().String() == did &&
+			uri.Collection().String() == nsid && infra.InSuccession(name, uid, uri.RecordKey().String()) {
+			rkey = uri.RecordKey().String()
+		}
 	}
 	publish := Publishing(b)
 	render := v.declaration
 	if publish {
 		render = render.Published()
 	}
-	out := &recordSync{rkey: rkey, repo: repo, uri: "at://" + did + "/" + nsid + "/" + rkey, createdAt: v.object.GetCreationTimestamp().Time,
+	out := &recordSync{rkey: rkey, repo: repo, uri: recordURI(did, nsid, rkey), createdAt: v.object.GetCreationTimestamp().Time,
 		render: render, publish: publish}
-	if !collectionOwned(v.object) {
-		if err := r.ensureWatch(ctx, req, v, repo, b.EventSourceRefs); err != nil {
-			return nil, err
-		}
+	gen := v.object.GetGeneration()
+	if v.kind == infra.KindInfra && rkey == infra.ReservedRkey {
+		out.action = infra.ActionReserved
+		out.status = &v1alpha1.InfraRecordStatus{URI: out.uri}
+		out.conditions = []metav1.Condition{
+			conds.New(v1alpha1.InfraConditionRecordReserved, true, "Reserved", "rkey self holds the account's index of live deployments; nothing is written", gen),
+			conds.New(v1alpha1.InfraConditionSynced, false, "Reserved", "rkey self is reserved", gen)}
+		return out, nil
 	}
-	got, err := reader.GetRecord(ctx, did, nsid, rkey)
-	present := err == nil
-	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
-		return nil, ReadFailed(fmt.Errorf("infra: reading %s: %w", out.uri, err))
+	var got atprotorepo.Record
+	var present bool
+	var decoded infra.Decoded
+	var derr error
+	for n := 0; ; n++ {
+		got, err = reader.GetRecord(ctx, did, nsid, rkey)
+		present = err == nil
+		if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
+			return nil, ReadFailed(fmt.Errorf("infra: reading %s: %w", out.uri, err))
+		}
+		decoded, derr = infra.Decoded{}, nil
+		if present {
+			decoded, derr = infra.Decode(v.kind, got.Value)
+		}
+		if follow || !fresh || !present || !(decoded.Over(v.kind, now) || errors.Is(derr, infra.ErrReserved)) {
+			break
+		}
+		if n+1 > infra.MaxSuccessors {
+			return nil, fmt.Errorf("infra: %d successor rkeys of %s all hold ended records", infra.MaxSuccessors, name)
+		}
+		next := infra.Successor(name, uid, n+1)
+		r.c.log.Info("infra_record_successor", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "ended", out.uri,
+			"endedAt", decoded.EndedAt, "successor", next)
+		rkey = next
+		out.rkey, out.uri = rkey, recordURI(did, nsid, rkey)
+	}
+	if err := r.ensureWatch(ctx, req, v, repo, rkey, b.EventSourceRefs); err != nil {
+		return nil, err
 	}
 	observed := infra.Record{Present: present, CID: got.CID}
 	if present {
-		decoded, derr := infra.Decode(v.kind, got.Value)
 		observed.Hash, observed.Err = decoded.Declaration.Hash(), derr
-		out.declaration = decoded.Declaration
+		observed.Ended, observed.Reserved = decoded.Ended(), errors.Is(derr, infra.ErrReserved)
+		out.declaration, out.recorded = decoded.Declaration, decoded
 		if !decoded.CreatedAt.IsZero() {
 			out.createdAt = decoded.CreatedAt
 		}
@@ -226,9 +256,19 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	out.cid = got.CID
 	r.c.index(string(v.kind), req, out.uri, got.CID)
 	specHash := render.Hash()
-	stored := v.status.Record
 	out.action = infra.Decide(infra.SyncInput{Follow: follow, Publish: publish, Stored: stored, URI: out.uri, SpecHash: specHash, Record: observed})
-	gen := v.object.GetGeneration()
+	endHeld := stored != nil && stored.URI == out.uri && stored.Direction != v1alpha1.InfraSyncRetained &&
+		meta.IsStatusConditionTrue(v.status.Conditions, v1alpha1.InfraConditionRecordEnded)
+	endLost := false
+	switch out.action {
+	case infra.ActionEnded, infra.ActionDelete, infra.ActionReserved:
+	default:
+		if endHeld {
+			r.c.log.Warn("infra_record_end_lost", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", out.uri, "cid", got.CID,
+				"action", out.action)
+			out.action, endLost = infra.ActionEnded, true
+		}
+	}
 	keep := v1alpha1.InfraRecordStatus{URI: out.uri}
 	if stored != nil && stored.URI == out.uri {
 		keep = *stored
@@ -288,6 +328,27 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 			conds.New(v1alpha1.InfraConditionSyncConflict, true, "RecordWon", message, gen)}
 		r.c.log.Warn("infra_record_conflict", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", out.uri, "cid", got.CID,
 			"generation", gen)
+	case infra.ActionEnded:
+		direction := keep.Direction
+		if direction == "" || direction == v1alpha1.InfraSyncRetained {
+			direction = v1alpha1.InfraSyncInSync
+		}
+		if endLost {
+			out.status = &keep
+			out.conditions = []metav1.Condition{conds.New(v1alpha1.InfraConditionSynced, false, "EndLost",
+				"the record no longer shows the end this object recorded; the object stays ended and writes nothing", gen)}
+			break
+		}
+		out.status = synced(direction)
+		message := fmt.Sprintf("the record ended at %s (%s); it is kept and never written again", decoded.EndedAt, strings.ToLower(string(decoded.EndReason)))
+		out.conditions = []metav1.Condition{
+			conds.New(v1alpha1.InfraConditionSynced, true, "Ended", message, gen),
+			conds.New(v1alpha1.InfraConditionRecordEnded, true, string(decoded.EndReason), message, gen)}
+	case infra.ActionReserved:
+		out.status = &keep
+		out.conditions = []metav1.Condition{
+			conds.New(v1alpha1.InfraConditionRecordReserved, true, "Reserved", "the record holds the account's index of live deployments; nothing is written", gen),
+			conds.New(v1alpha1.InfraConditionSynced, false, "Reserved", "the record is the index, not a deployment", gen)}
 	case infra.ActionInvalid:
 		out.status = &keep
 		out.conditions = []metav1.Condition{conds.New(v1alpha1.InfraConditionRecordValid, false, "Invalid", observed.Err.Error(), gen),
@@ -322,10 +383,12 @@ func (r *reconciler[T]) settled(ctx context.Context, req ctlruntime.Request, v v
 		return false
 	}
 	r.c.bindRepo(string(v.kind), req, repo)
-	if !collectionOwned(v.object) {
-		if err := r.ensureWatch(ctx, req, v, repo, v.spec.Record.EventSourceRefs); err != nil {
-			return false
-		}
+	uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI))
+	if err != nil {
+		return false
+	}
+	if err := r.ensureWatch(ctx, req, v, repo, uri.RecordKey().String(), v.spec.Record.EventSourceRefs); err != nil {
+		return false
 	}
 	if changed, err := r.watchedChange(ctx, req, v, stored); err != nil || changed {
 		return false
@@ -337,9 +400,6 @@ func (r *reconciler[T]) settled(ctx context.Context, req ctlruntime.Request, v v
 
 func (r *reconciler[T]) watchedChange(ctx context.Context, req ctlruntime.Request, v view, stored *v1alpha1.InfraRecordStatus) (bool, error) {
 	name := infra.ChildName(v.kind, v.object.GetName())
-	if owner, ok := collectionOwner(v.object); ok {
-		name = infra.ChildName(v.kind, "coll", owner)
-	}
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return false, err
@@ -385,18 +445,23 @@ func (r *reconciler[T]) writeRecord(ctx context.Context, req ctlruntime.Request,
 	if rec.publish {
 		observed = observed.Published()
 	}
+	observed.EndedAt, observed.EndReason = "", ""
 	value, err := infra.Render(v.kind, rec.render, observed, rec.createdAt)
 	if err != nil {
 		return err
 	}
-	repo := rec.repo
+	return r.applyRecord(ctx, req, v, rec.repo, rec.rkey, value, rec.swapCid)
+}
+
+func (r *reconciler[T]) applyRecord(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef, rkey string, value json.RawMessage, swapCid string) error {
 	if repo.Workspace == req.Workspace {
 		repo.Workspace = ""
 	}
 	ar := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
 		ObjectMeta: metav1.ObjectMeta{Name: infra.ChildName(v.kind, v.object.GetName()), Labels: childLabels(v),
 			OwnerReferences: []metav1.OwnerReference{ownerRef(v)}},
-		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: v.kind.NSID(), Rkey: rec.rkey, Record: json.RawMessage(value), SwapCid: rec.swapCid}}
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: v.kind.NSID(), Rkey: rkey, Record: value, SwapCid: swapCid,
+			DeletionPolicy: v1alpha1.RecordDeletionRetain}}
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return err
@@ -407,99 +472,162 @@ func (r *reconciler[T]) writeRecord(ctx context.Context, req ctlruntime.Request,
 	return nil
 }
 
-func (r *reconciler[T]) deleteRecord(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
-	dyn, err := r.c.dynamic(req.Workspace)
-	if err != nil {
-		return false, err
-	}
-	name := infra.ChildName(v.kind, v.object.GetName())
-	records := dyn.Resource(v1alpha1.AtprotoRecordGVR)
-	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, records, name)
-	switch {
-	case apierrors.IsNotFound(err):
-		return r.recordAbsent(ctx, req, v)
-	case err != nil:
-		return false, err
-	case !ar.DeletionTimestamp.IsZero():
-		return false, nil
-	}
-	if holdsRecord(ar) {
-		if _, _, err := r.recordRepo(ctx, req, v); err != nil && !RecordOrphaned(err) {
-			return false, err
-		}
-	}
-	if err := records.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return false, err
-	}
-	r.c.log.Info("infra_record_deleting", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name)
-	return false, nil
-}
-
 func RecordOrphaned(err error) bool {
 	reason, ok := Unresolved(err)
 	return ok && (reason == "RepoNotFound" || reason == "RepoBackendGone")
 }
 
-func holdsRecord(ar *v1alpha1.AtprotoRecord) bool {
-	return ar.Spec.DeletionPolicy != v1alpha1.RecordDeletionRetain &&
-		(strings.TrimSpace(ar.Status.URI) != "" || strings.TrimSpace(ar.Status.Cid) != "")
-}
-
-func (r *reconciler[T]) recordRepo(ctx context.Context, req ctlruntime.Request, v view) (commonv1.ObjectRef, atprotorepo.RecordReader, error) {
-	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
-	if err != nil {
-		return commonv1.ObjectRef{}, nil, err
+func (r *reconciler[T]) finalObserved(v view) infra.Observed {
+	at := v.object.GetDeletionTimestamp()
+	out := infra.Observed{Phase: v1alpha1.InfraPhaseEnded, EndReason: v1alpha1.EphemeralInfraEndDeleted}
+	for _, c := range v.status.Contracts {
+		switch c.Phase {
+		case v1alpha1.InfraContractPhaseStaged, v1alpha1.InfraContractPhaseReleased, v1alpha1.InfraContractPhaseFailed:
+		default:
+			if v.object.GetDeletionTimestamp() != nil {
+				c.Phase = v1alpha1.InfraContractPhaseReleased
+			}
+		}
+		out.Contracts = append(out.Contracts, c)
 	}
-	r.c.bindRepo(string(v.kind), req, repo)
-	_, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
-	return repo, reader, err
+	if at != nil {
+		out.EndedAt = at.UTC().Format(time.RFC3339)
+	}
+	if v.ephemeral != nil {
+		out.ExpiresAt = v.ephemeral.ExpiresAt
+		if v.ephemeral.EndedAt != "" {
+			out.EndedAt, out.EndReason = v.ephemeral.EndedAt, cmp.Or(v.ephemeral.EndReason, v1alpha1.EphemeralInfraEndDeleted)
+		}
+	}
+	if out.EndedAt == "" {
+		out.EndedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	if v.spec.Record == nil || Publishing(v.spec.Record) {
+		out = out.Published()
+	}
+	return out
 }
 
-func (r *reconciler[T]) recordAbsent(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
+func (r *reconciler[T]) owns(v view, rkey string) bool {
+	if v.spec.Record != nil && strings.TrimSpace(v.spec.Record.URI) != "" {
+		return false
+	}
+	for _, o := range v.object.GetOwnerReferences() {
+		if o.Controller != nil && *o.Controller && (o.Kind == CollectionKind || o.Kind == EphemeralCollectionKind) {
+			return false
+		}
+	}
+	return infra.InSuccession(v.object.GetName(), string(v.object.GetUID()), rkey)
+}
+
+func arInSync(ar *v1alpha1.AtprotoRecord) bool {
+	c := meta.FindStatusCondition(ar.Status.Conditions, v1alpha1.ConditionRecordInSync)
+	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == ar.Generation && ar.Status.ObservedGeneration == ar.Generation
+}
+
+func pendingEnd(ar *v1alpha1.AtprotoRecord) string {
+	var value struct {
+		Status struct {
+			EndedAt string `json:"endedAt"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(ar.Spec.Record, &value) != nil {
+		return ""
+	}
+	return strings.TrimSpace(value.Status.EndedAt)
+}
+
+func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
 	stored := v.status.Record
 	if stored == nil || stored.Direction == v1alpha1.InfraSyncRetained || strings.TrimSpace(stored.URI) == "" {
 		return true, nil
 	}
 	uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI))
-	if err != nil {
+	if err != nil || uri.Collection().String() != v.kind.NSID() {
 		return true, nil
 	}
-	repo, reader, err := r.recordRepo(ctx, req, v)
+	rkey := uri.RecordKey().String()
+	if v.kind == infra.KindInfra && rkey == infra.ReservedRkey {
+		return true, nil
+	}
+	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI}
+	if !r.owns(v, rkey) {
+		r.c.log.Info("infra_record_not_owned", attrs...)
+		return true, nil
+	}
+	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return false, err
 	}
-	collection, rkey := uri.Collection().String(), uri.RecordKey().String()
-	got, err := reader.GetRecord(ctx, uri.Authority().String(), collection, rkey)
+	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, dyn.Resource(v1alpha1.AtprotoRecordGVR), infra.ChildName(v.kind, v.object.GetName()))
+	switch {
+	case apierrors.IsNotFound(err):
+		ar = nil
+	case err != nil:
+		return false, err
+	}
+	var ref commonv1.ObjectRef
+	switch {
+	case v.spec.Record != nil:
+		ref = v.spec.Record.RepoRef
+	case ar != nil && ar.Spec.RepoRef != nil:
+		ref = *ar.Spec.RepoRef
+	default:
+		r.c.log.Info("infra_record_end_skipped", append(attrs, "reason", "no repoRef")...)
+		return true, nil
+	}
+	repo, err := RepoRef(req.Workspace, ref)
+	if err != nil {
+		return false, err
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	_, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
+	if err != nil {
+		return false, err
+	}
+	got, err := reader.GetRecord(ctx, uri.Authority().String(), uri.Collection().String(), rkey)
 	switch {
 	case errors.Is(err, atprotorepo.ErrNotFound):
+		r.c.log.Info("infra_record_absent_at_end", attrs...)
 		return true, nil
 	case err != nil:
-		return false, ReadFailed(fmt.Errorf("infra: confirming %s is deleted: %w", stored.URI, err))
+		return false, ReadFailed(fmt.Errorf("infra: reading %s for its final status: %w", stored.URI, err))
 	}
-	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI, "cid", got.CID}
-	if want := strings.TrimSpace(stored.CID); want == "" || got.CID != want {
+	attrs = append(attrs, "cid", got.CID)
+	decoded, derr := infra.Decode(v.kind, got.Value)
+	switch {
+	case errors.Is(derr, infra.ErrReserved):
+		return true, nil
+	case decoded.Ended():
+		r.c.log.Info("infra_record_ended", append(attrs, "endedAt", decoded.EndedAt, "endReason", decoded.EndReason)...)
+		return true, nil
+	}
+	own := []string{strings.TrimSpace(stored.CID)}
+	if ar != nil && arInSync(ar) {
+		own = append(own, strings.TrimSpace(ar.Status.Cid))
+	}
+	if !slices.Contains(own, got.CID) {
 		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID)...)
 		return true, nil
 	}
-	writer, err := bus.Resolve[atprotorepo.Repo](ctx, r.c.bus, r.self(req), repo,
-		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: []string{collection}})
+	observed := r.finalObserved(v)
+	if ar != nil {
+		if at := pendingEnd(ar); at != "" {
+			observed.EndedAt = at
+			if ar.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && ar.Status.ObservedGeneration == ar.Generation {
+				return false, fmt.Errorf("infra: the final status write of %s failed: %s", stored.URI, ar.Status.Message)
+			}
+		}
+	}
+	value, err := infra.Final(v.kind, got.Value, observed)
 	if err != nil {
-		return false, fmt.Errorf("infra: the repo.write handle of %s to delete %s: %w", repo.String(), stored.URI, err)
+		return false, err
 	}
-	if swap, ok := writer.(atprotorepo.SwapDeleter); ok {
-		err = swap.DeleteRecordSwap(ctx, collection, rkey, got.CID)
-	} else {
-		err = writer.DeleteRecord(ctx, collection, rkey)
+	if err := r.applyRecord(ctx, req, v, repo, rkey, value, got.CID); err != nil {
+		return false, err
 	}
-	if errors.Is(err, atprotorepo.ErrSwapMismatch) {
-		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID, "err", err.Error())...)
-		return true, nil
-	}
-	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
-		return false, fmt.Errorf("infra: deleting %s: %w", stored.URI, err)
-	}
-	r.c.log.Info("infra_record_deleted", attrs...)
-	return true, nil
+	r.c.log.Info("infra_record_ending", attrs...)
+	return false, nil
 }
 
 func (r *reconciler[T]) unbindRecord(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
@@ -518,19 +646,65 @@ func (r *reconciler[T]) unbindRecord(ctx context.Context, req ctlruntime.Request
 	case !ar.DeletionTimestamp.IsZero():
 		return false, nil
 	}
-	if ar.Spec.DeletionPolicy != v1alpha1.RecordDeletionRetain {
-		retained := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: ar.Labels, OwnerReferences: ar.OwnerReferences}, Spec: ar.Spec}
-		retained.Spec.DeletionPolicy = v1alpha1.RecordDeletionRetain
-		if _, err := kube.Apply[v1alpha1.AtprotoRecord](ctx, records, retained, kube.ApplyOptions{FieldManager: r.manager, Force: true}); err != nil {
-			return false, fmt.Errorf("infra: retaining the record of the AtprotoRecord %s: %w", name, err)
-		}
+	if err := r.retain(ctx, records, ar); err != nil {
+		return false, err
 	}
 	if err := records.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
 	r.c.log.Info("infra_record_unbound", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name, "uri", ar.Status.URI)
 	return false, nil
+}
+
+func (r *reconciler[T]) retain(ctx context.Context, records kube.Resource, ar *v1alpha1.AtprotoRecord) error {
+	if ar.Spec.DeletionPolicy == v1alpha1.RecordDeletionRetain {
+		return nil
+	}
+	retained := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
+		ObjectMeta: metav1.ObjectMeta{Name: ar.Name, Labels: ar.Labels, OwnerReferences: ar.OwnerReferences}, Spec: ar.Spec}
+	retained.Spec.DeletionPolicy = v1alpha1.RecordDeletionRetain
+	if _, err := kube.Apply[v1alpha1.AtprotoRecord](ctx, records, retained, kube.ApplyOptions{FieldManager: r.manager, Force: true}); err != nil {
+		return fmt.Errorf("infra: retaining the record of the AtprotoRecord %s: %w", ar.Name, err)
+	}
+	return nil
+}
+
+func (r *reconciler[T]) retainChild(ctx context.Context, req ctlruntime.Request, v view) error {
+	dyn, err := r.c.dynamic(req.Workspace)
+	if err != nil {
+		return err
+	}
+	records := dyn.Resource(v1alpha1.AtprotoRecordGVR)
+	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, records, infra.ChildName(v.kind, v.object.GetName()))
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return err
+	case !ar.DeletionTimestamp.IsZero():
+		return nil
+	}
+	return r.retain(ctx, records, ar)
+}
+
+func (r *reconciler[T]) retainOnce(ctx context.Context, req ctlruntime.Request, v view) error {
+	if v.spec.Record == nil && (v.status.Record == nil || v.status.Record.Direction == v1alpha1.InfraSyncRetained) {
+		return nil
+	}
+	k := keyOf(req, v)
+	r.c.mu.Lock()
+	done := r.c.retained[k]
+	r.c.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := r.retainChild(ctx, req, v); err != nil {
+		return err
+	}
+	r.c.mu.Lock()
+	r.c.retained[k] = true
+	r.c.mu.Unlock()
+	return nil
 }
 
 func (r *reconciler[T]) dropWatch(ctx context.Context, dyn *kube.Client, name string) error {
@@ -545,13 +719,13 @@ func (r *reconciler[T]) dropWatch(ctx context.Context, dyn *kube.Client, name st
 	return nil
 }
 
-func (r *reconciler[T]) ensureWatch(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef, sources []commonv1.ObjectRef) error {
+func (r *reconciler[T]) ensureWatch(ctx context.Context, req ctlruntime.Request, v view, repo commonv1.ObjectRef, rkey string, sources []commonv1.ObjectRef) error {
 	return EnsureWatch(ctx, r.c.dynamic, r.manager, req.Workspace, infra.ChildName(v.kind, v.object.GetName()), childLabels(v), ownerRef(v),
-		repo, v.kind.NSID(), sources)
+		repo, v.kind.NSID(), []string{rkey}, sources)
 }
 
 func EnsureWatch(ctx context.Context, dynamic kube.Factory, manager, workspace, name string, labels map[string]string, owner metav1.OwnerReference,
-	repo commonv1.ObjectRef, collection string, sources []commonv1.ObjectRef) error {
+	repo commonv1.ObjectRef, collection string, rkeys []string, sources []commonv1.ObjectRef) error {
 	dyn, err := dynamic(workspace)
 	if err != nil {
 		return err
@@ -561,7 +735,7 @@ func EnsureWatch(ctx context.Context, dynamic kube.Factory, manager, workspace, 
 	}
 	watch := &v1alpha1.AtprotoRecordWatch{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: events.RecordWatchKind},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, OwnerReferences: []metav1.OwnerReference{owner}},
-		Spec: v1alpha1.AtprotoRecordWatchSpec{RepoRef: &repo, Collection: collection,
+		Spec: v1alpha1.AtprotoRecordWatchSpec{RepoRef: &repo, Collection: collection, Rkeys: rkeys,
 			Source: v1alpha1.AtprotoRecordWatchSource{EventSourceRefs: sources}}}
 	if _, err := kube.Apply[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), watch,
 		kube.ApplyOptions{FieldManager: manager, Force: true}); err != nil {
@@ -644,6 +818,7 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	delete(c.pulls, k)
 	delete(c.moved, k)
 	delete(c.unwritten, k)
+	delete(c.retained, k)
 	c.retries.Reset(k)
 }
 

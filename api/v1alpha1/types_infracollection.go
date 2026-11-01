@@ -73,3 +73,5 @@ type InfraCollectionStatus struct {
 }
 
 const InfraCollectionConditionListed = "Listed"
+
+const InfraCollectionConditionIndexed = "Indexed"

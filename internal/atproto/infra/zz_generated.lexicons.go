@@ -174,6 +174,7 @@ type Infra struct {
 	Contracts   []InfraContract            `json:"contracts,omitempty"`
 	CreatedAt   string                     `json:"createdAt"`
 	Description string                     `json:"description,omitempty"`
+	Index       *InfraIndex                `json:"index,omitempty"`
 	Status      *InfraStatus               `json:"status,omitempty"`
 	Extra       map[string]json.RawMessage `json:"-"`
 	absent      map[string]json.RawMessage
@@ -329,6 +330,88 @@ func (v *InfraContractStatus) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type InfraIndex struct {
+	Live        []InfraIndexEntry          `json:"live,omitempty"`
+	RecentEnded []InfraIndexEnded          `json:"recentEnded,omitempty"`
+	UpdatedAt   string                     `json:"updatedAt"`
+	Extra       map[string]json.RawMessage `json:"-"`
+	absent      map[string]json.RawMessage
+}
+
+func (v InfraIndex) MarshalJSON() ([]byte, error) {
+	type plain InfraIndex
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraIndex) UnmarshalJSON(b []byte) error {
+	type plain InfraIndex
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraIndex(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type InfraIndexEnded struct {
+	Collection string                     `json:"collection"`
+	EndReason  string                     `json:"endReason,omitempty"`
+	EndedAt    string                     `json:"endedAt"`
+	Rkey       string                     `json:"rkey"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (v InfraIndexEnded) MarshalJSON() ([]byte, error) {
+	type plain InfraIndexEnded
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraIndexEnded) UnmarshalJSON(b []byte) error {
+	type plain InfraIndexEnded
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraIndexEnded(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type InfraIndexEntry struct {
+	AddedAt    string                     `json:"addedAt"`
+	Collection string                     `json:"collection"`
+	CreatedAt  string                     `json:"createdAt"`
+	ExpiresAt  string                     `json:"expiresAt,omitempty"`
+	Rkey       string                     `json:"rkey"`
+	Writer     string                     `json:"writer,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (v InfraIndexEntry) MarshalJSON() ([]byte, error) {
+	type plain InfraIndexEntry
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraIndexEntry) UnmarshalJSON(b []byte) error {
+	type plain InfraIndexEntry
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraIndexEntry(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type InfraShell struct {
 	EnvFile string                     `json:"envFile,omitempty"`
 	Extra   map[string]json.RawMessage `json:"-"`
@@ -355,6 +438,8 @@ func (v *InfraShell) UnmarshalJSON(b []byte) error {
 
 type InfraStatus struct {
 	Contracts []InfraContractStatus      `json:"contracts,omitempty"`
+	EndReason string                     `json:"endReason,omitempty"`
+	EndedAt   string                     `json:"endedAt,omitempty"`
 	Phase     string                     `json:"phase"`
 	Extra     map[string]json.RawMessage `json:"-"`
 	absent    map[string]json.RawMessage

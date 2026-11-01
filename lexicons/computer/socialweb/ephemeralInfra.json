@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "computer.socialweb.ephemeralInfra",
-  "description": "A short-lived deployment. It ends at createdAt plus ttlSeconds, or, with endWhen complete, once every requested contract is released or failed; then its contracts are released and the record is deleted.",
+  "description": "A short-lived deployment. It ends at createdAt plus ttlSeconds, or, with endWhen complete, once every requested contract is released or failed; then its contracts are released, and the record is kept with status.endedAt.",
   "defs": {
     "main": {
       "type": "record",
@@ -27,11 +27,11 @@
       "type": "object",
       "required": ["phase"],
       "properties": {
-        "phase": { "type": "string" },
+        "phase": { "type": "string", "knownValues": ["pending", "staged", "deploying", "deployed", "releasing", "released", "degraded", "ending", "deleting", "ended"] },
         "contracts": { "type": "array", "items": { "type": "ref", "ref": "computer.socialweb.infra#contractStatus" } },
         "expiresAt": { "type": "string", "format": "datetime" },
         "endedAt": { "type": "string", "format": "datetime" },
-        "endReason": { "type": "string", "knownValues": ["complete", "deadline"] }
+        "endReason": { "type": "string", "knownValues": ["complete", "deadline", "deleted"] }
       }
     }
   }

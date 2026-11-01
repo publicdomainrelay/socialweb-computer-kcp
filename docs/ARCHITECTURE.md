@@ -3657,7 +3657,7 @@ internal/controllers/guestidentitygrant/    GuestIdentityGrant
 internal/controllers/hostinstall/           HostInstall
 internal/controllers/hostrelease/           HostRelease
 internal/controllers/infra/                 Infra and EphemeralInfra: their ComputeContracts (staged, requested, released), their AtprotoRecord and AtprotoRecordWatch, the pull of a record edited elsewhere
-internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: one listing of an account's collection, then its record watch, into child objects
+internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: the live entries of the account's index at infra/self into child objects; no listing
 internal/controllers/jetstreameventsource/  JetstreamEventSource
 internal/controllers/kcpinstallation/       KcpInstallation
 internal/controllers/localrepo/             LocalRepo: a repo on a local Pds component
@@ -11593,6 +11593,9 @@ are unchanged.
 
 ### An Infra keeps its finalizer until its record is deleted or confirmed absent (2026-10-30, rc131)
 
+Superseded in r140 (see "Infra and EphemeralInfra records are kept"): the finalizer no longer
+deletes the record; it writes the final status once and keeps the record.
+
 Before, the Infra and EphemeralInfra finalizer deleted the child AtprotoRecord and released once it was
 gone, and the AtprotoRecord finalizer released without a delete on any unbound repo, so the infra went
 and its PDS record stayed. Now the AtprotoRecord finalizer releases without a delete only when its
@@ -11787,30 +11790,10 @@ read. A finished infra never retries a read on a timer: a failed read leaves Syn
 keeps `RecordReadRetrying` and its retry timer. After: 0 reads an hour per finished infra with no
 change to its own record, one read per change of it.
 
-The collection keeps one full enumeration: an InfraCollection is a view of every record of one
-collection in one repo, so its first sync must list (the owner's rule allows a listing where the
-answer is an enumeration; no rkey derivation names records written by other tabs, apps or
-devices). The listing is bounded by the object's own scope (its repo and NSID), paged by 100 and
-capped at 50 pages (`ListCapped`). After it, the collection applies its watch's `status.records`
-and `status.deleted` as a diff against the record set it applied last, kept in memory (never
-against the cached `status.children`, which can lag a pass), so a burst cannot drop or bring back
-an entry (new uri: a child; new cid: the entry's cid; a uri newly deleted: the entry goes;
-children are never deleted), with no PDS read. A capped listing stops at the newest 50 pages; an
-older record shows up only when it changes.
-It lists again only after a gap: a ready EventStream of its watch that it has not seen (a new
-stream starts live, with no cursor), a new generation or DID, or a failed relist, and at most once
-per 10 min (`resyncFloor`, a delayed requeue) for a relist that succeeded; a failed relist retries
-on the netretry rate like the first listing. A process restart is not a gap for a stream with a
-saved cursor; one with no cursor at restart counts as new.
-
-Left open: each AtprotoRecordWatch still verifies every record in its `status.records` by getRecord
-every 5 min (`VerifyInterval`), and each non-collection infra owns a watch of the whole collection,
-so those reads still grow with infras x records seen. A stream that resumes under the same UID
-from a cursor its source no longer replays loses events with no relist (the client sees no
-expired-cursor signal). The watch keeps 512 records, so in a larger collection a settled infra's
-record can be evicted and then only the stream reports its changes. After a restart, deletes the
-watch recorded while the process was down are not applied to `status.children`. Keeping the first
-listing on a collection that grows with every page load needs the owner's sign-off (review I3).
+The collection's enumeration (one listing, then a diff of its watch) is replaced in r140: an
+InfraCollection lists nothing and adopts only live entries of the index at `infra/self` (see "Infra
+and EphemeralInfra records are kept", r140 below). The 5 min verify of every held record is narrowed
+there too (AtprotoRecordWatch `spec.rkeys`).
 
 ### A bidder's offering is `market.offering/self`, a participant's relays `market.relays/self`; nothing is deleted (2026-10-31, r139 rcA)
 
@@ -11899,6 +11882,97 @@ Start timing: `requester_start_timing` with `step` `started` (`identityMs`, `rep
 and `firstBidderDiscovery` (`discoveryMs`, `bidders`), all from the entry of `Requester.Start`;
 `requester_bidder_discovery` carries `discoveryMs`, and each start-time termination check logs
 `requester_termination_checked` at debug with `readMs`.
+
+### Infra and EphemeralInfra records are kept; an ended record is never live again (2026-10-31, r140 rcA)
+
+Owner rule (2026-10-31): never delete records for people; no listRecords on a collection that grows
+without bound; one getRecord on a deterministic rkey beats a listing.
+
+Before: ending an EphemeralInfra (its deadline, or `endWhen: complete`) deleted the kcp object, and the
+Infra and EphemeralInfra finalizer deleted the user's PDS record twice over: it deleted the child
+AtprotoRecord (`deletionPolicy` default Delete, so its finalizer deleted the record) and, with no
+AtprotoRecord, deleted the record directly (`recordAbsent`, DeleteRecordSwap). The page GC, kubectl
+and the gateway's Cluster teardown all went through that finalizer. The final record write of an
+ending EphemeralInfra ran only when that pass happened to write (r139 I2). The end rule read only the
+kcp object (its creationTimestamp and its own `status.endedAt`), so an object created again for a kept
+record got a fresh TTL and requested its contracts again. Every infra's AtprotoRecordWatch covered
+the whole collection and re-read every record it held every 5 min, and the InfraCollection listed
+the whole collection.
+
+Now:
+
+- Nothing deletes an infra record. Every AtprotoRecord an infra applies is `deletionPolicy: Retain`,
+  every bound infra sets it on an existing child once per process whatever its sync action, and the
+  AtprotoRecord finalizer keeps any record of `computer.socialweb.infra` or
+  `computer.socialweb.ephemeralInfra` whatever its policy, so `compose.ReleaseRecords`, a force delete
+  or a workspace delete cannot delete one either. The finalizer, once every contract is released,
+  reads the record by one getRecord and writes its final status once:
+  `status.phase: ended`, `status.endedAt` (the EphemeralInfra's own end time, else the deletion time),
+  `status.endReason` (`complete` or `deadline` for an EphemeralInfra that ended, `deleted` for any object
+  deleted before its end) and the final `status.contracts`, through the AtprotoRecord with the read
+  cid as `swapCid`. It holds its finalizer until a getRecord shows `endedAt` (`infra_record_ending`,
+  then `infra_record_ended`), then releases the AtprotoRecord (Retain) and drops the finalizer. A
+  record that is gone (`infra_record_absent_at_end`), already ended, or at a cid that is neither
+  `status.record.cid` nor the cid of an AtprotoRecord that is InSync at its generation (a SwapMismatch
+  holds the other writer's cid; `infra_record_replaced`) is not written and never created again.
+  Only the owner writes the end: an object bound by its own name or successor rkey, never one bound
+  by `spec.record.uri` or owned by a collection (`infra_record_not_owned`), so ending a follower never
+  ends another kcp's live session. Removing `spec.record` from an owner (the gateway does it when a
+  Cluster is deleting) writes the end the same way before the record is Retained, with the
+  AtprotoRecord's repoRef, so a Cluster created again binds a successor instead of pushing over the
+  old record's history. A repo that cannot be resolved (RepoNotFound, RepoBackendGone) or 24 h without a
+  confirmed write (`FinalWriteGaveUp`) keeps the record with its last status (RecordOrphaned). A
+  live pass never writes `endedAt`; the finalizer is the one writer of the end.
+- G1: the EphemeralInfra end rule takes the earlier of the record's `createdAt` and the object's, and
+  the record's `status.endedAt`/`endReason` as the sticky end when the object has none. The end is
+  computed again after the record read, so an object created for an ended or expired record is ended
+  from its first pass and requests nothing. The record's `createdAt` is not used while any owned
+  ComputeContract is not Released or Failed, so a live tab whose record is older than its kcp object
+  never has a Held contract released by this rule.
+- G2: a record with `status.endedAt` is frozen. The sync decision is `Ended`: no write, no push, no
+  pull; the object gets `RecordEnded=True`, releases every contract and shows phase `Ended` (an
+  EphemeralInfra is then deleted as usual; its finalizer finds the end and writes nothing). The end
+  is kept in the object: while `RecordEnded=True` and `status.record.uri` names the bound record, a
+  record that lost its `endedAt` (an old binary, a client edit) is still Ended (Synced reason
+  `EndLost`, `infra_record_end_lost`), so a kept Infra never requests its contracts again.
+- G3: a new object (no `status.record`) whose name is the rkey of an ended or expired record binds
+  `<name>-<first 8 hex of its UID>` instead (`infra_record_successor`) and keeps it in
+  `status.record.uri`; later passes use that URI. When that rkey holds an ended record too, it binds
+  the next free one, `<name>-<uid8>-2` up to `-64` (`infra.MaxSuccessors`), probing each by one
+  getRecord on the binding pass only, so an older ended record of its name never freezes a live
+  object. An object whose record was Retained (unbound) counts as new when it binds again; the end
+  written at unbind is Publish-filtered (no contract messages). This covers the gateway's `nodes-<hash>` of a Cluster created
+  again (its record was ended at unbind), a kubectl re-apply and a reused page tab id. A reader that builds the URI
+  from the name must read `status.record.uri` (page G6).
+- G4: the InfraCollection never lists. It reads the index at `computer.socialweb.infra/self` from its
+  watch's held value, else by one getRecord (absent: `Indexed` reason `IndexEmpty`, no children), and
+  adopts only live entries of its kind that are not expired, after one getRecord shows the record is
+  present and not ended (an ended one is remembered in memory and not read again). `status.records`
+  is the count of live entries; the condition `Indexed` replaces `Listed`.
+- G5: rkey `self` of `computer.socialweb.infra` is the index. An Infra bound to it gets
+  `RecordReserved=True` and writes nothing; a value with `index` decodes as `infra.ErrReserved`.
+- The watch: AtprotoRecordWatch `spec.rkeys` (optional; empty keeps every rkey) drops other rkeys'
+  events before the fetch and drops held records that no longer match, so the 5 min verify reads only
+  them. Every Infra and EphemeralInfra (a collection's children too) watches only its own rkey; the
+  collection's watch is the index watch (`computer.socialweb.infra`, rkeys `[self]`). Steady-state
+  verify per kcp per 5 min: one getRecord per live infra plus one per collection, where it grew with
+  infras x records seen.
+- Lexicons: `computer.socialweb.infra` gains the optional `index` (#index, #indexEntry,
+  #indexEnded), `status.endedAt`, `status.endReason` (`deleted`) and the phase `ended`;
+  `computer.socialweb.ephemeralInfra` gains the phase `ended` and the endReason `deleted`, and says the
+  record is kept. No OAuth scope changes (every writer already holds create/update/delete on both
+  collections). Schemas: AtprotoRecordWatch revision 7, Infra 13, EphemeralInfra 13.
+
+Rollout rule: never roll back below this release. A binary older than r140 deletes the records again
+when it ends or deletes an infra, and an older end rule re-requests the contracts of a kept record
+that an object is created for. Old cached pages run their own old kcp and still delete their own
+records; that cannot be prevented from here.
+
+Deferred to rcB: the writers of the index (the swap put capability `atprotorepo.SwapPutter`, the
+add, remove, prune and self-heal of entries, the per-repo index watch and the `Indexed` condition on
+infras). Until rcB nothing writes `infra/self`, so a collection adopts nothing. No listing is kept for
+the records written before r140 (design D2a): they stay unindexed and age out by
+`createdAt + ttlSeconds`.
 
 ## 16. Vocabulary
 

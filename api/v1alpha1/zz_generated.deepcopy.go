@@ -516,6 +516,11 @@ func (in *AtprotoRecordWatchSpec) DeepCopyInto(out *AtprotoRecordWatchSpec) {
 		*out = new(commonv1alpha1.ObjectRef)
 		**out = **in
 	}
+	if in.Rkeys != nil {
+		in, out := &in.Rkeys, &out.Rkeys
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Match != nil {
 		in, out := &in.Match, &out.Match
 		*out = make([]AtprotoRecordMatch, len(*in))

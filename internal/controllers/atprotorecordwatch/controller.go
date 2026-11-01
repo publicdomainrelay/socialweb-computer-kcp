@@ -303,7 +303,8 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 		return ctlruntime.Result{}, nil
 	}
 	w := c.bind(req, obj)
-	w.status = eventstream.MergeStatus(w.status, w.sink.Take())
+	w.sink.SetRkeys(obj.Spec.Rkeys)
+	w.status = eventstream.KeepRkeys(eventstream.MergeStatus(w.status, w.sink.Take()), obj.Spec.Rkeys)
 	generation := obj.Generation
 	repo, repoKeys, err := c.repo(ctx, req.Workspace, obj.Spec)
 	c.refs.Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, &struct{}{},
