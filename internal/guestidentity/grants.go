@@ -55,13 +55,13 @@ func (f GrantStoreFuncs) Delete(ctx context.Context, name string) error {
 }
 
 type RBACSource interface {
-	Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error)
+	Records(ctx context.Context, requesterDID, acceptURI string, acceptedAt time.Time) ([]RBACRecord, error)
 }
 
-type RBACSourceFunc func(context.Context, string, string) ([]RBACRecord, error)
+type RBACSourceFunc func(context.Context, string, string, time.Time) ([]RBACRecord, error)
 
-func (f RBACSourceFunc) Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error) {
-	return f(ctx, requesterDID, acceptURI)
+func (f RBACSourceFunc) Records(ctx context.Context, requesterDID, acceptURI string, acceptedAt time.Time) ([]RBACRecord, error) {
+	return f(ctx, requesterDID, acceptURI, acceptedAt)
 }
 
 type GrantSubject struct {
@@ -72,6 +72,8 @@ type GrantSubject struct {
 	RequesterDID string
 
 	AcceptURI string
+
+	AcceptedAt time.Time
 
 	Subject string
 }
@@ -281,7 +283,7 @@ func (s *Syncer) syncOnce(ctx context.Context, subject GrantSubject) error {
 	if s.opts.Issuer != nil {
 		issuer = s.opts.Issuer()
 	}
-	records, readable, err := s.records(ctx, subject.RequesterDID, subject.AcceptURI)
+	records, readable, err := s.records(ctx, subject.RequesterDID, subject.AcceptURI, subject.AcceptedAt)
 	if err != nil {
 		if suppressed, due := s.rbacWarnDue(subject.RequesterDID); due {
 			s.opts.Log.Warn("the requester's RBAC records are unreadable; the grants it already holds stay",
@@ -345,8 +347,8 @@ func (s *Syncer) rbacWarnDue(requesterDID string) (int, bool) {
 	return last.suppressed, true
 }
 
-func (s *Syncer) records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, bool, error) {
-	records, err := s.opts.RBAC.Records(ctx, requesterDID, acceptURI)
+func (s *Syncer) records(ctx context.Context, requesterDID, acceptURI string, acceptedAt time.Time) ([]RBACRecord, bool, error) {
+	records, err := s.opts.RBAC.Records(ctx, requesterDID, acceptURI, acceptedAt)
 	if err != nil {
 		return nil, false, err
 	}

@@ -30,7 +30,9 @@ const (
 )
 
 func (q *Requester) Synced() {
-	q.synced.Store(true)
+	if since, ok := q.sinceStartMs(); !q.synced.Swap(true) && ok {
+		q.log.Info("requester_start_timing", "step", "synced", "sinceStartMs", since)
+	}
 	q.startOrphanRevokes()
 }
 

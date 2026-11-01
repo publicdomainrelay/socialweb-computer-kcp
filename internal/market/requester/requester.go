@@ -199,6 +199,10 @@ type Requester struct {
 
 	synced atomic.Bool
 
+	startedAt atomic.Pointer[time.Time]
+
+	firstResume atomic.Bool
+
 	prunedForeign atomic.Int64
 
 	prunedEnded atomic.Int64
@@ -560,6 +564,8 @@ func (q *Requester) Start(ctx context.Context) error {
 		return errors.New("requester: the role is already started")
 	}
 	q.started = true
+	startedAt := time.Now()
+	q.startedAt.Store(&startedAt)
 	q.ctx = ctx
 	q.mu.Unlock()
 	if dir := q.cfg.dataDir(); dir != "" {
@@ -576,6 +582,7 @@ func (q *Requester) Start(ctx context.Context) error {
 	if err := q.resolveIdentity(ctx); err != nil {
 		return err
 	}
+	identityMs := time.Since(startedAt).Milliseconds()
 	if err := q.loadKeys(); err != nil {
 		return err
 	}
@@ -596,6 +603,7 @@ func (q *Requester) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	repoMs := time.Since(startedAt).Milliseconds()
 	if len(q.cfg.OwnerSessions) > 0 || q.cfg.IdentityMode == IdentityModeOAuth {
 		if err := q.bindSignerKey(ctx); err != nil {
 			return err
@@ -628,6 +636,7 @@ func (q *Requester) Start(ctx context.Context) error {
 		HTTPClient:      q.deps.HTTP,
 		Timeout:         q.cfg.BidWindow,
 		Log:             q.log,
+		StartedAt:       startedAt,
 	}
 	outbox, err := participant.NewOutbox(q.deps.Intents, q.deps.Now,
 		&marketInbox{q: q}, inboxAck{name: BidInboxAdapter}, inboxAck{name: InboxAdapter})
@@ -636,7 +645,26 @@ func (q *Requester) Start(ctx context.Context) error {
 	}
 	q.outbox = outbox
 	q.policy = &PolicyEvaluator{Runs: q.policyRuns(), Workflow: PolicyWorkflowName(q.cfg.PolicyWorkflow), DID: q.marketDID}
+	q.log.Info("requester_start_timing", "step", "started", "sinceStartMs", time.Since(startedAt).Milliseconds(),
+		"identityMs", identityMs, "repoMs", repoMs)
 	return nil
+}
+
+func (q *Requester) sinceStartMs() (int64, bool) {
+	startedAt := q.startedAt.Load()
+	if startedAt == nil {
+		return 0, false
+	}
+	return time.Since(*startedAt).Milliseconds(), true
+}
+
+func (q *Requester) noteFirstResume(contract string, readMs int64) {
+	since, ok := q.sinceStartMs()
+	if !ok || q.firstResume.Swap(true) {
+		return
+	}
+	q.log.Info("requester_start_timing", "step", "firstContractResumed", "contract", contract,
+		"sinceStartMs", since, "terminationReadMs", readMs)
 }
 
 func (q *Requester) Shutdown(ctx context.Context) {
