@@ -86,15 +86,21 @@ decisions:
   - id: D1
     question: "How does OpenBao issue OIDC compliant JWTs with no OpenBao token in the guest?"
     decided: >
-      A secrets engine plugin of ours, openbao-plugin-secrets-wid (cmd/openbao-plugin-secrets-wid, pinned like
-      the two auth plugins), mounted at wid/ on the bidder's OpenBao. It holds the signing key (ES256, rotation
-      with an overlap) in its own storage and publishes, as unauthenticated paths, wid/.well-known/openid-configuration
-      and wid/.well-known/jwks.json; issuer <bidder ingress>/v1/wid. Its unauthenticated path wid/token takes
-      {role, challenge, signature, audience} (the sshsig challenge of the bound host key, the same proof the
-      sshsig auth plugin checks, read through the role it shares) and answers a JWT: iss, sub = the workload
-      subject (actx:<bidder>:plc:<requester>:role:<role>), aud = the one requested audience, iat, nbf, exp
-      (5 min), jti, plus computevm. No X-Vault-Token is created or stored; guest-login.sh token <aud> keeps its
-      interface. A rate limit per role.
+      Inside the sshsig auth plugin itself (cmd/openbao-plugin-auth-sshsig/wid.go), not a separate secrets
+      plugin: a secrets plugin cannot read the auth mount's bound host keys or its single-use challenges, and the
+      proof is the one the plugin already checks. Unauthenticated auth/<mount>/wid/token takes {role, challenge,
+      signature, audience}: the challenge from auth/<mount>/challenge, consumed like login consumes it, and an
+      sshsig over it by the role's bound host key. It answers an ES256 JWT: iss (auth/<mount>/wid/config, which
+      the guest control plane sets to <bidder ingress>/v1/auth/<mount>/wid), sub = the role's wid_subject
+      (actx:<bidder>:plc:<requester>:role:<role>), aud = the one requested audience, iat, nbf, exp (5 min), jti,
+      plus the role's wid_claims (computevm). The guest control plane writes wid_subject and wid_claims through
+      auth/<mount>/role/<vm>/wid (policy bidder-guest-kcp, update on that path only). The signing key lives in
+      the plugin's storage, rotates every 24h or on auth/<mount>/wid/rotate (MarketBidder signingKeyRotation),
+      and a retired key stays in auth/<mount>/wid/.well-known/keys for 48h beside
+      auth/<mount>/wid/.well-known/openid-configuration. No OpenBao token is created: guest-login.sh binds once
+      and `guest-login.sh token <aud>` does challenge, sign, wid/token. The guest control plane proxies
+      /v1/auth/<mount>/{bind,challenge}, /v1/auth/<mount>/wid/token and the two documents, and nothing of
+      identity/oidc any more. A token bucket per role.
   - id: D2
     question: "Which audiences may a guest ask for?"
     decided: >
@@ -206,11 +212,11 @@ items:
     title: "The market writes and reads the record at the role name; no listRecords, no polling"
     files: [internal/market/requester/secrets.go, internal/atproto/market/records.go, internal/guestidentity/rbac_reader.go, internal/guestidentity/grants.go, deploy/obligations.txt]
     work: >
-      The requester writes its record at rkey = the VM role and deletes it at release. With D2, the bidder's
-      RepoRBAC, the listRecords fallback, RBACAtAcceptSince and Syncer.run (and its obligations line) are
-      deleted; without D2, the bidder reads getRecord(requester, com.fedproxy.rbac, vm.spec.vm.role) once per
-      ComputeVM and again only on a stream commit of that rkey (the requester streams already carry the
-      requester DIDs), never on a timer.
+      Done by deletion: with D2 nothing reads a per-contract record, so the requester writes none (the record at
+      node.<accept rkey>, its legacy secrets-<contract> key, market.RBACRKey and RBACRKeyOfAccept are gone) and
+      the bidder reads none (RepoRBAC, the listRecords fallback, RBACAtAcceptSince, the 30 s Syncer and its
+      obligations line are gone). A com.fedproxy.rbac record is written only where a relying party reads it, at
+      rkey = the role name, by one getRecord (S5, S7).
     status: proposed
   - id: S4-OPENBAO-WID
     title: "openbao-plugin-secrets-wid issues OIDC JWTs; the guest holds no OpenBao token"
