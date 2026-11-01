@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -157,6 +158,7 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 	cfg.ProviderWorkspace = cmp.Or(cfg.ProviderWorkspace, DefaultProviderWorkspace)
 	cfg.Origin = cmp.Or(cfg.Origin, DefaultOrigin)
 	cfg.IdentityMode = cmp.Or(cfg.IdentityMode, v1alpha1.MarketIdentityModeOAuthBrowser)
+	cfg.PolicySandbox = presentPolicySandbox(cfg.PolicySandbox)
 	log := cfg.Log
 	if log == nil {
 		log = slog.Default()
@@ -426,6 +428,19 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 	obj.Name = AppName
 	_, err = kube.Apply[*v1alpha1.MarketRequester](ctx, resource, obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
+}
+
+func presentPolicySandbox(host PolicySandbox) PolicySandbox {
+	if host == nil {
+		return nil
+	}
+	switch v := reflect.ValueOf(host); v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		if v.IsNil() {
+			return nil
+		}
+	}
+	return host
 }
 
 var policyEngineKey = compose.ComponentKey(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent)
