@@ -193,7 +193,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     bundle entry at envFile; getSecrets and the sealed fallback serve the bundle without that entry
     until it is minted, and every fresh mint publishes guest.secretsUpdated so the guest fetches
     again; user_data installs `atirc-agent.service`
-    and `/etc/socialweb-guest-agent/agent.json` but never starts the unit. A requester-originated
+    and `/etc/socialweb-guest-agent/agent.json` but never starts the unit; it enables `atirc-agent-env.path`
+    on the envFile, which runs `systemctl try-restart --no-block atirc-agent.service` (never a start)
+    when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
     linux/amd64 only.

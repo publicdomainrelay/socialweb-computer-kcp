@@ -63,6 +63,16 @@ const (
 
 	AgentRunPath = "/usr/local/bin/atirc-agent-run.sh"
 
+	AgentEnvPathUnit = "atirc-agent-env.path"
+
+	AgentEnvUnit = "atirc-agent-env.service"
+
+	AgentEnvRestartPath = "/usr/local/bin/atirc-agent-env.sh"
+
+	AgentEnvStampDir = "/run/atirc-agent"
+
+	AgentEnvStampPath = AgentEnvStampDir + "/env.sha256"
+
 	AtircBinary = "/usr/local/bin/atirc"
 
 	GuestAgentAgentPath = GuestAgentConfigDir + "/agent.json"
@@ -116,21 +126,59 @@ func agentPatch(opts AgentOptions) (UserDataPatch, error) {
 				[]string{
 					"Type=simple",
 					"EnvironmentFile=-" + opts.envFile(),
-					"ExecStart=" + AgentRunPath,
+					"ExecStart=" + AgentRunPath + " " + opts.envFile(),
 					"Restart=always",
 					"RestartSec=30",
 					"StandardOutput=journal",
 					"StandardError=journal",
 				})},
 			{Path: AgentRunPath, Owner: "root:root", Permissions: "0700", Content: agentRunScript},
+			{Path: AgentEnvRestartPath, Owner: "root:root", Permissions: "0700", Content: agentEnvRestartScript},
+			{Path: "/etc/systemd/system/" + AgentEnvUnit, Owner: "root:root", Permissions: "0644", Content: strings.Join([]string{
+				"[Unit]",
+				"Description=restart a running atirc agent when its env file changed",
+				"",
+				"[Service]",
+				"Type=oneshot",
+				"ExecStart=" + AgentEnvRestartPath + " " + opts.envFile(),
+				"StandardOutput=journal",
+				"StandardError=journal",
+				"",
+			}, "\n")},
+			{Path: "/etc/systemd/system/" + AgentEnvPathUnit, Owner: "root:root", Permissions: "0644", Content: strings.Join([]string{
+				"[Unit]",
+				"Description=watch the atirc agent env file",
+				"",
+				"[Path]",
+				"PathChanged=" + opts.envFile(),
+				"Unit=" + AgentEnvUnit,
+				"",
+				"[Install]",
+				"WantedBy=paths.target",
+				"",
+			}, "\n")},
 			{Path: GuestAgentAgentPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
 		},
-		RuncmdPrepend: []any{"systemctl daemon-reload"},
+		RuncmdPrepend: []any{"systemctl daemon-reload", "systemctl enable --now " + AgentEnvPathUnit},
 	}, nil
 }
 
+const agentEnvRestartScript = `#!/usr/bin/env bash
+set -euo pipefail
+ENV_FILE="$1"
+now="$(sha256sum < "${ENV_FILE}" 2>/dev/null || true)"
+if [ "${now}" = "$(cat "` + AgentEnvStampPath + `" 2>/dev/null || true)" ]; then
+  exit 0
+fi
+echo "atirc-agent-env: ${ENV_FILE} changed; restarting ` + AgentUnit + ` if it runs" >&2
+exec systemctl try-restart --no-block ` + AgentUnit + `
+`
+
 const agentRunScript = `#!/usr/bin/env bash
 set -euo pipefail
+ENV_FILE="$1"
+install -d -m 0700 -o root -g root "` + AgentEnvStampDir + `"
+{ sha256sum < "${ENV_FILE}" 2>/dev/null || true; } > "` + AgentEnvStampPath + `"
 if [ ! -f "` + GuestSecretsReadyPath + `" ] && [ ! -f "` + SecretsDoneStamp + `" ]; then
   echo "atirc-agent: the secrets bundle is not written yet (` + GuestSecretsReadyPath + `); the agent waits" >&2
   exit 1
