@@ -4522,6 +4522,32 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **Workload identity OAuth on our PDS; the guest's JWTs come from the sshsig plugin with any audience
+  (plan 0040, 2026-11-01).** Before: every OAuth session on our PDS was full access (authenticate
+  dropped its scope); a workload could not sign an app in as an account without a password or a
+  person; the guest held an OpenBao token and asked for one identity/oidc role per audience, each a
+  GuestIdentityGrant the bidder derived from the requester's com.fedproxy.rbac record at
+  `node.<accept rkey>`, with a listRecords fallback and a 30 s re-read. After: our PDS enforces the
+  granted scopes on every write (403 ScopeMissingError); `com.fedproxy.temp.oauth.exchangeToken`
+  (RFC 8693 names, DPoP) and `approveAuthorization` let a workload JWT approve a PAR request as the
+  account, admitted only by the account's `com.fedproxy.rbac` record at rkey = role (one role per
+  record, protects naming the PDS service DID, the body schema evaluated on a document the PDS builds
+  from the PAR); refresh re-checks the record and a commit to it revokes the sessions it admitted.
+  The sshsig auth plugin issues the guest's OIDC JWTs (`wid/token`, `sub` = the workload subject, any
+  one audience); the bidder reads no requester record, GuestIdentityGrant and the identity/oidc
+  roles are gone, and relying parties check `sub`. Requester rules: ComputeContract
+  `spec.oauthClients` (rkey `oauth-<vm role>`, flow 2) and Requester `spec.oauthGrants` (flow 1). An
+  ingress Exposure with `ingressKey: Ephemeral` makes a PDS public at a run-time
+  `<did:key label>.xrpc.fedproxy.com` host with no key on disk. Readings: `go test ./test/integration/`
+  6 cases PASS (5 runs with -race, 23.9 s); live `TestLiveWorkloadMintsAnAtircSessionAndScrobblesThroughIt`
+  PASS in 130 s: irc.fedfork.com signed in a did:plc on an ephemeral xrpc.fedproxy.com PDS through
+  the workload's approval and wrote `com.vibescrobble.scrobble/3mzbvauwixf22` through the session;
+  the run found two interop defects, fixed: `scopes_supported` lacked `transition:generic` (atirc's
+  atproto-oauth refused the server) and indigo's re-registered `ES256` jwt method made every
+  standard ES256 workload token fail verification inside the PDS process (the verifier now checks
+  signatures itself). How it works: `docs/pds/oauth-wid.md`; protocol note:
+  `docs/protocol/workload-oauth.md`.
+
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app
   launches stalled with `Workspace [app] in root for Ready after 1m0s (last error: Workspace app

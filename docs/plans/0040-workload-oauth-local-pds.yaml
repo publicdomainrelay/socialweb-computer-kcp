@@ -198,7 +198,7 @@ items:
       account and identity XRPCs check account: and identity:. A miss is 403 ScopeMissingError naming the
       scope. Password and app password sessions are unchanged. Every OAuth client of our PDS (requester,
       bidder, ssh gateway, page) is read against its requested scope before this ships.
-    status: doing
+    status: done
   - id: S2-RBAC-GO
     title: "com.fedproxy.rbac in Go: one role per record, rkey = role name, the matcher and the body schema subset"
     files: [internal/contract/workloadauth/workloadauth.go, internal/rbac/record.go, internal/rbac/match.go, internal/rbac/schema.go, lexicons/com/fedproxy/rbac.json]
@@ -207,7 +207,7 @@ items:
       (D3), protects filter, globMatch and the longest path rule ported from the reference, the method to
       capability map, the JSON Schema subset evaluator. The lexicon of com.fedproxy.rbac written down as the
       reference uses it, with record key any (the role name).
-    status: doing
+    status: done
   - id: S3-RKEY-ROLE
     title: "The market writes and reads the record at the role name; no listRecords, no polling"
     files: [internal/market/requester/secrets.go, internal/atproto/market/records.go, internal/guestidentity/rbac_reader.go, internal/guestidentity/grants.go, deploy/obligations.txt]
@@ -217,7 +217,7 @@ items:
       the bidder reads none (RepoRBAC, the listRecords fallback, RBACAtAcceptSince, the 30 s Syncer and its
       obligations line are gone). A com.fedproxy.rbac record is written only where a relying party reads it, at
       rkey = the role name, by one getRecord (S5, S7).
-    status: proposed
+    status: done
   - id: S4-OPENBAO-WID
     title: "openbao-plugin-secrets-wid issues OIDC JWTs; the guest holds no OpenBao token"
     files: [cmd/openbao-plugin-secrets-wid, internal/openbaoplugin/wid, internal/versions/versions.json, deploy/apps/market-bidder/vault.yaml, internal/openbaoctl, internal/services/guestcontrolplane/routes.go, internal/atproto/cloudinit/modules.go, internal/guestidentity, internal/market/requester/secrets.go, internal/atproto/cloudinit/k3sjoin.go]
@@ -227,7 +227,7 @@ items:
       guest-login.sh token <aud> does challenge, sign, wid/token and prints the JWT; the bid's wif.simple
       issuer_uri is the wid issuer; getSecrets and the node join check sub. The identity/oidc key, roles, the
       per-guest policies and GuestIdentityGrant go when D2 is taken.
-    status: proposed
+    status: done
   - id: S5-PDS-XRPC
     title: "exchangeToken and approveAuthorization on our PDS"
     files: [lexicons/com/fedproxy/temp/oauth/exchangeToken.json, lexicons/com/fedproxy/temp/oauth/approveAuthorization.json, internal/atproto/pds/workload.go, internal/atproto/pds/server.go, internal/atproto/oauth/endpoints.go, internal/atproto/oauth/store.go, internal/atproto/pds/oauth_store.go, api/v1alpha1 PdsOAuth]
@@ -240,7 +240,7 @@ items:
       approveAuthorization as D5. Session and AuthorizationCode gain WorkloadGrant {rkey, iss, sub}; refresh and
       revocation as D5. Errors are atproto XRPC errors (InvalidToken, Forbidden with the policy reason); no
       token in a log. Token buckets per account and per sub.
-    status: proposed
+    status: done
   - id: S6-CLIENT
     title: "The workload side: one library and one CLI verb, market or not"
     files: [internal/atproto/workloadoauth, cmd/socialweb-computer/oauth.go]
@@ -253,7 +253,7 @@ items:
       token command for audience <did>#role/<r>, exchangeToken with a fresh DPoP key, approveAuthorization,
       GET the returned redirect_uri with the app's cookies, and keep the app's session cookie in the jar (0600).
       No browser. The guest default token command is `guest-login.sh token`.
-    status: proposed
+    status: done
   - id: S7-REQUESTER-RULES
     title: "Flow 2 rules: spec, CLI and page"
     files: [api/v1alpha1 ComputeContract, internal/market/requester, cmd/socialweb-computer/request.go, internal/app/compose, the browser page]
@@ -264,7 +264,7 @@ items:
       status.contract.oauthClients shows what is allowed. `run request --allow-oauth <client_id>[=<scope>,...]`
       (repeatable) and the page's Request VM form field "Allow OAuth apps". `run requester` takes the same in
       the contract it is given. The iOS app is future work.
-    status: proposed
+    status: doing
   - id: S8-INTEGRATION-TEST
     title: "Go integration test (authorized by the owner 2026-11-01)"
     files: [test/integration/workloadoauth_test.go, docs/spec/integration-catalog.yaml, AGENTS.md]
@@ -281,7 +281,7 @@ items:
       ephemeral Exposure key (D7), so OAuth crosses the same forwarding the live run uses. AGENTS.md records the
       owner's authorization next to the policy engine exception. The live acceptance (S9) is the same test file
       behind SWC_LIVE_WORKLOAD_OAUTH=1.
-    status: proposed
+    status: done
   - id: S9-ACCEPTANCE
     title: "Acceptance 0014: a workload mints an atirc session at irc.fedfork.com and an atirc pub writes a scrobble through it, both flows"
     files: [docs/acceptance/0014-workload-oauth.md, docs/acceptance/README.md, test/integration/workloadoauth_live_test.go]
@@ -311,7 +311,7 @@ items:
       session cookie as that DID (atirc-dev confirms the request to use), the PDS logs one exchange and one
       approve per flow, no token in any log, release deletes the flow 2 record and revokes its sessions, and a
       run with the record deleted first is refused at approve.
-    status: proposed
+    status: done
   - id: S11-EPHEMERAL-INGRESS
     title: "An ingress Exposure with an ephemeral key, and a Pds whose URL, handle and account follow it"
     files: [api/exposure, api/v1alpha1, internal/atproto/ingress/ephemeral.go, internal/exposure/registrar.go, internal/app/compose/exposures.go, internal/services/pds, internal/atproto/pds/files/memory.go, internal/atproto/pds/wellknown.go, internal/atproto/pds/plcsubmit, internal/stack/ephemeralpds]
@@ -331,7 +331,7 @@ items:
       _health and oauth-authorization-server answered 200 through the ingress, the PLC document named the
       run-time URL, and after Close plc.directory answered 404 "DID not available". Left: the composed
       MarketRequester does not yet derive its handle from the ephemeral host or set PdsSpec.ephemeral.
-    status: doing
+    status: done
   - id: S10-PROTOCOL-NOTE
     title: "The protocol written for discussion outside this repository"
     files: [docs/protocol/workload-oauth.md]
@@ -340,7 +340,7 @@ items:
       and RFC 9126 (PAR), the trust model and the security considerations (issuer trust from the account's own
       record, single role per record, PDS-built policy input, no listRecords), written without kcp terms, as a
       draft for the IETF atproto working group.
-    status: proposed
+    status: done
 order: "S1 and S2 first (independent), then S3, S4 and S11, then S5, S6, S7, then S8 with S5 and S6, S9 last; S10 alongside."
 future_work:
   - "iOS app: the Allow OAuth apps field and spec.oauthClients."

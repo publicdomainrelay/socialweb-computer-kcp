@@ -30,6 +30,7 @@ needs the argument behind it. Do not read it end to end.
 | The operator handoff | `handoff.yaml` |
 | What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
 | The integration scenarios (no Go tests until plan 0027) | `docs/spec/integration-catalog.yaml` |
+| How a workload signs an OAuth app in as an account on our PDS (`com.fedproxy.rbac`, exchangeToken, approveAuthorization) | `docs/pds/oauth-wid.md` |
 
 ## Layout
 
