@@ -15,6 +15,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
@@ -208,17 +209,13 @@ func DiscoverBiddersFromRelays(ctx context.Context, relayURLs []string, collecti
 
 var relaysOf = ttlcache.New[string, []string](ttlcache.Options{TTL: RelaysCacheTTL, MaxEntries: 1024})
 
-func AutoDiscoverRelayURLs(ctx context.Context, getter RecordGetter, did string) []string {
-	return RelayURLsOf(ctx, getter, did)
-}
-
 func RelayURLsOf(ctx context.Context, getter RecordGetter, did string) []string {
 	if getter == nil || did == "" {
 		return nil
 	}
 	urls, err := relaysOf.GetOrLoad(ctx, did, func(ctx context.Context) ([]string, time.Duration, error) {
 		rec, err := getter.GetRecord(ctx, did, RelaysNSID, RelaysRKey)
-		if errors.Is(err, ErrNotFound) {
+		if RecordAbsent(err) {
 			return []string{}, RelaysCacheTTL, nil
 		}
 		if err != nil {
@@ -230,6 +227,17 @@ func RelayURLsOf(ctx context.Context, getter RecordGetter, did string) []string 
 		return nil
 	}
 	return slices.Clone(urls)
+}
+
+func RecordAbsent(err error) bool {
+	if !errors.Is(err, ErrNotFound) {
+		return false
+	}
+	failure, ok := errors.AsType[*xrpc.Error](err)
+	if !ok {
+		return true
+	}
+	return failure.Status == http.StatusNotFound || (failure.Status == http.StatusBadRequest && failure.Name == "RecordNotFound")
 }
 
 func relayURLsIn(value map[string]any) []string {
@@ -292,14 +300,6 @@ func ReadOffering(ctx context.Context, getter RecordGetter, did string) (Offerin
 		return Offering{}, "", err
 	}
 	return *offering, rec.URI, nil
-}
-
-func ListOfferings(ctx context.Context, getter RecordGetter, did string) ([]Offering, error) {
-	offering, _, err := ReadOffering(ctx, getter, did)
-	if err != nil {
-		return nil, err
-	}
-	return []Offering{offering}, nil
 }
 
 func OfferingApplies(offering Offering, payloadNSID string) bool {

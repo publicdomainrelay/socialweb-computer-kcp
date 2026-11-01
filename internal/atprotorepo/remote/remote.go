@@ -43,6 +43,7 @@ var (
 	_ atprotorepo.RecordWriter = (*Repo)(nil)
 	_ atprotorepo.Subscriber   = (*Repo)(nil)
 	_ atprotorepo.SwapDeleter  = (*Repo)(nil)
+	_ atprotorepo.SwapPutter   = (*Repo)(nil)
 )
 
 func New(cfg Config) (*Repo, error) {
@@ -152,6 +153,18 @@ func (r *Repo) CreateRecord(ctx context.Context, collection, rkey string, value 
 }
 
 func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error) {
+	return r.putRecord(ctx, collection, rkey, value, pdsclient.WriteOptions{})
+}
+
+func (r *Repo) PutRecordSwap(ctx context.Context, collection, rkey string, value json.RawMessage, swapCID string) (commonv1.StrongRef, error) {
+	swap, err := cid.Decode(strings.TrimSpace(swapCID))
+	if err != nil {
+		return commonv1.StrongRef{}, fmt.Errorf("remote: the swap cid %q: %w", swapCID, err)
+	}
+	return r.putRecord(ctx, collection, rkey, value, pdsclient.WriteOptions{SwapRecord: &swap})
+}
+
+func (r *Repo) putRecord(ctx context.Context, collection, rkey string, value json.RawMessage, opts pdsclient.WriteOptions) (commonv1.StrongRef, error) {
 	if strings.TrimSpace(rkey) == "" {
 		return commonv1.StrongRef{}, errors.New("remote: putRecord needs an rkey")
 	}
@@ -159,8 +172,12 @@ func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value jso
 	if err != nil {
 		return commonv1.StrongRef{}, err
 	}
-	out, err := r.pds.PutRecord(ctx, path, value, pdsclient.WriteOptions{})
+	out, err := r.pds.PutRecord(ctx, path, value, opts)
 	if err != nil {
+		var failure *pdsclient.XRPCError
+		if errors.As(err, &failure) && failure.Code == "InvalidSwap" {
+			return commonv1.StrongRef{}, fmt.Errorf("%w: %v", atprotorepo.ErrSwapMismatch, err)
+		}
 		return commonv1.StrongRef{}, err
 	}
 	return commonv1.StrongRef{URI: out.URI.String(), CID: out.CID.String()}, nil

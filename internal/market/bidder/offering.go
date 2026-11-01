@@ -95,23 +95,15 @@ func (b *Bidder) serveMarket(ctx context.Context) {
 func (b *Bidder) withdraw(ctx context.Context) {
 	b.offerWrite.Lock()
 	defer b.offerWrite.Unlock()
-	prior, err := b.selfOffering(ctx)
-	if err != nil {
-		b.log.Warn("reading the market offering to withdraw failed", "err", err)
-		return
+	prior, readErr := b.selfOffering(ctx)
+	if readErr != nil {
+		b.log.Warn("reading the market offering to withdraw failed; it is withdrawn anyway", "err", readErr)
 	}
-	if err := b.findLegacyOffering(ctx); err != nil {
-		b.log.Warn("reading the heartbeat to withdraw the market offering failed", "err", err)
-		return
-	}
-	if prior == nil && b.legacyOffering == "" {
+	if prior != nil && market.OfferingWithdrawn(*prior) {
 		return
 	}
 	createdAt := ""
 	if prior != nil {
-		if market.OfferingWithdrawn(*prior) {
-			return
-		}
 		createdAt = prior.CreatedAt
 	}
 	record, err := market.BuildWithdrawnOffering(createdAt, b.now().UTC().Format(time.RFC3339))
@@ -119,12 +111,34 @@ func (b *Bidder) withdraw(ctx context.Context) {
 		b.log.Warn("building the withdrawn market offering failed", "err", err)
 		return
 	}
-	uri, err := b.putOffering(ctx, record)
-	if err != nil {
-		b.log.Warn("withdrawing the market offering failed", "err", err)
+	written := false
+	if prior != nil || readErr != nil {
+		written = b.withdrawSelf(ctx, record)
+	}
+	if err := b.findLegacyOffering(ctx); err != nil {
+		b.log.Warn("reading the heartbeat to withdraw the legacy market offering failed", "err", err)
+		if !written && prior == nil {
+			b.withdrawSelf(ctx, record)
+		}
 		return
 	}
-	b.log.Info("the bidder offering is withdrawn while its participation is suspended", "offering", uri, "legacy", b.legacyOffering)
+	if b.legacyOffering == "" {
+		return
+	}
+	if !written {
+		b.withdrawSelf(ctx, record)
+	}
+	b.mirrorLegacy(ctx, record)
+}
+
+func (b *Bidder) withdrawSelf(ctx context.Context, record market.Offering) bool {
+	ref, err := b.putRecord(ctx, market.OfferingRKey, record)
+	if err != nil {
+		b.log.Warn("withdrawing the market offering failed", "err", err)
+		return false
+	}
+	b.log.Info("the bidder offering is withdrawn while its participation is suspended", "offering", ref.URI)
+	return true
 }
 
 func (b *Bidder) setOffering(uri string) {
@@ -153,6 +167,9 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	if prior != nil {
 		createdAt = prior.CreatedAt
 		if !touch && prior.WithdrawnAt == "" && prior.EndpointURL == b.cfg.EndpointURL && sameStrings(prior.AppliesTo, appliesTo) {
+			if b.legacyStale {
+				b.mirrorLegacy(ctx, *prior)
+			}
 			b.setOffering(b.heartbeatOffering())
 			return nil
 		}
@@ -224,13 +241,16 @@ func (b *Bidder) findLegacyOffering(ctx context.Context) error {
 		b.legacyChecked = true
 		return nil
 	}
-	_, err = b.records.GetRecord(ctx, b.cfg.DID, market.OfferingNSID, rkey)
+	rec, err := b.records.GetRecord(ctx, b.cfg.DID, market.OfferingNSID, rkey)
 	switch {
 	case errors.Is(err, market.ErrNotFound):
 	case err != nil:
 		return err
+	case rec.CID == "":
+		b.log.Warn("the legacy market offering has no cid; it is not mirrored", "legacy", rkey)
 	default:
 		b.legacyOffering = rkey
+		b.legacyCID = rec.CID
 		b.log.Info("the bidder mirrors its offering to the legacy record its heartbeat named", "legacy", rkey)
 	}
 	b.legacyChecked = true
@@ -249,12 +269,33 @@ func (b *Bidder) putOffering(ctx context.Context, record market.Offering) (strin
 	if err != nil {
 		return "", err
 	}
-	if b.legacyOffering != "" {
-		if _, err := b.putRecord(ctx, b.legacyOffering, record); err != nil && ctx.Err() == nil {
+	b.mirrorLegacy(ctx, record)
+	return ref.URI, nil
+}
+
+func (b *Bidder) mirrorLegacy(ctx context.Context, record market.Offering) {
+	if b.legacyOffering == "" {
+		return
+	}
+	value, err := market.EncodeRecord(record)
+	if err != nil {
+		b.log.Warn("encoding the legacy market offering failed", "legacy", b.legacyOffering, "err", err)
+		b.legacyStale = true
+		return
+	}
+	ref, err := b.records.PutRecordSwap(ctx, b.cfg.DID, market.OfferingNSID, b.legacyOffering, value, b.legacyCID)
+	switch {
+	case errors.Is(err, market.ErrSwapMismatch), errors.Is(err, market.ErrNotFound):
+		b.log.Warn("the legacy market offering changed or is gone; the mirror stops and the heartbeat names self", "legacy", b.legacyOffering, "err", err)
+		b.legacyOffering, b.legacyCID, b.legacyStale = "", "", false
+	case err != nil:
+		if ctx.Err() == nil {
 			b.log.Warn("updating the legacy market offering failed", "legacy", b.legacyOffering, "err", err)
 		}
+		b.legacyStale = true
+	default:
+		b.legacyCID, b.legacyStale = ref.CID, false
 	}
-	return ref.URI, nil
 }
 
 func (b *Bidder) currentOffering() string {

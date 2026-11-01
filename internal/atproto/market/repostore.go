@@ -129,6 +129,29 @@ func (s *RepoStore) PutRecord(ctx context.Context, repo, collection, rkey string
 	return s.write(ctx, repo, collection, rkey, record, false)
 }
 
+func (s *RepoStore) PutRecordSwap(ctx context.Context, repoDID, collection, rkey string, record map[string]any, swapCID string) (StrongRef, error) {
+	repo, err := s.repo(ctx, repoDID)
+	if err != nil {
+		return StrongRef{}, err
+	}
+	swapper, ok := repo.(atprotorepo.SwapPutter)
+	if !ok {
+		return StrongRef{}, errors.New("market: the repo cannot put a record by its cid")
+	}
+	raw, err := encodeValue(record)
+	if err != nil {
+		return StrongRef{}, err
+	}
+	ref, err := swapper.PutRecordSwap(ctx, collection, rkey, raw, swapCID)
+	if errors.Is(err, atprotorepo.ErrSwapMismatch) {
+		return StrongRef{}, fmt.Errorf("%w: %s/%s/%s: %v", ErrSwapMismatch, s.did, collection, rkey, err)
+	}
+	if err != nil {
+		return StrongRef{}, fmt.Errorf("market: writing %s/%s/%s: %w", s.did, collection, rkey, err)
+	}
+	return NewStrongRef(ref.URI, ref.CID), nil
+}
+
 func (s *RepoStore) DeleteRecord(ctx context.Context, repoDID, collection, rkey string) error {
 	repo, err := s.repo(ctx, repoDID)
 	if err != nil {

@@ -11770,17 +11770,22 @@ Decision (rcA). The bidder writes one offering at `market.offering/self` by PutR
 of `self` (keeps `createdAt`; no write when endpoint and appliesTo match, except for a touch), then
 the put. It never lists and never deletes. On suspend it puts `self` with `appliesTo: []` and
 `withdrawnAt` (new optional field of `offering.json`; an offering with `withdrawnAt` may have an
-empty appliesTo) and stops the heartbeat; serving again writes appliesTo back and drops
-`withdrawnAt`. Endpoint drift for requesters that still list (a pinned page or iOS): once per
+empty appliesTo) first, then tries the heartbeat read and the legacy mirror, so a failed
+heartbeat read never leaves `self` live; it stops the heartbeat; serving again writes appliesTo
+back and drops `withdrawnAt`. Endpoint drift for requesters that still list (a pinned page or iOS): once per
 process the bidder reads `heartbeat/self`; when it names a TID offering in its own repo that a
-getRecord finds, the bidder puts the same content to that one record on every write (an update of
-an existing record, never a create of a new TID, never a delete, never a listing) and keeps its
-heartbeat naming that record, so the mirror is found again after a restart. Every other old
+getRecord finds, the bidder puts the same content to that one record on every write with
+`swapRecord` set to the cid it last read or wrote (`atprotorepo.SwapPutter`), so it only ever
+updates that record: when the record was deleted or changed since, the put fails, the mirror stops
+for the process and the heartbeat names `self`. It never creates a new TID, never deletes and
+never lists. While mirroring, the heartbeat keeps naming that record, so the mirror is found again
+after a restart; a mirror put that failed for another reason is retried on the next ensure. Every other old
 offering is left as it is. The requester reads `offering/self`; on RecordNotFound it reads
 `heartbeat/self` and then the offering it names, only when that is a record of the same repo in
 `market.offering` (any other authority or collection is refused), and parses that one record.
 Relays are `cfg` relays plus one getRecord `market.relays/self` per root (`RelayURLsOf`, a
-RecordGetter), cached 60 s per DID; RecordNotFound means no relays; no listing fallback, since no
+RecordGetter), cached 60 s per DID; only RecordNotFound (HTTP 400 RecordNotFound or 404) means no
+relays, and any other 4xx, a 429 or a 5xx is an error that is not cached; no listing fallback, since no
 writer in this stack ever wrote one. Lexicons keep `"key": "any"` (the TID records exist and stay
 valid); their descriptions name `self`.
 
@@ -11795,9 +11800,10 @@ named TID).
 
 No OAuth scope changes in rcA. rcB, after the page and iOS run rcA: the requester reads `self` only
 (a heartbeat naming another record is ignored and logged `requester_offering_legacy_ignored`), the
-bidder drops the legacy mirror and its heartbeat names `self`, and `AutoDiscoverRelayURLs` and
-`ListOfferings` (kept in rcA as thin names over `RelayURLsOf` and `ReadOffering` for their requester
-callers) go away. No record is deleted at any step.
+bidder drops the legacy mirror and its heartbeat names `self`. No record is deleted at any step.
+Rollout rule: never roll a bidder back below rcA and never run a pre-rcA and an rcA bidder on one
+DID at the same time; a pre-rcA bidder lists `market.offering` and deletes every record but the
+first (rkey descending, so it keeps `self` and deletes the TIDs) wherever its scope allows delete.
 
 ### r139: the requester reads the receipt and the termination by getRecord
 

@@ -148,7 +148,7 @@ func (m *HTTPMarket) relaySources(ctx context.Context, roots []string) ([]candid
 	relays := append([]string(nil), m.RelayURLs...)
 	auto := 0
 	for _, did := range roots {
-		for _, relay := range market.AutoDiscoverRelayURLs(ctx, m.Reader, did) {
+		for _, relay := range market.RelayURLsOf(ctx, m.Reader, did) {
 			relay = strings.TrimRight(relay, "/")
 			if !slices.Contains(relays, relay) {
 				relays = append(relays, relay)

@@ -22,6 +22,7 @@ var (
 	ErrInvalidAuth   = errors.New("market: invalid service auth")
 	ErrInvalidEvent  = errors.New("market: invalid event")
 	ErrContractGraph = errors.New("market: contract graph")
+	ErrSwapMismatch  = errors.New("market: the record is not at the swap cid")
 )
 
 type ContractGraphError struct {
