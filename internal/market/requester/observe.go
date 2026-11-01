@@ -200,6 +200,7 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 	}
 	if contractTerminal(contract) {
 		q.markFinished(contract.Name)
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	state := contract.Status.Contract

@@ -264,6 +264,8 @@ type Requester struct {
 
 	finished map[string]bool
 
+	releaseRevoking sync.Map
+
 	waiting map[string]bool
 
 	settled map[string]bool

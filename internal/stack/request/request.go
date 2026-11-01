@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -47,7 +48,7 @@ const (
 	NetworkAppFieldManager       = "socialweb.computer/network-app"
 	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
 	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
-	AtircParentPath              = "identity/atirc-parent"
+	AtircParentPath              = requester.AtircParentPath
 	Poll                         = time.Second
 	RetryMax                     = 5 * time.Second
 	irohScheme                   = "iroh://"

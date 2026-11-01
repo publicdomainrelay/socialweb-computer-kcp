@@ -221,8 +221,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     whose root names `spec.atircParentRef` (a vault secret {token, subhandle, exp}; the guest requester's
     `run request` writes it from that file) mints its own agents' tokens below that subhandle with the
     parent token as bearer instead of service auth. Release revokes the agent and the guest requester
-    tokens in the background with a bounded backoff until revoked or expired; revoking a subhandle
-    revokes every token below it.
+    tokens in the background with a backoff capped at 5 min until each is revoked or expired (24h at
+    most), stops with the requester and resumes after a restart from a marker in the bundle secret;
+    revoking a subhandle revokes every token below it. `spec.atircParentRef` must name
+    `identity/atirc-parent` in the requester's own mount.
     `run request --associate <did>|guest` asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
