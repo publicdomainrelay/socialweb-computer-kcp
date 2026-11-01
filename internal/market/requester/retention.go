@@ -165,6 +165,9 @@ func (c Config) retention() retentionConfig {
 		}
 		out.keep = append(out.keep, normalized)
 	}
+	if len(out.rejected) > 0 {
+		out.mode = v1alpha1.RetentionModeDryRun
+	}
 	return out
 }
 
@@ -274,7 +277,7 @@ type retentionRun struct {
 func (q *Requester) startRetention() {
 	cfg := q.cfg.retention()
 	if len(cfg.rejected) > 0 {
-		q.log.Warn("requester_retention_keep_rejected", "entries", cfg.rejected, "reason", "a keep at-uri must name a DID repo")
+		q.log.Warn("requester_retention_keep_rejected", "entries", cfg.rejected, "reason", "a keep at-uri must name a DID repo", "mode", cfg.mode)
 	}
 	if cfg.age <= 0 && cfg.infraAge <= 0 {
 		q.log.Info("requester_retention_off")
@@ -805,15 +808,16 @@ func (run *retentionRun) infraVerdict(rec *retainedRecord) string {
 		if s.Receipt != "" && run.live.receipts[s.Receipt] {
 			return "liveContract"
 		}
-		switch v1alpha1.InfraContractPhase(s.Phase) {
-		case v1alpha1.InfraContractPhaseReleased:
+		phase := func(p v1alpha1.InfraContractPhase) bool { return strings.EqualFold(s.Phase, string(p)) }
+		switch {
+		case phase(v1alpha1.InfraContractPhaseReleased):
 			continue
-		case v1alpha1.InfraContractPhaseStaged:
+		case phase(v1alpha1.InfraContractPhaseStaged):
 			if c, ok := spec[name]; ok && c.State == "staged" && s.Receipt == "" {
 				continue
 			}
 			return "infraContractOpen"
-		case v1alpha1.InfraContractPhaseFailed:
+		case phase(v1alpha1.InfraContractPhaseFailed):
 			if s.Receipt == "" {
 				continue
 			}
