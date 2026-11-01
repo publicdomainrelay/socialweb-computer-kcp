@@ -1,6 +1,6 @@
 # Acceptance 0012: Infra quickstart (VM, k8s, Deno sandbox, agent VM)
 
-Proves the path of [../QUICKSTART.md](../QUICKSTART.md) end to end: a local kcp with a market in it, a
+Proves the path of [../quickstart-local.md](../quickstart-local.md) end to end (the prod step: [../quickstart-prod.md](../quickstart-prod.md)): a local kcp with a market in it, a
 requester app, kubectl apply of each example in [../../examples/infra/](../../examples/infra/), await, use each
 resource, release, dev down. The atirc join of the agent VM is the one prod step.
 
@@ -43,19 +43,19 @@ sequenceDiagram
 ## Steps
 
 Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001 XDG_RUNTIME_DIR=/run/user/$(id -u test-0001) ...`).
-`k <ws> ...` is the helper of QUICKSTART section 3.
+`k <ws> ...` is the helper of quickstart-local section 3.
 
-1. `dev up --instance qs1 --profile market-network --host-backend proc --bidders 1 --with-gateway ...` (QUICKSTART section 2);
+1. `dev up --instance qs1 --profile market-network --host-backend proc --bidders 1 --with-gateway ...` (quickstart-local section 2);
    `dev status` phase Ready.
 2. Add the requester app `qs` to `MarketNetwork.spec.apps`; wait `.status.apps[qs]` Ready with a did.
-3. Vouches (QUICKSTART section 4): [vouch.yaml](../../examples/infra/vouch.yaml) in `root:qs` (requester -> bidder) and
+3. Vouches (quickstart-local section 4): [vouch.yaml](../../examples/infra/vouch.yaml) in `root:qs` (requester -> bidder) and
    [vouch-bidder-operator.yaml](../../examples/infra/vouch-bidder-operator.yaml) in `root:bidder-1` (bidder operator -> requester);
    both AtprotoRecords Applied. Wait 5 minutes if any contract was denied before.
 4. VM: apply `vm.yaml` (your key in), `kubectl wait ... phase=Deployed`, ssh over iroh, read `/root/quickstart`.
 5. k8s: apply `k8s-cluster.yaml` to the tenant kubeconfig; read the gateway Infra `nodes-<hex>`, node Ready, pod logs.
 6. Deno: set `MarketBidder app` `spec.computeKinds: [vm, deno]` in `root:bidder-1`; apply `deno-sandbox.yaml`; read
    `status.contract.sandbox`.
-7. Agent: write `agent-bundle.json` into the requester OpenBao (QUICKSTART section 4); apply `agent-vm.yaml`; read the
+7. Agent: write `agent-bundle.json` into the requester OpenBao (quickstart-local section 4); apply `agent-vm.yaml`; read the
    requester log for `requester_atirc_*`; on prod apply `agent-start.yaml` and watch the channel for the nick JOIN.
 8. Release: patch each contract `state: Released` (or delete the object); delete the Deployment; `dev down`; release
    the live slot.

@@ -1,0 +1,480 @@
+plan: "0039"
+title: "A long-lived requester from the CLI: run requester in the foreground with a ready file, install requester as a systemd unit, the gateway composed into it, atirc agents from it, and a mixed-prod acceptance against a user-configured bidder"
+status: todo
+source: >
+  2026-11-01 atirc, owner (verbatim): "split quickstart into quickstart-local.md and quickstart-prod.md, then write
+  a plan for how we are going to address all the Not Supported Today items so that we could bring up a
+  mixed-prod.yaml assume the user has access to a bidder they will configure (via
+  examples/infra/vouch-bidder-operator.yaml and examples/infra/vouch.yaml and etc.). There is no reason we cannot
+  bring up a kcp and apply resources to make a long lived requester from our CLI, we want this requester to be
+  able to be run in the foreground and report random port bound to written out to file so we can wait for bound
+  port and kubectl file to access it. We also want to support and document how we would kubectl apply
+  HostProcess or whatever to have it installed as a systemd unit in slice in sepcified user created if asked for
+  new user - similar to how we do bidder installs. There's also no reason we couldn't compose the gateway into
+  that requester so that it can create k8s clusters and run the k3s control plane for them. also for the atirc
+  agent we have ingress options and should show how to configure them for a local PDS so that that works or
+  leverage a remote PDS for an existing account. write plan then make it happen and validate, including
+  acceptance test(s) as needed." Lead: linux-kcp. Plan author: linux-kcp-plan39. The Not Supported items are
+  the tables at the end of docs/quickstart-local.md and docs/quickstart-prod.md.
+principle: >
+  A long-lived requester is one more application instance: a kcp of its own, the MarketRequester root applied
+  into it, every listener on port 0, state as kcp objects under one state dir. It is the root that
+  `run request` composes today, kept up instead of torn down per contract, so `kubectl apply` of Infra,
+  EphemeralInfra and ComputeContract against it runs the same RFP flow against prod bidders. The default
+  policies always run (requester-tangled-vouch; bidder-tangled-vouch on the bidders); nothing here sets
+  `policy: open`. No user record is ever deleted by these paths. A user is created only by the one explicit
+  root step (install); everything else runs as USER without root.
+grounding: >
+  Read from the code at main 0ac9a0c3.
+  (1) `run request` (cmd/socialweb-computer/request.go, requestRun.start, standalone branch): bringUp with
+  profile quick and role devinstance.RoleRequester into requests/<name>, then request.OpenKcp(...).ApplyRoot of a
+  MarketRequesterSpec, signIn, WaitReady, WriteInvocation; one ComputeContract per invocation; the owner lock
+  requests/<name>/owner.lock. Standalone defaults (request.go:528-537): network.plcDirectoryUrl
+  https://plc.directory, network.ingressProxyHost xrpc.fedproxy.com, spec.ingress compose.DefaultIngressConfig().
+  (2) `run bidder` (cmd/socialweb-computer/bidder.go) is the long-lived model: standalone() bringUp + serve()
+  (ApplyRoot with retry, signIn through appcli.IdentityRenderer without a deadline under --fg, WaitReady, a JSON
+  summary on stdout, then block until Ctrl-C and downInstance keeping state); installedCore() is the
+  --host-backend systemd-user path that bidder.RunCore (internal/stack/bidder/core.go) runs under the unit.
+  (3) `install bidder` (internal/install/install.go Install): steps account (useradd --system, --adopt-account
+  for an existing one, install-<account>.json record), subids, kvm, delegation, apparmor, nodePassword,
+  stateLayout, guestImage, unitFiles (templates/socialweb-computer-bidder@.service: Type=notify, Slice=
+  socialweb.slice, CONFIG_PATH_SOCIALWEB_COMPUTER=<state>/config.json, ExecStart run bidder --handle %i --fg),
+  linger, enable, bringUp, checkHost; config() writes config.json (host-backend systemd-user, state-dir,
+  profile prod-qr, bidder-policy default); roles come from internal/hostcontract (gateway, bidder only) and
+  internal/bootstrap/table (Gateway(), Bidder()); upgrade.go infers gateway or bidder.
+  (4) HostProcess (api/v1alpha1/types_hostprocess.go) has unit, exec/argv, env, slice, readiness, placement
+  supervisor|bootstrap and no account field: it runs in the user manager of the core that places it. HostInstall
+  (internal/controllers/hostinstall) only observes the install record.
+  (5) pkg/embedded (plan 0038) runs the requester in process on memory storage and vaultmemory, comms Firehose,
+  no ingress, a snapshot the app must store encrypted; it is the iOS and wasm shape, not a Linux host shape.
+  (6) The Gateway root (internal/app/gateway/gateway.go) composes its own Pds, Requester, GatewayAPI and the
+  cluster provider (ClusterStateDir <state>/clusterprovider, k3s and kine HostProcesses), with
+  GatewayNodeMarket{HomeWorkspace, ContractWorkspace} (gateway.go:231-240): the NodeClaim controller
+  (internal/controllers/nodeclaim) writes the cluster's Infra nodes-<hex> into the contract workspace. Profiles
+  prod and market-network only. The core registers the Infra and NodeClaim controllers for every root
+  (internal/stack/componentcore/controllers.go:146-152).
+  (7) atirc mint (internal/market/requester/atirc.go serviceAtircIssuer): fails "the requester identity signs no
+  service auth" when q.serviceAuth is nil; requester.go:643-650 sets it only for IdentityModeOAuth
+  (oauthServiceAuth) or, when not LocalSigner, from the owner MarketIdentity (pdsAccount and oauthSessionProxy;
+  the link marketrequester.go:407). localRepo sets LocalSigner (requester.go:377), so a local-PDS requester never
+  signs, although the Pds component provides pds.CapabilityServiceAuth (internal/controllers/pds/provide.go:77) and
+  the bidder already links its guest to it (internal/app/marketbidder/marketbidder.go:634). A localRepo handle is
+  compose.PdsHandle: <workspace>.requester.local (internal/app/compose/pds.go:56), which nobody resolves.
+  (8) RequesterOAuthScope (internal/atproto/oauth/scope.go:69) has no repo:sh.tangled.graph.vouch, so vouch.yaml
+  through an OAuth requester repo is refused by the PDS; OptionalScopes holds only rpc:chat.atirc.revoke.
+  (9) NetworkApp has no computeKinds (MarketBidderSpec has, types_application.go:669); marketnetwork
+  children.go:630 builds the MarketBidderSpec from NetworkApp; dev up has no --compute-kinds.
+  (10) The vouch examples use deletionPolicy Delete (AtprotoRecord default); vouch-bidder-operator.yaml needs the
+  network's operator repo link (link-records-operator), which an installed bidder does not compose.
+  (11) Schema revisions now: MarketRequester 37 (38 burned on prod by a reverted build), Requester 29, Gateway 38,
+  MarketNetwork 31.
+decisions:
+  name_and_base: >
+    The verb is `socialweb-computer run requester` (beside `run bidder`), on the bringUp path of `run request`
+    standalone (HostProcess kcp, real OpenBao, ingress), not pkg/embedded: a Linux host has sockets, an ingress
+    gives getSecrets without the sealed fallback, and OpenBao keeps secrets out of a snapshot file. Owner decision
+    D1 below.
+  ready_file: >
+    `run requester --ready-file <path>` (default <state-dir>/requesters/<name>/ready.json) is written once the
+    MarketRequester root is Ready, by write to <path>.tmp then rename, mode 0600, and rewritten on every restart
+    and on a change of any field. JSON {schema: 1, name, pid, startedAt, kcpUrl (the bound front address),
+    kubeconfig (path of the admin kubeconfig), workspace, did, handle, identityMode, pdsUrl, ingress {pds,
+    requester} (public URLs from the Exposure status), gateway {workspace} when composed}. No token, key or
+    password, only paths. Removed on a clean stop. A script waits with `until [ -s ready.json ]`.
+  install_vs_hostprocess: >
+    `install requester` is the path that creates a user (the one explicit root step, as install bidder); a
+    HostProcess manifest is the documented same-account path (no root, no new user) into a core the account
+    already runs. Both run the same process: `socialweb-computer run requester --fg`. HostProcess has no account
+    field and cannot create a user, so it cannot be the new-user path. Owner decision D2.
+  gateway_compose: >
+    `run requester --with-gateway` applies a Gateway root with a new profile `requester` into the same kcp. The
+    Gateway gains spec.requesterRef {workspace, name}: with it the root composes no Pds, Requester or identity
+    of its own, sets GatewayNodeMarket.ContractWorkspace to the MarketRequester's workspace, and the
+    MarketRequester's Requester rents the nodes under the user's own DID and policy. GatewayAPI is not composed
+    in profile requester; a Cluster is a kubectl apply. Owner decision D3.
+  agent_identity: >
+    OAuth (QR or browser): mints today. Remote PDS existing account (pdsAccount, app password): mints through
+    the owner MarketIdentity service auth; prove it live. Local PDS (localRepo): mints only when the DID is on
+    plc.directory, the PDS is public through an ingress, the handle is one the user controls and resolves, and
+    the Requester links service auth to its own Pds component; a .local handle is refused before the RFP of an
+    agent contract. Owner decision D4.
+state_rules:
+  - "Read AGENTS.md first. status is one of todo, doing, done, blocked. The lead flips statuses."
+  - "No Go tests (AGENTS.md, plan 0027). Proof is the build gates and the live runs in done_when; the policy spec tests stay green."
+  - "Schema changes bump the Revision in api/v1alpha1/resources.go past every burned revision (MarketRequester 38 is burned) and run go generate; generated output is never hand-merged; only one track holds api/ at a time."
+  - "Live runs against prod bidders and irc.fedfork.com are the lead's (acceptance README rules); task agents prove on their own market network, with a local bidder and a requester of their own."
+  - "Default policies only. No deletion of user records: every AtprotoRecord in these paths is deletionPolicy Retain."
+  - "A decision that closes moves into docs/ARCHITECTURE.md (section 14 when the item opens, 15 when it closes)."
+open_decisions:
+  - id: D1
+    question: "Base the long-lived requester on the run request bringUp (HostProcess kcp, OpenBao, ingress) or on pkg/embedded (in process, memory storage, Firehose only)?"
+    recommended: "bringUp, verb `run requester`. pkg/embedded stays the app shape (iOS, wasm)."
+  - id: D2
+    question: "Systemd install: `install requester` (root, creates the account) or a kubectl-applied HostProcess?"
+    recommended: "install requester for a new user, mirroring install bidder (default account swc-requester, --account to name one, --adopt-account for an existing one); HostProcess documented for the same account with no root."
+  - id: D3
+    question: "Gateway in the requester: a Gateway root that reuses the MarketRequester's Requester (spec.requesterRef), or a second root with its own Requester on the same account through oauthSessionProxy?"
+    recommended: "spec.requesterRef: one identity, one OAuth session (plan 0030), one policy engine, one ingress; no second sign-in."
+  - id: D4
+    question: "Local PDS atirc agent: what must irc.fedfork.com resolve? (ask atirc-dev: does chat.atirc.mint check only the service-auth JWT against the DID document from plc.directory, or also the handle bidirectionally?)"
+    recommended: "require did:plc on plc.directory, the PDS public through the ingress, and --atproto-handle on a domain the user controls (DNS TXT _atproto or https /.well-known/atproto-did on the PDS ingress public host); refuse a .local handle for spec.agent before the RFP."
+  - id: D5
+    question: "vouch-bidder-operator.yaml on a user-configured (installed) bidder: how does the bidder kcp write the operator's repo?"
+    recommended: "an optional operator sign-in in the bidder kcp: MarketIdentity operator (oauthQr, scope repo:sh.tangled.graph.vouch only) and the AtprotoRepo operator with the same link label as the market network (apps.socialweb.computer/record-repo: operator), so the example applies unchanged; until then the operator writes the record with goat."
+  - id: D6
+    question: "The agent bundle of a kubectl-applied contract: who writes the ATIRC_TOKEN placeholder entry?"
+    recommended: "the Requester itself, when a spec.agent contract's spec.secretsRef path holds no bundle (one entry at agent.envFile, mode 0600), so the page, the iOS app and the CLI need no bao step; the quickstart's bao commands stay valid."
+  - id: D7
+    question: "The vouch record through an OAuth requester repo needs repo:sh.tangled.graph.vouch. Add it to RequesterOAuthScope?"
+    recommended: "yes, as an optional scope (oauth.OptionalScopes), so no identity is forced to sign in again on rollout (status.pendingAction signInAgain ScopeUpgrade instead); typescript-helpers mirrors it; goat stays the fallback."
+  - id: D8
+    question: "deletionPolicy of the vouch examples?"
+    recommended: "Retain everywhere (local examples too): kubectl delete never deletes a user's vouch record."
+  - id: D9
+    question: "Sign-in of an installed requester (no TTY)?"
+    recommended: "oauthQr as the default profile (the pendingAction url from the MarketIdentity status, scripts/oauth-signin.ts), as a prod-qr bidder; an app password goes once from stdin into the requester's root OpenBao (a SecretRef), never into config.json, a flag or a HostProcess argument."
+parallel_tracks:
+  - track: T1-cli-requester
+    items: [A-RUN-REQUESTER]
+    owns: "cmd/socialweb-computer/requester.go (new), cmd/socialweb-computer/main.go (verb table rows), internal/stack/request (shared passthrough, ready file, core)"
+  - track: T2-install
+    items: [B-INSTALL-REQUESTER, B2-HOSTPROCESS-PATH]
+    owns: "internal/install, internal/hostcontract, internal/bootstrap/table, internal/checkhostmain, cmd/socialweb-computer/install.go"
+    note: "starts at once against the fixed verb name; its live proof waits for A-RUN-REQUESTER"
+  - track: T3-gateway
+    items: [C-GATEWAY-COMPOSE]
+    owns: "internal/app/gateway, internal/controllers/nodeclaim, api Gateway type, cmd/socialweb-computer/requestergateway.go (new)"
+  - track: T4-identity
+    items: [D-AGENT-IDENTITY, F2-VOUCH-SCOPE]
+    owns: "internal/market/requester (requester.go service-auth selection, atirc.go, secrets.go), internal/app/marketrequester, internal/atproto/oauth/scope.go"
+  - track: T5-dev-up
+    items: [E-DEV-COMPUTE-KINDS]
+    owns: "api NetworkApp, internal/app/marketnetwork, cmd/socialweb-computer/dev.go"
+  - track: T6-bidder-operator
+    items: [F3-BIDDER-OPERATOR-REPO]
+    owns: "internal/app/marketbidder, internal/app/compose/operator.go"
+  - track: T7-docs-acceptance
+    items: [D-AGENT-INGRESS, F-MIXED-PROD]
+    owns: "docs/quickstart-local.md, docs/quickstart-prod.md, docs/acceptance/0013-mixed-prod.md (new), examples/infra"
+  - track: api-serialization
+    note: "T3 (Gateway) and T5 (NetworkApp) both change api/v1alpha1/types_application.go and resources.go: land T5 first (smaller), then T3 rebases and runs scripts/regen-after-rebase.sh; T4 has no schema change unless D6 needs one."
+items:
+  - id: A-RUN-REQUESTER
+    title: "run requester: a long-lived foreground MarketRequester root in a kcp of its own, a ready file, restart survival, every identity mode"
+    track: T1-cli-requester
+    depends_on: []
+    files:
+      - cmd/socialweb-computer/requester.go
+      - cmd/socialweb-computer/main.go
+      - cmd/socialweb-computer/request.go
+      - internal/stack/request/request.go
+      - internal/stack/request/ready.go
+      - internal/stack/request/ssh.go
+      - deploy/apps/option-map.yaml
+      - AGENTS.md
+      - docs/quickstart-prod.md
+    work: >
+      New verb `run requester` with options name, state-dir, ready-file, fg, ready-timeout, network-timeout,
+      host-backend, the kcp/kine/bao/dumbpipe paths, log-level, and the same passthrough after `--` as `run
+      request` (identity: --atproto-oauth-qr, --atproto-oauth, --atproto-identity-mode pdsAccount
+      --atproto-handle --atproto-pds-url with the password from the environment, localRepo with --identity
+      <name>; comms; ingress; secrets-fallback). Move the MarketRequesterSpec part of requestRun.passthrough into a
+      function both verbs call (no copy). State dir <state-dir>/requesters/<name> (never requests/, which holds
+      invocations), one owner flock. Bring up with bringUp (profile quick, role requester), ApplyRoot, sign in
+      through appcli.IdentityRenderer (no deadline under --fg), WaitReady, write the ready file (decisions
+      ready_file), print the JSON summary, then block until Ctrl-C and stop the instance keeping state, as
+      run bidder --fg. A second start on the same state dir adopts the units and reuses the DID, the vault and
+      every contract. Helpers on the running instance: `run requester env <name>` (KUBECONFIG and the
+      workspace, like dev env), `run requester ssh <name> --contract <cc> [--transport webrtc]` (the run
+      request ssh code over any Held contract). No Infra-specific verb: kubectl apply.
+    done_when: >
+      As USER, `run requester --name lr1 --state-dir S -- --atproto-oauth-qr` signs in from the pendingAction url
+      and writes S/requesters/lr1/ready.json; `until [ -s ready.json ]` returns; `kubectl --kubeconfig
+      $(jq -r .kubeconfig ready.json) get marketrequesters.socialweb.computer app` prints Ready and the DID; the
+      kcpUrl port is not a fixed port and equals the bound front; `kubectl apply -f examples/infra/vm.yaml` (bidder
+      pinned) reaches Deployed on a prod bidder and `run requester ssh lr1 --contract infra-quickstart-vm-vm1`
+      prints quickstart-vm-ok; Ctrl-C, start again: the same DID, the ready file rewritten with the new kcpUrl,
+      the contract still Held, ssh again works; the same with a pdsAccount identity (app password) and with a
+      localRepo --identity; no token or password in the ready file, the summary or any log.
+    risks:
+      - "bringUp of profile quick is tuned for short invocations (ready timeouts, die-with); a long-lived instance must survive the CLI's terminal closing only under --fg semantics, and nothing must be torn down on a transient kcp error."
+      - "Two verbs sharing one passthrough: a refactor of request.go is shared with live run request users; keep run request output identical."
+      - "Held contracts across a restart: the requester adopts by status; prove a release after a restart revokes atirc tokens first (cloudinit.RequestRevokeWait)."
+    status: todo
+
+  - id: B-INSTALL-REQUESTER
+    title: "install requester: account (created when asked), slice, user unit, config.json, linger, upgrade and uninstall, as install bidder"
+    track: T2-install
+    depends_on: [A-RUN-REQUESTER]
+    files:
+      - internal/hostcontract/hostcontract.go
+      - internal/checkhostmain
+      - internal/bootstrap/table/table.go
+      - internal/install/install.go
+      - internal/install/bootstrap.go
+      - internal/install/upgrade.go
+      - internal/install/uninstall.go
+      - internal/install/templates/socialweb-computer-requester@.service
+      - internal/stack/request/core.go
+      - cmd/socialweb-computer/install.go
+      - cmd/socialweb-computer/main.go
+      - cmd/socialweb-computer/requester.go
+      - docs/quickstart-prod.md
+    work: >
+      hostcontract.RoleRequester ("requester"), check-host -role requester (no kvm; subids and delegation only
+      with --with-gateway). install.DefaultAccount requester -> swc-requester; `--account <name>` creates that
+      account when no record and no user exists, `--adopt-account` takes an existing one (ErrForeignAccount
+      otherwise), as today. `--name` (repeatable, like --handle) names each requester instance; unit
+      socialweb-computer-requester@<name>.service: Type=notify, Slice=socialweb.slice, WorkingDirectory=<state>,
+      CONFIG_PATH_SOCIALWEB_COMPUTER=<state>/config.json, ExecStart <state>/bin/current/socialweb-computer run
+      requester --name %i --fg, Restart=always, Delegate=yes. Steps: account, subids and delegation (gateway
+      only), nodePassword (gateway only), stateLayout, unitFiles, config (host-backend systemd-user, state-dir,
+      identity mode, handle, ingress, comms, with-gateway; never a password), linger, enable, bringUp (wait for
+      the ready file), checkHost. `run requester --host-backend systemd-user` runs request.RunCore under the unit
+      (the bidder.RunCore pattern) and sends READY=1 after the ready file. upgrade and rollback learn the role;
+      uninstall removes the units, keeps the state unless --purge. Sign-in per D9.
+    done_when: >
+      On a test host as root: `install requester --account swc-req-t1 --name me --dry-run` prints the step list;
+      without --dry-run the account is created (install-swc-req-t1.json records Created), the unit is active in
+      socialweb.slice of that user, <state>/requesters/me/ready.json appears after the scripted QR sign-in, and
+      `sudo -u swc-req-t1 kubectl --kubeconfig <ready.kubeconfig> get marketrequesters.socialweb.computer app`
+      is Ready; a second install is all FOUND; `upgrade --binary <new> --sha256 <sum>` restarts the unit and the
+      DID and Held contracts survive; reboot keeps it (linger); `uninstall requester --account swc-req-t1`
+      removes the units and leaves the state.
+    risks:
+      - "install is prod-shaped code shared with install bidder and install gateway; a regression there breaks prod upgrades. Prove install bidder --dry-run output is unchanged."
+      - "upgrade.go infers the role from the record; a requester record must never be read as a bidder."
+      - "systemd user manager Type=notify through the run requester process: READY=1 must come only after the ready file, or the unit start times out on a slow OAuth sign-in (TimeoutStartSec, as BidderStartGrace)."
+    status: todo
+
+  - id: B2-HOSTPROCESS-PATH
+    title: "Same-account install through a kubectl-applied HostProcess, documented and proven"
+    track: T2-install
+    depends_on: [A-RUN-REQUESTER]
+    files:
+      - examples/infra/requester-hostprocess.yaml
+      - docs/quickstart-prod.md
+    work: >
+      An example HostProcess (placement supervisor, unit swc-requester-<name>, exec socialweb-computer, argv run
+      requester --name <name> --state-dir <dir> --fg, slice socialweb.slice, restartPolicy Always, readiness exec
+      test -s <dir>/requesters/<name>/ready.json) applied into a core the account already runs (an installed
+      requester or a dev host instance). Prove that no root prunes a HostProcess outside its set (compose.SetWorkloads
+      renders only set members) and that the core adopts it across its own restart (unit name and InvocationID).
+    done_when: >
+      kubectl apply of the example into a running core of the same account places the unit in socialweb.slice,
+      HostProcess status Running with the ready-file readiness, the ready file names a working kubeconfig; dev
+      restart of that core leaves the unit adopted unchanged; kubectl delete stops it and keeps its state dir.
+    risks:
+      - "If a root prunes foreign HostProcesses, this path needs a label or a set entry; read compose.CheckWorkloads first."
+    status: todo
+
+  - id: C-GATEWAY-COMPOSE
+    title: "The gateway in the requester's kcp: profile requester, spec.requesterRef, Cluster by kubectl, k3s control plane and nodes rented by the same requester"
+    track: T3-gateway
+    depends_on: [A-RUN-REQUESTER]
+    files:
+      - api/v1alpha1/types_application.go
+      - api/v1alpha1/resources.go
+      - internal/app/gateway/gateway.go
+      - internal/app/gateway/vault.go
+      - internal/controllers/nodeclaim/controller.go
+      - internal/controllers/nodeclaim/infra.go
+      - cmd/socialweb-computer/requestergateway.go
+      - deploy/sets
+      - docs/quickstart-prod.md
+    work: >
+      GatewaySpec.RequesterRef *commonv1.ObjectRef (Gateway Revision 39) and ProfileGatewayRequester
+      "requester". With requesterRef the root skips PlanAccount, the Pds, the Requester and GatewayAPI, composes
+      the cluster provider (ClusterStateDir under the requester's state dir) and GatewayNodeMarket with
+      HomeWorkspace = the gateway workspace and ContractWorkspace = the requester workspace; the NodeClaim
+      controller writes nodes-<hex> Infra there, whose ComputeContracts the MarketRequester's Requester runs
+      with the user's DID and the default policy; vault links for the node join secrets go to the requester's
+      vault (contracts/*). `run requester --with-gateway` applies the Gateway root into workspace gateway of the
+      same kcp and adds gateway.workspace to the ready file; `run requester kubeconfig <name> --cluster <c>`
+      prints the tenant admin kubeconfig path.
+    done_when: >
+      run requester --with-gateway (OAuth identity): kubectl apply of a Cluster {account: me, running: true} in the
+      gateway workspace goes Ready with the k3s control plane as HostProcesses of the requester's core;
+      `kubectl --kubeconfig $(run requester kubeconfig lr1 --cluster c1) apply -f examples/infra/k8s-cluster.yaml`
+      makes a NodeClaim, Infra nodes-<hex> appears in the requester workspace, a node rented from the
+      user-configured prod bidder joins Ready, the pod logs quickstart-k8s-ok; deleting the Deployment scales the
+      node to zero (about 2 min idle) and the contract is Released; a requester restart keeps the cluster.
+    risks:
+      - "k3s in a user namespace needs subids and cgroup delegation on the host: run requester --with-gateway must preflight what install gateway checks (check-host -role gateway subset)."
+      - "The nodes-<hex> Infra record mirror writes computer.socialweb.infra to the owner repo: needs the repo link from the gateway root to the requester's repo; Retain only."
+      - "Two roots in one kcp share one core: CheckWorkloads per root; profile requester must not render the gateway set's web app or association-watch."
+      - "Gateway Revision 39 must not collide with a burned revision on prod; read deploy/apiresourceschema-revisions.txt first."
+    status: todo
+
+  - id: D-AGENT-IDENTITY
+    title: "atirc agents from the long-lived requester: OAuth and remote-PDS identities proven, and a local-PDS identity that signs service auth"
+    track: T4-identity
+    depends_on: [A-RUN-REQUESTER]
+    files:
+      - internal/market/requester/requester.go
+      - internal/market/requester/atirc.go
+      - internal/market/requester/secrets.go
+      - internal/app/marketrequester/marketrequester.go
+      - internal/services/requester/wiring.go
+      - docs/quickstart-prod.md
+    work: >
+      OAuth: no code; prove from run requester. pdsAccount: prove the owner MarketIdentity service auth mints
+      (an app password may call getServiceAuth for chat.atirc.mint) and that revoke works by the token itself.
+      localRepo: when the identity's DID is on the public PLC (spec.network.plcDirectoryUrl
+      https://plc.directory) and its Pds component is public (ingress Exposure Ready), the MarketRequester local
+      path adds compose.ServiceAuthLink(requester, the Pds component, did) and the Requester selects that service
+      auth (requester.go:643-650: a third case, local Pds service auth, logged requester_service_auth signing
+      local-pds); otherwise it stays nil. A spec.agent contract whose requester handle ends in .local, or whose
+      handle does not resolve to its DID, fails before the RFP with one message naming --atproto-handle. Per
+      D6, a spec.agent contract whose secretsRef path holds no bundle gets the placeholder bundle from the
+      Requester.
+    done_when: >
+      From run requester: OAuth QR identity, kubectl apply of agent-vm.yaml with no bao step logs
+      requester_atirc_minted, agent-start.yaml makes <label>-<rkey>.<handle> JOIN the owner channel, release
+      revokes before vm.terminated; the same with a pdsAccount identity on bsky.social; a localRepo identity with
+      --atproto-handle on a test domain and the PDS behind xrpc.fedproxy.com mints and joins; a localRepo identity
+      with the default .local handle fails the agent contract before the RFP with the --atproto-handle message,
+      and a plain VM contract of it still works.
+    risks:
+      - "Unknown atirc checks (D4): ask atirc-dev through the lead before coding the local-PDS case."
+      - "A service-auth path for localRepo also changes what bidders see (submitRfp/submitAccept callbacks may start sending service auth); keep the market callbacks unchanged and use the new source only for the atirc issuer, or prove the bidders accept both."
+      - "The guest requester R2 and spec.atircParentRef paths share atirc.go; they must keep their parent-bearer issuer."
+    status: todo
+
+  - id: D-AGENT-INGRESS
+    title: "Document and prove the ingress options a local-PDS requester needs for the agent, and what a remote-PDS one needs"
+    track: T7-docs-acceptance
+    depends_on: [A-RUN-REQUESTER, D-AGENT-IDENTITY]
+    files:
+      - docs/quickstart-prod.md
+      - cmd/socialweb-computer/ingressopts.go
+      - deploy/apps/option-map.yaml
+    work: >
+      Two ingresses, two jobs. PDS ingress (spec.ingress; local PDS only): makes the DID document's atproto_pds
+      endpoint, the handle's /.well-known/atproto-did, the relay crawl and the bidders' record reads reach the
+      local PDS: `--ingress-xrpc-host xrpc.fedproxy.com` (the did:key ingress relay, the standalone default),
+      `--ingress-provider opentunnel --ingress-opentunnel-*`, or `--ingress-public-host <host>` behind the user's
+      own edge. Requester ingress (spec.requesterIngress; every identity): submitBid, submitEvent and getSecrets
+      (the agent's ATIRC_TOKEN reaches the guest through getSecrets): `--requester-ingress-provider
+      webrtc|xrpc-subscription|opentunnel|iroh`, `--requester-ingress-webrtc-stun`; comms Firehose has none and
+      then needs `--secrets-fallback Sealed`. A remote-PDS identity needs only the requester ingress. Add any
+      option-map rows the requester lacks for these flags; the ready file reports both public URLs.
+    done_when: >
+      quickstart-prod.md has a table of the options per identity; a localRepo run requester with the default
+      xrpc-subscription PDS ingress and one with opentunnel each answer `curl https://<pds public>/xrpc/_health`
+      and resolve the handle to the DID, and the agent joins (D-AGENT-IDENTITY); a pdsAccount run requester with
+      requester ingress webrtc gets its bundle by getSecrets (SecretsApplied reason GetSecrets).
+    risks:
+      - "xrpc.fedproxy.com is prod infrastructure shared by every bidder; a new load pattern goes to the lead first."
+    status: todo
+
+  - id: E-DEV-COMPUTE-KINDS
+    title: "dev up --compute-kinds vm,deno for the network bidders"
+    track: T5-dev-up
+    depends_on: []
+    files:
+      - api/v1alpha1/types_application.go
+      - api/v1alpha1/resources.go
+      - internal/app/marketnetwork/devup.go
+      - internal/app/marketnetwork/children.go
+      - cmd/socialweb-computer/dev.go
+      - cmd/socialweb-computer/main.go
+      - cmd/socialweb-computer/bidder.go
+      - docs/quickstart-local.md
+      - docs/acceptance/0012-infra-quickstart.md
+    work: >
+      NetworkApp.ComputeKinds []string (listType=set, values vm|deno; MarketNetwork Revision 32); BidderVMDefaults
+      gains ComputeKinds and fill copies it to every bidder app; children.go passes app.ComputeKinds into the
+      MarketBidderSpec; `dev up --compute-kinds` with the validation of run bidder (one shared parse function, no
+      copy); docs drop the manual MarketBidder apply.
+    done_when: >
+      dev up --bidders 1 --compute-kinds vm,deno: `k root:bidder-1 get marketbidders.socialweb.computer app -o
+      jsonpath='{.spec.computeKinds}'` prints [vm,deno] with no manual apply and deno-sandbox.yaml reaches
+      Deployed with quickstart-deno-ok; without the flag it prints [vm] or nothing and a deno contract gets no bid.
+    risks:
+      - "A MarketNetwork schema change: every dev network must be brought down and up again after the bump (not a dev restart)."
+    status: todo
+
+  - id: F2-VOUCH-SCOPE
+    title: "vouch.yaml through an OAuth or pdsAccount requester repo: the optional vouch scope and Retain"
+    track: T4-identity
+    depends_on: []
+    files:
+      - internal/atproto/oauth/scope.go
+      - typescript-helpers lib/oauth-scope/mod.ts
+      - examples/infra/vouch.yaml
+      - examples/infra/vouch-bidder-operator.yaml
+    work: >
+      repo:sh.tangled.graph.vouch?action=create&action=update in RequesterOAuthScope and in OptionalScopes (D7), so
+      a session granted without it stays Ready with pendingAction signInAgain ScopeUpgrade; both vouch examples
+      get deletionPolicy Retain (D8).
+    done_when: >
+      run requester with a fresh OAuth sign-in: vouch.yaml applies and the AtprotoRecord is Applied with
+      at://<did>/sh.tangled.graph.vouch/<bidder did>; an identity signed in before the change stays Ready with
+      pendingAction ScopeUpgrade and is not expired on rollout; kubectl delete of the AtprotoRecord leaves the
+      record in the repo.
+    risks:
+      - "An OAuth scope change reaches every OAuth identity on rollout (memory: scope add forces re-sign-in for oauthQr identities): it must land only as optional, announced to the lead before an rc."
+    status: todo
+
+  - id: F3-BIDDER-OPERATOR-REPO
+    title: "vouch-bidder-operator.yaml on an installed bidder: an optional operator sign-in that composes the operator repo"
+    track: T6-bidder-operator
+    depends_on: [F2-VOUCH-SCOPE]
+    files:
+      - internal/app/marketbidder/marketbidder.go
+      - internal/app/compose/operator.go
+      - internal/atproto/oauth/scope.go
+      - docs/bidder.md
+    work: >
+      Per D5: a MarketBidder option (operator-signin) composes a MarketIdentity operator (oauthQr, a scope of
+      repo:sh.tangled.graph.vouch only), the AtprotoRepo operator and the ComponentLink link-records-operator for
+      AtprotoRecords labelled apps.socialweb.computer/record-repo: operator, the same names the market network
+      uses; nothing changes for a bidder without the option.
+    done_when: >
+      On a test bidder installed with the option, after the operator's scripted QR sign-in, kubectl apply of
+      vouch-bidder-operator.yaml in the bidder kcp is Applied with at://<operator did>/sh.tangled.graph.vouch/<requester
+      did>; the bidder then bids for that requester under bidder-tangled-vouch; a bidder without the option is
+      unchanged (0006 compat smoke).
+    risks:
+      - "A second OAuth session in a prod bidder kcp; the bidder's own oauthQr identity must be untouched (plan 0030)."
+    status: todo
+
+  - id: F-MIXED-PROD
+    title: "examples/infra/mixed-prod.yaml and acceptance 0013: bring it up against a user-configured bidder with the vouch examples, default policy only"
+    track: T7-docs-acceptance
+    depends_on: [A-RUN-REQUESTER, D-AGENT-IDENTITY, F2-VOUCH-SCOPE]
+    files:
+      - examples/infra/mixed-prod.yaml
+      - docs/acceptance/0013-mixed-prod.md
+      - docs/acceptance/README.md
+      - docs/quickstart-prod.md
+    work: >
+      mixed-prod.yaml: EphemeralInfra mixedprod, ttlSeconds 3600, endWhen Complete; vm1 (your key, a cloud-init
+      marker, bidderDids [REPLACE-BIDDER-DID], tunnel ssh:22 webrtc), sbx1 (computeKind deno, the same bidder pin;
+      the operator must serve deno), agent1 (agent, secrets entry for the bundle path); no policy field anywhere.
+      0013: preconditions (a bidder the user configured: install bidder with bidder-tangled-vouch and, for sbx1,
+      --compute-kinds vm,deno; the requester account; both vouches; an atirc token to watch), steps (run
+      requester with ready file; wait; vouch.yaml in the requester kcp; the operator vouch by F3 or goat; apply
+      mixed-prod.yaml; ssh vm1; read sbx1 stdout; agent-start.yaml and the JOIN; with --with-gateway a Cluster and
+      k8s-cluster.yaml; Ctrl-C and restart mid-run; delete; the same with install requester), expected
+      observations, pass criteria, cleanup, pitfalls; a row in docs/acceptance/README.md.
+    done_when: >
+      `kubectl apply --dry-run=server -f examples/infra/mixed-prod.yaml` passes against a run requester; 0013 is
+      written in the format of 0012 and linked from the acceptance README and quickstart-prod.md.
+    risks:
+      - "The deno contract needs a bidder that opted in; without one sbx1 stays Degraded (no bids); the runbook says so."
+    status: todo
+
+  - id: ACC39-MIXED-PROD
+    title: "Acceptance 0013 passes live against a user-configured prod bidder, default policy only"
+    track: T7-docs-acceptance
+    depends_on: [A-RUN-REQUESTER, B-INSTALL-REQUESTER, C-GATEWAY-COMPOSE, D-AGENT-IDENTITY, D-AGENT-INGRESS, E-DEV-COMPUTE-KINDS, F-MIXED-PROD, F2-VOUCH-SCOPE, F3-BIDDER-OPERATOR-REPO]
+    done_when: >
+      The lead runs 0013: from run requester (OAuth QR) and from install requester, mixed-prod.yaml reaches Deployed
+      on the user's bidder with requester-tangled-vouch and bidder-tangled-vouch both run and allowing; vm1 ssh
+      prints the marker; sbx1 stdout is read; agent1's nick joins and answers; a tenant cluster node joins and the
+      pod runs; a restart mid-run keeps every Held contract; delete releases everything, tokens revoked before
+      vm.terminated, the bidder host empty, the vouch records still in both repos; no secret on any terminal or log;
+      the Not Supported tables of both quickstarts are empty.
+    status: todo
