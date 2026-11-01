@@ -3297,7 +3297,7 @@ api <- contract <- kit <- transport <- impl <- controllers <- app <- cmd
 | `internal/kit/**` | kit (common helpers) | no concept |
 | `internal/controllers/runtime/<pkg>` | transport | the dynamic client and unstructured objects are allowed only here and in `internal/apigen` |
 | `internal/controllers/**`, and the package `internal/controllers/runtime` itself | controllers (adapters) | one reconciler per kind |
-| `internal/app/**`, `internal/stack/**`, `internal/devcore/**`, `internal/<x>main` | app (factory) | `<x>main` is a package directly under `internal/` whose name ends in `main` |
+| `internal/app/**`, `internal/stack/**`, `internal/devcore/**`, `pkg/**`, `internal/<x>main` | app (factory) | `<x>main` is a package directly under `internal/` whose name ends in `main`; `pkg/**` is the factory another module imports (the internal rule keeps it out of `internal/`) |
 | `cmd/**`, `hack/**`, `internal/apigen/**`, `internal/lexgen/**` | cmd (CLI and tools) | |
 | every other `internal/**` | impl | this includes `internal/bus`, the component runtime and the adapters under `internal/services/**` |
 | a directory with no Go package | assets | rank 0, so any layer may embed it |
@@ -3723,6 +3723,7 @@ internal/stack/componentcore/     the component core: the controller manager, ev
 internal/stack/gatewaykcp/        `serve gateway kcp`: the gateway's kcp, the bootstrap cluster, the clusterprovider env
 internal/stack/gatewayssh/        `run gateway ssh`: the ssh gateway's spec, kcp and listener
 internal/stack/request/           `run request`: invocations, contract summaries, the requester's kcp
+pkg/embedded/                     the requester an app embeds (the AT-IRC iOS app, plan 0038): the MarketRequester root and its Requester in the caller's in-process kcp, comms Firehose, a memory vault, in-process Exposures, no listener and no HostProcess; on ios the policy sandbox fails closed until plan 0038 I6
 internal/devcore/                 `internal dev-core`: one dev instance's core: components, host processes, postgres, OpenBao, store maintenance, log caps, TTL scope
 internal/foldmain/                the Invocation a verb body runs with (args, env, stdio, the resolved bin/<sha>/ path, the verb words) and the re-exec argv it builds
 internal/ccmmain/                 `internal cloud-controller-manager`; the clusterprovider re-execs it as `<bin/sha path> internal cloud-controller-manager` with its env rebuilt

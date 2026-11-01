@@ -21,7 +21,7 @@ var layerRank = map[string]int{
 
 const layerOrder = "api <- contract <- kit <- transport <- impl <- controllers <- app <- cmd"
 
-var appRoots = []string{"internal/app", "internal/stack", "internal/devcore"}
+var appRoots = []string{"internal/app", "internal/stack", "internal/devcore", "pkg"}
 
 var toolRoots = []string{"cmd", "test", "hack", "internal/apigen", "internal/lexgen"}
 
