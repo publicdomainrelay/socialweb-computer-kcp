@@ -28,9 +28,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// ../../../node_modules/.deno/iso-datestring-validator@2.2.2/node_modules/iso-datestring-validator/dist/index.js
+// ../../../../../node_modules/.deno/iso-datestring-validator@2.2.2/node_modules/iso-datestring-validator/dist/index.js
 var require_dist = __commonJS({
-  "../../../node_modules/.deno/iso-datestring-validator@2.2.2/node_modules/iso-datestring-validator/dist/index.js"(exports) {
+  "../../../../../node_modules/.deno/iso-datestring-validator@2.2.2/node_modules/iso-datestring-validator/dist/index.js"(exports) {
     (() => {
       "use strict";
       var e = {
@@ -90,49 +90,7 @@ var require_dist = __commonJS({
   }
 });
 
-// ../deno-typescript/bid-payload.ts
-var BID_PAYLOAD_FILTER_POLICY_NAME = "bid-payload";
-function createBidPayloadFilterPolicy() {
-  const DEFAULT_ALLOWED = [
-    "com.publicdomainrelay.temp.market.bids.free"
-  ];
-  return {
-    kind: "work",
-    name: BID_PAYLOAD_FILTER_POLICY_NAME,
-    description: "Only accept bids whose payload type is allowed.",
-    perspectives: [
-      "requester"
-    ],
-    async evaluate(ctx) {
-      const allowed = Array.isArray(ctx.args.allowedPayloadNsids) ? ctx.args.allowedPayloadNsids : DEFAULT_ALLOWED;
-      if (!ctx.offer) return {
-        allow: true,
-        violations: []
-      };
-      if (!allowed.includes(ctx.offer.payloadNsid)) {
-        return {
-          allow: false,
-          violations: [
-            {
-              msg: `bid payload type ${ctx.offer.payloadNsid} not allowed`,
-              policyId: BID_PAYLOAD_FILTER_POLICY_NAME
-            }
-          ]
-        };
-      }
-      return {
-        allow: true,
-        violations: []
-      };
-    }
-  };
-}
-
 // ../deno-typescript-shared/constants.ts
-var VOUCH_NSID = "sh.tangled.graph.vouch";
-var BADGE_BLUE_KEYS_NSID = "com.publicdomainrelay.temp.badgeBlueKeys";
-var BIDDER_ASSOCIATE = "bidder_associate";
-var REQUESTER_ASSOCIATE = "requester_associate";
 function splitAtUri(uri) {
   const parts = uri.replace(/^at:\/\//, "").split("/");
   return {
@@ -272,7 +230,7 @@ function writePolicyResult(store, key, result, ttlMs = 3e4) {
   });
 }
 
-// ../../../node_modules/.deno/@atproto+common-web@0.5.6/node_modules/@atproto/common-web/dist/check.js
+// ../../../../../node_modules/.deno/@atproto+common-web@0.5.14/node_modules/@atproto/common-web/dist/check.js
 var check_exports = {};
 __export(check_exports, {
   assure: () => assure,
@@ -291,7 +249,7 @@ var isObject = (obj) => {
   return typeof obj === "object" && obj !== null;
 };
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base32.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base32.js
 var base32_exports = {};
 __export(base32_exports, {
   base32: () => base32,
@@ -305,7 +263,7 @@ __export(base32_exports, {
   base32z: () => base32z
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bytes.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bytes.js
 var empty = new Uint8Array(0);
 function equals(aa, bb) {
   if (aa === bb) {
@@ -340,7 +298,7 @@ function toString(b) {
   return new TextDecoder().decode(b);
 }
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/vendor/base-x.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/vendor/base-x.js
 function base(ALPHABET, name2) {
   if (ALPHABET.length >= 255) {
     throw new TypeError("Alphabet too long");
@@ -475,7 +433,7 @@ var src = base;
 var _brrp__multiformats_scope_baseX = src;
 var base_x_default = _brrp__multiformats_scope_baseX;
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base.js
 var Encoder = class {
   name;
   prefix;
@@ -655,7 +613,7 @@ function rfc4648({ name: name2, prefix, bitsPerChar, alphabet: alphabet2 }) {
   });
 }
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base32.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base32.js
 var base32 = rfc4648({
   prefix: "b",
   name: "base32",
@@ -711,7 +669,7 @@ var base32z = rfc4648({
   bitsPerChar: 5
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base36.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base36.js
 var base36_exports = {};
 __export(base36_exports, {
   base36: () => base36,
@@ -728,7 +686,7 @@ var base36upper = baseX({
   alphabet: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base58.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base58.js
 var base58_exports = {};
 __export(base58_exports, {
   base58btc: () => base58btc,
@@ -745,7 +703,7 @@ var base58flickr = baseX({
   alphabet: "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ"
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/vendor/varint.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/vendor/varint.js
 var encode_1 = encode2;
 var MSB = 128;
 var REST = 127;
@@ -804,7 +762,7 @@ var varint = {
 var _brrp_varint = varint;
 var varint_default = _brrp_varint;
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/varint.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/varint.js
 function decode3(data, offset = 0) {
   const code2 = varint_default.decode(data, offset);
   return [
@@ -820,7 +778,7 @@ function encodingLength(int) {
   return varint_default.encodingLength(int);
 }
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/digest.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/digest.js
 function create2(code2, digest2) {
   const size = digest2.byteLength;
   const sizeOffset = encodingLength(code2);
@@ -865,7 +823,7 @@ var Digest = class {
   }
 };
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/cid.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/cid.js
 function format(link, base3) {
   const { bytes, version } = link;
   switch (version) {
@@ -1225,7 +1183,7 @@ function encodeCID(version, code2, multihash) {
 }
 var cidSymbol = Symbol.for("@ipld/js-cid/CID");
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/sha2.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/sha2.js
 var sha2_exports = {};
 __export(sha2_exports, {
   sha256: () => sha256,
@@ -1233,7 +1191,7 @@ __export(sha2_exports, {
 });
 import crypto from "node:crypto";
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/hasher.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/hasher.js
 var DEFAULT_MIN_DIGEST_LENGTH = 20;
 function from2({ name: name2, code: code2, encode: encode5, minDigestLength, maxDigestLength }) {
   return new Hasher(name2, code2, encode5, minDigestLength, maxDigestLength);
@@ -1281,7 +1239,7 @@ function createDigest(digest2, code2, truncate) {
   return create2(code2, digest2);
 }
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/sha2.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/sha2.js
 var sha256 = from2({
   name: "sha2-256",
   code: 18,
@@ -1293,7 +1251,7 @@ var sha512 = from2({
   encode: (input2) => coerce(crypto.createHash("sha512").update(input2).digest())
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base64.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base64.js
 var base64_exports = {};
 __export(base64_exports, {
   base64: () => base64,
@@ -1326,11 +1284,11 @@ var base64urlpad = rfc4648({
   bitsPerChar: 6
 });
 
-// ../../../node_modules/.deno/@atproto+lex-data@0.1.5/node_modules/@atproto/lex-data/dist/cid.js
+// ../../../../../node_modules/.deno/@atproto+lex-data@0.1.8/node_modules/@atproto/lex-data/dist/cid.js
 var SHA256_HASH_CODE = sha256.code;
 var SHA512_HASH_CODE = sha512.code;
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/external.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -1442,7 +1400,7 @@ __export(external_exports, {
   void: () => voidType
 });
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/util.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {
@@ -1574,7 +1532,7 @@ var getParsedType = (data) => {
   }
 };
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/ZodError.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -1707,7 +1665,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/locales/en.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -1800,7 +1758,7 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/errors.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function setErrorMap(map) {
   overrideErrorMap = map;
@@ -1809,7 +1767,7 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [
@@ -1925,7 +1883,7 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? {
@@ -1934,7 +1892,7 @@ var errorUtil;
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/types.js
+// ../../../../../node_modules/.deno/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -5636,7 +5594,7 @@ var coerce2 = {
 };
 var NEVER = INVALID;
 
-// ../../../node_modules/.deno/@atproto+common-web@0.5.6/node_modules/@atproto/common-web/dist/types.js
+// ../../../../../node_modules/.deno/@atproto+common-web@0.5.14/node_modules/@atproto/common-web/dist/types.js
 var cidSchema = external_exports.unknown().transform((obj, ctx) => {
   const cid = CID.asCID(obj);
   if (cid == null) {
@@ -5688,17 +5646,17 @@ var def = {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+common-web@0.5.6/node_modules/@atproto/common-web/dist/times.js
+// ../../../../../node_modules/.deno/@atproto+common-web@0.5.14/node_modules/@atproto/common-web/dist/times.js
 var SECOND = 1e3;
 var MINUTE = SECOND * 60;
 var HOUR = MINUTE * 60;
 var DAY = HOUR * 24;
 
-// ../../../node_modules/.deno/@atproto+syntax@0.7.2/node_modules/@atproto/syntax/dist/datetime.js
+// ../../../../../node_modules/.deno/@atproto+syntax@0.7.6/node_modules/@atproto/syntax/dist/datetime.js
 var isoDatestringValidator = __toESM(require_dist());
 var { isValidISODateString } = ((m) => m.default ?? m)(isoDatestringValidator);
 
-// ../../../node_modules/.deno/@atproto+common-web@0.5.6/node_modules/@atproto/common-web/dist/did-doc.js
+// ../../../../../node_modules/.deno/@atproto+common-web@0.5.14/node_modules/@atproto/common-web/dist/did-doc.js
 var getDid = (doc) => {
   const id = doc.id;
   if (typeof id !== "string") {
@@ -5814,7 +5772,7 @@ var didDocument = external_exports.object({
   service: external_exports.array(service).optional()
 });
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/errors.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/errors.js
 var DidNotFoundError = class extends Error {
   constructor(did) {
     super(`Could not resolve DID: ${did}`);
@@ -5847,7 +5805,7 @@ var UnsupportedDidWebPathError = class extends Error {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/const.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/const.js
 var P256_DID_PREFIX = new Uint8Array([
   128,
   36
@@ -5861,7 +5819,7 @@ var DID_KEY_PREFIX = "did:key:";
 var P256_JWT_ALG = "ES256";
 var SECP256K1_JWT_ALG = "ES256K";
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/equals.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/equals.js
 function equals3(a, b) {
   if (a === b) {
     return true;
@@ -5877,32 +5835,32 @@ function equals3(a, b) {
   return true;
 }
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/alloc.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/alloc.node.js
 import { Buffer as Buffer2 } from "node:buffer";
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/util/as-uint8array.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/util/as-uint8array.node.js
 function asUint8Array(buf) {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/alloc.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/alloc.node.js
 function allocUnsafe(size = 0) {
   return asUint8Array(Buffer2.allocUnsafe(size));
 }
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/compare.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/compare.node.js
 import { Buffer as Buffer3 } from "node:buffer";
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/concat.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/concat.node.js
 import { Buffer as Buffer4 } from "node:buffer";
 function concat(arrays, length2) {
   return asUint8Array(Buffer4.concat(arrays, length2));
 }
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/from-string.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/from-string.node.js
 import { Buffer as Buffer5 } from "node:buffer";
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base10.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base10.js
 var base10_exports = {};
 __export(base10_exports, {
   base10: () => base10
@@ -5913,7 +5871,7 @@ var base10 = baseX({
   alphabet: "0123456789"
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base16.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base16.js
 var base16_exports = {};
 __export(base16_exports, {
   base16: () => base16,
@@ -5932,7 +5890,7 @@ var base16upper = rfc4648({
   bitsPerChar: 4
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base2.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base2.js
 var base2_exports = {};
 __export(base2_exports, {
   base2: () => base2
@@ -5944,7 +5902,7 @@ var base2 = rfc4648({
   bitsPerChar: 1
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base256emoji.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base256emoji.js
 var base256emoji_exports = {};
 __export(base256emoji_exports, {
   base256emoji: () => base256emoji
@@ -5990,7 +5948,7 @@ var base256emoji = from({
   decode: decode5
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base8.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/base8.js
 var base8_exports = {};
 __export(base8_exports, {
   base8: () => base8
@@ -6002,7 +5960,7 @@ var base8 = rfc4648({
   bitsPerChar: 3
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/identity.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/bases/identity.js
 var identity_exports = {};
 __export(identity_exports, {
   identity: () => identity
@@ -6014,11 +5972,11 @@ var identity = from({
   decode: (str) => fromString(str)
 });
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/codecs/json.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/codecs/json.js
 var textEncoder = new TextEncoder();
 var textDecoder = new TextDecoder();
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/identity.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/hashes/identity.js
 var identity_exports2 = {};
 __export(identity_exports2, {
   identity: () => identity2
@@ -6042,7 +6000,7 @@ var identity2 = {
   digest
 };
 
-// ../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/basics.js
+// ../../../../../node_modules/.deno/multiformats@13.4.2/node_modules/multiformats/dist/src/basics.js
 var bases = {
   ...identity_exports,
   ...base2_exports,
@@ -6060,7 +6018,7 @@ var hashes = {
   ...identity_exports2
 };
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/util/bases.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/util/bases.js
 function createCodec(name2, prefix, encode5, decode6) {
   return {
     name: name2,
@@ -6107,7 +6065,7 @@ var BASES = {
 };
 var bases_default = BASES;
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/from-string.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/from-string.node.js
 function fromString2(string2, encoding = "utf8") {
   const base3 = bases_default[encoding];
   if (base3 == null) {
@@ -6119,7 +6077,7 @@ function fromString2(string2, encoding = "utf8") {
   return base3.decoder.decode(`${base3.prefix}${string2}`);
 }
 
-// ../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/to-string.node.js
+// ../../../../../node_modules/.deno/uint8arrays@5.1.1/node_modules/uint8arrays/dist/src/to-string.node.js
 import { Buffer as Buffer6 } from "node:buffer";
 function toString2(array, encoding = "utf8") {
   const base3 = bases_default[encoding];
@@ -6132,11 +6090,11 @@ function toString2(array, encoding = "utf8") {
   return base3.encoder.encode(array).substring(1);
 }
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto2 = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -6266,7 +6224,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/utils.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/utils.js
 var _0n = /* @__PURE__ */ BigInt(0);
 var _1n = /* @__PURE__ */ BigInt(1);
 function _abool2(value, title = "") {
@@ -6405,7 +6363,7 @@ function memoized(fn) {
   };
 }
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/modular.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/modular.js
 var _0n2 = BigInt(0);
 var _1n2 = BigInt(1);
 var _2n = /* @__PURE__ */ BigInt(2);
@@ -6715,7 +6673,7 @@ function mapHashToField(key, fieldOrder, isLE = false) {
   return isLE ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE) {
   if (typeof view.setBigUint64 === "function") return view.setBigUint64(byteOffset, value, isLE);
   const _32n2 = BigInt(32);
@@ -6864,7 +6822,7 @@ var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
   327033209
 ]);
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_u64.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -6913,7 +6871,7 @@ var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0
 var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
 var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -7298,7 +7256,7 @@ var sha2562 = /* @__PURE__ */ createHasher(() => new SHA256());
 var sha5122 = /* @__PURE__ */ createHasher(() => new SHA512());
 var sha384 = /* @__PURE__ */ createHasher(() => new SHA384());
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/hmac.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash {
   constructor(hash, _key) {
     super();
@@ -7363,7 +7321,7 @@ var HMAC = class extends Hash {
 var hmac = (hash, key, message) => new HMAC(hash, key).update(message).digest();
 hmac.create = (hash, key) => new HMAC(hash, key);
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/curve.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/curve.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 function negateCt(condition, item) {
@@ -7651,7 +7609,7 @@ function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
   };
 }
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/abstract/weierstrass.js
 var divNearest = (num, den) => (num + (num >= 0 ? den : -den) / _2n2) / den;
 function _splitEndoScalar(k, basis, n) {
   const [[a1, b1], [a2, b2]] = basis;
@@ -8648,7 +8606,7 @@ function weierstrass(c) {
   return _ecdsa_new_output_to_legacy(c, signs);
 }
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/_shortw_utils.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/_shortw_utils.js
 function createCurve(curveDef, defHash) {
   const create3 = (hash) => weierstrass({
     ...curveDef,
@@ -8660,7 +8618,7 @@ function createCurve(curveDef, defHash) {
   };
 }
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/nist.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/nist.js
 var p256_CURVE = {
   p: BigInt("0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
   n: BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"),
@@ -8712,10 +8670,10 @@ var p521 = createCurve({
   ]
 }, sha5122);
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/p256.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/p256.js
 var p2562 = p256;
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/p256/encoding.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/p256/encoding.js
 var compressPubkey = (pubkeyBytes) => {
   const point = p2562.ProjectivePoint.fromHex(pubkeyBytes);
   return point.toRawBytes(true);
@@ -8728,27 +8686,34 @@ var decompressPubkey = (compressed) => {
   return point.toRawBytes(false);
 };
 
-// ../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha256.js
+// ../../../../../node_modules/.deno/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha256.js
 var sha2563 = sha2562;
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/utils.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/utils.js
 var extractMultikey = (did) => {
   if (!did.startsWith(DID_KEY_PREFIX)) {
     throw new Error(`Incorrect prefix for did:key: ${did}`);
   }
   return did.slice(DID_KEY_PREFIX.length);
 };
+var MAX_BASE58_KEY_LENGTH = 128;
+var base58ToKeyBytes = (str) => {
+  if (str.length > MAX_BASE58_KEY_LENGTH) {
+    throw new Error(`base58btc key too long (${str.length} > ${MAX_BASE58_KEY_LENGTH})`);
+  }
+  return fromString2(str, "base58btc");
+};
 var extractPrefixedBytes = (multikey) => {
   if (!multikey.startsWith(BASE58_MULTIBASE_PREFIX)) {
     throw new Error(`Incorrect prefix for multikey: ${multikey}`);
   }
-  return fromString2(multikey.slice(BASE58_MULTIBASE_PREFIX.length), "base58btc");
+  return base58ToKeyBytes(multikey.slice(BASE58_MULTIBASE_PREFIX.length));
 };
 var hasPrefix = (bytes, prefix) => {
   return equals3(prefix, bytes.subarray(0, prefix.byteLength));
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/p256/operations.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/p256/operations.js
 var verifyDidSig = async (did, data, sig, opts) => {
   const prefixedBytes = extractPrefixedBytes(extractMultikey(did));
   if (!hasPrefix(prefixedBytes, P256_DID_PREFIX)) {
@@ -8766,7 +8731,7 @@ var verifySig = async (publicKey, data, sig, opts) => {
   });
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/p256/plugin.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/p256/plugin.js
 var p256Plugin = {
   prefix: P256_DID_PREFIX,
   jwtAlg: P256_JWT_ALG,
@@ -8775,7 +8740,7 @@ var p256Plugin = {
   decompressPubkey
 };
 
-// ../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/secp256k1.js
+// ../../../../../node_modules/.deno/@noble+curves@1.9.7/node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1_CURVE = {
   p: BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
   n: BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"),
@@ -8830,7 +8795,7 @@ var secp256k1 = createCurve({
   endo: secp256k1_ENDO
 }, sha2562);
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/secp256k1/encoding.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/secp256k1/encoding.js
 var compressPubkey2 = (pubkeyBytes) => {
   const point = secp256k1.ProjectivePoint.fromHex(pubkeyBytes);
   return point.toRawBytes(true);
@@ -8843,7 +8808,7 @@ var decompressPubkey2 = (compressed) => {
   return point.toRawBytes(false);
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/secp256k1/operations.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/secp256k1/operations.js
 var verifyDidSig2 = async (did, data, sig, opts) => {
   const prefixedBytes = extractPrefixedBytes(extractMultikey(did));
   if (!hasPrefix(prefixedBytes, SECP256K1_DID_PREFIX)) {
@@ -8861,7 +8826,7 @@ var verifySig2 = async (publicKey, data, sig, opts) => {
   });
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/secp256k1/plugin.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/secp256k1/plugin.js
 var secp256k1Plugin = {
   prefix: SECP256K1_DID_PREFIX,
   jwtAlg: SECP256K1_JWT_ALG,
@@ -8870,13 +8835,13 @@ var secp256k1Plugin = {
   decompressPubkey: decompressPubkey2
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/plugins.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/plugins.js
 var plugins = [
   p256Plugin,
   secp256k1Plugin
 ];
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/did.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/did.js
 var parseMultikey = (multikey) => {
   const prefixedBytes = extractPrefixedBytes(multikey);
   const plugin = plugins.find((p) => hasPrefix(prefixedBytes, p.prefix));
@@ -8908,7 +8873,7 @@ function formatDidKey(jwtAlg, keyBytes) {
   return `${DID_KEY_PREFIX}${formatMultikey(jwtAlg, keyBytes)}`;
 }
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/multibase.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/multibase.js
 var multibaseToBytes = (mb) => {
   const base3 = mb[0];
   const key = mb.slice(1);
@@ -8922,7 +8887,7 @@ var multibaseToBytes = (mb) => {
     case "B":
       return fromString2(key, "base32upper");
     case "z":
-      return fromString2(key, "base58btc");
+      return base58ToKeyBytes(key);
     case "m":
       return fromString2(key, "base64");
     case "u":
@@ -8934,7 +8899,7 @@ var multibaseToBytes = (mb) => {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+crypto@0.5.4/node_modules/@atproto/crypto/dist/verify.js
+// ../../../../../node_modules/.deno/@atproto+crypto@0.5.7/node_modules/@atproto/crypto/dist/verify.js
 var verifySignature = (didKey, data, sig, opts) => {
   const parsed = parseDidKey(didKey);
   if (opts?.jwtAlg && opts.jwtAlg !== parsed.jwtAlg) {
@@ -8947,7 +8912,7 @@ var verifySignature = (didKey, data, sig, opts) => {
   return plugin.verifySignature(didKey, data, sig, opts);
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/atproto-data.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/atproto-data.js
 var getKey = (doc) => {
   const key = getSigningKey(doc);
   if (!key) return void 0;
@@ -9004,7 +8969,7 @@ var ensureAtprotoKey = (doc) => {
   return signingKey;
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/base-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/base-resolver.js
 var BaseResolver = class {
   constructor(cache2) {
     this.cache = cache2;
@@ -9070,7 +9035,7 @@ var BaseResolver = class {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/util.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/util.js
 async function timed(ms, fn) {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), ms);
@@ -9083,7 +9048,7 @@ async function timed(ms, fn) {
   }
 }
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/web-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/web-resolver.js
 var DOC_PATH = "/.well-known/did.json";
 var DidWebResolver = class extends BaseResolver {
   constructor(timeout, cache2) {
@@ -9120,7 +9085,7 @@ var DidWebResolver = class extends BaseResolver {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/plc-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/plc-resolver.js
 var DidPlcResolver = class extends BaseResolver {
   constructor(plcUrl, timeout, cache2) {
     super(cache2);
@@ -9149,7 +9114,7 @@ var DidPlcResolver = class extends BaseResolver {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/did-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/did-resolver.js
 var DidResolver = class extends BaseResolver {
   constructor(opts) {
     super(opts.didCache);
@@ -9182,7 +9147,7 @@ var DidResolver = class extends BaseResolver {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/handle/index.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/handle/index.js
 import * as dns from "node:dns/promises";
 var SUBDOMAIN = "_atproto";
 var PREFIX = "did=";
@@ -9267,7 +9232,7 @@ var HandleResolver = class {
   }
 };
 
-// ../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/id-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/id-resolver.js
 var IdResolver = class {
   constructor(opts = {}) {
     const { timeout = 3e3, plcUrl, didCache } = opts;
@@ -9284,6 +9249,9 @@ var IdResolver = class {
 };
 
 // ../deno-typescript-shared/ctx.ts
+function noTrustSnapshot(did) {
+  return Promise.reject(new Error(`no trust snapshot is seeded for ${did}: operator and vouch lookups come only from the host snapshot`));
+}
 var PolicyEvalCtxImpl = class {
   policyName;
   args;
@@ -9325,18 +9293,18 @@ var PolicyEvalCtxImpl = class {
     this.#store = opts.store;
     this.#log = opts.log;
     this.#resolve = opts.resolve ?? ((ref) => this.#resolveCached(ref));
-    this.#resolveOperatorDid = opts.resolveOperatorDid ?? ((did) => this.#resolveOperatorFromBadgeBlueKeys(did));
-    this.#getVouchedDids = opts.getVouchedDids ?? ((did) => this.#vouchedDidsFromGraph(did));
+    this.#resolveOperatorDid = opts.resolveOperatorDid ?? noTrustSnapshot;
+    this.#getVouchedDids = opts.getVouchedDids ?? noTrustSnapshot;
   }
   /** Satisfies PolicyEvalCtx.resolve — getRecord on the strongRef, cached under rec/<uri>/<cid> when a store is present. */
   async resolve(ref) {
     return this.#resolve(ref);
   }
-  /** Satisfies PolicyEvalCtx.resolveOperatorDid — operator of a DID via badgeBlueKeys. */
+  /** Satisfies PolicyEvalCtx.resolveOperatorDid from the injected snapshot. */
   async resolveOperatorDid(did) {
     return this.#resolveOperatorDid(did);
   }
-  /** Satisfies PolicyEvalCtx.getVouchedDids — vouch/follow set via the Tangled graph. */
+  /** Satisfies PolicyEvalCtx.getVouchedDids from the injected snapshot. */
   async getVouchedDids(did) {
     return this.#getVouchedDids(did);
   }
@@ -9409,75 +9377,6 @@ var PolicyEvalCtxImpl = class {
     if (!res.ok) throw new Error(`getRecord ${ref.uri} failed: ${res.status}`);
     const data = await res.json();
     return data.value ?? {};
-  }
-  /** Paginated com.atproto.repo.listRecords via the repo's PDS (PDS caps pages at 100). */
-  async #listRecords(repo, collection, limit = 100) {
-    const pds = await this.#pdsFor(repo);
-    const all = [];
-    let cursor;
-    const pageLimit = Math.min(limit, 100);
-    do {
-      const url = new URL(`${pds}/xrpc/com.atproto.repo.listRecords`);
-      url.searchParams.set("repo", repo);
-      url.searchParams.set("collection", collection);
-      url.searchParams.set("limit", String(pageLimit));
-      if (cursor) url.searchParams.set("cursor", cursor);
-      const res = await fetch(url);
-      if (!res.ok) break;
-      const data = await res.json();
-      for (const r of data.records) {
-        all.push({
-          uri: r.uri,
-          value: r.value
-        });
-      }
-      cursor = data.cursor;
-    } while (cursor && all.length < limit);
-    return all.slice(0, limit);
-  }
-  /**
-   * Operator of a DID: a badgeBlueKeys record whose challenge is the subject's
-   * own DID and whose keyId is the operator. Bidders mint bidder_associate,
-   * requesters mint requester_associate — both point at the same operator, so
-   * either resolves it. A subject with no association has no separate operator.
-   */
-  async #resolveOperatorFromBadgeBlueKeys(did) {
-    try {
-      const records = await this.#listRecords(did, BADGE_BLUE_KEYS_NSID, 100);
-      for (const r of records) {
-        const v = r.value;
-        if (v.challenge !== did) continue;
-        const service2 = v.service;
-        if (service2 !== BIDDER_ASSOCIATE && service2 !== REQUESTER_ASSOCIATE) continue;
-        const keyId = v.keyId;
-        if (typeof keyId === "string" && keyId.startsWith("did:")) return keyId;
-      }
-    } catch (err) {
-      this.#emit("warn", "resolveOperatorDid failed", {
-        did,
-        error: String(err)
-      });
-    }
-    return null;
-  }
-  /** Vouch set: sh.tangled.graph.vouch records whose rkey is the vouched DID. */
-  async #vouchedDidsFromGraph(did) {
-    const vouched = /* @__PURE__ */ new Set();
-    try {
-      const records = await this.#listRecords(did, VOUCH_NSID, 100);
-      for (const r of records) {
-        const v = r.value;
-        if (v.kind === "denounce") continue;
-        const rkey = r.uri.split("/").pop() ?? "";
-        if (rkey.startsWith("did:")) vouched.add(rkey);
-      }
-    } catch (err) {
-      this.#emit("warn", "getVouchedDids failed", {
-        did,
-        error: String(err)
-      });
-    }
-    return vouched;
   }
   toJSON() {
     return {
@@ -9693,7 +9592,7 @@ function flatVouched(query) {
 async function scopeDecide(opts) {
   const { registry, named, perspective, selfDid, counterpartyDid, resolveOperatorDid, getVouchedDids } = opts;
   if (!Array.isArray(named) || named.length === 0) return void 0;
-  const snapshot = await buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, counterpartyDid);
+  let snapshot;
   let abstained = false;
   let firstDeny;
   for (const raw of named) {
@@ -9714,12 +9613,14 @@ async function scopeDecide(opts) {
       abstained = true;
       continue;
     }
+    const needsSnapshot = policy.needsTrustSnapshot === true || policy.needsVouchSet === true;
+    if (needsSnapshot) snapshot ??= await buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, counterpartyDid);
     const verdict = policy.decide({
       did: counterpartyDid,
       selfDid,
-      vouchedDids: flatVouched(snapshot),
+      vouchedDids: needsSnapshot && snapshot ? flatVouched(snapshot) : void 0,
       args,
-      query: snapshot
+      query: needsSnapshot ? snapshot : void 0
     });
     if (verdict === void 0) {
       abstained = true;
@@ -9742,6 +9643,44 @@ async function scopeDecide(opts) {
   return {
     allow: true,
     violations: []
+  };
+}
+
+// ../deno-typescript/bid-payload.ts
+var BID_PAYLOAD_FILTER_POLICY_NAME = "bid-payload";
+function createBidPayloadFilterPolicy() {
+  const DEFAULT_ALLOWED = [
+    "com.publicdomainrelay.temp.market.bids.free"
+  ];
+  return {
+    kind: "work",
+    name: BID_PAYLOAD_FILTER_POLICY_NAME,
+    description: "Only accept bids whose payload type is allowed.",
+    perspectives: [
+      "requester"
+    ],
+    async evaluate(ctx) {
+      const allowed = Array.isArray(ctx.args.allowedPayloadNsids) ? ctx.args.allowedPayloadNsids : DEFAULT_ALLOWED;
+      if (!ctx.offer) return {
+        allow: true,
+        violations: []
+      };
+      if (!allowed.includes(ctx.offer.payloadNsid)) {
+        return {
+          allow: false,
+          violations: [
+            {
+              msg: `bid payload type ${ctx.offer.payloadNsid} not allowed`,
+              policyId: BID_PAYLOAD_FILTER_POLICY_NAME
+            }
+          ]
+        };
+      }
+      return {
+        allow: true,
+        violations: []
+      };
+    }
   };
 }
 
@@ -9803,6 +9742,29 @@ function trustResolvers(store, counterpartyDid) {
     getVouchedDids: async (did) => new Set(vouchedBy[did] ?? [])
   };
 }
+function needsTrustSnapshot(policy) {
+  return policy.kind === "trust" && policy.needsTrustSnapshot === true;
+}
+async function denyUnseeded(policy, counterpartyDid, mode) {
+  const violations = [
+    {
+      msg: `no trust snapshot is seeded for the counterparty ${counterpartyDid || "(none)"}`,
+      policyId: policy.name
+    }
+  ];
+  await writeOutputs({
+    allow: false,
+    violations,
+    fromCache: false,
+    cacheKey: ""
+  });
+  console.log(JSON.stringify({
+    policy: policy.name,
+    allow: false,
+    violations,
+    mode
+  }));
+}
 async function evaluateScope(policy, opts) {
   const { selfDid, perspective, args, store } = opts;
   const counterpartyDid = input("counterparty-did");
@@ -9813,6 +9775,10 @@ async function evaluateScope(policy, opts) {
   const subjectDid = counterpartyDid;
   const rootRequesterDid = perspective === "requester" ? selfDid : counterpartyDid;
   const tr = trustResolvers(store, counterpartyDid);
+  if (needsTrustSnapshot(policy) && !tr) {
+    await denyUnseeded(policy, counterpartyDid, "scope");
+    return;
+  }
   const ctx = new PolicyEvalCtxImpl({
     policyName: policy.name,
     args,
@@ -9835,8 +9801,8 @@ async function evaluateScope(policy, opts) {
     perspective,
     selfDid,
     counterpartyDid,
-    resolveOperatorDid: tr?.resolveOperatorDid ?? ((did) => ctx.resolveOperatorDid(did)),
-    getVouchedDids: tr?.getVouchedDids ?? ((did) => ctx.getVouchedDids(did))
+    resolveOperatorDid: (did) => ctx.resolveOperatorDid(did),
+    getVouchedDids: (did) => ctx.getVouchedDids(did)
   });
   if (verdict !== void 0) {
     await writeOutputs({
@@ -9890,6 +9856,10 @@ async function evaluatePolicyAction(policy) {
     return;
   }
   const tr = trustResolvers(store, input("counterparty-did") || "");
+  if (needsTrustSnapshot(policy) && !tr) {
+    await denyUnseeded(policy, input("counterparty-did"), "full");
+    return;
+  }
   const ctx = await createPolicyCtx({
     policyName: policy.name,
     args,
