@@ -216,7 +216,11 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err != nil {
 		return fmt.Errorf("read the bundle: %w", err)
 	}
-	if _, pending := data[atircReleaseKey]; pending || r.released() || q.revokesStarted(contract) {
+	marker, err := markerIn(data)
+	if err != nil {
+		return fmt.Errorf("no token is minted: %w", err)
+	}
+	if marker.ownedBy(string(contract.UID)) || r.released() || q.revokesStarted(contract) {
 		return errors.New("the contract's release has started; no atirc token is minted")
 	}
 	current := SecretEntry{Path: path, Mode: "0600"}
@@ -378,6 +382,24 @@ type atircReleaseMarker struct {
 	Paths []string `json:"paths"`
 
 	StartedAt int64 `json:"startedAt"`
+
+	UID string `json:"uid,omitempty"`
+}
+
+func markerIn(data map[string]any) (*atircReleaseMarker, error) {
+	text, _ := data[atircReleaseKey].(string)
+	if text == "" {
+		return nil, nil
+	}
+	var marker atircReleaseMarker
+	if err := json.Unmarshal([]byte(text), &marker); err != nil {
+		return nil, fmt.Errorf("parse the release marker: %w", err)
+	}
+	return &marker, nil
+}
+
+func (m *atircReleaseMarker) ownedBy(uid string) bool {
+	return m != nil && (m.UID == "" || uid == "" || m.UID == uid)
 }
 
 func ReleaseRevokesExpected(contract v1alpha1.ComputeContract) bool {
@@ -411,7 +433,7 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRe
 		return "", nil
 	}
 	paths := releaseTokenPaths(contract)
-	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}
+	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix(), UID: string(contract.UID)}
 	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(len(paths)+1)*atircCallTimeout)
 	defer cancel()
 	if err := r.setReleaseMarker(first, contract, marker); err != nil {
@@ -447,6 +469,12 @@ func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1
 	if err != nil {
 		return err
 	}
+	if marker == nil {
+		current, err := markerIn(data)
+		if err == nil && current != nil && !current.ownedBy(string(contract.UID)) {
+			return nil
+		}
+	}
 	next := make(map[string]any, len(data)+1)
 	for k, v := range data {
 		if k != atircReleaseKey {
@@ -472,15 +500,11 @@ func (r *contractRunner) releaseMarker(ctx context.Context, contract v1alpha1.Co
 	if err != nil {
 		return nil, err
 	}
-	text, _ := data[atircReleaseKey].(string)
-	if text == "" {
-		return nil, nil
-	}
-	var marker atircReleaseMarker
-	if err := json.Unmarshal([]byte(text), &marker); err != nil {
+	marker, err := markerIn(data)
+	if err != nil || !marker.ownedBy(string(contract.UID)) {
 		return nil, err
 	}
-	return &marker, nil
+	return marker, nil
 }
 
 func (q *Requester) startReleaseRevokes(r *contractRunner, contract v1alpha1.ComputeContract, marker *atircReleaseMarker, write bool) {
@@ -558,7 +582,7 @@ func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
 		}
 		write := marker == nil || len(marker.Paths) == 0
 		if write {
-			marker = &atircReleaseMarker{Paths: releaseTokenPaths(contract), StartedAt: q.now().Unix()}
+			marker = &atircReleaseMarker{Paths: releaseTokenPaths(contract), StartedAt: q.now().Unix(), UID: string(contract.UID)}
 		}
 		if contract.Status.AtircRevokes != v1alpha1.AtircRevokesPending {
 			pending, cancelPending := context.WithTimeout(q.runContext(), atircCallTimeout)

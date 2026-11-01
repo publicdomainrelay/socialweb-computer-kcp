@@ -293,7 +293,8 @@ func (q *Requester) revokeOrphan(ctx context.Context, entry atircIndexEntry) (bo
 		}
 		next[atircMintedKey] = string(raw)
 	}
-	if !otherLive {
+	if marker, err := markerIn(data); err == nil && marker != nil &&
+		((entry.UID != "" && marker.UID == entry.UID) || (marker.UID == "" && !otherLive)) {
 		delete(next, atircReleaseKey)
 	}
 	if len(next) != len(data) || len(kept) != len(current) {
