@@ -11293,7 +11293,8 @@ to `exec.LookPath("deno")`. The integration hosts hat-7 and hat-9 were prepared 
   - Churn: an event the filter empties marks a slow debounce (`delivery.ProgressDelay`, 1 min) for the
     EventStream and EventSource status instead of the 5 s one; a state change, the first event of a
     connection and a delivered event still use 5 s. A full relay costs at most one status write per
-    minute per stream and per backend.
+    minute per stream and per backend. (r141: a delivered event uses the 1 min one too; see "Steady
+    state writes nothing per event" in section 15.)
 - **Readings (market network `fhdef`, 1 bidder, 2026-10-25).** `run request -- --comms-mode Firehose
   --hold`: the root workspace held the four `firehose-jetstream-*` sources (Running, StreamOpen, no
   event: the network's records are not on the public Jetstreams) beside `relay-network` and
@@ -11905,6 +11906,52 @@ add, remove, prune and self-heal of entries, the per-repo index watch and the `I
 infras). Until rcB nothing writes `infra/self`, so a collection adopts nothing. No listing is kept for
 the records written before r140 (design D2a): they stay unindexed and age out by
 `createdAt + ttlSeconds`.
+
+### Steady state writes nothing per event: stream progress is coalesced to one write a minute (2026-10-31, r141)
+
+Before (measured by the browser page, which runs this Go code in process, 95 s right after Held with
+one contract): about 75 kcp writes a minute, all by the socialweb controllers. EventStream status 30
+per 95 s, AtprotoRecordWatch status 24, EventSource and JetstreamEventSource status 6 each. Every
+delivered event marked the 5 s flush (`delivery.Loop`, `delivery.Tracked`), and the flush wrote
+`status.cursor`, `status.lastEventAt` and `status.lag` (EventStream, EventSource backends; the
+abstract EventSource mirrors its backend), and the record watch sink wrote `status.cursors` and a new
+`verifiedAt` on every event, also for an event that changed no watched record. The page snapshot
+never went quiet, so a reload cold-booted, and a phone paid for each write.
+
+Now:
+
+- Progress fields are not written per event. EventStream `status.cursor`, `status.lastEventAt`,
+  `status.lag` and the Lagging condition, the backend EventSource `status.cursor`, `status.lastEventAt`
+  and `status.lag`, and AtprotoRecordWatch `status.cursors` are kept in memory; a status whose only
+  change is these fields waits for the progress timer (`delivery.ProgressDelay`, 1 min, armed by an
+  event, listed in `deploy/obligations.txt` as kind coalesce). Every other change (phase, Ready,
+  Failed, serverFilter, observedGeneration, a watched record, a delete, a condition) is written at
+  once (5 s debounce) and carries the current progress with it. A stopping stream writes its last
+  cursor. A delivered event marks the progress timer, not the flush; the first event of a connection
+  and a recovery from DeliverFailed still flush.
+- A watched record whose did, cid and value did not change keeps its `verifiedAt`.
+- Resume. A `Live` stream (the default public firehoses) never reads a stored cursor, so nothing
+  changes for it. Any other stream (the network relay and `spec.comms.eventSourceRefs` streams, the
+  bidder's `Recent` requester streams, record watch streams) resumes from a cursor up to 1 min old (the file store and `status.cursor` both save on the progress timer):
+  after a crash or a page kill the stream replays at most the last minute of its filtered events plus
+  its rewind (relay 1000 events, Jetstream 30 s). The sinks already absorb replays: the market sink
+  creates a StateSync named by `uri#cid` (AlreadyExists is success) and drops a `uri|cid` it took in
+  the last 15 s, the bidder never bids twice on one RFP, the requester's pending events are keyed by
+  `uri#cid`, and a record watch reads the record by getRecord. A clean stop writes the cursor first.
+- Not changed: the market inbox StateSyncs (`market-<hash>`, `inbox-<hash>`, `bid-<hash>`) and the
+  ContractEvent and ComputeContract writes right after Held. The page window above was the settle
+  right after Held: the guest's secrets request and the reseal of `secrets-<contract>`, the agent
+  token mint and its `secretsUpdated`, the guest events of the first minute (3 market records, each
+  seen twice), and the prune of the bid inbox items once the contract has an accept (11 deletes).
+  Each inbound market record is one short-lived StateSync by design (the inbox is the dedup and
+  retry point); none of them repeats while nothing arrives. The Infra and AtprotoRecord writes of
+  that window follow the contract's status changes (an infra mirrors each contract's phase and
+  message into its record).
+- Expected steady state with one Held contract and no inbound record: at most one write a minute
+  per EventStream, per backend EventSource and its abstract EventSource, and per AtprotoRecordWatch,
+  and only while its stream delivers events; nothing for StateSync, ContractEvent, ComputeContract,
+  Infra, EphemeralInfra and AtprotoRecord. The 5 min record watch verify writes only when a record
+  changed.
 
 ## 16. Vocabulary
 
