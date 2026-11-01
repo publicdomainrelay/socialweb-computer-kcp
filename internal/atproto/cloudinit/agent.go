@@ -184,6 +184,10 @@ chmod 0600 "` + AgentEnvSnapshotPath + `"
 sha256sum < "` + AgentEnvSnapshotPath + `" > "` + AgentEnvStampPath + `"
 while IFS= read -r line || [ -n "${line}" ]; do
   if [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    if ! (export "${line}") 2>/dev/null; then
+      echo "atirc-agent: skipped ${line%%=*} from the env file (not exportable)" >&2
+      continue
+    fi
     export "${line}"
   fi
 done < "` + AgentEnvSnapshotPath + `"
