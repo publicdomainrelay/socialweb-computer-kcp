@@ -7,11 +7,10 @@ default policy runs on both sides; no file and no command names `open` ([../quic
 sections 2, 5 and 7).
 
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
-  C the gateway in the requester kcp (TODO(C-GATEWAY-COMPOSE))
+  C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: not yet run on prod. `kubectl apply --dry-run=server -f examples/infra/mixed-prod.yaml` passes against a
-  `run requester --network` of an own market network (2026-11-01, main 6497fe61 dev build); the local readings below
-  found the restart step failing (Known Pitfalls, first row)
+- Last pass: 2026-11-01 on prod: A and C on rc159 (`ec0f4849`), B on the rc160 CLI (`840f0437`; on rc159 B failed its
+  ssh step, Known Pitfalls). Prod readings below
 
 ```mermaid
 sequenceDiagram
@@ -94,8 +93,8 @@ minutes before the first apply when a contract was denied before (verdicts are c
 ### B. install requester (systemd user unit)
 
 1. `sudo $SWC install requester --name mp --dry-run`, then `sudo $SWC install requester --name mp` (account
-   `swc-requester`, identity `--atproto-oauth-qr` by default); the sign-in URL is in `journalctl --user -u
-   socialweb-computer-requester@mp.service` of that account; sign in with `scripts/oauth-signin.ts`.
+   `swc-requester`, identity `--atproto-oauth-qr` by default); the sign-in URL: `$SWC run requester signin mp --state-dir
+   /var/lib/socialweb-computer/swc-requester` (as root or the account); sign in with `scripts/oauth-signin.ts`.
 2. `R=/var/lib/socialweb-computer/swc-requester/requesters/mp/ready.json`; as the account, `kubectl --kubeconfig
    "$(jq -r .kubeconfig "$R")"` reads `MarketRequester app` Ready.
 3. Steps A3 to A8 as the account, `$SWC run requester ssh mp --state-dir /var/lib/socialweb-computer/swc-requester`.
@@ -105,9 +104,24 @@ minutes before the first apply when a contract was denied before (verdicts are c
 
 ### C. Gateway in the requester kcp (Cluster and k8s-cluster.yaml)
 
-TODO(C-GATEWAY-COMPOSE): apply a Cluster into the requester kcp, read its kubeconfig, `kubectl apply -f
-examples/infra/k8s-cluster.yaml` against it, the NodeClaim, the node rented from the same bidder by the same requester,
-pod log `quickstart-k8s-ok`, delete and scale to zero.
+The gateway runs inside the requester's core (Gateway `spec.requesterRef`): its clusterprovider, k3s and kine are
+HostProcesses of that core, and every node is a contract of the same requester. Needs a subuid/subgid range for the
+user (`check-host` reports it).
+
+1. `$SWC run requester --name mk --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/mk.log" 2>&1 &`; sign in
+   as in A1; wait until the ready file names the gateway: `jq -r .gateway "$ST/requesters/mk/ready.json"` is not `null`.
+2. `$SWC run requester cluster mk --cluster c1 --state-dir "$ST"`; then `TK=$($SWC run requester kubeconfig mk --cluster
+   c1 --state-dir "$ST")` (retry until it prints a path: the Cluster is Ready).
+3. `kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml`: a NodeClaim becomes an Infra in the requester
+   kcp, its contract is bid and Held, the node VM fetches meshd by sha256 from the public bucket and joins k3s; poll
+   until the `quickstart-k8s` pod is Ready (a `kubectl wait` before the pod exists returns no match); `kubectl logs
+   deploy/quickstart-k8s` prints `quickstart-k8s-ok`.
+4. Pin the node to a remote bidder by leaving only that bidder able to win (the run below suspended the local
+   bidder: `kubectl patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":true}}'` in its kcp,
+   resumed after).
+5. `kubectl --kubeconfig "$TK" delete deployment quickstart-k8s`: the node is reaped, its contract released, `kubectl
+   get nodes` is empty (scale to zero); the bidder host is empty.
+6. Ctrl-C the `run requester`.
 
 ## Expected Observations
 
@@ -122,6 +136,28 @@ pod log `quickstart-k8s-ok`, delete and scale to zero.
 | restart: same DID, ready file rewritten, contracts Held | ready file, ComputeContracts | ready again in seconds (quickstart-prod section 7: 1.4 s) |
 | delete: `requester_atirc_revoked`, `status.atircRevokes` Done, then vm.delete, `vm.terminated`, contracts gone | requester log, bidder repo, kcp | under a minute |
 | bidder host empty, vouch records present | 0008 watcher, `goat get` | right after the delete |
+
+## Prod Readings (2026-11-01, rc159 `ec0f4849`, account alice)
+
+| time (Z) | path, step | reading |
+| --- | --- | --- |
+| 10:37:20 | A2 | ready file, `identityMode` `oauthQr`, alice's DID |
+| 10:37:55 | A5 | mixed-prod Deployed in 35 s on the local bidder (`install bidder --compute-kinds vm,deno`): vm1, sbx1, agent1 Held |
+| 10:38 | A6, A7 | vm1 ssh iroh and webrtc exit 0; sbx1 stdout `mixedprod-deno-ok sum=10 on linux/x86_64`, exit 0 |
+| 10:38:31 | A8 | placeholder bundle, mint, agent JOIN, answered `x86_64` |
+| 10:39 | A9 | restart: same DID, all Held, ssh again |
+| 10:40:16.805 | A10 | agent1 revoked, then the terminations at 10:40:17; 0 contracts in 5 s; host empty |
+| 11:19:31 | B3 (rc159) | `run requester ssh` as the account: did not answer within 1m (the ProxyCommand ran under the account's `nologin` shell) |
+| 11:46:44 | B1, B2 (rc160) | `install requester` (account `swc-requester`, `socialweb.slice`) printed the journal and `run requester signin` hints; the URL from `run requester signin mp`; Ready |
+| 11:47:14 | B3 | `vm.yaml` pinned to hat-7; ssh as the account: `quickstart-vm-ok`, `x86_64`, exit 0 |
+| 11:47:15 | B4 | `systemctl --user restart`: same DID, contract Held, ssh `quickstart-vm-ok` again |
+| 11:47:35 | B5 | delete: 0 contracts; `uninstall --purge` removed the account; hat-7 empty |
+| 11:31:52 | C1 | `--with-gateway`, ready file names the gateway |
+| 11:32:03 | C2 | cluster `c1` kubeconfig |
+| 11:33:04 | C3, C4 | node `2wjeqtgx-c1-node1` on hat-7 (remote, local bidder suspended), k3s v1.36.4+k3s1, pod Ready, `quickstart-k8s-ok` |
+| 11:35:41 | C5 | node reaped (hat-7 terminate 11:35:36, released 11:35:38), 0 nodes, hat-7 empty |
+
+No plaintext token, key or sign-in URL in any log (check 0 on every file).
 
 ## Local Readings (2026-11-01, own market network `mxp`, main 6497fe61 dev build)
 
@@ -162,7 +198,10 @@ pod log `quickstart-k8s-ok`, delete and scale to zero.
 
 | Symptom | Cause / fix |
 | --- | --- |
-| after a restart every Held contract is Failed `the held contract is not resumed: ... the policy engine is not running`; an `endWhen: Complete` EphemeralInfra then ends and releases everything | main 6497fe61: the requester resumes a Held contract (the recorded winner's policy run) before its PolicyEngine runs, and that error fails the contract instead of retrying (`resumeReceipt` in `internal/market/requester/runner.go`); open, reported to the lead; step A9 / B4 cannot pass until it is fixed |
+| after a restart every Held contract is Failed `the held contract is not resumed: ... the policy engine is not running` | main 6497fe61 and rc157: fixed in rc158 (resume waits for the policy engine) |
+| B: no sign-in URL in `journalctl --user` of the account | the user units of a system account log to the system journal, which the account cannot read: `run requester signin mp --state-dir /var/lib/socialweb-computer/swc-requester` (rc160), or as root `journalctl _UID=<uid> _SYSTEMD_USER_UNIT=socialweb-computer-requester@mp.service` |
+| B: `run requester ssh` as the account does not answer within 1m | rc159: ssh ran its ProxyCommand with the account's `nologin` shell; rc160 runs it under `/bin/sh` |
+| C: `run requester cluster` says the requester runs no gateway | rc159: the ready file was first written before the gateway was Ready; rc160 writes it once, with `.gateway` |
 | sbx1 `no bids received within 30s`, stays without a bid | the pinned bidder does not serve deno: `--compute-kinds vm,deno` on `run bidder`, or `install bidder --compute-kinds vm,deno` again for an installed bidder |
 | every contract `no bids`; bidder `policy rejected ... not vouched` | the operator -> requester record is missing (step A4); denials are cached 5 minutes |
 | agent1 Failed before its RFP, `refused: the atirc agent needs a requester handle that resolves to <did> ... --atproto-handle ...` | the requester handle is `.local` (a localRepo identity, the default without an identity option) or does not resolve; use the OAuth account, or a local PDS on plc.directory with `--atproto-handle <a domain you control>` ([../quickstart-prod.md](../quickstart-prod.md) section 5) |

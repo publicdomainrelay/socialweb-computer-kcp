@@ -125,8 +125,8 @@ or an existing one is taken over with `--adopt-account`:
 ```bash
 sudo socialweb-computer install requester --name me --dry-run      # prints every step, writes nothing
 sudo socialweb-computer install requester --name me                # unit socialweb-computer-requester@me, identity --atproto-oauth-qr
-sudo runuser -u swc-requester -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-requester) \
-  journalctl --user -u socialweb-computer-requester@me.service -f  # the sign-in URL
+sudo socialweb-computer run requester signin me \
+  --state-dir /var/lib/socialweb-computer/swc-requester            # the sign-in URL (prints nothing once Ready)
 ```
 
 - the ready file is `/var/lib/socialweb-computer/swc-requester/requesters/me/ready.json`; an app password goes in once
@@ -218,13 +218,13 @@ association, upgrade and the foreground form (`run bidder --host-backend proc --
 
 | item | state |
 | --- | --- |
-| a node of a `--with-gateway` tenant cluster from a remote bidder: the node cannot fetch meshd (its download base is the local Exposure `http://192.0.2.1:<port>`, which only a bidder on the same host reaches) | fix in progress |
-| an atirc agent from a local PDS or a `pdsAccount` identity | built, not yet proven against irc.fedfork.com |
+| an atirc agent from a local PDS identity (`localRepo` on plc.directory, a handle you control) | built, not yet proven against irc.fedfork.com; `pdsAccount` proven on rc161 |
 
 ## Docs
 
 | doc | what |
 | --- | --- |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | what is supported today and how far each item is proven |
 | [`docs/quickstart-local.md`](docs/quickstart-local.md), [`docs/quickstart-prod.md`](docs/quickstart-prod.md) | the two quick starts in full |
 | [`docs/acceptance/`](docs/acceptance/) | runbooks: [0012](docs/acceptance/0012-infra-quickstart.md) the infra quick start, [0013](docs/acceptance/0013-mixed-prod.md) mixed prod, auth modes, ssh gateway, atirc agent, ... |
 | [`docs/protocol/README.md`](docs/protocol/README.md) | the atproto lexicons and the end-to-end sequence |

@@ -148,7 +148,7 @@ requester's own kcp, and `install` prints both. A password never goes into reque
   `requester.json` records `withGateway`; the ready file is first written only once the Gateway is Ready too, with
 `gateway {workspace, name, clusters}`;
   `run requester cluster <name> --cluster <c>` makes the home workspace `root:<account>:<c>` and its Cluster, and
-  `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path. A node fetches socialweb-meshd and
+  `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path once the Cluster is Ready (exit 1 before). A node fetches socialweb-meshd and
   socialweb-node from `<base>/downloads/<sha256>/<name>` and checks the pinned sha256: the base is the nodes-only
   GatewayAPI's `spec.publicOrigin`, set from `--node-download-base` (default the public bucket, where the CI
   `publish` job puts the pinned socialweb-computer-k8s-downloads tree content-addressed under `downloads/`); with
