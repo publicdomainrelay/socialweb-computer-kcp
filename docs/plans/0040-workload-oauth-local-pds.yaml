@@ -1,6 +1,6 @@
 plan: "0040"
 title: "Workload identity OAuth on our PDS: OpenBao issues OIDC JWTs, a token exchange XRPC and an approve XRPC gated by com.fedproxy.rbac records keyed by role name, scope enforcement, and an atirc session minted by a workload"
-status: proposed
+status: doing
 source: >
   2026-11-01, owner (verbatim, first): "take the reference implementation and study it and understand the
   com.fedproxy.rbac records and then I want you to find the social Webb computer KCP PDS implementation and I
@@ -97,7 +97,7 @@ decisions:
       interface. A rate limit per role.
   - id: D2
     question: "Which audiences may a guest ask for?"
-    recommended: >
+    decided: >
       Any one audience (an https URL, an api://<api>?actx=<ctx> or a DID, at most 512 bytes), as GitHub Actions
       does: the subject is fixed by the proof, and every relying party checks iss, sub and aud. Then the bidder
       reads no requester RBAC record at all: GuestIdentityGrant, the identity/oidc roles, RepoRBAC, the
@@ -141,6 +141,21 @@ decisions:
   - id: D6
     question: "Which PDS and accounts"
     decided: "Only our PDS (internal/atproto/pds). Flow 2 works only for an account hosted on it (requester identity localRepo, --identity). An account on bsky.social is refused with a clear message; no proxy route."
+  - id: D7
+    question: "How is a local PDS made resolvable for atirc with no saved private key and no domain of ours?"
+    decided: >
+      Through the xrpc.fedproxy.com IngressProxy and an ingress Exposure whose key is ephemeral. Today the
+      Exposure's ingress keypair is a jwk under <state>/exposure-identity (internal/stack/componentcore/exposure_identity.go,
+      market.LoadOrCreateSignerFile), and the public host is <did:key label>.xrpc.fedproxy.com
+      (internal/exposure/registrar.go). A new Exposure spec field ingress.key: Ephemeral makes the registrar
+      generate the keypair in memory, never write it, and report the host it yields in status.ingress.url, so the
+      URL is known only at run time. The Pds takes its public URL and its OAuth issuer from that status (port 0
+      rule: the bound address is reported, peers read it), its handle is that host (the PDS already answers
+      /.well-known/atproto-did through the ingress), and the account is created only after the URL is known: a
+      did:plc genesis whose PDS service endpoint is the URL, with the PLC rotation key and the repo key held in
+      memory (a memory RepoKeyStore) for the life of the run and the DID tombstoned at the end. An Exposure
+      restart gives a new host; an ephemeral account is not carried over. A persistent account keeps the file
+      key as today.
 records:
   example: >
     at://<account DID>/com.fedproxy.rbac/<role>
@@ -177,7 +192,7 @@ items:
       account and identity XRPCs check account: and identity:. A miss is 403 ScopeMissingError naming the
       scope. Password and app password sessions are unchanged. Every OAuth client of our PDS (requester,
       bidder, ssh gateway, page) is read against its requested scope before this ships.
-    status: proposed
+    status: doing
   - id: S2-RBAC-GO
     title: "com.fedproxy.rbac in Go: one role per record, rkey = role name, the matcher and the body schema subset"
     files: [internal/contract/workloadauth/workloadauth.go, internal/rbac/record.go, internal/rbac/match.go, internal/rbac/schema.go, lexicons/com/fedproxy/rbac.json]
@@ -186,7 +201,7 @@ items:
       (D3), protects filter, globMatch and the longest path rule ported from the reference, the method to
       capability map, the JSON Schema subset evaluator. The lexicon of com.fedproxy.rbac written down as the
       reference uses it, with record key any (the role name).
-    status: proposed
+    status: doing
   - id: S3-RKEY-ROLE
     title: "The market writes and reads the record at the role name; no listRecords, no polling"
     files: [internal/market/requester/secrets.go, internal/atproto/market/records.go, internal/guestidentity/rbac_reader.go, internal/guestidentity/grants.go, deploy/obligations.txt]
@@ -256,15 +271,31 @@ items:
       exchange refused; iss not the role's -> refused; client_id or a scope outside the record -> approve
       refused and the PAR not consumed; PDS token replayed with another DPoP key or after use -> refused;
       record deleted -> refresh refused and the session revoked; the session writes a collection outside its
-      scope -> 403 (S1). AGENTS.md records the owner's authorization next to the policy engine exception.
+      scope -> 403 (S1). The ingress relay (internal/atproto/ingress server) runs in process too, with an
+      ephemeral Exposure key (D7), so OAuth crosses the same forwarding the live run uses. AGENTS.md records the
+      owner's authorization next to the policy engine exception. The live acceptance (S9) is the same test file
+      behind SWC_LIVE_WORKLOAD_OAUTH=1.
     status: proposed
   - id: S9-ACCEPTANCE
-    title: "Acceptance 0014: a workload mints an atirc session at irc.fedfork.com, both flows"
-    files: [docs/acceptance/0014-workload-oauth.md, docs/acceptance/README.md]
+    title: "Acceptance 0014: a workload mints an atirc session at irc.fedfork.com and an atirc pub writes a scrobble through it, both flows"
+    files: [docs/acceptance/0014-workload-oauth.md, docs/acceptance/README.md, test/integration/workloadoauth_live_test.go]
+    atirc: >
+      Read from atirc f2f2dca (tangled.org/johnandersen777.bsky.social/atirc, cli/src/server/oauth.rs,
+      scrobble.rs, xrpc.rs). The session is minted and exercised so: GET https://irc.fedfork.com/login?handle=<h>
+      answers 302 to our PDS authorize URL (request_uri, client_id) and sets the state cookie; the workload
+      runs exchangeToken and approveAuthorization; GET of the returned callback with the cookie jar sets the
+      atirc session cookie; POST /scrobble {did, on=1} turns the owner's vibescrobble switch on; POST
+      /agent/link {did} creates the account's link and GET / shows /u/<uuid>; GET /u/<uuid> answers a long
+      atirc token; `ATIRC_TOKEN=<token> atirc pub -c '#<channel>' '<text whose first character is an emoji>'`
+      posts (chat.atirc.post); atirc's scrobble writer then does createRecord com.vibescrobble.scrobble in the
+      account's repo on our PDS with the OAuth session it holds (DPoP, scope
+      repo:com.vibescrobble.scrobble?action=create), which is the OAuth use S1 checks. Pass: that record
+      appears in the account's repo (read from our PDS's own commit stream), and a pub whose first character is
+      not an emoji writes none. GET /logout at the end; the DID is tombstoned.
     work: >
       Preconditions: an account on our PDS whose DID is on https://plc.directory and whose PDS is public
-      through the xrpc.fedproxy.com IngressProxy and an ingress Exposure, with a handle on a domain we control
-      (a localRepo --identity); probe first that /oauth/par, /oauth/authorize and /oauth/token pass through the
+      through the xrpc.fedproxy.com IngressProxy and an ephemeral ingress Exposure (D7), handle = that host, no
+      key on disk; probe first that /oauth/par, /oauth/authorize and /oauth/token pass through the
       ingress with form bodies and DPoP headers, before any other step. Flow 2: `run request --identity <id>
       --allow-oauth https://irc.fedfork.com/oauth/client-metadata.json=atproto,repo:com.fedfork.irc.agents?action=create&action=update
       --hold --guest-tools socialweb-computer`; in the guest `socialweb-computer oauth approve --account <handle>
@@ -275,6 +306,15 @@ items:
       approve per flow, no token in any log, release deletes the flow 2 record and revokes its sessions, and a
       run with the record deleted first is refused at approve.
     status: proposed
+  - id: S11-EPHEMERAL-INGRESS
+    title: "An ingress Exposure with an ephemeral key, and a Pds whose URL, handle and account follow it"
+    files: [api/exposure, internal/exposure/registrar.go, internal/stack/componentcore/exposure_identity.go, internal/app/compose/pds.go, internal/services/pds, internal/atproto/pds/files/keys.go]
+    work: >
+      D7: Exposure ingress.key Ephemeral (keypair in memory, status.ingress.url); the Pds reads its public URL
+      from that status and rebuilds its OAuth issuer and well-known answers when it changes; a memory
+      RepoKeyStore; an ephemeral account mode that creates the did:plc only once the URL is known and
+      tombstones it at stop.
+    status: proposed
   - id: S10-PROTOCOL-NOTE
     title: "The protocol written for discussion outside this repository"
     files: [docs/protocol/workload-oauth.md]
@@ -284,7 +324,7 @@ items:
       record, single role per record, PDS-built policy input, no listRecords), written without kcp terms, as a
       draft for the IETF atproto working group.
     status: proposed
-order: "S1 and S2 first (independent), then S3 and S4, then S5, S6, S7, then S8 with S5 and S6, S9 last; S10 alongside."
+order: "S1 and S2 first (independent), then S3, S4 and S11, then S5, S6, S7, then S8 with S5 and S6, S9 last; S10 alongside."
 future_work:
   - "iOS app: the Allow OAuth apps field and spec.oauthClients."
   - "The same exchange as the RFC 8693 grant type at /oauth/token, once the XRPC shape settled."
