@@ -113,6 +113,8 @@ const (
 	EphemeralInfraEndComplete EphemeralInfraEnd = "Complete"
 
 	EphemeralInfraEndDeadline EphemeralInfraEnd = "Deadline"
+
+	EphemeralInfraEndDeleted EphemeralInfraEnd = "Deleted"
 )
 
 type EphemeralInfraSpec struct {
@@ -143,6 +145,8 @@ const (
 	InfraPhaseEnding InfraPhase = "Ending"
 
 	InfraPhaseDeleting InfraPhase = "Deleting"
+
+	InfraPhaseEnded InfraPhase = "Ended"
 )
 
 type InfraContractPhase string
@@ -249,6 +253,10 @@ const (
 	InfraConditionRecordUnresolved = "RecordUnresolved"
 
 	InfraConditionRecordOrphaned = "RecordOrphaned"
+
+	InfraConditionRecordEnded = "RecordEnded"
+
+	InfraConditionRecordReserved = "RecordReserved"
 
 	InfraReasonRecordReadRetrying = "RecordReadRetrying"
 

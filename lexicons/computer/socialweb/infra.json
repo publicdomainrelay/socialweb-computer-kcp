@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "computer.socialweb.infra",
-  "description": "A long-lived deployment: a set of compute contracts, each declared with the state its author wants. Any client of the account may change the declaration; the socialweb-computer requester that runs the deployment writes the status.",
+  "description": "A long-lived deployment: a set of compute contracts, each declared with the state its author wants. Any client of the account may change the declaration; the socialweb-computer requester that runs the deployment writes the status. When the deployment ends its record is kept with status.endedAt.",
   "defs": {
     "main": {
       "type": "record",
@@ -18,6 +18,11 @@
             "description": "The declared contracts. Names are unique within the record."
           },
           "status": { "type": "ref", "ref": "#status" },
+          "index": {
+            "type": "ref",
+            "ref": "#index",
+            "description": "Only at rkey self: the account's index of live deployments. A record with index is not a deployment."
+          },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }
@@ -100,9 +105,47 @@
       "properties": {
         "phase": {
           "type": "string",
-          "knownValues": ["pending", "staged", "deploying", "deployed", "releasing", "released", "degraded", "ending", "deleting"]
+          "knownValues": ["pending", "staged", "deploying", "deployed", "releasing", "released", "degraded", "ending", "deleting", "ended"]
         },
-        "contracts": { "type": "array", "items": { "type": "ref", "ref": "#contractStatus" } }
+        "contracts": { "type": "array", "items": { "type": "ref", "ref": "#contractStatus" } },
+        "endedAt": { "type": "string", "format": "datetime", "description": "Set once, when the deployment ends; the record is kept and an ended record is never live again." },
+        "endReason": { "type": "string", "knownValues": ["deleted"] }
+      }
+    },
+    "index": {
+      "type": "object",
+      "required": ["live", "updatedAt"],
+      "properties": {
+        "live": { "type": "array", "maxLength": 256, "items": { "type": "ref", "ref": "#indexEntry" } },
+        "recentEnded": {
+          "type": "array",
+          "maxLength": 32,
+          "items": { "type": "ref", "ref": "#indexEnded" },
+          "description": "Newest first; the oldest drops off. The records themselves are kept."
+        },
+        "updatedAt": { "type": "string", "format": "datetime" }
+      }
+    },
+    "indexEntry": {
+      "type": "object",
+      "required": ["collection", "rkey", "createdAt", "addedAt"],
+      "properties": {
+        "collection": { "type": "string", "format": "nsid", "knownValues": ["computer.socialweb.infra", "computer.socialweb.ephemeralInfra"] },
+        "rkey": { "type": "string", "format": "record-key" },
+        "createdAt": { "type": "string", "format": "datetime" },
+        "expiresAt": { "type": "string", "format": "datetime", "description": "EphemeralInfra only: createdAt plus ttlSeconds." },
+        "addedAt": { "type": "string", "format": "datetime" },
+        "writer": { "type": "string", "maxLength": 64, "description": "A public label of the kcp that runs it: page:<origin host>, ios, gateway:<host>, cli." }
+      }
+    },
+    "indexEnded": {
+      "type": "object",
+      "required": ["collection", "rkey", "endedAt"],
+      "properties": {
+        "collection": { "type": "string", "format": "nsid" },
+        "rkey": { "type": "string", "format": "record-key" },
+        "endedAt": { "type": "string", "format": "datetime" },
+        "endReason": { "type": "string" }
       }
     },
     "contractStatus": {
