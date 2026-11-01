@@ -87,6 +87,8 @@ const (
 
 	MarketExposureWait = 10 * time.Second
 
+	CallbackWait = 5 * time.Minute
+
 	PDSExposure = "svc-pds-pds-local"
 
 	KindRequester = "Requester"
@@ -764,30 +766,49 @@ func (q *Requester) callbackDID() string {
 	return cmp.Or(q.did, q.marketDID)
 }
 
-func (q *Requester) submitBidRef() string {
-	return q.callbackRef(market.DefaultMarketServiceID)
+func (q *Requester) submitBidRef(ctx context.Context) (string, error) {
+	return q.callbackRef(ctx, market.DefaultMarketServiceID)
 }
 
-func (q *Requester) submitEventRef() string {
-	return q.callbackRef(market.DefaultComputeEventServiceID)
+func (q *Requester) submitEventRef(ctx context.Context) (string, error) {
+	return q.callbackRef(ctx, market.DefaultComputeEventServiceID)
 }
 
-func (q *Requester) callbackRef(fragment string) string {
+var errNoCallback = errors.New("requester: the market Exposure has no address, and in XRPC comms mode no bidder could reach a record without it")
+
+func (q *Requester) callbackRef(ctx context.Context, fragment string) (string, error) {
 	if !q.cfg.InboundXRPC() {
-		return ""
+		return "", nil
 	}
 	if address := q.marketAddress(); address != "" {
-		return address
+		return address, nil
 	}
+	xrpcOnly := q.cfg.Spec.Comms != nil && q.cfg.Spec.Comms.Mode == v1alpha1.MarketCommsModeXRPC
 	if name := q.marketExposure(); name != "" {
-		if address := q.deps.Inputs.AwaitAddress(q.runContext(), name, MarketExposureWait, nil); address != "" {
-			return strings.TrimRight(address, "/")
+		deadline := time.Now().Add(CallbackWait)
+		for attempt := 1; ; attempt++ {
+			if address := q.deps.Inputs.AwaitAddress(ctx, name, MarketExposureWait, nil); address != "" {
+				return strings.TrimRight(address, "/"), nil
+			}
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			if !xrpcOnly {
+				break
+			}
+			if !time.Now().Before(deadline) {
+				return "", fmt.Errorf("%w (%s, after %s)", errNoCallback, name, CallbackWait)
+			}
+			q.log.Warn("requester_callback_waits", "exposure", name, "attempt", attempt)
 		}
 	}
 	if q.cfg.IdentityMode == IdentityModeOAuth || q.callbackDID() == "" {
-		return ""
+		if xrpcOnly {
+			return "", errNoCallback
+		}
+		return "", nil
 	}
-	return q.callbackDID() + "#" + fragment
+	return q.callbackDID() + "#" + fragment, nil
 }
 
 func (q *Requester) ingress() tunnel.Service {

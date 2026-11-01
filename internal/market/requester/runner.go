@@ -165,6 +165,19 @@ func (r *contractRunner) requestRelease() {
 	r.releaseOnce.Do(func() { close(r.releaseCh) })
 }
 
+func (r *contractRunner) untilRelease(ctx context.Context, ref func(context.Context) (string, error)) (string, error) {
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-r.releaseCh:
+			cancel()
+		case <-waitCtx.Done():
+		}
+	}()
+	return ref(waitCtx)
+}
+
 func (r *contractRunner) stop() {
 	r.gone.Store(true)
 	if r.cancel != nil {
@@ -411,9 +424,13 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if state.RFP != nil && state.RFP.URI != "" {
 		rfpURI, rfpCID = state.RFP.URI, state.RFP.CID
 	} else {
+		submitBid, err := r.untilRelease(ctx, q.submitBidRef)
+		if err != nil {
+			return err
+		}
 		rfpOptions := market.RFPOptions{
 			Payload:   market.RecordRef{URI: state.Payload.URI, CID: state.Payload.CID},
-			SubmitBid: q.submitBidRef(),
+			SubmitBid: submitBid,
 			Ingress:   q.ingressRecords(ctx),
 			Domain:    "compute",
 			CreatedAt: q.nowISO(),
@@ -551,10 +568,15 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		return ErrParticipationSuspended
 	}
 	if !found {
+		var submitEvent string
+		submitEvent, err = r.untilRelease(ctx, q.submitEventRef)
+		if err != nil {
+			return err
+		}
 		accept, err = market.CreateAcceptAt(ctx, q.repo, q.repoDID, acceptRKey, market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: q.submitEventRef(),
+			SubmitEvent: submitEvent,
 			Ingress:     q.ingressRecords(ctx),
 			CreatedAt:   q.nowISO(),
 		}, q.signer)

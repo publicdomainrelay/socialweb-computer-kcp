@@ -593,9 +593,13 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	if err != nil {
 		return nil, err
 	}
+	submitBid, err := q.submitBidRef(ctx)
+	if err != nil {
+		return nil, err
+	}
 	options := market.RFPOptions{
 		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-		SubmitBid: q.submitBidRef(),
+		SubmitBid: submitBid,
 		Ingress:   q.ingressRecords(ctx),
 		Domain:    "compute",
 		CreatedAt: q.nowISO(),
@@ -650,10 +654,15 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		return nil, err
 	}
 	if !found {
+		var submitEvent string
+		submitEvent, err = q.submitEventRef(ctx)
+		if err != nil {
+			return nil, err
+		}
 		accept, err = market.CreateAcceptAt(ctx, q.repo, q.repoDID, acceptRKey, market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfp.URI, CID: rfp.CID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: q.submitEventRef(),
+			SubmitEvent: submitEvent,
 			Ingress:     q.ingressRecords(ctx),
 			CreatedAt:   q.nowISO(),
 		}, q.signer)
