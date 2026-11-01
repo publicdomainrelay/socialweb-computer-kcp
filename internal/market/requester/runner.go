@@ -22,6 +22,7 @@ import (
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/netretry"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
@@ -259,8 +260,10 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 	}
 	if contract.Spec.SecretsRef != nil && contract.Status.SecretsFetchedAt == "" {
-		if err := r.ensureSecrets(ctx, contract); err != nil {
-			r.recordFailure(ctx, r.stateCopy(), err, 1)
+		if err := r.untilSettled(ctx, "ensureSecrets", func() error { return r.ensureSecrets(ctx, contract) }); err != nil {
+			if !r.q.stopping() {
+				r.recordFailure(ctx, r.stateCopy(), err, 1)
+			}
 			return
 		}
 	}
@@ -695,7 +698,7 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 	if bidderDID == "" {
 		return errors.New("the recorded contract names no winning bidder")
 	}
-	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+	if err := r.untilSettled(ctx, "resumeAccepted", func() error { return r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()) }); err != nil {
 		if !errors.Is(err, ErrPolicyRejected) {
 			return fmt.Errorf("the recorded accept is not resubmitted: %w", err)
 		}
@@ -791,9 +794,62 @@ func (q *Requester) recordedWinnerAllowed(ctx context.Context, state *v1alpha1.N
 	case decision.Allow:
 		return nil
 	case !decision.Completed:
-		return errors.New("the policy run for the recorded winner " + bidderDID + " did not complete: " + decision.Reason)
+		return retryable(errors.New("the policy run for the recorded winner " + bidderDID + " did not complete: " + decision.Reason))
 	}
 	return fmt.Errorf("%w: the recorded winner %s: %s", ErrPolicyRejected, bidderDID, decision.Reason)
+}
+
+type retryableError struct{ error }
+
+func (e retryableError) Unwrap() error { return e.error }
+
+func retryable(err error) error {
+	if err == nil {
+		return nil
+	}
+	return retryableError{err}
+}
+
+func isRetryable(err error) bool {
+	var target retryableError
+	return errors.As(err, &target)
+}
+
+func (r *contractRunner) untilSettled(ctx context.Context, site string, try func() error) error {
+	err := try()
+	if err == nil || !isRetryable(err) || ctx.Err() != nil {
+		return err
+	}
+	wake, cancel := r.q.watchBinds()
+	defer cancel()
+	giveUp := time.Now().Add(TransientResumeGiveUp)
+	r.log().Info("requester_contract_waits_transient", "site", site, "err", err.Error(),
+		"reason", "a transient start-up failure keeps the contract in its phase; a Vault, MarketIdentity or AtprotoRepo bind or the backoff wakes the next try; no success within "+TransientResumeGiveUp.String()+" fails it")
+	for failures := 1; ; failures++ {
+		wait := time.NewTimer(netretry.Delay(failures))
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return err
+		case <-r.releaseCh:
+			wait.Stop()
+			return err
+		case <-wake:
+			wait.Stop()
+		case <-wait.C:
+		}
+		err = try()
+		switch {
+		case err == nil || !isRetryable(err):
+			r.log().Info("requester_contract_transient_settled", "site", site, "attempts", failures+1, "err", fmt.Sprint(err))
+			return err
+		case ctx.Err() != nil:
+			return err
+		case !time.Now().Before(giveUp):
+			r.log().Warn("requester_contract_transient_gave_up", "site", site, "attempts", failures+1, "err", err.Error())
+			return err
+		}
+	}
 }
 
 func (r *contractRunner) contractPolicyName() string {
@@ -857,7 +913,10 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if r.released() {
 		return r.releaseContract(ctx, state, bidderDID)
 	}
-	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+	if err := r.untilSettled(ctx, "resumeReceipt", func() error { return r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()) }); err != nil {
+		if r.released() && !errors.Is(err, ErrPolicyRejected) {
+			return r.releaseContract(ctx, state, bidderDID)
+		}
 		if !errors.Is(err, ErrPolicyRejected) {
 			return fmt.Errorf("the held contract is not resumed: %w", err)
 		}
@@ -1658,7 +1717,10 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: the contract status holds no bidder-signed vm.hostKeys", state, nil, nil, "adopting", 1)
 		return
 	}
-	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+	if err := r.untilSettled(ctx, "adopt", func() error { return r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()) }); err != nil {
+		if r.q.stopping() {
+			return
+		}
 		if errors.Is(err, ErrPolicyRejected) {
 			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
 			state.Error = "adopt: " + err.Error()

@@ -32,6 +32,8 @@ type Runner struct {
 
 	bindings map[string]binding
 
+	bound chan struct{}
+
 	waiters map[string]map[*waiter]struct{}
 }
 
@@ -56,15 +58,23 @@ type handle struct {
 }
 
 func newRunner(log *slog.Logger) *Runner {
-	return &Runner{log: log, bindings: map[string]binding{}, waiters: map[string]map[*waiter]struct{}{}}
+	return &Runner{log: log, bindings: map[string]binding{}, bound: make(chan struct{}), waiters: map[string]map[*waiter]struct{}{}}
 }
 
 func (r *Runner) bind(req ctlruntime.Request, engine string) {
 	b := binding{req: req, engine: engine}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	added := false
 	for _, key := range bindingKeys(req, engine) {
+		if _, ok := r.bindings[key]; !ok {
+			added = true
+		}
 		r.bindings[key] = b
+	}
+	if added {
+		close(r.bound)
+		r.bound = make(chan struct{})
 	}
 }
 
@@ -85,14 +95,31 @@ func bindingKeys(req ctlruntime.Request, engine string) []string {
 }
 
 func (r *Runner) open(ctx context.Context, to commonv1.ObjectRef, scope []string) (policy.Runner, error) {
-	r.mu.Lock()
-	b, ok := r.bindings[Key(strings.TrimSpace(to.Workspace), strings.TrimSpace(to.Name))]
-	r.mu.Unlock()
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotRunning, to)
-	}
+	key := Key(strings.TrimSpace(to.Workspace), strings.TrimSpace(to.Name))
 	caller, _ := bus.CallerFrom(ctx)
-	return &handle{runner: r, binding: b, caller: caller.Ref, scope: scope}, nil
+	var waitedSince time.Time
+	for {
+		r.mu.Lock()
+		b, ok := r.bindings[key]
+		bound := r.bound
+		r.mu.Unlock()
+		if ok {
+			if !waitedSince.IsZero() {
+				r.log.Info("policyengine_run_engine_bound", "engine", to.String(), "caller", caller.Ref.String(), "waitedMs", time.Since(waitedSince).Milliseconds())
+			}
+			return &handle{runner: r, binding: b, caller: caller.Ref, scope: scope}, nil
+		}
+		if waitedSince.IsZero() {
+			waitedSince = time.Now()
+			r.log.Info("policyengine_run_waits_for_engine", "engine", to.String(), "caller", caller.Ref.String(),
+				"reason", "the engine binding wakes the run; the caller's run timeout bounds the wait")
+		}
+		select {
+		case <-bound:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%w: %s after %s: %w", ErrNotRunning, to, time.Since(waitedSince).Round(time.Millisecond), context.Cause(ctx))
+		}
+	}
 }
 
 func (r *Runner) observe(cluster string, run *policyv1alpha1.PolicyWorkflowRun) {

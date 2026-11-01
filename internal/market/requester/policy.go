@@ -107,7 +107,7 @@ func (q *Requester) attachedPolicy(ctx context.Context, ref market.StrongRef, wa
 	}
 	record, err := q.repo.GetRecord(ctx, aturi.Authority().String(), aturi.Collection().String(), aturi.RecordKey().String())
 	if err != nil {
-		return PolicyGate{}, fmt.Errorf("read the attached policy %s: %w", ref.URI, err)
+		return PolicyGate{}, retryable(fmt.Errorf("read the attached policy %s: %w", ref.URI, err))
 	}
 	if ref.CID != "" && record.CID != ref.CID {
 		return PolicyGate{}, fmt.Errorf("the attached policy %s changed: cid %s, want %s", ref.URI, record.CID, ref.CID)

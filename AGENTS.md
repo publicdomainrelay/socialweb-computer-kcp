@@ -628,7 +628,13 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `runs.CacheKey` (workflow, mode, perspective, every DID, the records, the args), so a memoized
   verdict never crosses parties. Free winners get the full run too. A missing evaluator, run client
   or engine, or an `allow` output that is not a strict boolean, denies. `open` runs the open workflow
-  only when named; it never skips.
+  only when named; it never skips. A run whose PolicyEngine is not bound yet (a core start) waits
+  for the binding (`policyengine_run_waits_for_engine`, then `policyengine_run_engine_bound`) within
+  the caller's run timeout instead of failing at once. A requester restart never fails a contract
+  for a transient start-up failure: when a resumed contract's recorded-winner policy run does not
+  complete, or its attached policy record, its secrets bundle or its ingress url cannot be read, it
+  keeps its phase and tries again (`requester_contract_waits_transient`, a bind or the backoff 2 s
+  doubling to 30 s) and fails only on a deny or after `TransientResumeGiveUp` (2 min).
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify
