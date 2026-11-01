@@ -251,6 +251,8 @@ type Requester struct {
 
 	serviceAuth ServiceAuthSource
 
+	atircAuth ServiceAuthSource
+
 	market MarketClient
 
 	policy *PolicyEvaluator
@@ -648,8 +650,10 @@ func (q *Requester) Start(ctx context.Context) error {
 		serviceAuth = q.ownerServiceAuth
 	}
 	q.serviceAuth = serviceAuth
+	atircAuth, atircSigning, atircReason := q.atircServiceAuth(serviceAuth)
+	q.atircAuth = atircAuth
 	q.log.Info("requester_service_auth", "identityMode", q.cfg.IdentityMode, "localSigner", q.cfg.LocalSigner,
-		"signing", serviceAuthName(serviceAuth))
+		"signing", serviceAuthName(serviceAuth), "atircSigning", atircSigning, "atircReason", atircReason)
 	q.market = &HTTPMarket{
 		Directory:       q.deps.Directory,
 		Reader:          q.repo,
@@ -728,7 +732,20 @@ func (q *Requester) resolveIdentity(ctx context.Context) error {
 		q.pdsURL = found.Status.PdsURL
 	}
 	q.handle = cmp.Or(q.handle, found.Status.Handle)
+	q.noteIdentityRef(ref.Name)
 	return nil
+}
+
+func (q *Requester) noteIdentityRef(name string) {
+	if q.identityRef.Name != "" {
+		return
+	}
+	for _, ws := range IdentityWorkspaces(q.cfg.Workspace) {
+		if _, has := q.deps.Inputs.Identity(ws, name); has {
+			q.identityRef = commonv1.ObjectRef{Name: name, Workspace: ws}
+			return
+		}
+	}
 }
 
 func (q *Requester) loadKeys() error {

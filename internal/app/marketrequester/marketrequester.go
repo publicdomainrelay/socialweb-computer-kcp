@@ -533,6 +533,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	repoLinks := append(compose.LocalAccountLinks(ws, acct), compose.RepoWriteLink(p.self(), compose.RepoRefIn(did, ws), compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(did, ws), compose.ScopeAll))
 	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(did, ws))...)
+	if requireIngress && localPdsSignsAtirc(o.Spec.Network, pdsPublicURL) {
+		repoLinks = append(repoLinks, compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
+	}
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -596,6 +599,14 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.wait("waiting for the requester's MarketIdentity to sign in")
 	}
 	return p.wait("waiting for every component to be ready")
+}
+
+func localPdsSignsAtirc(network *v1alpha1.MarketNetworkValue, pdsPublicURL string) bool {
+	if network == nil {
+		return false
+	}
+	ok, _ := role.LocalPdsSignsAtirc(network.PLCDirectoryURL, pdsPublicURL)
+	return ok
 }
 
 func validatePDSStateDir(dir, did string, wantOAuth bool) error {

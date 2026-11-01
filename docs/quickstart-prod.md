@@ -7,8 +7,8 @@
 - what works today: the browser page (section 3), the CLI per contract (section 4), the agent join (section 5), tenant clusters
   through the prod gateway (section 6), a long-lived requester from the CLI that `kubectl apply` works against (section 7,
   `run requester`)
-- what is planned: installing that requester as a systemd unit, the gateway in it, and the atirc agent from a local PDS
-  (section 7, plan [0039](plans/0039-long-lived-requester.yaml))
+- what is planned: installing that requester as a systemd unit and the gateway in it (section 7, plan
+  [0039](plans/0039-long-lived-requester.yaml)); the atirc agent from a local PDS is built (section 5) and not yet proven on prod
 - acceptance: [acceptance/0012-infra-quickstart.md](acceptance/0012-infra-quickstart.md) "Prod Step For The Agent Join" and
   "Prod Readings"; the runbook rules of [acceptance/README.md](acceptance/README.md) apply (announce on atirc first, release
   what you rent, no secret on any terminal)
@@ -103,9 +103,27 @@ $SWC run request release "$NAME" --state-dir "$R"
 ## 5. Agent VM: The atirc Join
 
 The mint needs a requester identity irc.fedfork.com resolves and that signs service auth (lxm `chat.atirc.mint`, aud
-`did:web:irc.fedfork.com#atirc`): an OAuth account with `rpc:chat.atirc.mint` in its granted scope (the CLI with
-`--atproto-oauth-qr`, the page, the iOS app). A local network requester (`localRepo`) cannot
-([quickstart-local.md](quickstart-local.md) section 7).
+`did:web:irc.fedfork.com#atirc`). irc.fedfork.com checks the JWT against the DID document from plc.directory, then the
+handle: the first of up to 3 `alsoKnownAs` aliases whose DNS TXT `_atproto.<handle>` (else
+`https://<handle>/.well-known/atproto-did`) names the DID. An agent token is leased, so irc.fedfork.com also reads the
+receipt and the bidder's `vm.terminated` from the requester's PDS: that PDS must be reachable from the internet.
+
+| identity | signs the mint with | log `requester_service_auth` `atircSigning` |
+|---|---|---|
+| OAuth (`--atproto-oauth-qr`, `--atproto-oauth`, the page, the iOS app) | the OAuth session; its granted scope holds `rpc:chat.atirc.mint` | `oauth` |
+| existing account with an app password (`--atproto-identity-mode pdsAccount`) | the owner MarketIdentity (getServiceAuth on that account's PDS) | `owner-identity` |
+| local PDS (`localRepo`) | its own Pds component, only when the DID is on `https://plc.directory` and the Pds is public through its ingress (a ComponentLink Requester -> Pds `pds.serviceauth`); otherwise none, with the reason in `atircReason` | `local-pds` or `none` |
+
+- the market callbacks (submitBid, submitEvent, the RFP and accept signatures) are unchanged: this source signs only the
+  atirc mint
+- a `spec.agent` contract whose requester handle is `.local` (the default `localRepo` handle
+  `<workspace>.requester.local`) or does not resolve to the requester DID is Failed before its RFP, with
+  `refused: the atirc agent needs a requester handle that resolves to <did>: ...; start the requester with
+  --atproto-handle <a domain you control> ...`; a plain VM contract of the same requester still runs
+- a `spec.agent` contract whose `spec.secretsRef` path holds no bundle gets one from the requester: one entry at
+  `agent.envFile` (`ATIRC_TOKEN=`, mode 0600), logged `requester_agent_bundle_placeholder`; no bao step is needed (the
+  bao commands of [quickstart-local.md](quickstart-local.md) still work and win, a bundle that is there is kept). The path
+  must be under `contracts/` of the requester mount
 
 ```bash
 NAME=qs-agent-$(date +%s)
@@ -187,14 +205,47 @@ kill -INT %1                                              # Ctrl-C: stops the kc
   file rewritten in 1.4 s, contract still Held, ssh again. The standalone path against prod bidders with an OAuth QR
   sign-in is the lead's run (acceptance rules)
 
+### Ingress options per identity
+
+Two ingresses, two jobs. Both go after `--` (rows of `deploy/apps/option-map.yaml`, app `market-requester`); the ready
+file reports both public URLs (`ingress.pds`, `ingress.requester`).
+
+- PDS ingress (`spec.ingress`, a local PDS only): makes the DID document's `atproto_pds` endpoint, the relay crawl, the
+  bidders' record reads and irc.fedfork.com's lease reads reach the local PDS
+- requester ingress (`spec.requesterIngress`, every identity): submitBid, submitEvent and getSecrets; the agent's
+  `ATIRC_TOKEN` reaches the guest through getSecrets
+
+| identity | PDS ingress | requester ingress | agent mint |
+|---|---|---|---|
+| OAuth QR / browser | none (the account's PDS is public) | as below | mints |
+| pdsAccount (app password) | none (the account's PDS is public) | as below | mints through the owner MarketIdentity |
+| localRepo (own Pds) | `--ingress-xrpc-host xrpc.fedproxy.com` (the did:key ingress relay; the standalone default, public URL `https://<did label>.xrpc.fedproxy.com`); `--ingress-provider opentunnel --ingress-opentunnel-command ... --ingress-opentunnel-route-name ...`; `--ingress-public-host <host>` (with `--ingress-relay-url <your relay>`) for `https://<did label>.<host>` behind your own edge | as below | mints only with the DID on plc.directory (standalone default `--plc-directory-url https://plc.directory`), that PDS ingress Ready, and `--atproto-handle <a domain you control>` whose DNS TXT `_atproto.<handle>` or `https://<handle>/.well-known/atproto-did` names the DID |
+
+Requester ingress, every identity:
+
+| option | effect |
+|---|---|
+| (none, comms `XRPC` or `Both`) | the app ingress (standalone: xrpc-subscription through xrpc.fedproxy.com) |
+| `--requester-ingress-provider webrtc` (`--requester-ingress-webrtc-stun stun:...`) | bids, events and getSecrets over a webrtc datachannel |
+| `--requester-ingress-provider xrpc-subscription`, `opentunnel` or `iroh` | the same endpoints through that provider |
+| `--comms-mode Firehose` | no inbound endpoint at all: add `--secrets-fallback Sealed`, or a contract with `spec.secretsRef` (every agent contract) fails with "secrets need the requester ingress (getSecrets) or secretsFallback: Sealed" |
+
+- a localRepo requester with a public handle, its PDS behind xrpc.fedproxy.com and the agent:
+  `$SWC run requester --name me --state-dir "$ST" -- --atproto-handle me.example.org` (the defaults give
+  plc.directory and xrpc.fedproxy.com); publish `did=<the ready file's did>` as DNS TXT `_atproto.me.example.org`
+  before the first agent contract; the core log shows `requester_service_auth ... "atircSigning":"local-pds"`
+- proven (2026-11-01, own market network, localRepo with the default `.local` handle, bidder policy
+  `bidder-tangled-vouch`): `atircSigning` `none` ("the DID is on the network PLC"), no `pds.serviceauth` link;
+  `agent-vm.yaml` with no bao step: placeholder bundle written (`/etc/atirc/atirc.env`, 0600), contract Failed
+  `refused: ... --atproto-handle ...` with no RFP; `vm.yaml` of the same requester Deployed in 22 s, ssh printed
+  `quickstart-vm-ok`. A real mint from a local PDS is the lead's prod run
+
 Still planned in plan 0039:
 
 - `install requester` (item B-INSTALL-REQUESTER): the same process as a systemd user unit in `socialweb.slice` of an
   account that install creates when asked, with `config.json` and `upgrade`, as `install bidder` does
 - the gateway in the same kcp (item C-GATEWAY-COMPOSE): `kubectl apply` a Cluster, its k3s control plane runs as
   HostProcesses of the requester's core, and its nodes are rented by the same requester
-- the atirc agent (items D-AGENT-IDENTITY, D-AGENT-INGRESS): which identity mints, and the ingress options
-  (`--requester-ingress-provider`, `--ingress-xrpc-host`, `--ingress-public-host`, opentunnel) for a local PDS
 - `examples/infra/mixed-prod.yaml` and acceptance `docs/acceptance/0013-mixed-prod.md` (item F-MIXED-PROD, not written yet)
 
 ## Not Supported On Prod Today
@@ -203,6 +254,6 @@ Still planned in plan 0039:
 |---|---|
 | `run requester` as an installed systemd unit (today it runs in your terminal) | plan 0039 B-INSTALL-REQUESTER |
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
-| an atirc agent from a local PDS identity | plan 0039 D-AGENT-IDENTITY, D-AGENT-INGRESS |
+| an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder | plan 0039 F3-BIDDER-OPERATOR-REPO |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |

@@ -208,7 +208,7 @@ func (s *Service) awaitRepo(ctx context.Context, did string) {
 }
 
 func (s *Service) openServiceAuth(ctx context.Context, identity commonv1.ObjectRef, did string) (pds.ServiceAuth, error) {
-	identity.Group, identity.Kind = v1alpha1.GroupName, "MarketIdentity"
+	identity.Group, identity.Kind = cmp.Or(identity.Group, v1alpha1.GroupName), cmp.Or(identity.Kind, "MarketIdentity")
 	return bus.Resolve[pds.ServiceAuth](ctx, s.deps.Bus, s.self(), identity, bus.Capability{Name: pds.CapabilityServiceAuth, Scope: []string{did}})
 }
 

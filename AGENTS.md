@@ -223,7 +223,14 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
-    linux/amd64 only. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
+    linux/amd64 only. The mint signs with `atircSigning` of the `requester_service_auth` log (atirc only; the market
+    callbacks keep `signing`): the OAuth session, the owner MarketIdentity for pdsAccount (`owner-identity`), or for
+    localRepo its own Pds component (`local-pds`, a `pds.serviceauth` ComponentLink Requester -> Pds the MarketRequester
+    composes only when the DID is on `https://plc.directory` and the Pds is public through its ingress,
+    `role.LocalPdsSignsAtirc`); else `none` with `atircReason`. Before the RFP of a spec.agent contract (no
+    `spec.atircParentRef`) the requester writes the placeholder bundle (one entry at envFile, `ATIRC_TOKEN=`, 0600) when
+    the secretsRef path holds none (`requester_agent_bundle_placeholder`), then refuses the contract (Failed `refused:
+    ... --atproto-handle ...`, no record) when its handle has a disallowed TLD (`.local`) or does not resolve to its DID. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
     command starts with `atirc`, or whose client sends `LC_ATIRC=1` (`LC_ATIRC=0` turns it off), gets,
     when it is not an `LC_SESSION` held one, the agent module in its user_data (so the bidder seeds
     `/usr/local/bin/atirc`), and after the receipt the requester mints, with its own service auth

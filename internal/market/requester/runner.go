@@ -247,6 +247,17 @@ func (r *contractRunner) Run(ctx context.Context) {
 		r.resumeReleased(ctx, state)
 		return
 	}
+	if contract.Spec.Agent != nil && (state == nil || state.RFPURI == "") && !r.released() {
+		if err := r.ensureAgentBundle(ctx, contract); err != nil {
+			r.recordFailure(ctx, state, err, 1)
+			return
+		}
+		if err := r.q.checkAgentHandle(ctx); err != nil {
+			r.log().Warn("requester_contract_refused", "err", err.Error())
+			r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+err.Error(), state, nil, nil, "refused", 1)
+			return
+		}
+	}
 	if contract.Spec.SecretsRef != nil && contract.Status.SecretsFetchedAt == "" {
 		if err := r.ensureSecrets(ctx, contract); err != nil {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
