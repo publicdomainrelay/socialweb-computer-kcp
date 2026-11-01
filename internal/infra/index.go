@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ var (
 	ErrIndexFull = fmt.Errorf("infra: the index holds %d live entries; nothing is added until one is pruned", IndexMaxLive)
 
 	ErrNotIndex = errors.New("infra: the record at rkey self is not an index of live deployments")
+
+	recordKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:~-]{1,512}$`)
 )
 
 type IndexKey struct {
@@ -83,28 +86,68 @@ type IndexDead struct {
 type IndexChange struct {
 	Add *IndexEntry
 
+	Refresh bool
+
 	Remove *IndexEnded
 
 	Dead []IndexDead
+}
+
+type IndexView struct {
+	Live []IndexEntry
+
+	Ended []IndexKey
 }
 
 func IndexURI(did string) string {
 	return "at://" + did + "/" + record.InfraNSID + "/" + ReservedRkey
 }
 
-func parseIndex(raw json.RawMessage) (*record.Infra, error) {
+func validKey(key IndexKey) bool {
+	if key.Collection != record.InfraNSID && key.Collection != record.EphemeralInfraNSID {
+		return false
+	}
+	return key.Rkey != ReservedRkey && key.Rkey != "." && key.Rkey != ".." && recordKeyPattern.MatchString(key.Rkey)
+}
+
+func salvage[T any](raw any) []T {
+	items, _ := raw.([]any)
+	var out []T
+	for _, item := range items {
+		b, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		var v T
+		if json.Unmarshal(b, &v) == nil {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func parseIndex(raw json.RawMessage) (*record.Infra, bool, error) {
 	var value map[string]any
 	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-		return nil, fmt.Errorf("%w: the index record is not a JSON object", ErrNotIndex)
+		return nil, false, fmt.Errorf("%w: the index record is not a JSON object", ErrNotIndex)
 	}
 	r, err := record.ParseInfra(value)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNotIndex, err)
+	switch {
+	case err == nil && r.Index != nil:
+		return r, false, nil
+	case err == nil:
+		return nil, false, ErrNotIndex
 	}
-	if r.Index == nil {
-		return nil, ErrNotIndex
+	index, ok := value["index"].(map[string]any)
+	if typ, _ := value["$type"].(string); !ok || (typ != "" && typ != record.InfraNSID) {
+		return nil, false, fmt.Errorf("%w: %v", ErrNotIndex, err)
 	}
-	return r, nil
+	created, _ := value["createdAt"].(string)
+	if _, perr := time.Parse(time.RFC3339, created); perr != nil {
+		created = ""
+	}
+	return &record.Infra{Type: record.InfraNSID, CreatedAt: created, Description: IndexDescription, Index: &record.InfraIndex{
+		Live: salvage[record.InfraIndexEntry](index["live"]), RecentEnded: salvage[record.InfraIndexEnded](index["recentEnded"])}}, true, nil
 }
 
 func entryOf(e record.InfraIndexEntry) IndexEntry {
@@ -115,24 +158,49 @@ func entryOf(e record.InfraIndexEntry) IndexEntry {
 	return out
 }
 
-func DecodeIndex(raw json.RawMessage) ([]IndexEntry, error) {
-	r, err := parseIndex(raw)
+func endedKey(e record.InfraIndexEnded) IndexKey {
+	return IndexKey{Collection: strings.TrimSpace(e.Collection), Rkey: strings.TrimSpace(e.Rkey)}
+}
+
+func DecodeIndexView(raw json.RawMessage) (IndexView, error) {
+	r, _, err := parseIndex(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidDeclaration, err)
+		return IndexView{}, fmt.Errorf("%w: %v", ErrInvalidDeclaration, err)
 	}
-	out := make([]IndexEntry, 0, len(r.Index.Live))
+	var out IndexView
 	for _, e := range r.Index.Live {
-		entry := entryOf(e)
-		if entry.Rkey == "" || entry.Rkey == ReservedRkey {
-			continue
+		if entry := entryOf(e); validKey(entry.Key()) {
+			out.Live = append(out.Live, entry)
 		}
-		out = append(out, entry)
+	}
+	for _, e := range r.Index.RecentEnded {
+		out.Ended = append(out.Ended, endedKey(e))
 	}
 	return out, nil
 }
 
+func DecodeIndex(raw json.RawMessage) ([]IndexEntry, error) {
+	view, err := DecodeIndexView(raw)
+	return view.Live, err
+}
+
 func IndexHolds(entries []IndexEntry, key IndexKey) bool {
 	return slices.ContainsFunc(entries, func(e IndexEntry) bool { return e.Key() == key })
+}
+
+func sameEntry(have IndexEntry, want IndexEntry) bool {
+	return have.ExpiresAt.Equal(want.ExpiresAt) && (want.CreatedAt.IsZero() || have.CreatedAt.Equal(want.CreatedAt))
+}
+
+func (v IndexView) Settled(ch IndexChange) bool {
+	switch {
+	case ch.Add != nil:
+		i := slices.IndexFunc(v.Live, func(e IndexEntry) bool { return e.Key() == ch.Add.Key() })
+		return i >= 0 && (!ch.Refresh || sameEntry(v.Live[i], *ch.Add)) && !slices.Contains(v.Ended, ch.Add.Key())
+	case ch.Remove != nil:
+		return !IndexHolds(v.Live, ch.Remove.Key())
+	}
+	return true
 }
 
 func stamp(t time.Time) string {
@@ -153,11 +221,14 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 	if raw == nil {
 		r = record.Infra{Type: record.InfraNSID, CreatedAt: stamp(now), Description: IndexDescription, Index: &record.InfraIndex{}}
 	} else {
-		parsed, err := parseIndex(raw)
+		parsed, malformed, err := parseIndex(raw)
 		if err != nil {
 			return nil, false, err
 		}
-		r = *parsed
+		r, changed = *parsed, malformed
+		if r.CreatedAt == "" {
+			r.CreatedAt, changed = stamp(now), true
+		}
 	}
 	dead := map[IndexKey]IndexDead{}
 	for _, d := range ch.Dead {
@@ -170,13 +241,24 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 		key := entry.Key()
 		d, isDead := dead[key]
 		switch {
+		case !validKey(key) || entry.AddedAt.IsZero() || entry.CreatedAt.IsZero():
 		case ch.Remove != nil && key == ch.Remove.Key():
 			ended = append(ended, endedRecord(*ch.Remove, now))
+		case ch.Add != nil && key == ch.Add.Key():
+			if ch.Refresh && !sameEntry(entry, *ch.Add) {
+				e.ExpiresAt = stamp(ch.Add.ExpiresAt)
+				if !ch.Add.CreatedAt.IsZero() {
+					e.CreatedAt = stamp(ch.Add.CreatedAt)
+				}
+				changed = true
+			}
+			live = append(live, e)
+			continue
 		case entry.Expired(now):
 			ended = append(ended, endedRecord(IndexEnded{Collection: key.Collection, Rkey: key.Rkey, EndedAt: entry.ExpiresAt, EndReason: IndexEndDeadline}, now))
 		case isDead && !d.Gone:
 			ended = append(ended, endedRecord(d.IndexEnded, now))
-		case isDead && !entry.AddedAt.IsZero() && now.Sub(entry.AddedAt) >= IndexGoneAfter:
+		case isDead && now.Sub(entry.AddedAt) >= IndexGoneAfter:
 			ended = append(ended, endedRecord(IndexEnded{Collection: key.Collection, Rkey: key.Rkey, EndedAt: cmp.Or(d.EndedAt, now),
 				EndReason: IndexEndDeleted}, now))
 		default:
@@ -185,29 +267,34 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 		}
 		changed = true
 	}
+	var full error
 	if ch.Add != nil && !slices.ContainsFunc(live, func(e record.InfraIndexEntry) bool { return entryOf(e).Key() == ch.Add.Key() }) {
 		if len(live) >= IndexMaxLive {
-			return nil, false, ErrIndexFull
+			full = ErrIndexFull
+		} else {
+			add := *ch.Add
+			live = append(live, record.InfraIndexEntry{Collection: add.Collection, Rkey: add.Rkey, CreatedAt: stamp(cmp.Or(add.CreatedAt, now)),
+				ExpiresAt: stamp(add.ExpiresAt), AddedAt: stamp(now), Writer: add.Writer})
+			changed = true
 		}
-		add := *ch.Add
-		live = append(live, record.InfraIndexEntry{Collection: add.Collection, Rkey: add.Rkey, CreatedAt: stamp(cmp.Or(add.CreatedAt, now)),
-			ExpiresAt: stamp(add.ExpiresAt), AddedAt: stamp(now), Writer: add.Writer})
-		changed = true
-	}
-	if !changed {
-		return raw, false, nil
 	}
 	slices.SortStableFunc(ended, func(a, b record.InfraIndexEnded) int { return strings.Compare(b.EndedAt, a.EndedAt) })
 	recent := ended
 	for _, e := range r.Index.RecentEnded {
-		key := IndexKey{Collection: strings.TrimSpace(e.Collection), Rkey: strings.TrimSpace(e.Rkey)}
-		if slices.ContainsFunc(ended, func(n record.InfraIndexEnded) bool { return n.Collection == key.Collection && n.Rkey == key.Rkey }) {
-			continue
+		key := endedKey(e)
+		switch {
+		case slices.ContainsFunc(ended, func(n record.InfraIndexEnded) bool { return endedKey(n) == key }):
+		case full == nil && ch.Add != nil && key == ch.Add.Key():
+			changed = true
+		default:
+			recent = append(recent, e)
 		}
-		recent = append(recent, e)
 	}
 	if len(recent) > IndexMaxEnded {
-		recent = recent[:IndexMaxEnded]
+		recent, changed = recent[:IndexMaxEnded], true
+	}
+	if !changed {
+		return raw, false, full
 	}
 	index := *r.Index
 	index.Live, index.RecentEnded, index.UpdatedAt = live, recent, stamp(now)
@@ -216,5 +303,5 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 	if err != nil {
 		return nil, false, fmt.Errorf("infra: encoding the index: %w", err)
 	}
-	return out, true, nil
+	return out, true, full
 }
