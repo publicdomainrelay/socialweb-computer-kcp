@@ -283,7 +283,7 @@ func uriRKey(uri string) string {
 
 func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) {
 	envFile, err := agentEnvFile(contract)
-	if err != nil || envFile == "" {
+	if err != nil || envFile == "" || r.released() {
 		return
 	}
 	rfpURI := ""

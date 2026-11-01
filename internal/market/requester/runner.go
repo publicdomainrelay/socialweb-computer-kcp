@@ -855,6 +855,9 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 		}
 		return errors.New(state.Error)
 	}
+	if r.released() {
+		return r.releaseContract(ctx, state, bidderDID)
+	}
 	r.ensureAssociation(ctx, state.Accept, state)
 	receiptRef := market.RecordRef{URI: state.Receipt.URI, CID: state.Receipt.CID}
 	verified, err := r.verifyRecordedReceipt(ctx, state, receiptRef)
@@ -870,6 +873,9 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 		return errors.New(state.Error)
 	} else {
 		state.ReceiptOk = new(true)
+	}
+	if r.released() {
+		return r.releaseContract(ctx, state, bidderDID)
 	}
 	if state.Phase != v1alpha1.ContractNetwork && state.Phase != v1alpha1.ContractReleased {
 		state.Phase = v1alpha1.ContractReceipt
@@ -1133,7 +1139,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		return false
 	}
-	if slices.ContainsFunc(pending, handle) {
+	if r.released() || slices.ContainsFunc(pending, handle) {
 		return nil
 	}
 	var retry eventRetry
@@ -1728,6 +1734,10 @@ func contractHostKeys(keys []v1alpha1.ComputeVMHostKey) []v1alpha1.ContractHostK
 }
 
 func (r *contractRunner) sealSecrets(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	if r.released() {
+		r.log().Info("requester_guest_secrets_not_sealed", "reason", "the release is requested")
+		return
+	}
 	contract := r.snapshot()
 	contract.Status.Contract = cloneNodeClaimContract(state)
 	if grant := r.grantValue(); grant != nil {
