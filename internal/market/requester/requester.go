@@ -277,6 +277,10 @@ type Requester struct {
 
 	atircLeaseFallback atomic.Bool
 
+	atircLeaseMu sync.Mutex
+
+	atircLeaseEndpoints map[string]bool
+
 	atircRevokesStarted sync.Map
 
 	orphanSweep sync.Once

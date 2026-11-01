@@ -83,6 +83,8 @@ type contractRunner struct {
 	associationAttempts int
 
 	associationRetry *time.Timer
+
+	atircMint *atircMintOutcome
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -1635,6 +1637,9 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	}
 	if state != nil && state.Termination != nil {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
+	}
+	if mint := r.agentMintOutcome(); mint != nil {
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionAtircTokenMinted, conds.Status(mint.ok), mint.reason, mint.message, now)
 	}
 }
 

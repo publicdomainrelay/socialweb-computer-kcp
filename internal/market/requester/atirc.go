@@ -10,15 +10,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
 const (
@@ -47,6 +51,14 @@ const (
 	atircReleaseKey = "atircReleasePending"
 
 	atircMintedKey = "atircMinted"
+
+	atircLeaseEndpointsKey = "endpoints"
+
+	atircMintLeased = "Leased"
+
+	atircMintPlain = "Unleased"
+
+	atircMintPresent = "Present"
 
 	atircCallTimeout = 30 * time.Second
 
@@ -154,10 +166,81 @@ func checkLeaseChain(got, parent []atircLease, own *atircLease) error {
 	return nil
 }
 
-func leaseRefused(err error) bool {
-	var aerr *atircError
-	return errors.As(err, &aerr) && aerr.status == http.StatusBadRequest &&
-		strings.Contains(strings.ToLower(aerr.name+" "+aerr.message), "lease")
+func (q *Requester) atircLeaseRef() commonv1.SecretRef {
+	ref := q.atircMintedRef()
+	ref.Path += "-lease"
+	return ref
+}
+
+func (q *Requester) loadLeaseEndpointsLocked(ctx context.Context) error {
+	if q.atircLeaseEndpoints != nil {
+		return nil
+	}
+	if q.deps.VaultWrite == nil {
+		return errors.New("the requester has no vault write handle")
+	}
+	ref := q.atircLeaseRef()
+	kv, err := q.deps.VaultWrite(ctx, ref)
+	if err != nil {
+		return err
+	}
+	data, err := kv.Read(ctx, ref.Mount, ref.Path, 0)
+	endpoints := map[string]bool{}
+	switch {
+	case vaultPathGone(err):
+	case err != nil:
+		return fmt.Errorf("read the lease-aware atirc endpoints: %w", err)
+	case data == nil:
+		return errVaultNoData
+	default:
+		var list []string
+		if text, _ := data[atircLeaseEndpointsKey].(string); text != "" {
+			if err := json.Unmarshal([]byte(text), &list); err != nil {
+				return fmt.Errorf("parse the lease-aware atirc endpoints: %w", err)
+			}
+		}
+		for _, base := range list {
+			endpoints[base] = true
+		}
+	}
+	q.atircLeaseEndpoints = endpoints
+	return nil
+}
+
+func (q *Requester) leaseAware(ctx context.Context, base string) (bool, error) {
+	q.atircLeaseMu.Lock()
+	defer q.atircLeaseMu.Unlock()
+	if err := q.loadLeaseEndpointsLocked(ctx); err != nil {
+		return false, err
+	}
+	return q.atircLeaseEndpoints[base], nil
+}
+
+func (q *Requester) markLeaseAware(ctx context.Context, base string) error {
+	q.atircLeaseMu.Lock()
+	defer q.atircLeaseMu.Unlock()
+	if err := q.loadLeaseEndpointsLocked(ctx); err != nil {
+		return err
+	}
+	if q.atircLeaseEndpoints[base] {
+		return nil
+	}
+	q.atircLeaseEndpoints[base] = true
+	list := make([]string, 0, len(q.atircLeaseEndpoints))
+	for endpoint := range q.atircLeaseEndpoints {
+		list = append(list, endpoint)
+	}
+	slices.Sort(list)
+	raw, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	ref := q.atircLeaseRef()
+	kv, err := q.deps.VaultWrite(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return kv.Write(ctx, ref.Mount, ref.Path, map[string]any{atircLeaseEndpointsKey: string(raw)})
 }
 
 func liveAtircEntry(entries []SecretEntry, path string, now time.Time) bool {
@@ -271,14 +354,17 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 	if state != nil {
 		rfpURI = state.RFPURI
 	}
+	reason := ""
 	lease, err := contractLease(state, nil)
 	if err == nil {
-		err = r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}, lease)
+		reason, err = r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}, lease)
 	}
 	if err == nil {
+		r.noteAgentMint(ctx, true, reason, "the atirc agent token is in the bundle ("+reason+")")
 		return
 	}
 	r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", 1, "err", err.Error())
+	r.noteAgentMint(ctx, false, "MintFailed", fmt.Sprintf("attempt 1 of %d: %s", associationRetryAttempts, err.Error()))
 	if lease == nil {
 		return
 	}
@@ -295,15 +381,47 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 			if current.Status.AtircRevokes != "" || r.released() {
 				return
 			}
-			err := r.writeAtircToken(ctx, current, envFile, "", rfpURI, time.Time{}, lease)
+			reason, err := r.writeAtircToken(ctx, current, envFile, "", rfpURI, time.Time{}, lease)
 			if err == nil {
 				r.log().Info("requester_atirc_minted_after_retry", "envFile", envFile, "attempt", attempt)
+				r.noteAgentMint(ctx, true, reason, fmt.Sprintf("the atirc agent token is in the bundle (%s, attempt %d)", reason, attempt))
 				return
 			}
 			r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", attempt, "err", err.Error())
+			r.noteAgentMint(ctx, false, "MintFailed", fmt.Sprintf("attempt %d of %d: %s", attempt, associationRetryAttempts, err.Error()))
 		}
 		r.log().Warn("requester_atirc_mint_gave_up", "envFile", envFile, "attempts", associationRetryAttempts)
+		r.noteAgentMint(ctx, false, "GaveUp", fmt.Sprintf("no atirc agent token after %d attempts", associationRetryAttempts))
 	})
+}
+
+type atircMintOutcome struct {
+	ok bool
+
+	reason string
+
+	message string
+}
+
+func (r *contractRunner) noteAgentMint(ctx context.Context, ok bool, reason, message string) {
+	if r.isGone() {
+		return
+	}
+	r.mu.Lock()
+	r.atircMint = &atircMintOutcome{ok: ok, reason: reason, message: message}
+	r.mu.Unlock()
+	contract := r.snapshot()
+	status := v1alpha1.ComputeContractStatus{Conditions: append([]metav1.Condition(nil), contract.Status.Conditions...)}
+	conds.SetStatusAt(&status.Conditions, contract.Generation, v1alpha1.ComputeContractConditionAtircTokenMinted, conds.Status(ok), reason, message, r.q.now())
+	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
+		r.log().Warn("requester_atirc_mint_status_failed", "err", err.Error())
+	}
+}
+
+func (r *contractRunner) agentMintOutcome() *atircMintOutcome {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.atircMint
 }
 
 func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract, association commonv1.StrongRef, deadline time.Time) error {
@@ -314,7 +432,8 @@ func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract
 	if err != nil {
 		return err
 	}
-	return r.writeAtircToken(ctx, contract, cloudinit.GuestRequesterAtircEnvFile, "r2", state.Accept.URI, deadline, lease)
+	_, err = r.writeAtircToken(ctx, contract, cloudinit.GuestRequesterAtircEnvFile, "r2", state.Accept.URI, deadline, lease)
+	return err
 }
 
 func (r *contractRunner) mintedEntry(ctx context.Context, contract v1alpha1.ComputeContract, entry SecretEntry, fresh bool) {
@@ -353,63 +472,73 @@ func (r *contractRunner) postMint(ctx context.Context, bearer string, in atircMi
 	return token, nil
 }
 
-func (r *contractRunner) mintAtirc(ctx context.Context, contract v1alpha1.ComputeContract, issuer atircIssuer, in atircMintInput) (string, error) {
+func (r *contractRunner) mintAtirc(ctx context.Context, issuer atircIssuer, in atircMintInput) (string, string, error) {
 	token, err := r.postMint(ctx, issuer.bearer, in)
-	if err != nil && in.Lease != nil && leaseRefused(err) {
-		r.leaseFallback(err.Error())
-		if !issuer.parent {
-			if issuer, err = r.atircIssuer(ctx, contract); err != nil {
-				return "", err
-			}
+	if err != nil {
+		return "", "", err
+	}
+	if in.Lease == nil {
+		return token, atircMintPlain, nil
+	}
+	refuse := func(cause error) (string, string, error) {
+		if _, revokeErr := r.revokeAtircSubhandle(ctx, token, in.Subhandle); revokeErr != nil {
+			return "", "", fmt.Errorf("mint %s: %w; its revoke failed: %w", in.Subhandle, cause, revokeErr)
 		}
-		in.Lease = nil
-		return r.postMint(ctx, issuer.bearer, in)
+		return "", "", fmt.Errorf("mint %s: %w", in.Subhandle, cause)
 	}
-	if err != nil || in.Lease == nil {
-		return token, err
-	}
+	base := r.atircBase()
 	leases, ok := atircTokenLeases(token)
 	if !ok {
+		if len(issuer.leases) > 0 {
+			return refuse(errors.New("the token carries no leases claim under a leased parent token"))
+		}
+		aware, err := r.q.leaseAware(ctx, base)
+		switch {
+		case err != nil:
+			return refuse(fmt.Errorf("the token carries no leases claim and whether %s is lease-aware is unknown: %w", base, err))
+		case aware:
+			return refuse(fmt.Errorf("the token carries no leases claim and %s returned one before", base))
+		}
 		r.leaseFallback("the minted token carries no leases claim")
-		return token, nil
+		return token, atircMintPlain, nil
 	}
 	if err := checkLeaseChain(leases, issuer.leases, in.Lease); err != nil {
-		if _, revokeErr := r.revokeAtircSubhandle(ctx, token, in.Subhandle); revokeErr != nil {
-			return "", fmt.Errorf("mint %s: %w; its revoke failed: %w", in.Subhandle, err, revokeErr)
-		}
-		return "", fmt.Errorf("mint %s: %w", in.Subhandle, err)
+		return refuse(err)
 	}
-	return token, nil
+	if err := r.q.markLeaseAware(ctx, base); err != nil {
+		r.log().Warn("requester_atirc_lease_aware_unrecorded", "atirc", base, "err", err.Error())
+	}
+	return token, atircMintLeased, nil
 }
 
-func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, path, label, uri string, deadline time.Time, lease *atircLease) error {
+func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, path, label, uri string, deadline time.Time, lease *atircLease) (string, error) {
 	q := r.q
 	if err := CheckTokenPaths(contract, nil); err != nil {
-		return fmt.Errorf("no token is minted: %w", err)
+		return "", fmt.Errorf("no token is minted: %w", err)
 	}
 	switch {
 	case q.deps.VaultWrite == nil:
-		return errors.New("the requester has no vault write handle")
+		return "", errors.New("the requester has no vault write handle")
 	case contract.Spec.SecretsRef == nil:
-		return errors.New("the contract has no secrets bundle")
+		return "", errors.New("the contract has no secrets bundle")
 	case uri == "":
-		return errors.New("the contract has no record to name the subhandle after yet")
+		return "", errors.New("the contract has no record to name the subhandle after yet")
 	case contract.Status.AtircRevokes != "" || r.snapshot().Status.AtircRevokes != "":
-		return errors.New("the contract's atirc tokens are revoked; none is minted again")
+		return "", errors.New("the contract's atirc tokens are revoked; none is minted again")
 	}
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	ref := *contract.Spec.SecretsRef
 	kv, data, entries, err := r.readAtircBundle(ctx, ref)
 	if err != nil {
-		return fmt.Errorf("read the bundle: %w", err)
+		return "", fmt.Errorf("read the bundle: %w", err)
 	}
 	marker, err := markerIn(data)
 	if err != nil {
-		return fmt.Errorf("no token is minted: %w", err)
+		return "", fmt.Errorf("no token is minted: %w", err)
 	}
 	if marker.ownedBy(string(contract.UID)) || r.released() || q.revokesStarted(contract) {
-		return errors.New("the contract's release has started; no atirc token is minted")
+		return "", errors.New("the contract's release has started; no atirc token is minted")
 	}
 	current := SecretEntry{Path: path, Mode: "0600"}
 	at := -1
@@ -421,19 +550,19 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if token := atircToken(current.Value); token != "" {
 		if exp, ok := atircTokenExp(token, current.Value); ok && q.now().Before(exp) {
 			r.mintedEntry(ctx, contract, current, false)
-			return nil
+			return atircMintPresent, nil
 		}
 	}
 	issuer, err := r.atircIssuer(ctx, contract)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if label == "" {
 		label = issuer.label
 	}
 	subhandle := atircChild(label, uriRKey(uri), issuer.base)
 	if subhandle == "" {
-		return fmt.Errorf("%q and %q make no subhandle", issuer.base, uri)
+		return "", fmt.Errorf("%q and %q make no subhandle", issuer.base, uri)
 	}
 	exp := q.now().Add(AtircTokenLifetime)
 	for _, bound := range []time.Time{deadline, issuer.exp} {
@@ -442,15 +571,15 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		}
 	}
 	if !exp.After(q.now()) {
-		return fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
+		return "", fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
 	}
 	if err := q.indexMinted(ctx, contract, exp); err != nil {
 		r.log().Warn("requester_atirc_index_failed", "subhandle", subhandle, "err", err.Error())
-		return fmt.Errorf("no token is minted while the atirc minted index cannot record %s: %w", subhandle, err)
+		return "", fmt.Errorf("no token is minted while the atirc minted index cannot record %s: %w", subhandle, err)
 	}
-	token, err := r.mintAtirc(ctx, contract, issuer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease})
+	token, reason, err := r.mintAtirc(ctx, issuer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if claimed, ok := atircTokenExp(token, ""); ok {
 		exp = claimed
@@ -464,7 +593,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
-		return err
+		return "", err
 	}
 	next := make(map[string]any, len(data)+1)
 	for k, v := range data {
@@ -473,15 +602,15 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	next["bundle"] = string(raw)
 	minted, err := withMinted(data, atircMinted{Path: path, Subhandle: subhandle, Token: token, Exp: exp.Unix(), UID: string(contract.UID)}, q.now())
 	if err != nil {
-		return err
+		return "", err
 	}
 	next[atircMintedKey] = minted
 	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
-		return fmt.Errorf("write the bundle: %w", err)
+		return "", fmt.Errorf("write the bundle: %w", err)
 	}
 	r.mintedEntry(ctx, contract, current, true)
-	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339), "leased", lease != nil)
-	return nil
+	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339), "lease", reason)
+	return reason, nil
 }
 
 type atircMinted struct {

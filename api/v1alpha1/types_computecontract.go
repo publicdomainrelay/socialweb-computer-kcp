@@ -298,4 +298,6 @@ const (
 	ComputeContractConditionGuestRequesterReleased = "GuestRequesterReleased"
 
 	ComputeContractConditionTerminated = "Terminated"
+
+	ComputeContractConditionAtircTokenMinted = "AtircTokenMinted"
 )
