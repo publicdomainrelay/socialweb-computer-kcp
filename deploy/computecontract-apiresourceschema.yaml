@@ -104,6 +104,13 @@ spec:
                   refFile:
                     type: string
                     default: /etc/socialweb-computer/association-ref
+              guestTools:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - socialweb-computer
+                x-kubernetes-list-type: set
               secretsRef:
                 type: object
                 properties:
@@ -191,13 +198,6 @@ spec:
                       - pins
                 required:
                   - clusterRef
-              guestTools:
-                type: array
-                items:
-                  type: string
-                  enum:
-                    - socialweb-computer
-                x-kubernetes-list-type: set
               ttlSecondsAfterFinished:
                 type: integer
                 format: int32

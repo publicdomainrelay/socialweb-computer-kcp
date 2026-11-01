@@ -4096,8 +4096,10 @@ fail, rather than the code read against this document alone.
 - **Opened 2026-10-30 (plan 0036 V1): GUEST-SELF-BINARY, the socialweb-computer binary in a guest.** R2
   (`socialweb-computer run request` inside a guest) needs the CLI there; the release binary (~560 MB of
   embedded assets) is too big for `socialweb-guest-downloads`. Decision: `spec.guestTools: [socialweb-computer]`
-  on ComputeContractSpec (not the template: InfraContract mirrors the template in the
-  `computer.socialweb.infra#contract` lexicon), opt-in per contract and fixed at request time, because
+  on ComputeContractTemplate, so Infra and EphemeralInfra `spec.contracts[].guestTools` reach the
+  ComputeContract the infra composer creates (the page requests only through them); the
+  `computer.socialweb.infra#contract` lexicon carries `guestTools` (array of string, knownValues
+  `socialweb-computer`). It is opt-in per contract and fixed at request time, because
   user_data is fixed at provisioning while `spec.association` is set later by `run request associate`,
   and tying it to `spec.agent` would put 560 MB on every agent VM. The requester writes the marker
   `/etc/socialweb-computer/guest-tools/socialweb-computer` into user_data; the bidder's

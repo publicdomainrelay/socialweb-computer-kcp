@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,6 +78,7 @@ func normalize(d Declaration) Declaration {
 		c.Tunnels = normalTunnels(c.Tunnels)
 		c.Agent = normalAgent(c.Agent)
 		c.Association = normalAssociation(c.Association)
+		c.GuestTools = normalGuestTools(c.GuestTools)
 		out.Contracts = append(out.Contracts, c)
 	}
 	if out.TTLSeconds != 0 && out.EndWhen == "" {
@@ -141,6 +143,13 @@ func normalAssociation(in *v1alpha1.ComputeContractAssociation) *v1alpha1.Comput
 	return &out
 }
 
+func normalGuestTools(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return slices.Compact(slices.Sorted(slices.Values(in)))
+}
+
 func nonEmpty(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -153,7 +162,7 @@ func (d Declaration) Published() Declaration {
 	for _, c := range d.Contracts {
 		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
-				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association}})
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association, GuestTools: c.GuestTools}})
 	}
 	return normalize(out)
 }
