@@ -126,10 +126,10 @@ func (r *Runner) run(ctx context.Context, p sandbox.Program) (Answer, bool, erro
 	case <-ctx.Done():
 		return Answer{}, false, ctx.Err()
 	}
-	defer func() { <-r.slot }()
 	id := fmt.Sprintf("r%d", r.next.Add(1))
 	body, err := json.Marshal(Request{ID: id, Source: p.Source, Env: p.Env, TimeoutMs: timeout.Milliseconds()})
 	if err != nil {
+		<-r.slot
 		return Answer{}, false, err
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout+Grace)
@@ -137,6 +137,7 @@ func (r *Runner) run(ctx context.Context, p sandbox.Program) (Answer, bool, erro
 	done := call(func() ([]byte, error) { return r.host.Run(body) })
 	select {
 	case out := <-done:
+		<-r.slot
 		if out.err != nil {
 			return Answer{}, false, fmt.Errorf("sandbox/embedded: run: %w", out.err)
 		}
@@ -146,10 +147,20 @@ func (r *Runner) run(ctx context.Context, p sandbox.Program) (Answer, bool, erro
 		}
 		return answer, false, nil
 	case <-runCtx.Done():
+		hung := ctx.Err() == nil
 		r.host.Kill(id)
 		select {
 		case <-done:
+			<-r.slot
 		case <-time.After(Grace):
+			hung = true
+			go func() {
+				<-done
+				<-r.slot
+			}()
+		}
+		if hung {
+			r.fenced.Store(false)
 		}
 		if ctx.Err() != nil {
 			return Answer{}, false, ctx.Err()
