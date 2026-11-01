@@ -2,8 +2,6 @@ package requester
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,7 +15,7 @@ import (
 )
 
 const (
-	SessionAtircParentEnv = "LC_ATIRC_TOKEN"
+	SessionAtircEnv = "LC_ATIRC"
 
 	sessionAtircLabel = "ssh"
 
@@ -30,41 +28,12 @@ type sessionAtirc struct {
 	subhandle string
 }
 
-type atircTokenClaims struct {
-	Sub string `json:"sub"`
-
-	Subhandle string `json:"subhandle"`
-
-	Exp int64 `json:"exp"`
-
-	Leases []atircLease `json:"leases"`
-}
-
-func atircClaimsOf(token string) (atircTokenClaims, bool) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return atircTokenClaims{}, false
+func sessionWantsAtirc(command string, lc map[string]string) bool {
+	if value, set := lc[SessionAtircEnv]; set {
+		return truthy(value)
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return atircTokenClaims{}, false
-	}
-	var claims atircTokenClaims
-	if json.Unmarshal(raw, &claims) != nil {
-		return atircTokenClaims{}, false
-	}
-	return claims, true
-}
-
-func splitSessionAtircParent(lc map[string]string) (map[string]string, string) {
-	parent := strings.TrimSpace(lc[SessionAtircParentEnv])
-	out := make(map[string]string, len(lc))
-	for key, value := range lc {
-		if key != SessionAtircParentEnv {
-			out[key] = value
-		}
-	}
-	return out, parent
+	fields := strings.Fields(command)
+	return len(fields) > 0 && fields[0] == "atirc"
 }
 
 func sessionAtircUserData(userData string) (string, error) {
@@ -87,40 +56,26 @@ func (q *Requester) sessionAtircLifetime() time.Duration {
 	return AtircTokenLifetime
 }
 
-func (q *Requester) mintSessionAtirc(ctx context.Context, account sshtransport.AuthorizedAccount, parent string, state *v1alpha1.NodeClaimContract) (*sessionAtirc, error) {
-	claims, ok := atircClaimsOf(parent)
-	switch {
-	case !ok || strings.ContainsAny(parent, " \t\r\n"):
-		return nil, errors.New(SessionAtircParentEnv + " is not an atirc token")
-	case claims.Sub != account.DID:
-		return nil, fmt.Errorf("%s belongs to %s, not to the ssh account %s", SessionAtircParentEnv, claims.Sub, account.DID)
-	}
-	base := strings.ToLower(strings.TrimSpace(claims.Subhandle))
-	if base == "" {
-		return nil, errors.New(SessionAtircParentEnv + " names no subhandle")
-	}
+func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeClaimContract) (*sessionAtirc, error) {
 	lease, err := contractLease(state, nil)
 	if err != nil {
 		return nil, err
 	}
-	subhandle := atircChild(sessionAtircLabel, uriRKey(state.RFPURI), base)
+	issuer, err := q.serviceAtircIssuer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	subhandle := atircChild(sessionAtircLabel, uriRKey(state.RFPURI), issuer.base)
 	if subhandle == "" {
-		return nil, fmt.Errorf("%q and %q make no subhandle", base, state.RFPURI)
+		return nil, fmt.Errorf("%q and %q make no subhandle", issuer.base, state.RFPURI)
 	}
-	now := q.now()
-	exp := now.Add(q.sessionAtircLifetime())
-	if claims.Exp > 0 && time.Unix(claims.Exp, 0).Before(exp) {
-		exp = time.Unix(claims.Exp, 0)
-	}
-	if !exp.After(now) {
-		return nil, fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
-	}
+	exp := q.now().Add(q.sessionAtircLifetime())
 	mintCtx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()
 	var out struct {
 		Token string `json:"token"`
 	}
-	if err := q.postAtirc(mintCtx, AtircMintNSID, parent, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease}, &out); err != nil {
+	if err := q.postAtirc(mintCtx, AtircMintNSID, issuer.bearer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease}, &out); err != nil {
 		return nil, fmt.Errorf("mint %s: %w", subhandle, err)
 	}
 	minted := &sessionAtirc{token: strings.TrimSpace(out.Token), subhandle: subhandle}
@@ -132,18 +87,18 @@ func (q *Requester) mintSessionAtirc(ctx context.Context, account sshtransport.A
 		q.revokeSessionAtirc(ctx, minted)
 		return nil, fmt.Errorf("mint %s: %w (%s)", subhandle, errAtircLeaseMissing, q.atircBase())
 	}
-	if err := checkLeaseChain(leases, claims.Leases, lease); err != nil {
+	if err := checkLeaseChain(leases, issuer.leases, lease); err != nil {
 		q.revokeSessionAtirc(ctx, minted)
 		return nil, fmt.Errorf("mint %s: %w", subhandle, err)
 	}
 	return minted, nil
 }
 
-func (q *Requester) sessionAtircEnv(ctx context.Context, account sshtransport.AuthorizedAccount, parent string, state *v1alpha1.NodeClaimContract, lc map[string]string, io sshtransport.CommandIO) (map[string]string, *sessionAtirc) {
-	if parent == "" {
+func (q *Requester) sessionAtircEnv(ctx context.Context, account sshtransport.AuthorizedAccount, want bool, state *v1alpha1.NodeClaimContract, lc map[string]string, io sshtransport.CommandIO) (map[string]string, *sessionAtirc) {
+	if !want {
 		return lc, nil
 	}
-	minted, err := q.mintSessionAtirc(ctx, account, parent, state)
+	minted, err := q.mintSessionAtirc(ctx, state)
 	if err != nil {
 		q.log.Warn("requester_session_atirc_mint_failed", "did", account.DID, "err", err.Error())
 		io.WriteErr([]byte("atirc: this session runs without an atirc token: " + err.Error() + "\n"))

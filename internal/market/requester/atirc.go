@@ -251,6 +251,10 @@ func (r *contractRunner) atircIssuer(ctx context.Context, contract v1alpha1.Comp
 		leases, _ := atircTokenLeases(token)
 		return atircIssuer{bearer: token, base: subhandle, label: "vm", exp: exp, parent: true, leases: leases}, nil
 	}
+	return q.serviceAtircIssuer(ctx)
+}
+
+func (q *Requester) serviceAtircIssuer(ctx context.Context) (atircIssuer, error) {
 	handle := strings.ToLower(strings.TrimSpace(q.handle))
 	switch {
 	case handle == "":

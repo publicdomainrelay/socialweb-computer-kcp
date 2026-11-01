@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	infrarecord "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/infra"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
@@ -70,8 +71,10 @@ func GatewayAtprotoScope() string {
 	return strings.Join(out, " ")
 }
 
+var sshAtircScope = []string{atprotooauth.RPCAtircMint, atprotooauth.RPCAtircRevoke}
+
 func SshGatewayAtprotoScope() string {
-	return strings.Join(requesterScope, " ")
+	return strings.Join(slices.Concat(requesterScope, sshAtircScope), " ")
 }
 
 func OptionValue(opts []v1alpha1.ApplicationOption, name string) string {

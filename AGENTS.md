@@ -203,15 +203,16 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
-    linux/amd64 only. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose client
-    sends `LC_ATIRC_TOKEN` (an atirc token whose `sub` is the ssh account's DID) gets, when it is not
-    an `LC_SESSION` held one, the agent module in its user_data (so the bidder seeds
-    `/usr/local/bin/atirc`), and after the receipt the requester
-    mints, with that token as bearer, the child `ssh-<rfp rkey>.<its subhandle>` leased on the
-    session's receipt and vm.terminated, exp at most the session cap; the command runs with
-    `ATIRC_TOKEN=<child>` only (the client token is never forwarded, logged or stored) and the child
-    is revoked when the command ends. A failed mint runs the command without it and writes one stderr
-    line. `ssh <handle>@<gateway> atirc agent run <sub>` then mints `<sub>` below the child.
+    linux/amd64 only. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
+    command starts with `atirc`, or whose client sends `LC_ATIRC=1` (`LC_ATIRC=0` turns it off), gets,
+    when it is not an `LC_SESSION` held one, the agent module in its user_data (so the bidder seeds
+    `/usr/local/bin/atirc`), and after the receipt the requester mints, with its own service auth
+    (lxm chat.atirc.mint, aud `did:web:irc.fedfork.com#atirc`; the ssh gateway's sign-in scope carries
+    `rpc:chat.atirc.mint` and `rpc:chat.atirc.revoke`), the child `ssh-<rfp rkey>.<its handle>` leased
+    on the session's receipt and vm.terminated, exp at most the session cap; the command runs with
+    `ATIRC_TOKEN=<child>` and the child is revoked when the command ends. A failed mint runs the
+    command without it and writes one stderr line. `ssh <handle>@<gateway> atirc agent run <sub>` then
+    mints `<sub>` below the child.
     The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
     standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
     listener `ssh-public`, next to the loopback Exposure).
