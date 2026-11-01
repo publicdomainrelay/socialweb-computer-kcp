@@ -29,7 +29,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -288,8 +287,6 @@ type Requester struct {
 
 	bidders map[string]Bidder
 
-	scopeCache *ttlcache.Cache[string, PolicyDecision]
-
 	secretsMu sync.Mutex
 
 	secrets map[string]*secretsState
@@ -529,7 +526,6 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		eventSinks:     map[string]chan MarketEvent{},
 		undelivered:    map[string][]MarketEvent{},
 		bidders:        map[string]Bidder{},
-		scopeCache:     ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
 		secrets:        map[string]*secretsState{},
 		heldSessions:   map[string]*heldSession{},
 	}

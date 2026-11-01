@@ -73,12 +73,13 @@ type runState struct {
 }
 
 type Engine struct {
-	config     Config
-	resolver   workflow.ActionResolver
-	cacheStore *cache.Store
-	log        func(level, msg string, meta map[string]any)
-	sem        chan struct{}
-	queueDepth int
+	config        Config
+	resolver      workflow.ActionResolver
+	cacheStore    *cache.Store
+	scopeVerdicts *cache.Store
+	log           func(level, msg string, meta map[string]any)
+	sem           chan struct{}
+	queueDepth    int
 
 	mu       sync.Mutex
 	runs     map[string]*runState
@@ -111,13 +112,14 @@ func NewEngine(config Config) *Engine {
 		log = func(string, string, map[string]any) {}
 	}
 	return &Engine{
-		config:     config,
-		resolver:   resolver,
-		cacheStore: cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
-		log:        log,
-		sem:        make(chan struct{}, config.Limits.MaxConcurrentRuns),
-		queueDepth: config.Limits.QueueDepth,
-		runs:       make(map[string]*runState),
+		config:        config,
+		resolver:      resolver,
+		cacheStore:    cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
+		scopeVerdicts: cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
+		log:           log,
+		sem:           make(chan struct{}, config.Limits.MaxConcurrentRuns),
+		queueDepth:    config.Limits.QueueDepth,
+		runs:          make(map[string]*runState),
 	}
 }
 

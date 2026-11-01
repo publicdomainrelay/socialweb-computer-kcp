@@ -79,10 +79,16 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 		Deadline: r.deadline(run, workflowCR),
 		Cache:    seed,
 	}
+	memo := scopeMemoKey(workflowRaw, inputs)
+	if served, ok := r.Engine.servedScope(memo); ok {
+		served.Status.Restarts = run.Status.Restarts
+		return served, nil
+	}
 	outcome, err := r.Engine.Execute(ctx, request, opts)
 	if err != nil {
 		return failedOutcome(err), nil
 	}
+	r.Engine.rememberScope(memo, outcome)
 	outcome.Status.Restarts = run.Status.Restarts
 	return outcome, nil
 }

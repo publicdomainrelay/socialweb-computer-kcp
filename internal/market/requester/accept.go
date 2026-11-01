@@ -330,17 +330,10 @@ func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, wor
 		CounterpartyDid:  bid.DID,
 		RootRequesterDid: self,
 	})
-	rfpURI, rfpCID := "", ""
 	if rfp, _ := bid.Record["rfp"].(map[string]any); rfp != nil {
-		rfpURI, rfpCID = stringOf(rfp["uri"]), stringOf(rfp["cid"])
-		input.RFP = &PolicyRef{URI: rfpURI, CID: rfpCID}
-	}
-	key := strings.Join([]string{bid.DID, workflow.Key(), rfpURI, rfpCID}, "|")
-	if decision, ok := q.scopeCache.Get(key); ok {
-		return decision.Allow
+		input.RFP = &PolicyRef{URI: stringOf(rfp["uri"]), CID: stringOf(rfp["cid"])}
 	}
 	decision := q.policy.Scope(ctx, input)
-	q.scopeCache.Set(key, decision)
 	if !decision.Allow {
 		q.log.Info("requester_bid_policy_denied", "bidder", bid.DID, "reason", decision.Reason)
 	}
