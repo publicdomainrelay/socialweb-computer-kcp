@@ -6,27 +6,37 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway/custody"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/common/ref"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcplibs/impl/kcpstore"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 )
 
 const (
 	VaultClient = "ssh-gateway"
+
+	SignInWorkflow = "bidder-tangled-vouch"
 
 	atprotoMount = "atproto"
 
 	renewBelow = 30 * time.Minute
 
 	renewIncrement = time.Hour
+
+	signInPolicyTimeout = 30 * time.Second
 )
+
+var errNoOperator = errors.New("this ssh gateway names no operator, so its policy admits no account")
 
 type webSignIn struct {
 	signIn *custody.SignIn
@@ -50,11 +60,15 @@ func (s *Service) publicOrigin() string {
 	return strings.TrimRight(strings.TrimSpace(s.spec.PublicOrigin), "/")
 }
 
+func perUserMode(spec v1alpha1.SshServerSpec, ownerSessions int) bool {
+	return spec.VaultRef != nil && strings.TrimSpace(spec.PublicOrigin) != "" && ownerSessions == 0
+}
+
 func (s *Service) openSignIn(ctx context.Context) (*webSignIn, error) {
-	origin := s.publicOrigin()
-	if s.spec.VaultRef == nil || origin == "" || len(s.ownerSessions) > 0 {
+	if !s.perUser {
 		return nil, nil
 	}
+	origin := s.publicOrigin()
 	endpoint, err := s.vaultEndpoint(ctx)
 	if err != nil {
 		return nil, err
@@ -71,7 +85,7 @@ func (s *Service) openSignIn(ctx context.Context) (*webSignIn, error) {
 		return nil, err
 	}
 	if web.oauth, err = gatewayhttp.NewOAuth(gatewayhttp.OAuthOptions{SignIn: signIn, Auth: web.auth, PublicOrigin: origin,
-		PostSignInURL: origin + "/", OnSignedIn: s.signedIn, Tasks: tasks, Log: s.log}); err != nil {
+		PostSignInURL: origin + "/", OnSignedIn: s.signedIn, OnSignedOut: s.signedOut, Tasks: tasks, Log: s.log}); err != nil {
 		web.close()
 		return nil, err
 	}
@@ -100,104 +114,95 @@ func (s *Service) vaultEndpoint(ctx context.Context) (custody.Endpoint, error) {
 	if err != nil {
 		return custody.Endpoint{}, fmt.Errorf("sshserver: reading OpenBaoServer %s/%s: %w", workspace, vref.Name, err)
 	}
-	status := server.Status
-	if status.Phase != v1alpha1.OpenBaoServerPhaseReady || status.Address == "" || status.Refs == nil {
-		return custody.Endpoint{}, fmt.Errorf("sshserver: OpenBaoServer %s/%s is %s, not Ready", workspace, vref.Name, status.Phase)
-	}
-	var vclient *v1alpha1.OpenBaoServerClientRefs
-	for i := range status.Clients {
-		if status.Clients[i].Name == VaultClient {
-			vclient = &status.Clients[i]
-		}
-	}
-	if vclient == nil {
-		return custody.Endpoint{}, fmt.Errorf("sshserver: OpenBaoServer %s/%s reports no client %q", workspace, vref.Name, VaultClient)
-	}
-	ca, err := readFileRef(status.Refs.CA)
+	endpoint, _, err := custody.EndpointFor(server.Status, VaultClient, atprotoMount)
 	if err != nil {
-		return custody.Endpoint{}, fmt.Errorf("sshserver: the OpenBao CA: %w", err)
+		return custody.Endpoint{}, fmt.Errorf("sshserver: OpenBaoServer %s/%s: %w", workspace, vref.Name, err)
 	}
-	cert, err := readFileRef(vclient.ClientCert)
-	if err != nil {
-		return custody.Endpoint{}, fmt.Errorf("sshserver: the OpenBao client certificate: %w", err)
-	}
-	key, err := readFileRef(vclient.ClientKey)
-	if err != nil {
-		return custody.Endpoint{}, fmt.Errorf("sshserver: the OpenBao client key: %w", err)
-	}
-	return custody.Endpoint{Address: status.Address, CACert: ca, ClientCert: cert, ClientKey: key, CertMount: vclient.CertAuthMount,
-		CertRole: vclient.CertAuthRole, Mount: atprotoMount, Timeout: custody.DefaultTimeout}, nil
+	return endpoint, nil
 }
 
-func readFileRef(path string) ([]byte, error) {
-	if path == "" {
-		return nil, errors.New("the ref is empty")
+func (s *Service) self() commonv1.ObjectRef {
+	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace()}
+}
+
+func (s *Service) sessionOwners(ctx context.Context) (contractmarket.SessionOwnerIntents, error) {
+	if s.deps.Bus == nil {
+		return nil, errors.New("sshserver: no bus")
 	}
-	return os.ReadFile(strings.TrimPrefix(path, "file:"))
+	self := s.self()
+	return bus.Resolve[contractmarket.SessionOwnerIntents](ctx, s.deps.Bus, self, self, bus.Capability{Name: contractmarket.CapabilitySessionOwners})
+}
+
+func (s *Service) policyRuns() *runs.Client {
+	handlers := s.deps.Bus
+	self := s.self()
+	return &runs.Client{
+		Resolve: func(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
+			return bus.Resolve[policy.Runner](ctx, handlers, self, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
+		},
+		Owner:   policy.Owner{APIVersion: v1alpha1.GroupVersion.String(), Kind: Kind, Name: s.deps.Self.Name, UID: string(s.deps.UID)},
+		Engine:  runs.EngineRef(s.spec.PolicyEngineRef, s.workspace()),
+		Role:    "sshserver",
+		Prefix:  "sshserver-policy",
+		Timeout: signInPolicyTimeout,
+		Parser:  runs.Strict,
+		Now:     time.Now,
+	}
+}
+
+func (s *Service) admit(ctx context.Context, did string) error {
+	operator := strings.TrimSpace(s.spec.OperatorDid)
+	if operator == "" {
+		return errNoOperator
+	}
+	verdict := s.policyRuns().Run(ctx, runs.Request{WorkflowRef: SignInWorkflow, Input: runs.Input{Perspective: "bidder", Mode: runs.ModeScope,
+		SelfDid: operator, SubjectDid: did, CounterpartyDid: did}})
+	if !verdict.Allow {
+		return fmt.Errorf("the %s policy of %s does not admit %s: %s", SignInWorkflow, operator, did, verdict.Reason)
+	}
+	return nil
 }
 
 func (s *Service) signedIn(ctx context.Context, user *gatewayhttp.WebUser) error {
 	if user == nil || strings.TrimSpace(user.DID) == "" {
 		return errors.New("sshserver: the sign-in names no DID")
 	}
-	return s.ensureAccount(ctx, user.DID)
+	if err := s.admit(ctx, user.DID); err != nil {
+		s.log.Info("sshserver_sign_in_refused", "did", user.DID, "reason", err.Error())
+		return err
+	}
+	owners, err := s.sessionOwners(ctx)
+	if err != nil {
+		return fmt.Errorf("sshserver: the session owners handle: %w", err)
+	}
+	if err := owners.EnsureSessionOwner(ctx, user.DID); err != nil {
+		s.log.Warn("sshserver_sign_in_unrecorded", "did", user.DID, "err", err.Error())
+		return err
+	}
+	s.log.Info("sshserver_account_signed_in", "did", user.DID)
+	return nil
+}
+
+func (s *Service) signedOut(ctx context.Context, user *gatewayhttp.WebUser) error {
+	if user == nil || strings.TrimSpace(user.DID) == "" {
+		return nil
+	}
+	owners, err := s.sessionOwners(ctx)
+	if err != nil {
+		return fmt.Errorf("sshserver: the session owners handle: %w", err)
+	}
+	if err := owners.DeleteSessionOwner(ctx, user.DID); err != nil {
+		return err
+	}
+	s.log.Info("sshserver_account_signed_out", "did", user.DID)
+	return nil
 }
 
 func (s *Service) page(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write([]byte(signInPage))
 }
-
-const signInPage = `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>socialweb.computer ssh</title>
-<style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}input,textarea,button{font:inherit}textarea{width:100%;height:5rem}li{margin:.3rem 0}code{word-break:break-all}</style>
-</head><body>
-<h1>socialweb.computer ssh</h1>
-<div id="out"></div>
-<form id="signin" hidden><p>Sign in with your atproto handle, then add the ssh public key you connect with.</p>
-<input id="handle" placeholder="you.bsky.social" required> <button>Sign in</button></form>
-<div id="keys" hidden>
-<p>Signed in as <b id="who"></b>. Connect with <code id="cmd"></code> <button id="signout">Sign out</button></p>
-<h2>ssh keys</h2><ul id="list"></ul>
-<form id="add"><textarea id="key" placeholder="ssh-ed25519 AAAA... comment" required></textarea><br><button>Add key</button></form>
-</div>
-<script>
-const $ = (id) => document.getElementById(id);
-const say = (t) => { $("out").textContent = t; };
-const call = async (method, path, body) => {
-  const r = await fetch(path, {method, credentials: "same-origin", headers: body ? {"Content-Type": "application/json"} : {}, body: body ? JSON.stringify(body) : undefined});
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.message || j.error || r.status);
-  return j;
-};
-const keys = async () => {
-  const j = await call("GET", "/keys");
-  $("list").replaceChildren(...(j.keys || []).map((k) => {
-    const li = document.createElement("li");
-    const b = document.createElement("button");
-    b.textContent = "Remove";
-    b.onclick = async () => { try { await call("DELETE", "/keys/" + encodeURIComponent(k.rkey)); await keys(); } catch (e) { say(e.message); } };
-    li.append(k.name + " " + k.keyId.slice(0, 40) + "... ", b);
-    return li;
-  }));
-};
-const load = async () => {
-  const err = new URLSearchParams(location.search).get("error");
-  if (err) say(err);
-  try {
-    const s = await call("GET", "/session");
-    $("who").textContent = s.handle || s.did;
-    $("cmd").textContent = "ssh " + (s.handle || s.did) + "@" + location.hostname;
-    $("keys").hidden = false;
-    await keys();
-  } catch (e) { $("signin").hidden = false; }
-};
-$("signin").onsubmit = async (e) => { e.preventDefault(); try { const j = await call("POST", "/oauth/start", {handle: $("handle").value}); location.href = j.authorizationUrl; } catch (x) { say(x.message); } };
-$("add").onsubmit = async (e) => { e.preventDefault(); try { await call("POST", "/keys", {publicKey: $("key").value}); $("key").value = ""; await keys(); } catch (x) { say(x.message); } };
-$("signout").onclick = async () => { try { await call("DELETE", "/session"); } catch (x) {} location.reload(); };
-load();
-</script></body></html>
-`

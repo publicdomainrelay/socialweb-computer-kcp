@@ -36,8 +36,6 @@ const (
 
 	webReadHeaderTimeout = 10 * time.Second
 
-	rootLabelPrefix = "apps.socialweb.computer/root"
-
 	publicAcceptBackoff = 100 * time.Millisecond
 
 	requestTimeout = 30 * time.Second
@@ -75,6 +73,7 @@ func New(spec v1alpha1.SshServerSpec, deps Deps) (*Service, error) {
 		s.ownerSessions = sessions
 		did = cmp.Or(did, owner)
 	}
+	s.perUser = perUserMode(spec, len(s.ownerSessions))
 	hostKeyPath := spec.HostKeyRef
 	if hostKeyPath == "" && stateDir != "" {
 		hostKeyPath = filepath.Join(stateDir, "ssh_host_ed25519_key")

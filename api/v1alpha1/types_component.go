@@ -787,6 +787,12 @@ type SshServerSpec struct {
 
 	WebListen string `json:"webListen,omitempty"`
 
+	OperatorDid string `json:"operatorDid,omitempty"`
+
+	MaxAccounts int32 `json:"maxAccounts,omitempty" apigen:"default=64,minimum=1"`
+
+	PolicyEngineRef *commonv1.ObjectRef `json:"policyEngineRef,omitempty"`
+
 	MaxConnections int32 `json:"maxConnections,omitempty" apigen:"default=10000,minimum=1"`
 
 	MaxSessions int32 `json:"maxSessions,omitempty" apigen:"default=1000,minimum=1"`

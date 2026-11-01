@@ -341,14 +341,6 @@ func (h *handle) SetStateSyncFinalizer(ctx context.Context, name, finalizer stri
 	return h.apply(ctx, market.KindStateSync, name, doc, FieldManagerStateSyncFinalizer)
 }
 
-func (h *handle) EnsureMarketIdentity(ctx context.Context, identity v1alpha1.MarketIdentity) error {
-	err := h.create(ctx, market.KindMarketIdentity, identity.ObjectMeta, identity.Spec, h.manager)
-	if errors.Is(err, market.ErrExists) {
-		return nil
-	}
-	return err
-}
-
 func (h *handle) CreateComputeContract(ctx context.Context, contract v1alpha1.ComputeContract) error {
 	return h.create(ctx, market.KindComputeContract, contract.ObjectMeta, contract.Spec, h.manager)
 }

@@ -9858,6 +9858,11 @@ func (in *SshServerSpec) DeepCopyInto(out *SshServerSpec) {
 		*out = new(ComponentServe)
 		**out = **in
 	}
+	if in.PolicyEngineRef != nil {
+		in, out := &in.PolicyEngineRef, &out.PolicyEngineRef
+		*out = new(commonv1alpha1.ObjectRef)
+		**out = **in
+	}
 	if in.AuthTimeoutSeconds != nil {
 		in, out := &in.AuthTimeoutSeconds, &out.AuthTimeoutSeconds
 		*out = new(int32)

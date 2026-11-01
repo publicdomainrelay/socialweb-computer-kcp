@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +15,8 @@ import (
 
 const (
 	SessionAtircEnv = "LC_ATIRC"
+
+	sessionAtircTokenEnv = "LC_ATIRC_TOKEN"
 
 	sessionAtircLabel = "ssh"
 
@@ -41,12 +42,12 @@ func sessionAtircUserData(userData string) (string, error) {
 		Modules: []any{cloudinit.AgentModule(cloudinit.AgentOptions{})}})
 }
 
-func waitForAtircBinary(command string) string {
+func atircCommand(command string) string {
 	if strings.TrimSpace(command) == "" {
 		return command
 	}
-	return fmt.Sprintf("i=0; while [ ! -x %s ] && [ \"$i\" -lt %d ]; do sleep 1; i=$((i+1)); done; %s",
-		cloudinit.AtircBinary, sessionAtircBinaryWaitSec, command)
+	return fmt.Sprintf("i=0; while [ ! -x %s ] && [ \"$i\" -lt %d ]; do sleep 1; i=$((i+1)); done; export %s=\"$%s\"; unset %s; %s",
+		cloudinit.AtircBinary, sessionAtircBinaryWaitSec, AtircTokenEnv, sessionAtircTokenEnv, sessionAtircTokenEnv, command)
 }
 
 func (q *Requester) sessionAtircLifetime() time.Duration {
@@ -94,20 +95,25 @@ func (q *Requester) mintSessionAtirc(ctx context.Context, state *v1alpha1.NodeCl
 	return minted, nil
 }
 
-func (q *Requester) sessionAtircEnv(ctx context.Context, account sshtransport.AuthorizedAccount, want bool, state *v1alpha1.NodeClaimContract, lc map[string]string, io sshtransport.CommandIO) (map[string]string, *sessionAtirc) {
+func (q *Requester) sessionAtirc(ctx context.Context, account sshtransport.AuthorizedAccount, want bool, state *v1alpha1.NodeClaimContract, io sshtransport.CommandIO) *sessionAtirc {
 	if !want {
-		return lc, nil
+		return nil
 	}
 	minted, err := q.mintSessionAtirc(ctx, state)
 	if err != nil {
 		q.log.Warn("requester_session_atirc_mint_failed", "did", account.DID, "err", err.Error())
-		io.WriteErr([]byte("atirc: this session runs without an atirc token: " + err.Error() + "\n"))
-		return lc, nil
+		_ = io.WriteErr([]byte("atirc: this session runs without an atirc token: " + err.Error() + "\n"))
+		return nil
 	}
 	q.log.Info("requester_session_atirc_minted", "did", account.DID, "subhandle", minted.subhandle)
-	env := maps.Clone(lc)
-	env[AtircTokenEnv] = minted.token
-	return env, minted
+	return minted
+}
+
+func (m *sessionAtirc) env() map[string]string {
+	if m == nil {
+		return nil
+	}
+	return map[string]string{sessionAtircTokenEnv: m.token}
 }
 
 func (q *Requester) revokeSessionAtirc(ctx context.Context, minted *sessionAtirc) {
@@ -129,12 +135,4 @@ func (q *Requester) revokeSessionAtirc(ctx context.Context, minted *sessionAtirc
 	default:
 		q.log.Warn("requester_session_atirc_revoke_failed", "subhandle", minted.subhandle, "err", err.Error())
 	}
-}
-
-func (q *Requester) heldContractState(name string) *v1alpha1.NodeClaimContract {
-	contract, ok := q.contracts.Get(name)
-	if !ok {
-		return nil
-	}
-	return contract.Status.Contract
 }

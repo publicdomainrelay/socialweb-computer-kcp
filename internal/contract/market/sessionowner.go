@@ -4,21 +4,28 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
 
-const SessionOwnerLabel = "apps.socialweb.computer/session-owner"
-
 const (
+	CapabilitySessionOwners = "market.sessionowners"
+
+	SessionOwnerLabel = "apps.socialweb.computer/session-owner"
+
 	SessionOwnerIdentityPrefix = "owner"
 
 	SessionOwnerRequesterPrefix = "requester"
+
+	DefaultMaxSessionOwners = 64
 )
 
+var ErrSessionOwnersFull = errors.New("market: every signed-in account slot of this ssh gateway is taken")
+
 type SessionOwnerIntents interface {
-	EnsureMarketIdentity(ctx context.Context, identity v1alpha1.MarketIdentity) error
+	EnsureSessionOwner(ctx context.Context, did string) error
+
+	DeleteSessionOwner(ctx context.Context, did string) error
 }
 
 func SessionOwnerName(prefix, did string) string {

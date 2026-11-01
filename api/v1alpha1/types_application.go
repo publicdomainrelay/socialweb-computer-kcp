@@ -824,6 +824,10 @@ type SshGatewaySsh struct {
 	PublicListen string `json:"publicListen,omitempty"`
 
 	WebListen string `json:"webListen,omitempty"`
+
+	OperatorDid string `json:"operatorDid,omitempty"`
+
+	MaxAccounts int32 `json:"maxAccounts,omitempty" apigen:"minimum=0"`
 }
 
 type MarketNetwork struct {

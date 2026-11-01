@@ -127,6 +127,4 @@ type Intents interface {
 	StateSyncIntents
 
 	ContractIntents
-
-	SessionOwnerIntents
 }

@@ -75,7 +75,7 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 		case "bidder-dids":
 			r.bidderDids = append(r.bidderDids, splitList(p.Value)...)
 			continue
-		case "ssh-public-listen", "ssh-web-listen":
+		case "ssh-public-listen", "ssh-web-listen", "ssh-operator-did", "ssh-max-accounts":
 			if err := r.applySshOption(p.Name, p.Value); err != nil {
 				return err
 			}
@@ -141,6 +141,17 @@ func (r *gatewaySshRun) applySshOption(name, value string) error {
 	}
 	value = strings.TrimSpace(value)
 	switch name {
+	case "ssh-operator-did":
+		if !strings.HasPrefix(value, "did:") || strings.ContainsAny(value, " /") {
+			return fmt.Errorf("--ssh-operator-did %q is not a DID", value)
+		}
+		r.ssh.OperatorDid = value
+	case "ssh-max-accounts":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return fmt.Errorf("--ssh-max-accounts %q: want a positive number", value)
+		}
+		r.ssh.MaxAccounts = int32(n)
 	case "ssh-public-listen", "ssh-web-listen":
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
@@ -186,7 +197,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	case r.network != "" && backend != hostsvc.BackendProc:
 		return a.fail(exitRefused, "run gateway ssh: --network: the market network places its children under its own devsup; pass --host-backend=proc")
 	case r.network != "" && r.ssh != nil:
-		return a.fail(exitRefused, "run gateway ssh: --ssh-public-listen and --ssh-web-listen are options of a standalone ssh gateway; a market network child listens on loopback only")
+		return a.fail(exitRefused, "run gateway ssh: the --ssh-* options are options of a standalone ssh gateway; a market network child listens on loopback only")
 	case r.network != "":
 		return r.inNetwork(ctx)
 	case r.profile == sshgateway.SshGatewayProfileNetwork:

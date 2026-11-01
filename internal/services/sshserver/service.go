@@ -14,13 +14,11 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
-	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
@@ -78,6 +76,8 @@ type Service struct {
 
 	web *webSignIn
 
+	perUser bool
+
 	gateway *gateway.Gateway
 }
 
@@ -94,10 +94,7 @@ type requester struct {
 
 func (r requester) RunCommand(ctx context.Context, account sshcontract.Account, command string, env map[string]string, io sshcontract.CommandIO) error {
 	s := r.service
-	s.mu.Lock()
-	web := s.web
-	s.mu.Unlock()
-	if web == nil {
+	if !s.perUser {
 		runner, err := s.resolveRequester(ctx, r.ref)
 		if err != nil {
 			return err
@@ -105,41 +102,19 @@ func (r requester) RunCommand(ctx context.Context, account sshcontract.Account, 
 		return runner.RunCommand(ctx, account, command, env, io)
 	}
 	runner, err := s.resolveRequester(ctx, s.accountRequesterRef(account.DID))
-	if err != nil {
-		s.log.Info("sshserver_account_not_signed_in", "did", account.DID, "err", err.Error())
+	switch {
+	case errors.Is(err, bus.ErrLinkDenied):
+		s.log.Info("sshserver_account_not_signed_in", "did", account.DID)
 		_ = io.WriteErr([]byte("sign in at " + s.publicOrigin() + " first: this ssh gateway rents VMs as you, with your own atproto session, and has none for " + account.DID + " yet\n"))
+		io.Exit(1)
+		return nil
+	case err != nil:
+		s.log.Warn("sshserver_account_requester_unavailable", "did", account.DID, "err", err.Error())
+		_ = io.WriteErr([]byte("ssh gateway error: your requester is not available: " + err.Error() + "\n"))
 		io.Exit(1)
 		return nil
 	}
 	return runner.RunCommand(ctx, account, command, env, io)
-}
-
-func (s *Service) ensureAccount(ctx context.Context, did string) error {
-	if s.deps.Bus == nil || s.spec.VaultRef == nil {
-		return errors.New("sshserver: no bus or vault to record the sign-in")
-	}
-	self := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: s.deps.Self.Name, Workspace: s.workspace()}
-	intents, err := bus.Resolve[contractmarket.Intents](ctx, s.deps.Bus, self, self, bus.Capability{Name: contractmarket.CapabilityIntents})
-	if err != nil {
-		return fmt.Errorf("sshserver: the market intents handle: %w", err)
-	}
-	vault := commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: "Vault", Name: s.spec.VaultRef.Name, Workspace: s.workspace()}
-	labels := map[string]string{contractmarket.SessionOwnerLabel: "true"}
-	for key, value := range s.deps.Labels {
-		if strings.HasPrefix(key, rootLabelPrefix) {
-			labels[key] = value
-		}
-	}
-	identity := v1alpha1.MarketIdentity{
-		ObjectMeta: metav1.ObjectMeta{Name: contractmarket.SessionOwnerName(contractmarket.SessionOwnerIdentityPrefix, did), Labels: labels},
-		Spec: v1alpha1.MarketIdentitySpec{Mode: v1alpha1.MarketIdentityModeOAuthSessionProxy, Did: did, Association: v1alpha1.AssociationSkip,
-			SessionRef: &commonv1.SecretRef{Vault: &vault, Mount: "auth/" + atprotoMount, Path: "session/" + did}},
-	}
-	if err := intents.EnsureMarketIdentity(ctx, identity); err != nil {
-		return fmt.Errorf("sshserver: recording the signed-in account %s: %w", did, err)
-	}
-	s.log.Info("sshserver_account_signed_in", "did", did)
-	return nil
 }
 
 func (s *Service) resolveRequester(ctx context.Context, ref commonv1.ObjectRef) (sshcontract.Runner, error) {
@@ -284,7 +259,7 @@ func (s *Service) setup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if web == nil {
+	if !s.perUser {
 		if _, err := s.resolveRequester(ctx, ref); err != nil {
 			return err
 		}

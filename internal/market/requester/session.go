@@ -63,11 +63,15 @@ func (q *Requester) RunCommand(ctx context.Context, account sshtransport.Authori
 	if io == nil {
 		return errors.New("requester: the session has no command io")
 	}
+	if strings.TrimSpace(account.DID) != q.repoDID {
+		return commandFailed(io, "provisioning failed: ", fmt.Errorf("this requester rents only for %s, not for %s", q.repoDID, account.DID))
+	}
 	lc := lcEnv(env)
 	atirc := sessionWantsAtirc(command, lc)
 	delete(lc, SessionAtircEnv)
+	delete(lc, sessionAtircTokenEnv)
 	if name := strings.TrimSpace(lc["LC_SESSION"]); name != "" {
-		return q.runHeldCommand(ctx, account, name, command, lc, atirc, io)
+		return q.runHeldCommand(ctx, account, name, command, lc, io)
 	}
 	return q.runTransientCommand(ctx, account, command, lc, atirc, io)
 }
@@ -155,12 +159,12 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 	if !provider.PollReady(ctx, privateKeyPath, ticket, DefaultVMReadyTimeout, target.HostKeys) {
 		return commandFailed(io, "guest session failed: ", errors.New("the guest ssh did not answer"))
 	}
-	guestEnv, minted := q.sessionAtircEnv(ctx, account, atirc, target.State, lc, io)
+	minted := q.sessionAtirc(ctx, account, atirc, target.State, io)
 	defer q.revokeSessionAtirc(ctx, minted)
 	if minted != nil {
-		command = waitForAtircBinary(command)
+		command = atircCommand(command)
 	}
-	code := provider.RunSession(ctx, privateKeyPath, ticket, renderExecCommand(command, guestEnv), io, target.HostKeys)
+	code := provider.RunSessionEnv(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), minted.env(), io, target.HostKeys)
 	io.Exit(code)
 	return nil
 }
@@ -260,7 +264,7 @@ func (q *Requester) releaseAllHeldSessions(reason string) {
 	}
 }
 
-func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, atirc bool, io sshtransport.CommandIO) error {
+func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, io sshtransport.CommandIO) error {
 	policyName, policyArgs, err := q.sessionPolicy(lc)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
@@ -375,10 +379,10 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		held.mu.Unlock()
 		return commandFailed(io, "guest session failed: ", err)
 	}
-	guestEnv, minted := q.sessionAtircEnv(ctx, account, atirc, q.heldContractState(contract), lc, io)
-	code := provider.RunSession(ctx, privateKeyPath, ticket, renderExecCommand(command, guestEnv), io, target.HostKeys)
-	q.revokeSessionAtirc(ctx, minted)
-	held.mu.Unlock()
+	code := func() int {
+		defer held.mu.Unlock()
+		return provider.RunSession(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), io, target.HostKeys)
+	}()
 	q.armHeldSession(key, held)
 	io.Exit(code)
 	return nil
