@@ -39,6 +39,8 @@ type RegistryOptions struct {
 	RestConfig *rest.Config
 
 	Transport http.RoundTripper
+
+	Account string
 }
 
 type Registry struct {
@@ -46,6 +48,7 @@ type Registry struct {
 	http     *http.Client
 	codecs   runtime.NegotiatedSerializer
 	stateDir string
+	account  string
 }
 
 func NewRegistry(opts RegistryOptions) (*Registry, error) {
@@ -75,6 +78,7 @@ func NewRegistry(opts RegistryOptions) (*Registry, error) {
 		http:     httpClient,
 		codecs:   serializer.NewCodecFactory(scheme).WithoutConversion(),
 		stateDir: opts.StateDir,
+		account:  strings.TrimSpace(opts.Account),
 	}, nil
 }
 
@@ -86,6 +90,9 @@ func (r *Registry) Refs(ctx context.Context) ([]clusterprovider.Ref, error) {
 	var out []clusterprovider.Ref
 	for _, account := range accounts {
 		path := clusterhome.RootWorkspace + ":" + account
+		if r.account != "" && path != clusterhome.AccountPath(r.account) {
+			continue
+		}
 		homes, deleting, err := r.workspaces(ctx, path)
 		if apierrors.IsNotFound(err) {
 			continue
@@ -117,6 +124,9 @@ func (r *Registry) Refs(ctx context.Context) ([]clusterprovider.Ref, error) {
 }
 
 func (r *Registry) AccountClusters(ctx context.Context, account string) ([]v1alpha1.Cluster, error) {
+	if r.account != "" && account != clusterhome.AccountPath(r.account) {
+		return nil, nil
+	}
 	homes, deleting, err := r.workspaces(ctx, account)
 	if apierrors.IsNotFound(err) {
 		return nil, nil

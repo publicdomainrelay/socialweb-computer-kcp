@@ -148,6 +148,7 @@ func buildInputs(cfg Config) (inputs, error) {
 		Host:       cfg.KCPHost,
 		StateDir:   cfg.StateDir,
 		RestConfig: restCfg,
+		Account:    cfg.Account,
 	})
 	if err != nil {
 		return inputs{}, err

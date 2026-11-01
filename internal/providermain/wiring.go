@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterkcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
 	identitycontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotoidentity"
 	clustercontroller "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
@@ -318,6 +319,9 @@ func (p *Provider) Run(ctx context.Context) error {
 	case p.cfg.AllClusters():
 		if err := p.startAll(ctx); err != nil {
 			return err
+		}
+		if account := p.cfg.Account; account != "" {
+			opts.Keep = func(ref clusterprovider.Ref) bool { return ref.Account == clusterhome.AccountPath(account) }
 		}
 	default:
 		joined, err := p.startJoin(ctx)

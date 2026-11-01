@@ -36,7 +36,7 @@ const (
 )
 
 var requesterOptions = []string{backendOpt, "network", "name", "identity", "state-dir", "ready-file", "fg", "ready-timeout", "network-timeout",
-	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix"}
+	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix", "with-gateway"}
 
 var requesterPasswordOptions = []string{"name", "state-dir", "network-timeout"}
 
@@ -195,6 +195,10 @@ type requesterRun struct {
 	sshKey     string
 	mu         sync.Mutex
 	last       request.Ready
+	gateway    *request.ReadyGateway
+	gatewayOn  bool
+	gatewayExe map[string]devinstance.Executable
+	instance   *devinstance.Record
 }
 
 func requesterHome(a *app, vals clicfg.Values, name string) (string, string, error) {
@@ -269,7 +273,8 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		return a.fail(exitRefused, "run requester: another process runs the requester %s (%s); run requester env|ssh %s reach it", name, dir, name)
 	}
 	defer owner.Close()
-	rec := request.RequesterRecord{Schema: request.RequesterSchema, Name: name, Network: network, Identity: idName, Spec: parsed, CreatedAt: time.Now().UTC()}
+	rec := request.RequesterRecord{Schema: request.RequesterSchema, Name: name, Network: network, Identity: idName, Spec: parsed,
+		WithGateway: vals.Bool("with-gateway"), CreatedAt: time.Now().UTC()}
 	saved, restarted, err := request.ReadRequesterRecord(dir)
 	if err != nil {
 		return a.fail(exitFailed, "run requester: %v", err)
@@ -283,6 +288,14 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 				name, saved.Network, saved.Identity, filepath.Join(dir, request.RequesterFile))
 		default:
 			rec.CreatedAt = saved.CreatedAt
+		}
+		if want := saved.WithGateway || vals.Bool("with-gateway"); want != saved.WithGateway {
+			rec.WithGateway = want
+			if err := request.WriteRequesterRecord(dir, rec); err != nil {
+				return a.fail(exitFailed, "run requester: %v", err)
+			}
+		} else {
+			rec.WithGateway = want
 		}
 	} else if err := request.WriteRequesterRecord(dir, rec); err != nil {
 		return a.fail(exitFailed, "run requester: %v", err)
@@ -298,6 +311,15 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 	r := &requesterRun{requestRun: rr, dir: dir, readyFiles: []string{filepath.Join(dir, request.ReadyFile)}, startedAt: time.Now().UTC()}
 	if readyFile != r.readyFiles[0] {
 		r.readyFiles = append(r.readyFiles, readyFile)
+	}
+	if rec.WithGateway {
+		if r.gatewayExe, err = r.gatewayPreflight(vals); err != nil {
+			return a.fail(exitRefused, "run requester: %v", err)
+		}
+		if err := r.markGateway(ctx); err != nil {
+			return a.fail(exitRefused, "run requester: %v", err)
+		}
+		r.gatewayOn = true
 	}
 	if err := r.openIdentity(name); err != nil {
 		return a.fail(exitRefused, "run requester: %v", err)
@@ -336,6 +358,7 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		r.log("run requester: the installed requester; its unit stops the core and keeps its kcp units and state", "dir", dir, "restart", restarted)
 		return r.installedCore(ctx, stateRoot, func(ctx context.Context, rec devinstance.Record, notifyReady func() error) error {
 			r.inv.Instance, r.summary.Instance, r.summary.KcpURL = rec.Layout.ID, rec.Layout.ID, rec.KcpURL
+			r.instance = &rec
 			if err := r.attach(ctx, rec.AdminKubeconfig); err != nil {
 				return err
 			}
@@ -472,6 +495,26 @@ func (r *requesterRun) serve(ctx context.Context, started time.Time, readyFile, 
 	if err := notifyReady(); err != nil {
 		return err
 	}
+	gctx, stopGateway := context.WithCancel(ctx)
+	defer stopGateway()
+	var gatewayDone <-chan error
+	if r.gatewayOn {
+		done, gw, err := r.startGateway(gctx, r.gatewayExe, ready.Did)
+		if err != nil {
+			for _, path := range r.readyFiles {
+				_ = request.RemoveReady(path)
+			}
+			return fmt.Errorf("--with-gateway: %w", err)
+		}
+		gatewayDone = done
+		r.mu.Lock()
+		r.gateway = gw
+		r.mu.Unlock()
+		if err := r.writeReady(r.ready(ctx, st)); err != nil {
+			r.a.log.Warn("rewriting the ready file with the gateway", "err", err.Error())
+		}
+		r.log("the requester's gateway is Ready; the ready file names it", "workspace", gw.Workspace, "clusters", gw.Clusters)
+	}
 	follow, stopFollow := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -483,7 +526,15 @@ func (r *requesterRun) serve(ctx context.Context, started time.Time, readyFile, 
 			r.a.log.Warn("following the MarketRequester for the ready file", "err", err.Error())
 		}
 	})
-	<-ctx.Done()
+	var ended error
+	select {
+	case <-ctx.Done():
+	case err := <-gatewayDone:
+		if ctx.Err() == nil {
+			ended = fmt.Errorf("the requester's gateway ended: %v", err)
+		}
+	}
+	stopGateway()
 	stopFollow()
 	wg.Wait()
 	for _, path := range r.readyFiles {
@@ -491,7 +542,7 @@ func (r *requesterRun) serve(ctx context.Context, started time.Time, readyFile, 
 			r.a.log.Warn("removing the ready file", "path", path, "err", err.Error())
 		}
 	}
-	return nil
+	return ended
 }
 
 func runRequesterPassword(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
@@ -541,7 +592,10 @@ func (r *requesterRun) ready(ctx context.Context, st v1alpha1.ApplicationStatus)
 		cancel()
 	}
 	did, handle, mode, pdsURL, ingress := request.ReadyOf(st, id)
-	return request.Ready{Schema: request.ReadySchema, Name: r.inv.Name, Pid: os.Getpid(), StartedAt: r.startedAt, KcpURL: r.summary.KcpURL,
+	r.mu.Lock()
+	gw := r.gateway
+	r.mu.Unlock()
+	return request.Ready{Gateway: gw, Schema: request.ReadySchema, Name: r.inv.Name, Pid: os.Getpid(), StartedAt: r.startedAt, KcpURL: r.summary.KcpURL,
 		Kubeconfig: filepath.Join(r.dir, request.KubeconfigFile), Workspace: cmp.Or(r.workspace, compose.DefaultWorkspace), Did: did, Handle: handle,
 		IdentityMode: mode, PdsURL: pdsURL, Ingress: ingress, SSHPublicKey: r.sshKey}
 }

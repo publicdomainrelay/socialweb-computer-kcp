@@ -284,31 +284,13 @@ func RunChild(ctx context.Context, c Config, l devinstance.Layout, m hostsvc.Man
 func run(ctx context.Context, c Config, l devinstance.Layout, app *table.App, m hostsvc.Manager) error {
 	reg := &listeners{addr: map[string]string{}, kind: map[string]string{}}
 	g := &gateway{c: c, l: l, reg: reg}
-	if n := c.Spec.Network; n != nil && n.CABundle != "" && os.Getenv("SSL_CERT_FILE") == "" {
-		bundle, err := outboundCABundle(filepath.Join(c.StateDir, "tls"), n.CABundle)
-		if err != nil {
-			return err
-		}
-		os.Setenv("SSL_CERT_FILE", bundle)
-		c.log().Info("the system roots and the market network's CA are this gateway's outbound trust: every vault it places verifies a bidder's issuer with them",
-			"bundle", bundle)
+	addr, stopEgress, err := NetworkOutbound(ctx, c.Spec.Network, filepath.Join(c.StateDir, "tls"), filepath.Join(l.KcpDir(), egressRecord), c.log())
+	if err != nil {
+		return err
 	}
-	if c.Spec.Network != nil {
-		m, ok, err := guestTLSEgress(c.Spec.Network.GuestTLSURL())
-		if err != nil {
-			return err
-		}
-		if ok {
-			addr, stopEgress, err := runEgress(ctx, m, filepath.Join(l.KcpDir(), egressRecord), c.log())
-			if err != nil {
-				return err
-			}
-			defer stopEgress()
-			reg.set(ListenerEgress, "http", addr)
-			os.Setenv("HTTPS_PROXY", "http://"+addr.String())
-			c.log().Info("the market network's guest TLS front is this gateway's egress for its port-less names: every vault it places fetches a bidder's issuer through it",
-				"egress", addr.String(), "names", "*."+m.host+":443", "target", m.target)
-		}
+	defer stopEgress()
+	if addr != nil {
+		reg.set(ListenerEgress, "http", addr)
 	}
 	return devcore.Run(ctx, devcore.Config{Layout: l, ReadyTimeout: c.ReadyTimeout, Log: c.Log, Application: app, FrontAddress: c.FrontAddress,
 		TLSCertFile: c.TLSCert, TLSKeyFile: c.TLSKey,

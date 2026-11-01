@@ -32,6 +32,8 @@ const (
 
 	envJoin = "SOCIALWEB_CLUSTERPROVIDER_JOIN"
 
+	envAccount = "SOCIALWEB_CLUSTERPROVIDER_ACCOUNT"
+
 	envDatastore = "SOCIALWEB_CLUSTERPROVIDER_DATASTORE"
 
 	envStateDir = "SOCIALWEB_CLUSTERPROVIDER_STATE_DIR"
@@ -110,6 +112,8 @@ type Config struct {
 
 	Join string
 
+	Account string
+
 	Datastore string
 
 	StateDir string
@@ -182,6 +186,7 @@ func loadFor(get func(string) string, inv foldmain.Invocation) (Config, error) {
 		MountContext:           strings.TrimSpace(get(envMountContext)),
 		LeasePath:              strings.TrimSpace(get(envLeasePath)),
 		Join:                   strings.TrimSpace(get(envJoin)),
+		Account:                strings.TrimSpace(get(envAccount)),
 		Datastore:              strings.TrimSpace(get(envDatastore)),
 		StateDir:               strings.TrimSpace(get(envStateDir)),
 		VaultStateDir:          strings.TrimSpace(get(envVaultStateDir)),

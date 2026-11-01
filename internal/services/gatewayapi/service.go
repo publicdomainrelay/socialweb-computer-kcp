@@ -76,6 +76,9 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
 		return fmt.Errorf("gatewayapi: creating the state dir: %w", err)
 	}
+	if s.spec.NodesOnly {
+		return s.startNodesOnly(ctx)
+	}
 
 	vault, err := s.resolveVault(ctx)
 	if err != nil {
@@ -113,7 +116,29 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 		return err
 	}
+	return s.serve(ctx, handler, oauth, surface, nodeClaims)
+}
 
+func (s *Service) startNodesOnly(ctx context.Context) error {
+	pinned, err := s.loadDownloads()
+	if err != nil {
+		return err
+	}
+	nodeClaims, err := s.buildNodeClaims(&vaultRuntime{mount: strings.Trim(s.spec.NodeMarket.VaultMount, "/")}, pinned)
+	if err != nil {
+		return err
+	}
+	if nodeClaims == nil {
+		return errors.New("gatewayapi: nodesOnly needs a nodeMarket")
+	}
+	mux := http.NewServeMux()
+	gatewayhttp.NewDownloads(gatewayhttp.DownloadsOptions{Downloads: pinned, Log: s.log}).Register(mux)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeAPINotFound(w) }))
+	return s.serve(ctx, securityHeaders(mux), nil, nil, nodeClaims)
+}
+
+func (s *Service) serve(ctx context.Context, handler http.Handler, oauth *gatewayhttp.OAuth, surface *xrpcserver.Server, nodeClaims *contractnodeclaim.Binding) error {
+	log := s.log
 	stopCh := make(chan struct{})
 
 	s.mu.Lock()

@@ -106,6 +106,9 @@ func New(spec v1alpha1.GatewayAPISpec, deps Deps) (*Service, error) {
 }
 
 func (s *Service) check() error {
+	if s.spec.NodesOnly {
+		return s.checkNodesOnly()
+	}
 	switch {
 	case len(s.audiences) == 0:
 		return errors.New("gatewayapi: audience, serviceAuth.audience, identity.did or a hostname is required")
@@ -134,6 +137,18 @@ func (s *Service) check() error {
 		if err := checkLoopbackHost(s.spec.Serve.Host); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Service) checkNodesOnly() error {
+	switch {
+	case s.spec.NodeMarket == nil:
+		return errors.New("gatewayapi: nodesOnly needs a nodeMarket")
+	case strings.Trim(s.spec.NodeMarket.VaultMount, "/") == "":
+		return errors.New("gatewayapi: nodesOnly needs nodeMarket.vaultMount, the KV mount of the node join bundles")
+	case !s.vaultConfigured():
+		return errors.New("gatewayapi: nodesOnly needs the vault ref of the node join bundles")
 	}
 	return nil
 }

@@ -759,6 +759,8 @@ type GatewaySpec struct {
 	ClusterProvider *GatewayClusterProvider `json:"clusterProvider,omitempty"`
 
 	Operator string `json:"operator,omitempty"`
+
+	RequesterRef *commonv1.ObjectRef `json:"requesterRef,omitempty"`
 }
 
 type GatewayClusterProvider struct {
