@@ -29,7 +29,7 @@ func (p *Plane) issuerLoop(ctx context.Context) {
 			}
 			if err == nil {
 				configured = issuer
-				p.log.Info("the guest OIDC issuer is configured", "issuer", guestidentity.OIDCIssuer(issuer), "issuerUrl", guestidentity.OIDCIssuer(issuer))
+				p.log.Info("the guest workload identity issuer is configured", "issuer", guestidentity.OIDCIssuer(issuer, p.cfg.Mount))
 			} else {
 				p.log.Warn("configuring the guest OIDC issuer failed; retrying", "err", err)
 				retry = p.clock.After(p.cfg.IssuerRetry)

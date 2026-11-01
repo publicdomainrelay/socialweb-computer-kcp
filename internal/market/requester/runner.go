@@ -67,8 +67,6 @@ type contractRunner struct {
 
 	secrets *secretsState
 
-	rbacRKey string
-
 	atircRevoke sync.Once
 
 	releaseRequested string
@@ -575,7 +573,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.chosen = chosen
 	r.mu.Unlock()
 	acceptRKey := acceptRKeyFor(q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
-	if err := r.prepareWorkloadGrant(ctx, state, winner, acceptRKey); err != nil {
+	if err := r.prepareWorkloadGrant(ctx, state, winner); err != nil {
 		return err
 	}
 	if err := r.prepareOAuthClients(ctx, state, winner); err != nil {

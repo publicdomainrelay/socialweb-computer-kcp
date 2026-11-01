@@ -11,8 +11,6 @@ const (
 	CapabilityInputs = "guestcp.inputs"
 
 	CapabilityGuests = "guestcp.guests"
-
-	CapabilityGrants = "guestcp.grants"
 )
 
 type Inputs struct {
@@ -23,8 +21,6 @@ type Inputs struct {
 	OpenBao *v1alpha1.OpenBaoServerStatus
 
 	ComputeVMs []v1alpha1.ComputeVM
-
-	Grants []v1alpha1.GuestIdentityGrant
 }
 
 type Source interface {
@@ -35,12 +31,6 @@ type Source interface {
 
 type Guests interface {
 	RecordGuest(ctx context.Context, name string, report v1alpha1.ComputeVMGuestReport) error
-}
-
-type Grants interface {
-	Apply(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error
-
-	Delete(ctx context.Context, name string) error
 }
 
 type Reply struct {
@@ -59,8 +49,6 @@ type EventsRequest struct {
 
 type Plane interface {
 	LoginStep(ctx context.Context, step string, input map[string]any) Reply
-
-	OIDCToken(ctx context.Context, role, vaultToken string) Reply
 
 	Discovery(ctx context.Context) Reply
 

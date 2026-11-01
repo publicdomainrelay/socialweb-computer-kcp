@@ -21,7 +21,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/marketpresence"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/openbaoserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
@@ -43,7 +42,6 @@ type workspaceClients struct {
 var (
 	_ childapplication.Lister     = (*workspaceClients)(nil)
 	_ childapplication.Workspaces = workspaceTree{}
-	_ openbaoserver.Grants        = guestGrants{}
 	_ marketpresence.Bidders      = bidders{}
 )
 
@@ -150,18 +148,6 @@ func (t workspaceTree) ByLabel(ctx context.Context, parent, key, value string) (
 
 func workspaceOf(ws tenancyv1alpha1.Workspace) childapplication.Workspace {
 	return childapplication.Workspace{Name: ws.Name, Phase: string(ws.Status.Phase), Deleting: !ws.DeletionTimestamp.IsZero()}
-}
-
-type guestGrants struct {
-	clients *workspaceClients
-}
-
-func (g guestGrants) List(ctx context.Context, workspace string) ([]v1alpha1.GuestIdentityGrant, error) {
-	var list v1alpha1.GuestIdentityGrantList
-	if err := g.clients.List(ctx, workspace, &list); err != nil {
-		return nil, err
-	}
-	return list.Items, nil
 }
 
 type bidders struct {

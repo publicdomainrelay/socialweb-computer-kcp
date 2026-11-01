@@ -53,7 +53,6 @@ func New(spec v1alpha1.GuestControlPlaneSpec, deps Deps) (*Service, error) {
 		spec:        spec,
 		deps:        deps,
 		stateDir:    deps.StateDir,
-		grantSync:   time.Duration(ptr.Deref(spec.GrantSyncSeconds, 0)) * time.Second,
 		issuerRetry: time.Duration(ptr.Deref(spec.IssuerRetrySeconds, 0)) * time.Second,
 		trust:       component.NewTrust(spec.TLS.CA(), deps.Log),
 	}

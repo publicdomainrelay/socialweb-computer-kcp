@@ -657,7 +657,6 @@ func (c *Composer) readQuotas(ctx context.Context, roots map[string]rootQuota) [
 var gcKinds = []adoptKind{
 	{KindBid, v1alpha1.BidGVR},
 	{KindComputeVM, v1alpha1.ComputeVMGVR},
-	{"GuestIdentityGrant", v1alpha1.GuestIdentityGrantGVR},
 	{KindHostProcess, HostProcessGVR},
 	{KindOpenBaoServer, OpenBaoServerGVR},
 	{"Postgres", v1alpha1.PostgresGVR},

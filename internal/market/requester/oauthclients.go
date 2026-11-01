@@ -18,6 +18,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/workloadoauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/workloadauth"
 )
 
 const (
@@ -166,7 +167,7 @@ func (r *contractRunner) prepareOAuthClients(ctx context.Context, state *v1alpha
 	if err != nil {
 		return fmt.Errorf("requester: the OAuth clients record: %w", err)
 	}
-	ref, err := q.repo.PutRecord(ctx, account, FedproxyRBACNSID, role, record)
+	ref, err := q.repo.PutRecord(ctx, account, workloadauth.RBACCollection, role, record)
 	if err != nil {
 		return fmt.Errorf("requester: writing the OAuth clients record %s: %w", role, err)
 	}
@@ -213,9 +214,13 @@ func (r *contractRunner) deleteOAuthClients(ctx context.Context) {
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, FedproxyRBACNSID, role); err != nil && !rbacGone(err) {
+	if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, workloadauth.RBACCollection, role); err != nil && !oauthRecordGone(err) {
 		r.log().Warn("requester_oauth_clients_delete_failed", "role", role, "err", err)
 		return
 	}
 	r.log().Info("requester_oauth_clients_deleted", "role", role)
+}
+
+func oauthRecordGone(err error) bool {
+	return errors.Is(err, market.ErrNotFound) || strings.Contains(err.Error(), "not found")
 }

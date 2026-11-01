@@ -33,13 +33,6 @@ func (c *Controller) Provide() {
 		}
 		return guests{store: c.store, workspace: workspace}, nil
 	})
-	bus.Provide(c.bus, GroupKind, guestcp.CapabilityGrants, func(_ context.Context, to commonv1.ObjectRef, _ []string) (guestcp.Grants, error) {
-		workspace, _, err := target(to)
-		if err != nil {
-			return nil, err
-		}
-		return grants{store: c.store, workspace: workspace}, nil
-	})
 	bus.Provide(c.bus, GroupKind, guestcp.CapabilityEvents, func(_ context.Context, to commonv1.ObjectRef, _ []string) (guestcp.Events, error) {
 		workspace, name, err := target(to)
 		if err != nil {
@@ -168,47 +161,4 @@ func (g guests) RecordGuest(ctx context.Context, name string, report v1alpha1.Co
 		"status":     map[string]any{"market": map[string]any{"guest": guest}},
 	}
 	return g.store.Apply(ctx, g.workspace, FieldManager, doc, true)
-}
-
-type grants struct {
-	store Store
-
-	workspace string
-}
-
-var _ guestcp.Grants = grants{}
-
-func (g grants) Apply(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {
-	if strings.TrimSpace(grant.Name) == "" {
-		return errors.New("guestcontrolplane: applying a GuestIdentityGrant with no name")
-	}
-	object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&grant)
-	if err != nil {
-		return err
-	}
-	metadata := map[string]any{"name": grant.Name}
-	held, _ := object["metadata"].(map[string]any)
-	if owners, _ := held["ownerReferences"].([]any); len(owners) > 0 {
-		metadata["ownerReferences"] = owners
-	}
-	if labels, _ := held["labels"].(map[string]any); len(labels) > 0 {
-		metadata["labels"] = labels
-	}
-	doc := kube.Doc{
-		"apiVersion": v1alpha1.GroupVersion.String(),
-		"kind":       "GuestIdentityGrant",
-		"metadata":   metadata,
-		"spec":       object["spec"],
-	}
-	return g.store.Apply(ctx, g.workspace, FieldManager, doc, false)
-}
-
-func (g grants) Delete(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil
-	}
-	grant := &v1alpha1.GuestIdentityGrant{}
-	grant.Name = name
-	return g.store.Delete(ctx, g.workspace, grant)
 }

@@ -44,25 +44,20 @@ func (p *Plane) reconcile(ctx context.Context) bool {
 			continue
 		}
 		live[vm.Name] = true
-		accept := guestidentity.AcceptURIOf(vm)
-		acceptedAt := guestidentity.AcceptedAtOf(vm)
-		key := vm.Name + "\x00" + subject + "\x00" + requester + "\x00" + accept + "\x00" + acceptedAt.UTC().Format(time.RFC3339)
+		key := subject + "\x00" + vm.Name
 		if prior, known := p.known[vm.Name]; !known || prior != key {
-			if err := p.syncer.Register(ctx, guestidentity.GrantSubject{
-				ComputeVM:    vm.Name,
-				OwnerUID:     string(vm.UID),
-				RequesterDID: requester,
-				AcceptURI:    accept,
-				AcceptedAt:   acceptedAt,
-				Subject:      subject,
-			}); err != nil {
+			attempt, cancel := context.WithTimeout(ctx, p.cfg.Timeout)
+			err := p.identity.SetWorkload(attempt, vm.Name, subject, map[string]string{"computevm": vm.Name})
+			cancel()
+			if err != nil {
 				if ctx.Err() == nil {
-					p.log.Warn("registering a guest identity grant failed", "computevm", vm.Name, "err", err)
+					p.log.Warn("setting the guest's workload subject failed", "computevm", vm.Name, "err", err)
 				}
 				failed = true
 				continue
 			}
 			p.known[vm.Name] = key
+			p.log.Info("the guest's workload subject is set on its login role", "computevm", vm.Name, "subject", subject)
 		}
 		if held := guestidentity.GuestReportOf(vm); held == nil || len(held.HostKeys) == 0 {
 			p.recordHostKey(ctx, vm.Name)
@@ -73,10 +68,11 @@ func (p *Plane) reconcile(ctx context.Context) bool {
 			continue
 		}
 		delete(p.known, name)
-		p.syncer.Forget(name)
 	}
 	return failed
 }
+
+const retryDelay = 5 * time.Second
 
 func (p *Plane) retryLater(ctx context.Context) {
 	p.mu.Lock()
@@ -94,7 +90,7 @@ func (p *Plane) retryLater(ctx context.Context) {
 		}()
 		select {
 		case <-ctx.Done():
-		case <-p.clock.After(guestidentity.DefaultRetryDelay):
+		case <-p.clock.After(retryDelay):
 			nudge(p.kick)
 		}
 	})

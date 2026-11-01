@@ -352,7 +352,6 @@ type GuestLoginOptions struct {
 	BindSecret    string
 	Mount         string
 	SSHDir        string
-	TokenPath     string
 	Attempts      int
 	RetryDelaySec int
 }
@@ -360,8 +359,6 @@ type GuestLoginOptions struct {
 func GuestLoginScript(opts GuestLoginOptions) string {
 	sshDir := opts.SSHDir
 	sshDir = cmp.Or(sshDir, "/etc/ssh")
-	tokenPath := opts.TokenPath
-	tokenPath = cmp.Or(tokenPath, GuestLoginTokenPath)
 	attempts := opts.Attempts
 	attempts = cmp.Or(attempts, 30)
 	delay := opts.RetryDelaySec
@@ -374,7 +371,6 @@ URL="__URL__"
 ROLE="__ROLE__"
 MOUNT="__MOUNT__"
 BIND_SECRET="__BIND_SECRET__"
-TOKEN_PATH="__TOKEN_PATH__"
 ED25519="__SSH_DIR__/ssh_host_ed25519_key"
 OUT="$(mktemp)"
 trap 'rm -f "${OUT}"' EXIT
@@ -386,10 +382,13 @@ wait_key() {
   echo "guest-login: no ${ED25519}" >&2
   return 1
 }
+post_once() {
+  curl -sS -m 20 -o "${OUT}" -w '%{http_code}' -X POST "${URL}/auth/${MOUNT}/$1" -H 'Content-Type: application/json' -d "$2" 2>/dev/null || echo 000
+}
 post() {
   local step="$1" body="$2" code
   for _ in $(seq 1 __ATTEMPTS__); do
-    code="$(curl -sS -m 20 -o "${OUT}" -w '%{http_code}' -X POST "${URL}/auth/${MOUNT}/${step}" -H 'Content-Type: application/json' -d "${body}" 2>/dev/null || echo 000)"
+    code="$(post_once "${step}" "${body}")"
     case "${code}" in
       200|204) return 0 ;;
       4??) echo "guest-login: ${step} refused (${code}): $(cat "${OUT}" 2>/dev/null)" >&2; return 1 ;;
@@ -411,42 +410,29 @@ bind() {
   post bind "$(jq -nc --arg r "${ROLE}" --arg s "${BIND_SECRET}" --arg k "${host_key}" --arg g "${sig}" '{role: $r, bind_secret: $s, host_key: $k, signature: $g}')" || return 1
   echo "guest-login: bound $(jq -r '.data.host_key_fingerprint // empty' "${OUT}") to role ${ROLE}" >&2
 }
-login() {
-  local challenge sig token
-  post challenge "$(jq -nc --arg r "${ROLE}" '{role: $r}')" || return 1
-  challenge="$(jq -r '.data.challenge // empty' "${OUT}")"
-  [ -n "${challenge}" ] || { echo "guest-login: no challenge in $(cat "${OUT}")" >&2; return 1; }
-  sig="$(sign "${challenge}")"
-  post login "$(jq -nc --arg r "${ROLE}" --arg c "${challenge}" --arg g "${sig}" '{role: $r, challenge: $c, signature: $g}')" || return 1
-  token="$(jq -r '.auth.client_token // empty' "${OUT}")"
-  [ -n "${token}" ] || { echo "guest-login: no token in the login reply" >&2; return 1; }
-  install -d -m 0700 "$(dirname "${TOKEN_PATH}")"
-  ( umask 077; printf '%s\n' "${token}" > "${TOKEN_PATH}" )
-  echo "guest-login: logged in to the bidder's OpenBao as $(jq -r '.auth.metadata.role // empty' "${OUT}"), policies $(jq -c '.auth.policies' "${OUT}"), ttl $(jq -r '.auth.lease_duration' "${OUT}")s" >&2
-}
-role_for() {
-  printf 'guest-%s-%s' "${ROLE}" "$(printf '%s' "$1" | sha256sum | cut -c1-16)"
-}
 token() {
-  local name code
-  name="$(role_for "$1")"
-  [ -s "${TOKEN_PATH}" ] || login || return 1
+  local audience="$1" challenge sig code="000"
   for _ in $(seq 1 __ATTEMPTS__); do
-    code="$(curl -sS -m 20 -o "${OUT}" -w '%{http_code}' -H "X-Vault-Token: $(cat "${TOKEN_PATH}")" "${URL}/identity/oidc/token/${name}" 2>/dev/null || echo 000)"
-    case "${code}" in
-      200) jq -r '.data.token // empty' "${OUT}"; return 0 ;;
-      403) login || sleep __DELAY__ ;;
-      *) sleep __DELAY__ ;;
-    esac
+    code="$(post_once challenge "$(jq -nc --arg r "${ROLE}" '{role: $r}')")"
+    challenge="$(jq -r '.data.challenge // empty' "${OUT}" 2>/dev/null)"
+    if [ "${code}" = 200 ] && [ -n "${challenge}" ]; then
+      sig="$(sign "${challenge}")"
+      code="$(post_once wid/token "$(jq -nc --arg r "${ROLE}" --arg c "${challenge}" --arg g "${sig}" --arg a "${audience}" '{role: $r, challenge: $c, signature: $g, audience: $a}')")"
+      if [ "${code}" = 200 ]; then
+        jq -r '.data.token // empty' "${OUT}"
+        return 0
+      fi
+    fi
+    echo "guest-login: no workload identity token for ${audience} yet (http ${code}), retrying" >&2
+    sleep __DELAY__
   done
-  echo "guest-login: no token for $1 from the bidder's OpenBao (last http ${code})" >&2
+  echo "guest-login: no workload identity token for ${audience} from the bidder (last http ${code})" >&2
   return 1
 }
 case "${1:-}" in
-  "") wait_key && { bind || echo "guest-login: the bind was refused; logging in with the key already bound" >&2; login; } ;;
-  login) wait_key && login ;;
+  "") wait_key && { bind || echo "guest-login: the bind was refused; the key bound before stays" >&2; } ;;
   token) wait_key && token "${2:?an audience}" ;;
-  *) echo "usage: guest-login.sh [login|token <audience>]" >&2; exit 2 ;;
+  *) echo "usage: guest-login.sh [token <audience>]" >&2; exit 2 ;;
 esac
 `
 	return strings.NewReplacer(
@@ -454,7 +440,6 @@ esac
 		"__ROLE__", opts.Role,
 		"__MOUNT__", mount,
 		"__BIND_SECRET__", opts.BindSecret,
-		"__TOKEN_PATH__", tokenPath,
 		"__SSH_DIR__", sshDir,
 		"__ATTEMPTS__", strconv.Itoa(attempts),
 		"__DELAY__", strconv.Itoa(delay),
@@ -465,7 +450,7 @@ esac
 func GuestLoginModule(opts GuestLoginOptions) UserDataModule {
 	unit := strings.Join([]string{
 		"[Unit]",
-		"Description=Log this guest in to its bidder's OpenBao by its ssh host key",
+		"Description=Bind this guest's ssh host key to its login role in its bidder's OpenBao",
 		"After=network-online.target ssh.service",
 		"Wants=network-online.target",
 		"",

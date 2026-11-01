@@ -17,7 +17,7 @@ const (
 
 	NodeJWTTokenTTL = "5m"
 
-	NodeJWTUserClaim = "wid_sub"
+	NodeJWTUserClaim = "sub"
 
 	NodeJWTRoleType = "jwt"
 )

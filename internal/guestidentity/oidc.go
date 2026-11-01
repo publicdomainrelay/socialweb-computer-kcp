@@ -57,7 +57,7 @@ func NewVerifier(keys func(context.Context) ([]byte, error), issuer func() strin
 }
 
 func NewOpenBaoVerifier(identity *Client, ingressURL func() string) *Verifier {
-	return NewVerifier(IdentityKeys(identity), func() string { return OIDCIssuer(ingressURL()) })
+	return NewVerifier(IdentityKeys(identity), func() string { return OIDCIssuer(ingressURL(), identity.Mount()) })
 }
 
 func (v *Verifier) Refresh(ctx context.Context) error {

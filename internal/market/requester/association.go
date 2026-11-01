@@ -495,7 +495,6 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, rkey strin
 }
 
 func (r *contractRunner) deleteContractRecords(ctx context.Context) {
-	r.deleteRBAC(ctx)
 	r.deleteOAuthClients(ctx)
 	r.deleteAssociation(ctx)
 }

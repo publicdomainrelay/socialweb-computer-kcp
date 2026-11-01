@@ -170,22 +170,27 @@ func (c *Client) Step(ctx context.Context, step LoginStep, body map[string]strin
 	return c.send(ctx, http.MethodPost, "auth/"+c.mount+"/"+string(step), "", body)
 }
 
-func (c *Client) Token(ctx context.Context, role, vaultToken string) (Reply, error) {
-	if !ValidRole(role) {
-		return Reply{}, fmt.Errorf("guestidentity: role %q is not a guest role name", role)
-	}
-	if vaultToken == "" || len(vaultToken) > 512 {
-		return Reply{}, errors.New("guestidentity: the guest vault token is empty or too long")
-	}
-	return c.send(ctx, http.MethodGet, "identity/oidc/token/"+role, vaultToken, nil)
-}
-
 func (c *Client) Discovery(ctx context.Context) (Reply, error) {
-	return c.send(ctx, http.MethodGet, "identity/oidc/.well-known/openid-configuration", "", nil)
+	return c.send(ctx, http.MethodGet, "auth/"+c.mount+"/wid/.well-known/openid-configuration", "", nil)
 }
 
 func (c *Client) Keys(ctx context.Context) (Reply, error) {
-	return c.send(ctx, http.MethodGet, "identity/oidc/.well-known/keys", "", nil)
+	return c.send(ctx, http.MethodGet, "auth/"+c.mount+"/wid/.well-known/keys", "", nil)
+}
+
+func (c *Client) SetWorkload(ctx context.Context, computevm, subject string, claims map[string]string) error {
+	if !ValidComputeVM(computevm) {
+		return fmt.Errorf("guestidentity: %q is not a ComputeVM name", computevm)
+	}
+	reply, err := c.authed(ctx, http.MethodPut, "auth/"+c.mount+"/role/"+computevm+"/wid",
+		map[string]any{"wid_subject": subject, "wid_claims": claims})
+	if err != nil {
+		return err
+	}
+	if !reply.OK() {
+		return fmt.Errorf("guestidentity: setting the workload subject of %s returned HTTP %d: %s", computevm, reply.Status, bodyPreview(reply.Body))
+	}
+	return nil
 }
 
 func (c *Client) BoundHostKey(ctx context.Context, computevm string) (string, error) {
@@ -215,11 +220,13 @@ func (c *Client) BoundHostKey(ctx context.Context, computevm string) (string, er
 }
 
 func (c *Client) ConfigureIssuer(ctx context.Context, ingressURL string) error {
-	issuer, err := cleanIngressURL(ingressURL)
+	ingress, err := cleanIngressURL(ingressURL)
 	if err != nil {
 		return err
 	}
-	held, err := c.authed(ctx, http.MethodGet, "identity/oidc/config", nil)
+	issuer := OIDCIssuer(ingress, c.mount)
+	path := "auth/" + c.mount + "/wid/config"
+	held, err := c.authed(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return err
 	}
@@ -233,12 +240,12 @@ func (c *Client) ConfigureIssuer(ctx context.Context, ingressURL string) error {
 			return nil
 		}
 	}
-	reply, err := c.authed(ctx, http.MethodPut, "identity/oidc/config", map[string]string{"issuer": issuer})
+	reply, err := c.authed(ctx, http.MethodPut, path, map[string]string{"issuer": issuer})
 	if err != nil {
 		return err
 	}
 	if !reply.OK() {
-		return fmt.Errorf("guestidentity: setting the OIDC issuer returned HTTP %d: %s", reply.Status, bodyPreview(reply.Body))
+		return fmt.Errorf("guestidentity: setting the workload identity issuer returned HTTP %d: %s", reply.Status, bodyPreview(reply.Body))
 	}
 	return nil
 }

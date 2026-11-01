@@ -188,7 +188,11 @@ func (g *Guest) LoginStep(ctx context.Context, step string, input map[string]any
 	if err != nil {
 		return jsonReply(400, map[string]any{"errors": []string{err.Error()}})
 	}
-	if !g.loginLimits.Take(body["role"], g.now()) {
+	limits := g.loginLimits
+	if parsed == LoginToken {
+		limits = g.tokenLimits
+	}
+	if !limits.Take(body["role"], g.now()) {
 		return jsonReply(429, map[string]any{"errors": []string{"too many requests"}})
 	}
 	reply, err := g.identity.Step(ctx, parsed, body)
@@ -200,34 +204,13 @@ func (g *Guest) LoginStep(ctx context.Context, step string, input map[string]any
 	if parsed == LoginBind && reply.OK() {
 		g.recordBoundHostKeys(body["role"])
 	}
-	return normalized(reply)
-}
-
-func (g *Guest) OIDCToken(ctx context.Context, role, vaultToken string) Reply {
-	if !ValidRole(role) {
-		return jsonReply(404, map[string]any{"errors": []string{"no such role"}})
-	}
-	if vaultToken == "" || len(vaultToken) > 512 {
-		return jsonReply(403, map[string]any{"errors": []string{"missing token"}})
-	}
-	key := vaultToken
-	if len(key) > 24 {
-		key = key[len(key)-24:]
-	}
-	if !g.tokenLimits.Take(key, g.now()) {
-		return jsonReply(429, map[string]any{"errors": []string{"too many requests"}})
-	}
-	reply, err := g.identity.Token(ctx, role, vaultToken)
-	if err != nil {
-		g.log.Warn("the guest OIDC token exchange failed", "role", role, "err", err.Error())
-		return jsonReply(502, map[string]any{"errors": []string{err.Error()}})
-	}
-	if reply.OK() {
-		if err := g.refreshOIDCDocument(ctx, "keys", &g.keys, g.identity.Keys); err == nil {
-			g.log.Info("the guest OIDC keys are published after a token exchange", "role", role)
+	if parsed == LoginToken && reply.OK() {
+		if _, held := g.keys.get(); !held {
+			if err := g.refreshOIDCDocument(ctx, "keys", &g.keys, g.identity.Keys); err == nil {
+				g.log.Info("the workload identity keys are published after the first token", "role", body["role"])
+			}
 		}
 	}
-	g.log.Info("guest OIDC token", "role", role, "status", reply.Status)
 	return normalized(reply)
 }
 
@@ -485,7 +468,7 @@ func (g *Guest) refreshOIDCDocuments() {
 	}
 }
 
-var errOIDCKeysNotPublished = errors.New("guestidentity: no guest has exchanged a token, so OpenBao publishes no OIDC keys yet")
+var errOIDCKeysNotPublished = errors.New("guestidentity: no guest has taken a token, so the issuer publishes no key yet")
 
 func (g *Guest) refreshOIDCDocument(ctx context.Context, name string, cache *oidcCache, fetch func(context.Context) (Reply, error)) error {
 	reply, err := fetch(ctx)

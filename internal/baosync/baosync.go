@@ -9,23 +9,22 @@ import (
 )
 
 const (
-	MountKV2               = "kv-v2"
-	MountKV                = "kv"
-	MountPKI               = "pki"
-	AuthCert               = "cert"
-	AuthJWT                = "jwt"
-	AuthAppRole            = "approle"
-	AuthToken              = "token"
-	policyRoot             = "root"
-	policyDflt             = "default"
-	mountSys               = "sys"
-	mountIdent             = "identity"
-	mountCubby             = "cubbyhole"
-	collCerts              = "certs"
-	collRole               = "role"
-	collPKIRoles           = "roles"
-	IdentityRoleCollection = "identity/oidc/role"
-	PluginAuth             = "auth"
+	MountKV2     = "kv-v2"
+	MountKV      = "kv"
+	MountPKI     = "pki"
+	AuthCert     = "cert"
+	AuthJWT      = "jwt"
+	AuthAppRole  = "approle"
+	AuthToken    = "token"
+	policyRoot   = "root"
+	policyDflt   = "default"
+	mountSys     = "sys"
+	mountIdent   = "identity"
+	mountCubby   = "cubbyhole"
+	collCerts    = "certs"
+	collRole     = "role"
+	collPKIRoles = "roles"
+	PluginAuth   = "auth"
 )
 
 type SecretMount struct {
@@ -78,7 +77,6 @@ type Desired struct {
 	Policies     []Policy
 	Objects      []Object
 	KV           []KVScope
-	IdentityOIDC bool
 }
 
 type Actual struct {
@@ -201,9 +199,6 @@ func (d Desired) Collections() []string {
 		if m.Type == MountPKI {
 			out = append(out, PKIRoleCollection(m.Path))
 		}
-	}
-	if d.IdentityOIDC {
-		out = append(out, IdentityRoleCollection)
 	}
 	sort.Strings(out)
 	return slices.Compact(out)

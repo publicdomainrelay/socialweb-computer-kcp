@@ -195,8 +195,6 @@ type GuestControlPlaneSettings struct {
 
 	Role string `json:"role,omitempty"`
 
-	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty"`
-
 	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty"`
 
 	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty"`
@@ -502,8 +500,6 @@ type GuestControlPlaneSpec struct {
 	GuestLoginMount string `json:"guestLoginMount,omitempty" apigen:"default=sshsig,pattern=^[a-z0-9][a-z0-9-]{0,62}$"`
 
 	Role string `json:"role,omitempty" apigen:"default=kcp"`
-
-	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty" apigen:"default=30,minimum=1"`
 
 	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty" apigen:"default=30,minimum=1"`
 

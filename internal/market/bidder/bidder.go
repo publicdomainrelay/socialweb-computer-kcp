@@ -197,9 +197,7 @@ type Guests interface {
 
 	Audience(name string) string
 
-	Grant(bidderDID, requesterDID, role, name string) (v1alpha1.GuestIdentityGrant, error)
-
-	BidConfig(issuerURL, bidderDID, acceptPath, createdAt string) (string, any, error)
+	BidConfig(issuerURL, mount, bidderDID, acceptPath, createdAt string) (string, any, error)
 
 	Termination(vm *v1alpha1.ComputeVM, workspace, reason, observedAt string, request *commonv1.StrongRef) (v1alpha1.StateSync, error)
 

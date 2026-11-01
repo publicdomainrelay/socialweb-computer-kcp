@@ -73,17 +73,8 @@ func (guests) Audience(name string) string {
 	return guestidentity.GuestAudience(guestidentity.KCPAPI, name)
 }
 
-func (guests) Grant(bidderDID, requesterDID, role, name string) (v1alpha1.GuestIdentityGrant, error) {
-	subject, err := guestidentity.SubjectFor(bidderDID, requesterDID, role)
-	if err != nil {
-		return v1alpha1.GuestIdentityGrant{}, err
-	}
-	return guestidentity.GrantFor(guestidentity.GrantSubject{ComputeVM: name, RequesterDID: requesterDID, Subject: subject},
-		guestidentity.OwnWish(name)), nil
-}
-
-func (guests) BidConfig(issuerURL, bidderDID, acceptPath, createdAt string) (string, any, error) {
-	config, err := guestidentity.BidConfigFor(issuerURL, bidderDID, acceptPath, createdAt)
+func (guests) BidConfig(issuerURL, mount, bidderDID, acceptPath, createdAt string) (string, any, error) {
+	config, err := guestidentity.BidConfigFor(issuerURL, mount, bidderDID, acceptPath, createdAt)
 	return guestidentity.WIFSimpleNSID, config, err
 }
 

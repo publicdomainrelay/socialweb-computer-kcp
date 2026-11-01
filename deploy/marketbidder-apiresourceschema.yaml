@@ -766,9 +766,6 @@ spec:
                               type: string
                             role:
                               type: string
-                            grantSyncSeconds:
-                              type: integer
-                              format: int32
                             issuerRetrySeconds:
                               type: integer
                               format: int32

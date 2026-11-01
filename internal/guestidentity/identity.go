@@ -5,8 +5,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 )
 
 const (
@@ -14,19 +12,11 @@ const (
 
 	EntityPrefix = "guest-"
 
-	VaultTokenHeader = "X-Vault-Token"
-
-	OIDCIssuerPath = "/v1/identity/oidc"
-
-	OIDCSubjectClaim = "wid_sub"
-
-	OnNetworkScope = "on-network"
+	OIDCIssuerSuffix = "/wid"
 )
 
 var (
 	computeVMNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-	roleNameRE = regexp.MustCompile(`^guest-[A-Za-z0-9][A-Za-z0-9._-]*-[0-9a-f]{16}$`)
 
 	authMountName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
@@ -37,12 +27,12 @@ type Audience struct {
 	Actx string
 }
 
-func (a Audience) String() string { return openbaoctl.GuestAudience(a.API, a.Actx) }
+func (a Audience) String() string { return GuestAudience(a.API, a.Actx) }
 
-func GuestAudience(api, actx string) string { return openbaoctl.GuestAudience(api, actx) }
+func GuestAudience(api, actx string) string { return "api://" + api + "?actx=" + actx }
 
-func OIDCIssuer(ingressURL string) string {
-	return strings.TrimRight(ingressURL, "/") + OIDCIssuerPath
+func OIDCIssuer(ingressURL, mount string) string {
+	return strings.TrimRight(ingressURL, "/") + "/v1/auth/" + mount + OIDCIssuerSuffix
 }
 
 func ParseAudience(aud string) (Audience, error) {
@@ -78,12 +68,6 @@ func validActx(actx string) bool {
 
 func ValidComputeVM(name string) bool { return len(name) <= 201 && computeVMNameRE.MatchString(name) }
 
-func ValidRole(role string) bool { return len(role) <= 224 && roleNameRE.MatchString(role) }
-
 func Entity(computevm string) string { return EntityPrefix + computevm }
-
-func Role(computevm, audience string) string {
-	return openbaoctl.GuestRoleName(Entity(computevm), audience)
-}
 
 func ValidMount(mount string) bool { return len(mount) <= 63 && authMountName.MatchString(mount) }

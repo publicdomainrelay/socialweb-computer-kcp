@@ -24,9 +24,9 @@ const (
 func (s *Service) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/{mount}/{step}", s.handleLogin)
-	mux.HandleFunc("GET /v1/identity/oidc/token/{role}", s.handleOIDCToken)
-	mux.HandleFunc("GET /v1/identity/oidc/.well-known/openid-configuration", s.handleDiscovery)
-	mux.HandleFunc("GET /v1/identity/oidc/.well-known/keys", s.handleKeys)
+	mux.HandleFunc("POST /v1/auth/{mount}/wid/token", s.handleToken)
+	mux.HandleFunc("GET /v1/auth/{mount}/wid/.well-known/openid-configuration", s.handleDiscovery)
+	mux.HandleFunc("GET /v1/auth/{mount}/wid/.well-known/keys", s.handleKeys)
 	mux.HandleFunc("POST "+EventsPath, s.handleEvents)
 	pinneddownloads.NewHandler(s.downloads, s.log).Register(mux, DownloadsRoute)
 	mux.HandleFunc("GET "+SubscribeEventsPath, s.handleSubscribeEvents)
@@ -73,17 +73,23 @@ func readJSONMap(r *http.Request) (map[string]any, error) {
 }
 
 func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
+	s.loginStep(w, r, r.PathValue("step"))
+}
+
+func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
+	s.loginStep(w, r, string(guestidentity.LoginToken))
+}
+
+func (s *Service) loginStep(w http.ResponseWriter, r *http.Request, step string) {
 	guest := s.guest()
 	if guest == nil {
 		writeGuestError(w, http.StatusServiceUnavailable, "the guest control plane is not ready")
 		return
 	}
-	mount := r.PathValue("mount")
-	if mount != s.spec.GuestLoginMount {
+	if r.PathValue("mount") != s.spec.GuestLoginMount {
 		writeGuestError(w, http.StatusNotFound, "no such mount")
 		return
 	}
-	step := r.PathValue("step")
 	if _, err := guestidentity.ParseLoginStep(step); err != nil {
 		writeGuestError(w, http.StatusNotFound, "no such step")
 		return
@@ -96,24 +102,14 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeReply(w, guest.LoginStep(r.Context(), step, input))
 }
 
-func (s *Service) handleOIDCToken(w http.ResponseWriter, r *http.Request) {
-	guest := s.guest()
-	if guest == nil {
-		writeGuestError(w, http.StatusServiceUnavailable, "the guest control plane is not ready")
-		return
-	}
-	role := r.PathValue("role")
-	if !guestidentity.ValidRole(role) {
-		writeGuestError(w, http.StatusNotFound, "no such role")
-		return
-	}
-	writeReply(w, guest.OIDCToken(r.Context(), role, r.Header.Get(guestidentity.VaultTokenHeader)))
-}
-
 func (s *Service) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	guest := s.guest()
 	if guest == nil {
 		writeGuestError(w, http.StatusServiceUnavailable, "the guest control plane is not ready")
+		return
+	}
+	if r.PathValue("mount") != s.spec.GuestLoginMount {
+		writeGuestError(w, http.StatusNotFound, "no such mount")
 		return
 	}
 	writeReply(w, guest.Discovery(r.Context()))
@@ -123,6 +119,10 @@ func (s *Service) handleKeys(w http.ResponseWriter, r *http.Request) {
 	guest := s.guest()
 	if guest == nil {
 		writeGuestError(w, http.StatusServiceUnavailable, "the guest control plane is not ready")
+		return
+	}
+	if r.PathValue("mount") != s.spec.GuestLoginMount {
+		writeGuestError(w, http.StatusNotFound, "no such mount")
 		return
 	}
 	writeReply(w, guest.Keys(r.Context()))

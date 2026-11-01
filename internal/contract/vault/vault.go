@@ -71,5 +71,5 @@ type Trust interface {
 }
 
 type Keys interface {
-	RotateKey(ctx context.Context, mount, name string) error
+	RotateKey(ctx context.Context, mount, keyPath string) error
 }

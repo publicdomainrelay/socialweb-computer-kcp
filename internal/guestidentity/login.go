@@ -13,7 +13,7 @@ const (
 
 	LoginChallenge LoginStep = "challenge"
 
-	LoginLogin LoginStep = "login"
+	LoginToken LoginStep = "wid/token"
 )
 
 const maximumLoginField = 4096
@@ -21,7 +21,7 @@ const maximumLoginField = 4096
 var loginFields = map[LoginStep][]string{
 	LoginBind:      {"role", "bind_secret", "host_key", "signature"},
 	LoginChallenge: {"role"},
-	LoginLogin:     {"role", "challenge", "signature"},
+	LoginToken:     {"role", "challenge", "signature", "audience"},
 }
 
 func ParseLoginStep(step string) (LoginStep, error) {

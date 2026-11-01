@@ -63,14 +63,6 @@ var APIResources = []APIResource{
 		{Name: "ComputeVM", Type: "string", JSONPath: ".status.computeVM"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "GuestIdentityGrant", Plural: "guestidentitygrants", Revision: 3, Export: "computevms", Object: GuestIdentityGrant{}, PrinterColumns: []PrinterColumn{
-		{Name: "ComputeVM", Type: "string", JSONPath: ".spec.computeVMRef.name"},
-		{Name: "API", Type: "string", JSONPath: ".spec.api"},
-		{Name: "Actx", Type: "string", JSONPath: ".spec.actx"},
-		{Name: "Applied", Type: "boolean", JSONPath: ".status.applied"},
-		{Name: "Role", Type: "string", JSONPath: ".status.role"},
-		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
-	}},
 	{Kind: "HostProcess", Plural: "hostprocesses", Revision: 4, Export: "hostprocesses", Object: HostProcess{}, PrinterColumns: []PrinterColumn{
 		{Name: "Placement", Type: "string", JSONPath: ".spec.placement"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
@@ -86,7 +78,7 @@ var APIResources = []APIResource{
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 11, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
+	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 12, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Address", Type: "string", JSONPath: ".status.address"},
 		{Name: "Initialized", Type: "boolean", JSONPath: ".status.initialized"},

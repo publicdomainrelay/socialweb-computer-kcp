@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
@@ -41,8 +40,6 @@ type Config struct {
 
 	Timeout time.Duration
 
-	GrantSync time.Duration
-
 	IssuerRetry time.Duration
 
 	HostKeyAttempts int
@@ -52,10 +49,6 @@ type Deps struct {
 	Inputs guestcp.Source
 
 	Guests guestcp.Guests
-
-	Grants guestcp.Grants
-
-	RBAC atprotorepo.RecordReader
 
 	FallbackIssuer func() string
 
@@ -93,8 +86,6 @@ type Plane struct {
 
 	guest *guestidentity.Guest
 
-	syncer *guestidentity.Syncer
-
 	known map[string]string
 
 	cancel context.CancelFunc
@@ -116,10 +107,6 @@ func New(cfg Config, deps Deps) (*Plane, error) {
 		return nil, errors.New("guestcp: the guest control plane has no input source")
 	case deps.Guests == nil:
 		return nil, errors.New("guestcp: the guest control plane has no guest report writer")
-	case deps.Grants == nil:
-		return nil, errors.New("guestcp: the guest control plane has no grant writer")
-	case deps.RBAC == nil:
-		return nil, errors.New("guestcp: the guest control plane has no RBAC record reader")
 	}
 	cfg.VaultClient = cmp.Or(strings.TrimSpace(cfg.VaultClient), DefaultVaultClient)
 	cfg.Timeout = opt.Positive(cfg.Timeout, DefaultTimeout)
@@ -153,20 +140,7 @@ func (p *Plane) Start(ctx context.Context) error {
 		return err
 	}
 	p.identity = identity
-	issuer := func() string { return guestidentity.OIDCIssuer(p.IssuerURL()) }
-	p.verifier = guestidentity.NewVerifier(guestidentity.IdentityKeys(identity), issuer)
-	syncer, err := guestidentity.NewSyncer(runCtx, guestidentity.SyncerOptions{
-		Store:  grantStore{p: p},
-		RBAC:   &guestidentity.RepoRBAC{Reader: p.deps.RBAC, Log: p.log},
-		Issuer: issuer,
-		Log:    p.log,
-		Resync: p.cfg.GrantSync,
-	})
-	if err != nil {
-		p.Close()
-		return err
-	}
-	p.syncer = syncer
+	p.verifier = guestidentity.NewOpenBaoVerifier(identity, p.IssuerURL)
 	guest, err := guestidentity.NewGuest(runCtx, guestidentity.GuestOptions{
 		Handle:          p.cfg.Handle,
 		Identity:        identity,
@@ -198,9 +172,6 @@ func (p *Plane) Close() {
 		}
 		if p.guest != nil {
 			p.guest.Close()
-		}
-		if p.syncer != nil {
-			p.syncer.Close()
 		}
 		p.wg.Wait()
 	})
@@ -234,7 +205,7 @@ func (p *Plane) OIDCIssuer() string {
 	if raw == "" {
 		return ""
 	}
-	return guestidentity.OIDCIssuer(raw)
+	return guestidentity.OIDCIssuer(raw, p.cfg.Mount)
 }
 
 func (p *Plane) Recheck() {
@@ -243,10 +214,6 @@ func (p *Plane) Recheck() {
 
 func (p *Plane) LoginStep(ctx context.Context, step string, input map[string]any) guestcp.Reply {
 	return guestcp.Reply(p.guest.LoginStep(ctx, step, input))
-}
-
-func (p *Plane) OIDCToken(ctx context.Context, role, vaultToken string) guestcp.Reply {
-	return guestcp.Reply(p.guest.OIDCToken(ctx, role, vaultToken))
 }
 
 func (p *Plane) Discovery(ctx context.Context) guestcp.Reply {
@@ -307,16 +274,6 @@ func (p *Plane) vm(name string) *v1alpha1.ComputeVM {
 		}
 	}
 	return nil
-}
-
-func (p *Plane) grants() []v1alpha1.GuestIdentityGrant {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	out := make([]v1alpha1.GuestIdentityGrant, 0, len(p.inputs.Grants))
-	for i := range p.inputs.Grants {
-		out = append(out, *p.inputs.Grants[i].DeepCopy())
-	}
-	return out
 }
 
 func (p *Plane) endpoint(context.Context) (guestidentity.Endpoint, error) {

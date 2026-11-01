@@ -15,7 +15,7 @@ const (
 
 	WIFToIssue = "openbao-identity-oidc"
 
-	WIFURLRoute = "/v1/identity/oidc/token"
+	WIFURLRouteSuffix = "/wid/token"
 
 	WIFSubjectTemplate = "actx:{actx}:plc:{did-plc-key}:role:{role}"
 )
@@ -31,7 +31,7 @@ type BidConfig struct {
 
 	Actx string `json:"actx"`
 
-	TokenPath string `json:"token_path"`
+	TokenPath string `json:"token_path,omitempty"`
 
 	URLPath string `json:"url_path"`
 
@@ -57,7 +57,10 @@ func SubjectFor(bidderDID, requesterDID, role string) (string, error) {
 	return "actx:" + team + ":plc:" + requester + ":role:" + role, nil
 }
 
-func BidConfigFor(issuerURL, bidderDID, acceptPath, createdAt string) (BidConfig, error) {
+func BidConfigFor(issuerURL, mount, bidderDID, acceptPath, createdAt string) (BidConfig, error) {
+	if !ValidMount(mount) {
+		return BidConfig{}, fmt.Errorf("guestidentity: mount %q is not an auth mount name", mount)
+	}
 	team, err := didKey(bidderDID)
 	if err != nil {
 		return BidConfig{}, fmt.Errorf("guestidentity: bidder DID: %w", err)
@@ -66,7 +69,7 @@ func BidConfigFor(issuerURL, bidderDID, acceptPath, createdAt string) (BidConfig
 	if err != nil {
 		return BidConfig{}, fmt.Errorf("guestidentity: the bid config's issuer: %w", err)
 	}
-	issuer := OIDCIssuer(ingress)
+	issuer := OIDCIssuer(ingress, mount)
 	acceptPath = cmp.Or(acceptPath, guestseed.AcceptPathVM)
 	if createdAt == "" {
 		createdAt = time.Now().UTC().Format(time.RFC3339)
@@ -77,9 +80,8 @@ func BidConfigFor(issuerURL, bidderDID, acceptPath, createdAt string) (BidConfig
 		IssuerURI:  issuer,
 		ToIssue:    WIFToIssue,
 		Actx:       team,
-		TokenPath:  guestseed.GuestLoginTokenPath,
 		URLPath:    guestseed.OnNetworkBaseURLPath,
-		URLRoute:   WIFURLRoute,
+		URLRoute:   "/v1/auth/" + mount + WIFURLRouteSuffix,
 		Subject:    WIFSubjectTemplate,
 		CreatedAt:  createdAt,
 	}, nil

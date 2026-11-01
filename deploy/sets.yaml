@@ -48,7 +48,6 @@ sets:
           - path: computevm-apiresourceschema.yaml
           - path: firecrackervm-apiresourceschema.yaml
           - path: bid-apiresourceschema.yaml
-          - path: guestidentitygrant-apiresourceschema.yaml
           - path: computevm-apiexport.yaml
       - name: policy
         workspace: root:socialweb-provider
@@ -132,7 +131,7 @@ sets:
           - path: permission-inventory.yaml
             exceptKinds: [ServiceAccount]
   - name: bidder
-    summary: the ComputeVM, Bid and GuestIdentityGrant schemas and their export (computevms) beside the provider's, the bidder WorkspaceType binding computevms and hostprocesses (plan 0007 M1-API), and the computevms binding in root that the ComputeVM controller of a bidder application instance applies with it (plan 0007 M2-CONTROLLER); needs the provider workspace and the hostprocesses set
+    summary: the ComputeVM, FirecrackerVM and Bid schemas and their export (computevms) beside the provider's, the bidder WorkspaceType binding computevms and hostprocesses (plan 0007 M1-API), and the computevms binding in root that the ComputeVM controller of a bidder application instance applies with it (plan 0007 M2-CONTROLLER); needs the provider workspace and the hostprocesses set
     values: None
     phases:
       - name: schemas
@@ -141,7 +140,6 @@ sets:
           - path: computevm-apiresourceschema.yaml
           - path: firecrackervm-apiresourceschema.yaml
           - path: bid-apiresourceschema.yaml
-          - path: guestidentitygrant-apiresourceschema.yaml
           - path: computevm-apiexport.yaml
         after:
           - kind: APIExport
@@ -351,7 +349,6 @@ sets:
           - path: computevm-apiresourceschema.yaml
           - path: firecrackervm-apiresourceschema.yaml
           - path: bid-apiresourceschema.yaml
-          - path: guestidentitygrant-apiresourceschema.yaml
           - path: computevm-apiexport.yaml
         after:
           - kind: APIExport

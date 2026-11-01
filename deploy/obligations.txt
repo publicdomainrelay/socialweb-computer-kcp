@@ -73,7 +73,6 @@ internal/controllers/remotepds	controller.go:New	origin	DefaultCheckInterval 30s
 internal/controllers/vaultcertificate	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
 internal/controllers/vaultcredential	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
 internal/storemaint	storemaint.go:Monitor.Run	loop	cfg.Interval 5m after cfg.First 30s; <=0 uses the defaults	store maintenance (vacuum, usage); sqlite and postgres give no size event
-internal/guestidentity	grants.go:Syncer.run	loop	spec.grantSyncSeconds (opts.Resync); <=0 uses 30s	resync requester RBAC records held in a remote repo with no watch
 internal/guestidentity	service.go:Guest.refreshOIDCDocuments	loop	oidcDocumentRefresh 5m constant	refresh the OIDC discovery and keys OpenBao publishes with no watch
 internal/gateway/custody	signin.go:SignIn.refreshLoop	loop	per session: renew below 30m left, by 1h	renew the custody sessions of signed-in web users
 internal/market/requester	accept.go:Requester.submitAcceptAndWait	bounded	spec.receiptPollMilliseconds (<=0 uses a 500ms floor) doubling to 2s, bounded by receiptTimeoutSeconds (default 5m)	re-send submitAccept and read the bidder's market.receipt with listRecords; in XRPC mode nothing delivers the receipt (the submitAccept reply carries none, the bidder pushes none, submitEvent accepts only guest-event envelopes); firehose comms wake it from the market inbox

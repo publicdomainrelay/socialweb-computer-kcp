@@ -204,11 +204,10 @@ func (h *Handle) CA(ctx context.Context, mount string) (string, error) {
 	return client.CAPEM(ctx, mount)
 }
 
-func (h *Handle) RotateKey(ctx context.Context, mount, name string) error {
-	name = strings.Trim(strings.TrimSpace(name), "/")
-	target := "identity/oidc/key/" + name
-	if name == "" || !h.allows(target) {
-		return fmt.Errorf("%w: OIDC key %q", ErrOutOfScope, name)
+func (h *Handle) RotateKey(ctx context.Context, mount, keyPath string) error {
+	target := strings.Trim(strings.TrimSpace(keyPath), "/")
+	if target == "" || !h.allows(target) {
+		return fmt.Errorf("%w: signing key %q", ErrOutOfScope, target)
 	}
 	mount = strings.Trim(strings.TrimSpace(mount), "/")
 	if mount == "" {

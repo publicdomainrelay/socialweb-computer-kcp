@@ -131,7 +131,6 @@ type layoutInput struct {
 	plugins      []placedPlugin
 	tidyDue      bool
 	accessors    map[string]string
-	grants       []v1alpha1.GuestIdentityGrant
 }
 
 func or(v, dflt string) string {
@@ -191,9 +190,6 @@ func desired(ctx context.Context, in layoutInput, ca caSource) (baosync.Desired,
 	}
 	if len(in.plugins) > 0 {
 		core = append(append([]v1alpha1.OpenBaoPolicyRule(nil), CorePolicyRules...), PluginCorePolicyRules...)
-	}
-	if in.declared != nil && in.declared.IdentityOIDC != nil {
-		core = append(append([]v1alpha1.OpenBaoPolicyRule(nil), core...), IdentityCoreRules...)
 	}
 	d.Policies = append(d.Policies, baosync.Policy{Name: CorePolicy, HCL: PolicyHCL(core)})
 	d.Objects = append(d.Objects, baosync.Object{Path: "auth/" + CertAuthMount + "/certs/" + CertAuthRole, Data: map[string]any{

@@ -289,10 +289,6 @@ func (h *handle) ApplyComputeVMPublished(ctx context.Context, name string, publi
 	return h.applyStatus(ctx, market.KindComputeVM, name, value, v1alpha1.FieldManagerComputeVMMarketPublished)
 }
 
-func (h *handle) CreateGuestIdentityGrant(ctx context.Context, grant v1alpha1.GuestIdentityGrant) error {
-	return h.create(ctx, market.KindGuestIdentityGrant, grant.ObjectMeta, grant.Spec, h.manager)
-}
-
 func (h *handle) CreateStateSync(ctx context.Context, sync v1alpha1.StateSync) error {
 	return h.create(ctx, market.KindStateSync, sync.ObjectMeta, sync.Spec, h.manager)
 }

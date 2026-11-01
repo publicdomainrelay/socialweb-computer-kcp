@@ -43,7 +43,7 @@ const (
 
 var GVR = v1alpha1.OpenBaoServerGVR
 
-var ErrNotHeld = errors.New(grantNotHeldReason)
+var ErrNotHeld = errors.New("the server does not hold its declaration yet")
 
 type Config struct {
 	StateDir string
@@ -73,8 +73,6 @@ type Children interface {
 type Outcome struct {
 	Status v1alpha1.OpenBaoServerStatus
 
-	Grants map[string]v1alpha1.GuestIdentityGrantStatus
-
 	RequeueAfter time.Duration
 
 	Err error
@@ -102,10 +100,6 @@ func New(c Config) (*Servers, error) {
 func ServerDir(stateDir, name string) string { return filepath.Join(stateDir, DirName, name) }
 
 func ChildName(name string) string { return ChildPrefix + name }
-
-func NeedsGrants(o v1alpha1.OpenBaoServer) bool {
-	return o.Spec.Declared != nil && o.Spec.Declared.IdentityOIDC != nil
-}
 
 func (s *Servers) unit(o v1alpha1.OpenBaoServer) string {
 	if o.Spec.Unit != "" {
@@ -197,8 +191,6 @@ type synced struct {
 	running map[string]string
 	tidied  bool
 	tidyErr error
-	roles   map[string]grantRole
-	refused map[string]string
 }
 
 func tidyInterval(s v1alpha1.OpenBaoServerSpec) (time.Duration, error) {
@@ -256,7 +248,7 @@ func recordTidy(st *v1alpha1.OpenBaoServerStatus, s synced, interval time.Durati
 
 func syncWith(ctx context.Context, admin *openbao.Client, in layoutInput) (synced, error) {
 	in.accessors = accessorsOf(ctx, admin)
-	d, pending, roles, refused, err := desiredWithIdentity(ctx, in, pkiCA(admin))
+	d, pending, err := desired(ctx, in, pkiCA(admin))
 	if err != nil {
 		return synced{}, err
 	}
@@ -270,14 +262,14 @@ func syncWith(ctx context.Context, admin *openbao.Client, in layoutInput) (synce
 	}
 	if err == nil && rep.Err == nil && (generatedRoot || len(pending) > 0 && rep.Changed()) {
 		in.accessors = accessorsOf(ctx, admin)
-		if d2, pending2, roles2, refused2, derr := desiredWithIdentity(ctx, in, pkiCA(admin)); derr == nil {
+		if d2, pending2, derr := desired(ctx, in, pkiCA(admin)); derr == nil {
 			rep2, err2 := baosync.Sync(ctx, admin, d2)
 			rep.Applied = append(rep.Applied, rep2.Applied...)
 			rep.Conflicts, rep.Err = rep2.Conflicts, errors.Join(rep.Err, rep2.Err)
-			d, pending, roles, refused, err = d2, pending2, roles2, refused2, err2
+			d, pending, err = d2, pending2, err2
 		}
 	}
-	s := synced{report: rep, pending: pending, desired: d, roles: roles, refused: refused}
+	s := synced{report: rep, pending: pending, desired: d}
 	if err == nil && in.tidyDue {
 		s.tidied, s.tidyErr = tidyTokensAndLeases(ctx, admin)
 	}
@@ -406,7 +398,7 @@ func recordSync(st *v1alpha1.OpenBaoServerStatus, gen int64, s synced, err error
 	}
 }
 
-func (s *Servers) Reconcile(ctx context.Context, o v1alpha1.OpenBaoServer, grants []v1alpha1.GuestIdentityGrant, children Children) Outcome {
+func (s *Servers) Reconcile(ctx context.Context, o v1alpha1.OpenBaoServer, children Children) Outcome {
 	log := s.log.With("openbaoserver", o.Name)
 	var st v1alpha1.OpenBaoServerStatus
 	o.Status.DeepCopyInto(&st)
@@ -479,10 +471,7 @@ func (s *Servers) Reconcile(ctx context.Context, o v1alpha1.OpenBaoServer, grant
 		st.Plugins = nil
 		return retry("spec.plugins: %v", err)
 	}
-	if !NeedsGrants(o) {
-		grants = nil
-	}
-	layout := layoutInput{caPEM: tlsm.CAPEM, clientsCAPEM: clientsCA.CAPEM, clients: o.Spec.Clients, declared: o.Spec.Declared, plugins: plugins, grants: grants,
+	layout := layoutInput{caPEM: tlsm.CAPEM, clientsCAPEM: clientsCA.CAPEM, clients: o.Spec.Clients, declared: o.Spec.Declared, plugins: plugins,
 		tidyDue: tidyDue(st.Tidy, tidyEvery, time.Now())}
 	opts, err := serverOptions(o.Spec, clientsCA.BundlePath)
 	if err != nil {
@@ -615,16 +604,6 @@ func (s *Servers) Reconcile(ctx context.Context, o v1alpha1.OpenBaoServer, grant
 		held = ErrNotHeld
 	}
 	out := Outcome{}
-	if NeedsGrants(o) {
-		reason := ""
-		switch {
-		case held != nil:
-			reason = held.Error()
-		case len(sy.report.Conflicts) > 0:
-			reason = grantNotHeldReason
-		}
-		out.Grants = grantOutcomes(sy.roles, sy.refused, grants, reason == "", reason)
-	}
 	if len(plugins) > 0 {
 		perr := serr
 		if perr == nil {
