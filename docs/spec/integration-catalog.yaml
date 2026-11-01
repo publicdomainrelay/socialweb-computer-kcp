@@ -1788,6 +1788,17 @@ entries:
       answers 401 within 10 s and its refresh answers 400 invalid_grant.
     cleanup: test temp dir and servers.
 
+  - id: TestTheGuestCLIApprovesAnAppAndKeepsItsSessionCookies
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [the socialweb-computer binary built from the tree, our PDS, an OIDC issuer, the app]
+    asserts: >
+      socialweb-computer oauth approve with --oauth-token-file signs the app in as the account and
+      writes the app's cookies to --oauth-jar; a client holding only those cookies writes a record
+      through the app's session.
+    cleanup: test temp dir and servers.
+
   - id: TestAGuestGetsAnOIDCJWTForAnyAudienceWithItsBoundHostKeyAndNoToken
     kind: integration
     source: cmd/openbao-plugin-auth-sshsig/wid_test.go

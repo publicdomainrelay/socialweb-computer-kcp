@@ -13,6 +13,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -613,5 +615,46 @@ func TestDeletingTheRecordEndsTheSessionsItAdmitted(t *testing.T) {
 	}
 	if status, body := appCall(t, browser, w.app.srv.URL+"/refresh", nil); status != http.StatusBadRequest || !strings.Contains(body, "invalid_grant") {
 		t.Fatalf("a refresh after the record was deleted answered %d: %s", status, body)
+	}
+}
+
+func TestTheGuestCLIApprovesAnAppAndKeepsItsSessionCookies(t *testing.T) {
+	w := newWorld(t)
+	w.allow(appScopes)
+	dir := t.TempDir()
+	bin := dir + "/socialweb-computer"
+	build := exec.Command("go", "build", "-o", bin, "github.com/johnandersen777/socialweb-computer-kcp/cmd/socialweb-computer")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("building the CLI: %v: %s", err, out)
+	}
+	tokenFile := dir + "/token"
+	if err := os.WriteFile(tokenFile, []byte(w.issuer.token(t, workloadSubject, w.audience())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	jar := dir + "/jar.json"
+	cmd := exec.Command(bin, "oauth", "approve", "--oauth-account", w.did, "--oauth-role", roleName,
+		"--oauth-login", w.app.srv.URL+"/login", "--oauth-login-handle", "alice.test",
+		"--oauth-token-file", tokenFile, "--oauth-jar", jar, "--json")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oauth approve: %v: %s", err, out)
+	}
+	raw, err := os.ReadFile(jar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cookies []struct {
+		URL, Name, Value string
+	}
+	if err := json.Unmarshal(raw, &cookies); err != nil {
+		t.Fatal(err)
+	}
+	browser := newJar(t)
+	base, _ := url.Parse(w.app.srv.URL + "/")
+	for _, c := range cookies {
+		browser.Jar.SetCookies(base, []*http.Cookie{{Name: c.Name, Value: c.Value, Path: "/"}})
+	}
+	if status, body := appCall(t, browser, w.app.srv.URL+"/post", map[string]string{"collection": scrobbleCollection, "text": "\U0001F680 from the CLI"}); status != http.StatusOK {
+		t.Fatalf("the app session from the CLI's jar answered %d: %s", status, body)
 	}
 }
