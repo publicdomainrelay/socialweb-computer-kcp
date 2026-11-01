@@ -1,0 +1,38 @@
+apiVersion: exposure.socialweb.computer/v1alpha1
+kind: ComponentLink
+metadata:
+  name: quickstart-vouches
+spec:
+  capabilities:
+  - name: repo.write
+    scope:
+    - sh.tangled.graph.vouch
+  from:
+    selector:
+      group: socialweb.computer
+      kind: AtprotoRecord
+      matchLabels:
+        quickstart.socialweb.computer/vouch: "true"
+  to:
+    group: socialweb.computer
+    kind: AtprotoRepo
+    name: REPLACE-REQUESTER-REPO
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: vouch-bidder
+  labels:
+    quickstart.socialweb.computer/vouch: "true"
+spec:
+  repoRef:
+    group: socialweb.computer
+    kind: AtprotoRepo
+    name: REPLACE-REQUESTER-REPO
+  collection: sh.tangled.graph.vouch
+  rkey: REPLACE-BIDDER-DID
+  deletionPolicy: Delete
+  record:
+    $type: sh.tangled.graph.vouch
+    subject: REPLACE-BIDDER-DID
+    createdAt: "2026-11-01T00:00:00Z"

@@ -1,0 +1,19 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: EphemeralInfra
+metadata:
+  name: quickstart-agent
+spec:
+  description: quickstart one VM with an atirc agent
+  ttlSeconds: 3600
+  endWhen: Deadline
+  contracts:
+  - name: agent1
+    state: Requested
+    vmName: einfra-quickstart-agent-agent1
+    agent:
+      envFile: /etc/atirc/atirc.env
+  secrets:
+  - contract: agent1
+    secretsRef:
+      mount: requester
+      path: contracts/einfra-quickstart-agent-agent1/secrets

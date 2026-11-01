@@ -1,0 +1,16 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: Infra
+metadata:
+  name: quickstart-vm
+spec:
+  description: quickstart one firecracker VM, ssh with your own key
+  contracts:
+  - name: vm1
+    state: Requested
+    vmName: quickstart-vm1
+    sshAuthorizedKeys:
+    - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
+    userData: |
+      #cloud-config
+      runcmd:
+        - [sh, -c, "echo quickstart-vm-ok > /root/quickstart"]

@@ -1,0 +1,9 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: ContractEvent
+metadata:
+  name: quickstart-agent-agent1-start
+spec:
+  contractRef:
+    name: einfra-quickstart-agent-agent1
+  direction: outbound
+  nsid: com.publicdomainrelay.temp.compute.events.guest.agentStart

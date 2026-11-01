@@ -1,0 +1,33 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: EphemeralInfra
+metadata:
+  name: quickstart
+spec:
+  description: quickstart VM, deno sandbox and atirc agent VM for thirty minutes
+  ttlSeconds: 1800
+  endWhen: Deadline
+  contracts:
+  - name: vm1
+    state: Requested
+    vmName: einfra-quickstart-vm1
+    sshAuthorizedKeys:
+    - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
+    userData: |
+      #cloud-config
+      runcmd:
+        - [sh, -c, "echo quickstart-vm-ok > /root/quickstart"]
+  - name: sbx1
+    state: Requested
+    computeKind: deno
+    userData: |
+      console.log(`quickstart-deno-ok on ${Deno.build.os}/${Deno.build.arch}`);
+  - name: agent1
+    state: Requested
+    vmName: einfra-quickstart-agent1
+    agent:
+      envFile: /etc/atirc/atirc.env
+  secrets:
+  - contract: agent1
+    secretsRef:
+      mount: requester
+      path: contracts/einfra-quickstart-agent1/secrets

@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quickstart-k8s
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quickstart-k8s
+  template:
+    metadata:
+      labels:
+        app: quickstart-k8s
+    spec:
+      containers:
+      - name: run
+        image: docker.io/library/busybox:1.36.1
+        command: ["sh", "-c", "echo quickstart-k8s-ok; sleep 3600"]
