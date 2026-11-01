@@ -337,10 +337,10 @@ func (e *Engine) executeWithID(ctx context.Context, runID string, request *Polic
 	if result != nil {
 		statusValue.ExitStatus = result.ExitStatus
 		statusValue.Outputs = result.Outputs
-		statusValue.Cache = result.Cache
+		statusValue.Cache = withoutTrust(result.Cache)
 		statusValue.ConsoleOutput = truncateConsole(result.ConsoleOutput, e.config.Limits.MaxConsoleBytes)
 		statusValue.Annotations = result.Annotations
-		e.cacheStore.Merge(result.Cache)
+		e.cacheStore.Merge(statusValue.Cache)
 	}
 	outcome := Outcome{Status: statusValue}
 	if result != nil {
@@ -399,7 +399,7 @@ func (e *Engine) seedRequest(request *PolicyEngineRequest, seed models.Cache) *P
 	maps.Copy(merged, seed)
 	context["cache"] = merged
 	copyRequest.Context = context
-	e.cacheStore.Merge(merged)
+	e.cacheStore.Merge(withoutTrust(merged))
 	return &copyRequest
 }
 

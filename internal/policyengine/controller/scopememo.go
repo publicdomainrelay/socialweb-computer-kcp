@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,8 @@ const (
 	ReasonCacheServed = "CacheServed"
 
 	AnnotationCacheServed = "cache-served"
+
+	trustCachePrefix = "trust/"
 )
 
 func scopeMemoKey(workflow json.RawMessage, inputs map[string]any) string {
@@ -41,24 +44,48 @@ func scopeMemoKey(workflow json.RawMessage, inputs map[string]any) string {
 }
 
 func bindCacheKey(inputs map[string]any, workflow json.RawMessage, workflowCR *policyv1alpha1.PolicyWorkflow, requestContext map[string]any) {
-	key := stringInput(inputs, CacheKeyInput)
-	if key == "" {
+	delete(inputs, CacheKeyInput)
+	if !declaresInput(workflow, CacheKeyInput) {
+		return
+	}
+	seeded, ok := cacheFromAny(requestContext["cache"])
+	if !ok {
+		return
+	}
+	entry, ok := seeded[trustCachePrefix+stringInput(inputs, "counterparty-did")]
+	if !ok || len(entry) == 0 {
+		return
+	}
+	raw, err := json.Marshal(inputs)
+	if err != nil {
 		return
 	}
 	digest := sha256.New()
-	digest.Write(workflow)
-	if workflowCR != nil && workflowCR.Spec.RecordRef != nil {
-		digest.Write([]byte("\x00" + workflowCR.Spec.RecordRef.URI + "\x00" + workflowCR.Spec.RecordRef.CID))
+	for _, part := range [][]byte{workflow, raw} {
+		digest.Write([]byte(strconv.Itoa(len(part)) + ":"))
+		digest.Write(part)
 	}
-	digest.Write([]byte("\x00trust\x00"))
-	if seeded, ok := cacheFromAny(requestContext["cache"]); ok {
-		entry := seeded["trust/"+stringInput(inputs, "counterparty-did")]
-		for _, file := range []string{"operatorOf.json", "vouchedBy.json", "trustedOperators.json"} {
-			digest.Write([]byte("\x00" + file + "\x00" + entry[file].Data))
+	if workflowCR != nil && workflowCR.Spec.RecordRef != nil {
+		digest.Write([]byte("record:" + workflowCR.Spec.RecordRef.URI + "\x00" + workflowCR.Spec.RecordRef.CID + "\x00"))
+	}
+	for _, file := range []string{"operatorOf.json", "vouchedBy.json", "trustedOperators.json"} {
+		data := entry[file].Data
+		digest.Write([]byte(file + ":" + strconv.Itoa(len(data)) + ":" + data))
+	}
+	inputs[CacheKeyInput] = "engine/" + hex.EncodeToString(digest.Sum(nil))
+}
+
+func withoutTrust(value models.Cache) models.Cache {
+	if value == nil {
+		return nil
+	}
+	out := make(models.Cache, len(value))
+	for key, entry := range value {
+		if !strings.HasPrefix(key, trustCachePrefix) {
+			out[key] = entry
 		}
 	}
-	sum := digest.Sum(nil)
-	inputs[CacheKeyInput] = key + "|bind:" + hex.EncodeToString(sum[:12])
+	return out
 }
 
 func (e *Engine) scopeTTL(allow bool) time.Duration {

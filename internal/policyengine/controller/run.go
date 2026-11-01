@@ -60,9 +60,6 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 	if err != nil {
 		return failedOutcome(err), nil
 	}
-	if !declaresInput(workflowRaw, CacheKeyInput) {
-		delete(inputs, CacheKeyInput)
-	}
 	requestContext, contextErr := r.requestContext(ctx, run, workflowCR, inputs)
 	if contextErr != nil {
 		if ctx.Err() != nil {
@@ -258,10 +255,10 @@ func runCacheSeed(run *policyv1alpha1.PolicyWorkflowRun) models.Cache {
 		return models.Cache{}
 	}
 	if len(run.Spec.Cache) > 0 {
-		return CacheFromAPI(run.Spec.Cache)
+		return withoutTrust(CacheFromAPI(run.Spec.Cache))
 	}
 	if len(run.Status.Cache) > 0 {
-		return CacheFromAPI(run.Status.Cache)
+		return withoutTrust(CacheFromAPI(run.Status.Cache))
 	}
 	return models.Cache{}
 }
@@ -287,17 +284,15 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 		cache = models.Cache{}
 	}
 	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
-		if _, seeded := cache["trust/"+counterpartyDid]; !seeded {
-			selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
-			if stringInput(inputs, "perspective") == perspectiveRequester {
-				selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
-			}
-			snapshot, err := trust.BuildSnapshotWith(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService, associationOf(run))
-			if err != nil {
-				return nil, err
-			}
-			cache["trust/"+counterpartyDid] = snapshot.CacheFiles()
+		selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
+		if stringInput(inputs, "perspective") == perspectiveRequester {
+			selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
 		}
+		snapshot, err := trust.BuildSnapshotWith(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService, associationOf(run))
+		if err != nil {
+			return nil, err
+		}
+		cache[trustCachePrefix+counterpartyDid] = snapshot.CacheFiles()
 	}
 	if len(cache) > 0 {
 		context["cache"] = cache
