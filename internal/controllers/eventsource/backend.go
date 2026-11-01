@@ -142,7 +142,7 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	if created {
 		e = &backendEntry[T]{b: b, ref: commonv1.ObjectRef{Group: eventsv1.GroupName, Kind: b.kind, Name: obj.GetName(), Workspace: req.Workspace}}
 		e.flush = debounce.New(b.flushDelay, e.flushNow)
-		e.progress = debounce.New(delivery.ProgressDelay, e.flushNow)
+		e.progress = debounce.New(delivery.ProgressDelay, e.flushProgress)
 		b.entries[key] = e
 	}
 	b.mu.Unlock()
@@ -160,18 +160,26 @@ func (b *Backend[T]) Reconcile(ctx context.Context, req ctlruntime.Request, obj 
 	if err != nil {
 		b.log.Warn("the event source spec is invalid; it waits for a spec change", "workspace", req.Workspace, "name", obj.GetName(), "err", err.Error())
 	}
-	return ctlruntime.Result{}, e.publish(ctx)
+	return ctlruntime.Result{}, e.publish(ctx, false)
 }
 
 func (e *backendEntry[T]) flushNow() {
+	e.flushAt(false)
+}
+
+func (e *backendEntry[T]) flushProgress() {
+	e.flushAt(true)
+}
+
+func (e *backendEntry[T]) flushAt(progress bool) {
 	ctx, cancel := context.WithTimeout(e.b.root, statusTimeout)
 	defer cancel()
-	if err := e.publish(ctx); err != nil {
+	if err := e.publish(ctx, progress); err != nil {
 		e.b.log.Warn("writing the event source status", "workspace", e.ref.Workspace, "name", e.ref.Name, "err", err.Error())
 	}
 }
 
-func (e *backendEntry[T]) publish(ctx context.Context) error {
+func (e *backendEntry[T]) publish(ctx context.Context, progress bool) error {
 	e.publishMu.Lock()
 	defer e.publishMu.Unlock()
 	e.mu.Lock()
@@ -204,6 +212,10 @@ func (e *backendEntry[T]) publish(ctx context.Context) error {
 	if e.last != nil && statusEqual(*e.last, next) {
 		return nil
 	}
+	if !progress && e.last != nil && statusEqual(withoutProgress(*e.last), withoutProgress(next)) {
+		e.progress.Mark()
+		return nil
+	}
 	copied, ok := obj.DeepCopyObject().(T)
 	if !ok {
 		return fmt.Errorf("eventsource: %T does not copy to itself", obj)
@@ -214,6 +226,11 @@ func (e *backendEntry[T]) publish(ctx context.Context) error {
 	}
 	e.last = &next
 	return nil
+}
+
+func withoutProgress(status eventsv1.EventSourceStatus) eventsv1.EventSourceStatus {
+	status.Cursor, status.Lag, status.LastEventAt = 0, 0, nil
+	return status
 }
 
 func statusEqual(a, b eventsv1.EventSourceStatus) bool {

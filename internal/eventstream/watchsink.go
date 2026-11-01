@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	v1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/delivery"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/debounce"
 )
 
@@ -54,6 +56,8 @@ type Sink struct {
 
 	flush *debounce.Debounce
 
+	progress *debounce.Debounce
+
 	mu sync.Mutex
 
 	pending Pending
@@ -68,7 +72,12 @@ var _ events.Sink = (*Sink)(nil)
 func (w *Watches) NewSink(name string, matches MatchesFunc, flushed func()) *Sink {
 	s := &Sink{w: w, name: strings.TrimSpace(name), matches: matches, pending: newPending(), gone: map[string]struct{}{}}
 	s.flush = debounce.New(w.flushDelay, flushed)
+	s.progress = debounce.New(delivery.ProgressDelay, flushed)
 	return s
+}
+
+func (s *Sink) MarkProgress() {
+	s.progress.Mark()
 }
 
 func (s *Sink) SetRkeys(rkeys []string) {
@@ -196,6 +205,10 @@ func (s *Sink) Deliver(ctx context.Context, event events.Event) error {
 		s.pending.Cursors[event.Source] = event.Seq
 	}
 	s.mu.Unlock()
+	if len(records) == 0 && len(deletes) == 0 {
+		s.progress.Mark()
+		return nil
+	}
 	s.flush.Mark()
 	return nil
 }
@@ -232,6 +245,7 @@ func (s *Sink) Take() Pending {
 
 func (s *Sink) Close() {
 	s.flush.Stop()
+	s.progress.Stop()
 }
 
 func NoteDeleted(deleted []string, uris []string) []string {
@@ -254,6 +268,9 @@ func MergeStatus(status v1alpha1.AtprotoRecordWatchStatus, p Pending) v1alpha1.A
 	for uri, record := range p.Records {
 		i := slices.IndexFunc(status.Records, func(r v1alpha1.WatchedRecord) bool { return r.URI == uri })
 		if i >= 0 {
+			if prior := status.Records[i]; prior.Did == record.Did && prior.Cid == record.Cid && bytes.Equal(prior.Value, record.Value) {
+				record.VerifiedAt = prior.VerifiedAt
+			}
 			status.Records[i] = record
 		} else {
 			status.Records = append(status.Records, record)

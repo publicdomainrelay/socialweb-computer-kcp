@@ -318,7 +318,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, es *
 	}
 	s := c.start(ctx, k, req, es, fingerprint, filter, rewind, source, sink)
 	s.flush.Mark()
-	return ctlruntime.Result{}, s.publish(ctx)
+	return ctlruntime.Result{}, s.publish(ctx, false)
 }
 
 func rewindFor(kind string) int64 {
@@ -417,7 +417,7 @@ func (c *Controller) start(ctx context.Context, k string, req ctlruntime.Request
 	filter events.Filter, rewind int64, source events.Source, sink events.Sink) *stream {
 	s := &stream{c: c, key: k, uid: string(es.UID), fingerprint: fingerprint, rewind: rewind, req: req, es: es.DeepCopy()}
 	s.flush = debounce.New(c.flushDelay, s.flushNow)
-	s.progress = debounce.New(delivery.ProgressDelay, s.flushNow)
+	s.progress = debounce.New(delivery.ProgressDelay, s.flushProgress)
 	s.loop = delivery.New(delivery.Config{Filter: filter, Rewind: rewind, Live: es.Spec.Resume == eventsv1.EventStreamResumeLive},
 		delivery.Deps{Source: source, Sink: sink, Resume: s.resume, Changed: s.flush.Mark, Progress: s.progress.Mark,
 			Log: c.log.With("stream", k)})
@@ -447,7 +447,7 @@ func (s *stream) stop(flush bool) {
 	s.progress.Stop()
 	_ = s.group.Stop()
 	if flush {
-		s.flushNow()
+		s.flushAt(true)
 	}
 }
 
@@ -478,9 +478,17 @@ func (s *stream) resume() *int64 {
 }
 
 func (s *stream) flushNow() {
+	s.flushAt(false)
+}
+
+func (s *stream) flushProgress() {
+	s.flushAt(true)
+}
+
+func (s *stream) flushAt(progress bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.c.root), statusTimeout)
 	defer cancel()
-	if err := s.publish(ctx); err != nil {
+	if err := s.publish(ctx, progress); err != nil {
 		s.c.log.Warn("writing the EventStream status", "stream", s.key, "err", err.Error())
 	}
 	state := s.loop.State()
@@ -494,7 +502,7 @@ func (s *stream) flushNow() {
 	}
 }
 
-func (s *stream) publish(ctx context.Context) error {
+func (s *stream) publish(ctx context.Context, progress bool) error {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 	state := s.loop.State()
@@ -520,6 +528,10 @@ func (s *stream) publish(ctx context.Context) error {
 	if s.last != nil && statusEqual(*s.last, status) {
 		return nil
 	}
+	if !progress && s.last != nil && statusEqual(withoutProgress(*s.last), withoutProgress(status)) {
+		s.progress.Mark()
+		return nil
+	}
 	next := es.DeepCopy()
 	next.Status = status
 	if err := req.ApplyStatus(ctx, next); err != nil {
@@ -530,6 +542,14 @@ func (s *stream) publish(ctx context.Context) error {
 	}
 	s.last = &status
 	return nil
+}
+
+func withoutProgress(status eventsv1.EventStreamStatus) eventsv1.EventStreamStatus {
+	status.Cursor, status.Lag, status.LastEventAt = 0, 0, nil
+	status.Conditions = slices.DeleteFunc(slices.Clone(status.Conditions), func(c metav1.Condition) bool {
+		return c.Type == eventsv1.EventStreamConditionLagging
+	})
+	return status
 }
 
 func statusEqual(a, b eventsv1.EventStreamStatus) bool {
