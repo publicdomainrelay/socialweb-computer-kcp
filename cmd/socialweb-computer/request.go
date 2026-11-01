@@ -53,34 +53,36 @@ var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
 
 type requestRun struct {
-	a                *app
-	vals             clicfg.Values
-	stateRoot        string
-	inv              request.Invocation
-	hold             bool
-	skipSSH          bool
-	exec             string
-	secrets          string
-	transport        string
-	tag              string
-	target           string
-	root             v1alpha1.MarketRequesterSpec
-	contract         v1alpha1.ComputeContractSpec
-	appOptions       []v1alpha1.ApplicationOption
-	contractTimeout  time.Duration
-	networkTimeout   time.Duration
-	summary          request.Summary
-	kcp              *request.Kcp
-	standalone       devinstance.Layout
-	instanceDir      string
-	resuming         bool
-	cleanupOnly      bool
-	identity         *request.IdentityStore
-	identityState    *request.Identity
-	identityObject   *v1alpha1.MarketIdentity
-	expectedPDSURL   string
-	awaitRefFile     string
-	handshakeStarted bool
+	a                 *app
+	vals              clicfg.Values
+	stateRoot         string
+	inv               request.Invocation
+	hold              bool
+	skipSSH           bool
+	exec              string
+	secrets           string
+	associate         string
+	associationRefArg string
+	transport         string
+	tag               string
+	target            string
+	root              v1alpha1.MarketRequesterSpec
+	contract          v1alpha1.ComputeContractSpec
+	appOptions        []v1alpha1.ApplicationOption
+	contractTimeout   time.Duration
+	networkTimeout    time.Duration
+	summary           request.Summary
+	kcp               *request.Kcp
+	standalone        devinstance.Layout
+	instanceDir       string
+	resuming          bool
+	cleanupOnly       bool
+	identity          *request.IdentityStore
+	identityState     *request.Identity
+	identityObject    *v1alpha1.MarketIdentity
+	expectedPDSURL    string
+	awaitRefFile      string
+	handshakeStarted  bool
 }
 
 func (r *requestRun) openIdentity(name string) error {
@@ -361,6 +363,10 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
+		case p.To == compose.MapToOptions && !p.Mapped && slices.Contains(requestCreateOptions, p.Name):
+			return fmt.Errorf("--%s is a run request option; pass it before --", p.Name)
+		case p.To == compose.MapToOptions && !p.Mapped:
+			return fmt.Errorf("--%s is no %s option (%s); run request does not pass unknown options on", p.Name, marketrequester.RequesterApp, compose.OptionMapPath)
 		case p.To == compose.MapToOptions:
 			r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 		case p.To == compose.MapToCLI:
@@ -478,6 +484,10 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.secrets = p.Value
 		case p.To == "contract.agent":
 			r.contract.Agent = agentOf(p.Value)
+		case p.To == "contract.association":
+			r.associate = p.Value
+		case p.To == "spec.identity.associationRef":
+			r.associationRefArg = p.Value
 		case p.To == "contract.guestTools":
 			tools, err := guestToolsOf(p.Value)
 			if err != nil {
@@ -1116,7 +1126,7 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitRefused, "run request: --agent: %v", err)
 		}
 	}
-	if r.contract.Association, err = associateOf(vals.String("associate")); err != nil {
+	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)
 	}
 	if r.contract.Association != nil {

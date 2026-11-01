@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,7 +76,7 @@ func associationRefOf(value string) (*commonv1.StrongRef, string, error) {
 }
 
 func (r *requestRun) associationRef(network bool) error {
-	ref, wait, err := associationRefOf(r.vals.String("association-ref"))
+	ref, wait, err := associationRefOf(cmp.Or(r.vals.String("association-ref"), r.associationRefArg))
 	if err != nil || (ref == nil && wait == "") {
 		return err
 	}
