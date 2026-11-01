@@ -187,7 +187,9 @@ kill -INT %1                                              # Ctrl-C: stops the kc
 
 - identity, after `--` (the MarketRequesterSpec options of `run request`, parsed by the same code): `--atproto-oauth-qr`,
   `--atproto-oauth`, or an existing account with an app password (`--atproto-identity-mode pdsAccount --atproto-handle
-  <handle> --atproto-pds-url <pds>`, the password through the environment); without one it is a local PDS (`localRepo`,
+  <handle> --atproto-pds-url <pds>`, the password in `ATPROTO_PASSWORD` in the environment of that one command, which
+  puts it into the requester's own OpenBao, or later `run requester password <name>` on stdin); without one it is a
+  local PDS (`localRepo`,
   `--identity <name>` before `--` reuses a stored one); comms, ingress, requester ingress and `--secrets-fallback` too. A
   contract option (`--vm-name`, `--tunnel`, `--hold`, ...) is refused: contracts are kubectl objects here
 - the ready file (`<dir>/ready.json`, and a second copy at `--ready-file <path>`): written to `<path>.tmp` then renamed,

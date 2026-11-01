@@ -111,6 +111,13 @@ section 7). A restart must repeat `--network $I`, and must wait after the Ctrl-C
 (`k root:dev get workspaces $I-qs` NotFound, a few seconds): a restart while it is Deleting fails after 3 minutes
 ([acceptance/0012](acceptance/0012-infra-quickstart.md) Known Pitfalls). Held contracts stay Held across the restart.
 
+With `--network` the identity is the network's own (a `.local` handle) unless you give an account on the network PDS (`.network.status.bidderPdsUrl` of `dev status`; make one there with
+`com.atproto.server.createAccount`, a handle under `.bob.test`):
+`ATPROTO_PASSWORD=<app password> $SWC run requester --name pa --network $I --state-dir "$ST" -- --atproto-identity-mode
+pdsAccount --atproto-handle <handle>` (the PDS URL defaults to the network PDS; `run request --network` takes the same
+options). The password goes into the requester's own OpenBao; set it from a file in that one command's environment. No
+other identity mode is taken with `--network`, and pdsAccount needs `--atproto-handle`.
+
 What it composes in `root:qs` (read them, do not write them):
 
 | object | what to read |
