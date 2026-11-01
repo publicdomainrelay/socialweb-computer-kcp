@@ -11745,6 +11745,44 @@ so it waits for a planned one.
 No record is ever deleted from a test account (owner, 2026-10-31 05:05Z: "we never want to be
 deleting records for people"); the r137 requester retention sweep was reverted in r138.
 
+### r139: the requester reads the receipt and the termination by getRecord
+
+Before: `FindReceipt` paged the bidder's whole `market.receipt` collection (bob 354 records, 4
+pages) on every receipt poll (0.5 s doubling to 2 s while an accept waits) and on every start of an
+accepted contract without a receipt; `FindTerminations` paged the bidder's whole `market.event`
+collection (bob 1241 records, 13 pages, cap 20 pages, plus one Resolve per event naming the receipt)
+on every requester start, once per Held, adopted, or Released-with-receipt contract without a
+termination. A Released contract whose bidder never wrote `vm.terminated` was not terminal
+(`market.RequesterContractDone`), so it paid those 13 pages on every start forever.
+
+After: `FindReceipt` is one getRecord of `market.receipt/ReceiptRKey(accept uri, accept cid)`, the
+rkey every Go bidder writes at (`bidder/submit.go` createReceipt, since `963f7980`); the caller
+passes the accept cid it holds. `FindTermination` is one getRecord of
+`market.event/<EventRKeys(TerminationKey(receipt uri)) event rkey>` (the derivation the bidder's
+termination StateSync writes with and trust reads), plus one Resolve of its `vm.terminated` payload
+only when the event exists. No legacy listing is kept: no release tag holds a Go bidder that wrote
+either record at another rkey (the TID-era and `terminated:event:` termination writers never left
+the first rewrite day), and TS-era contracts did not survive the Go rewrite's fresh deploy. Read
+2026-10-31 by public reads: bob 361 receipts, 129 at `ReceiptRKey` and 232 at TIDs, the newest TID
+one 2026-10-16T02:04Z; 138 vm.terminated, 120 at the derived rkey with their market.event at the
+derived event rkey, 18 at TIDs, the newest 2026-10-16T02:06Z; john 457 receipts, all TIDs, the newest
+2026-09-22. Every record at another rkey predates the Go rewrite (2026-10-21). The
+first start after a release that finds no termination event (a real not-found, not a read
+failure or a refused signature) writes the Terminated condition False, reason `NotReported`, on the
+Released contract; `RequesterContractDone` counts such a contract as terminal, so later starts
+read nothing for it. The sink already dropped records for a Released and acknowledged contract
+(`RequesterContractSettled`), so no late `vm.terminated` is lost by this. Reads per requester start
+for N contracts: Held, before 13N pages plus Resolves, after N getRecords (2N when terminated);
+Released without a termination, before 13N pages on every start, after N getRecords on the first
+start and 0 after. `HTTPReader` no longer reads a 429 as not found: it retries like a 5xx and then
+returns the error, so a rate-limited read never records `NotReported`.
+
+Start timing: `requester_start_timing` with `step` `started` (`identityMs`, `repoMs`,
+`sinceStartMs`), `synced` (kcp informers synced), `firstContractResumed` (`terminationReadMs`)
+and `firstBidderDiscovery` (`discoveryMs`, `bidders`), all from the entry of `Requester.Start`;
+`requester_bidder_discovery` carries `discoveryMs`, and each start-time termination check logs
+`requester_termination_checked` at debug with `readMs`.
+
 ## 16. Vocabulary
 
 | | |

@@ -54,6 +54,8 @@ type contractRunner struct {
 
 	gone atomic.Bool
 
+	terminationNotReported atomic.Bool
+
 	nodeJoin *v1alpha1.ComputeContractNodeJoin
 
 	grant *v1alpha1.NodeClaimGrant
@@ -744,7 +746,7 @@ func (r *contractRunner) releaseDeniedAccept(ctx context.Context, state *v1alpha
 		release.LastError = fmt.Sprintf("waiting for the bidder's receipt of the accept to release its guest (attempt %d of %d)", attempt, DeniedAcceptReceiptAttempts)
 		r.setRelease(release)
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, reason+"; "+release.LastError, state, r.currentBids(), r.currentChosen(), "releasing", int32(attempt))
-		receipt, err := r.q.waitReceiptWithin(ctx, bidderDID, state.Accept.URI, r.q.cfg.ReceiptTimeout)
+		receipt, err := r.q.waitReceiptWithin(ctx, bidderDID, state.Accept.URI, state.Accept.CID, r.q.cfg.ReceiptTimeout)
 		if err != nil {
 			return err
 		}
@@ -792,7 +794,7 @@ func (r *contractRunner) recoverReceipt(ctx context.Context, state *v1alpha1.Nod
 	if state == nil || state.Receipt != nil || state.Accept == nil || state.Accept.URI == "" || bidderDID == "" {
 		return false
 	}
-	receipt, err := r.q.readReceipt(ctx, bidderDID, state.Accept.URI)
+	receipt, err := r.q.readReceipt(ctx, bidderDID, state.Accept.URI, state.Accept.CID)
 	if err != nil || receipt == nil {
 		r.log().Info("requester_release_no_receipt", "accept", state.Accept.URI, "bidder", bidderDID, "err", fmt.Sprint(err))
 		return false
@@ -891,7 +893,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 }
 
 func (r *contractRunner) resumeReleased(ctx context.Context, state *v1alpha1.NodeClaimContract) {
-	terminated := r.refreshTermination(ctx, state)
+	terminated := r.refreshReleasedTermination(ctx, state)
 	message := "released"
 	step := "released"
 	if terminated {
@@ -902,44 +904,61 @@ func (r *contractRunner) resumeReleased(ctx context.Context, state *v1alpha1.Nod
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), step, 1)
 }
 
+func (r *contractRunner) refreshReleasedTermination(ctx context.Context, state *v1alpha1.NodeClaimContract) bool {
+	terminated, answered := r.checkTermination(ctx, state)
+	if !terminated && answered {
+		r.terminationNotReported.Store(true)
+	}
+	return terminated
+}
+
 func (r *contractRunner) refreshTermination(ctx context.Context, state *v1alpha1.NodeClaimContract) bool {
+	terminated, _ := r.checkTermination(ctx, state)
+	return terminated
+}
+
+func (r *contractRunner) checkTermination(ctx context.Context, state *v1alpha1.NodeClaimContract) (bool, bool) {
 	if state == nil {
-		return false
+		return false, false
 	}
 	if state.Termination != nil {
 		state.Phase = v1alpha1.ContractReleased
-		return true
+		return true, true
 	}
 	if state.Receipt == nil || state.Receipt.URI == "" || r.q.market == nil {
-		return false
+		return false, false
 	}
 	bidderDID := winnerDID(state)
 	if bidderDID == "" {
-		return false
+		return false, false
 	}
 	readCtx, cancel := context.WithTimeout(ctx, DefaultHTTPTimeout)
 	defer cancel()
-	events, err := r.q.market.FindTerminations(readCtx, bidderDID, state.Receipt.URI)
+	readStart := time.Now()
+	event, err := r.q.market.FindTermination(readCtx, bidderDID, state.Receipt.URI)
+	readMs := time.Since(readStart).Milliseconds()
+	r.log().Debug("requester_termination_checked", "bidder", bidderDID, "receipt", state.Receipt.URI, "found", event != nil, "readMs", readMs, "err", fmt.Sprint(err))
+	r.q.noteFirstResume(r.name, readMs)
 	if err != nil {
 		if ctx.Err() == nil {
 			r.log().Warn("requester_termination_resume_read_failed", "bidder", bidderDID, "receipt", state.Receipt.URI, "err", err)
 		}
-		return false
+		return false, false
 	}
-	for _, event := range events {
-		parsed, err := r.q.parseGuestEvent(readCtx, event, state.Receipt.URI)
-		if err != nil {
-			r.log().Warn("requester_termination_resume_refused", "uri", event.Event.URI, "err", err)
-			continue
-		}
-		if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
-			continue
-		}
-		applyTermination(state, parsed.Termination, r.q.nowISO())
-		r.log().Info("requester_termination_resumed", "bidder", bidderDID, "receipt", state.Receipt.URI, "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
-		return true
+	if event == nil {
+		return false, true
 	}
-	return false
+	parsed, err := r.q.parseGuestEvent(readCtx, *event, state.Receipt.URI)
+	if err != nil {
+		r.log().Warn("requester_termination_resume_refused", "uri", event.Event.URI, "err", err)
+		return false, false
+	}
+	if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
+		return false, true
+	}
+	applyTermination(state, parsed.Termination, r.q.nowISO())
+	r.log().Info("requester_termination_resumed", "bidder", bidderDID, "receipt", state.Receipt.URI, "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
+	return true, true
 }
 
 func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptRef market.RecordRef) (bool, error) {
@@ -1589,11 +1608,15 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: the contract status holds no bidder-signed receipt", state, nil, nil, "adopting", 1)
 		return
 	}
-	if r.refreshTermination(ctx, state) {
+	terminated, answered := r.checkTermination(ctx, state)
+	if terminated {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "adopt: the bidder reported the guest terminated ("+state.Termination.Reason+")", state, nil, nil, "adopted", 1)
 		return
 	}
 	if contract.Status.Phase == v1alpha1.ComputeContractReleased {
+		if answered {
+			r.terminationNotReported.Store(true)
+		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "adopt: the contract is already released", state, nil, nil, "adopted", 1)
 		return
 	}
@@ -1718,8 +1741,12 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionFalse, "SealedFallbackRequested",
 			"the guest asked for its secrets sealed to its key; getSecrets did not answer", now)
 	}
-	if state != nil && state.Termination != nil {
+	switch {
+	case state != nil && state.Termination != nil:
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
+	case phase == v1alpha1.ComputeContractReleased && r.terminationNotReported.Load():
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionFalse, market.TerminationNotReportedReason,
+			"the bidder wrote no vm.terminated for the receipt by the first start after the release; it is not read again", now)
 	}
 	if mint := r.agentMintOutcome(); mint != nil {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionAtircTokenMinted, conds.Status(mint.ok), mint.reason, mint.message, now)

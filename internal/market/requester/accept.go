@@ -111,19 +111,19 @@ func (q *Requester) awaitReceipt(ctx context.Context, bidderDID, acceptURI strin
 	return nil, err
 }
 
-func (q *Requester) readReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error) {
+func (q *Requester) readReceipt(ctx context.Context, bidderDID, acceptURI, acceptCID string) (*market.ResolvedRecord, error) {
 	if found, ok := q.inboxReceipt(bidderDID, acceptURI); ok {
 		q.receipts.Remove(acceptURI)
 		return found, nil
 	}
 	readCtx, cancel := context.WithTimeout(ctx, submitAcceptReceiptTimeout)
 	defer cancel()
-	return q.market.FindReceipt(readCtx, bidderDID, acceptURI)
+	return q.market.FindReceipt(readCtx, bidderDID, acceptURI, acceptCID)
 }
 
-func (q *Requester) waitReceiptWithin(ctx context.Context, bidderDID, acceptURI string, timeout time.Duration) (*market.ResolvedRecord, error) {
+func (q *Requester) waitReceiptWithin(ctx context.Context, bidderDID, acceptURI, acceptCID string, timeout time.Duration) (*market.ResolvedRecord, error) {
 	until := q.now().Add(timeout)
-	receipt, readErr := q.readReceipt(ctx, bidderDID, acceptURI)
+	receipt, readErr := q.readReceipt(ctx, bidderDID, acceptURI, acceptCID)
 	if readErr == nil && receipt != nil {
 		return receipt, nil
 	}
@@ -140,9 +140,9 @@ func (q *Requester) waitReceiptWithin(ctx context.Context, bidderDID, acceptURI 
 func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acceptURI, acceptCID, winnerDID string) (*market.ResolvedRecord, error) {
 	provisionTimeout := max(q.cfg.ReceiptTimeout, submitAcceptProvisionTimeout)
 	if bidder.Endpoint == "" {
-		return q.waitReceiptWithin(ctx, winnerDID, acceptURI, q.cfg.ReceiptTimeout)
+		return q.waitReceiptWithin(ctx, winnerDID, acceptURI, acceptCID, q.cfg.ReceiptTimeout)
 	}
-	if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI); err == nil && receipt != nil {
+	if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI, acceptCID); err == nil && receipt != nil {
 		return receipt, nil
 	}
 	receipt, err := q.awaitReceipt(ctx, winnerDID, acceptURI, q.now().Add(acceptSettleDelay))
@@ -160,7 +160,7 @@ func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acce
 		wg.Wait()
 		cancel()
 		receipts := []string{}
-		receipt, receiptErr := q.waitReceiptWithin(ctx, winnerDID, acceptURI, provisionTimeout)
+		receipt, receiptErr := q.waitReceiptWithin(ctx, winnerDID, acceptURI, acceptCID, provisionTimeout)
 		errText := ""
 		if receiptErr != nil {
 			errText = receiptErr.Error()
@@ -194,12 +194,12 @@ func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acce
 		}
 		if err == nil && reply != nil && acceptDeclined(reply.Status) {
 			q.log.Warn("requester_submit_accept_declined", "bidder", bidder.DID, "accept", acceptURI, "status", reply.Status, "body", reply.Body)
-			if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI); err == nil && receipt != nil {
+			if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI, acceptCID); err == nil && receipt != nil {
 				return receipt, nil
 			}
 			return nil, nil
 		}
-		if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI); err == nil && receipt != nil {
+		if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI, acceptCID); err == nil && receipt != nil {
 			return receipt, nil
 		}
 		receipt, err := q.awaitReceipt(ctx, winnerDID, acceptURI, q.now().Add(delay))
