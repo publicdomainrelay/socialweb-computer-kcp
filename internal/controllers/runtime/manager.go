@@ -109,7 +109,7 @@ func NewManager(cfg Config) (*Manager, error) {
 			return nil, fmt.Errorf("runtime: building the scheme: %w", err)
 		}
 	}
-	logger := logr.FromSlogHandler(log.Handler())
+	logger := logr.FromSlogHandler(newRuntimeLogHandler(log.Handler()))
 	setLogger.Do(func() { ctrllog.SetLogger(logger) })
 	providers := multi.New(multi.Options{Separator: clusterSeparator})
 	mgr, err := mcmanager.New(clusterConfig(base, exportWorkspace), providers, manager.Options{
