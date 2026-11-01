@@ -74,7 +74,7 @@ func (h *HTTPReader) query(ctx context.Context, pds, nsid string, params url.Val
 			}
 			return nil
 		}
-		if failure, ok := errors.AsType[*xrpc.Error](err); ok && failure.Status < 500 {
+		if failure, ok := errors.AsType[*xrpc.Error](err); ok && failure.Status < 500 && failure.Status != http.StatusTooManyRequests {
 			return fmt.Errorf("%w: %s: HTTP %d", ErrNotFound, nsid, failure.Status)
 		}
 		lastErr = err

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 )
@@ -45,9 +46,19 @@ func RequesterContractDone(contract v1alpha1.ComputeContract) bool {
 		}
 	}
 	if terminal && state != nil && state.Receipt != nil && state.Termination == nil && state.Winner != nil && state.Winner.DID != "" {
-		terminal = false
+		terminal = RequesterTerminationNotReported(contract)
 	}
 	return terminal
+}
+
+const TerminationNotReportedReason = "NotReported"
+
+func RequesterTerminationNotReported(contract v1alpha1.ComputeContract) bool {
+	if contract.Status.Phase != v1alpha1.ComputeContractReleased {
+		return false
+	}
+	terminated := apimeta.FindStatusCondition(contract.Status.Conditions, v1alpha1.ComputeContractConditionTerminated)
+	return terminated != nil && terminated.Status == metav1.ConditionFalse && terminated.Reason == TerminationNotReportedReason
 }
 
 type ContractRefs struct {
