@@ -50,8 +50,11 @@ func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 	if input.Mode == "" {
 		input.Mode = participant.PolicyModeFull
 	}
+	if own := e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input); !own.Allow {
+		return own
+	}
 	if len(refs) == 0 {
-		return e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input)
+		return participant.PolicyDecision{Allow: true}
 	}
 	if e == nil || e.records == nil {
 		return participant.PolicyDecision{Reason: "the policy record store is not configured"}

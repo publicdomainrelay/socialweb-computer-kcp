@@ -332,7 +332,7 @@ func (s *Service) policyRuns() *runs.Client {
 		Prefix:      "policy",
 		Args:        s.policyArgs,
 		Timeout:     seconds(s.spec.PolicyTimeoutSeconds),
-		Parser:      runs.Lenient,
+		Parser:      runs.Strict,
 		Association: s.spec.Association,
 	})
 }

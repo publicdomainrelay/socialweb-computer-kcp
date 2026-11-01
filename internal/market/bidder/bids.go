@@ -63,18 +63,16 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 			b.failBid(ctx, bid, "BidWindowOver", "the bid window of the RFP closed before the bid was published", now)
 			return 0, nil
 		}
+		decided, err := b.validateBid(ctx, bid, now)
+		if err != nil || decided == nil {
+			return 0, err
+		}
 		if bid.Spec.PayloadNsid == "" || bid.Spec.Policy.Verdict != "allow" {
-			decided, err := b.validateBid(ctx, bid, now)
-			if err != nil || decided == nil {
-				return 0, err
-			}
 			if err := b.applyBidSpec(ctx, bid, decided, now); err != nil {
 				return 0, err
 			}
-			rfp = decided
-		} else {
-			rfp = b.rfpForBid(ctx, bid)
 		}
+		rfp = decided
 	}
 	if bid.Status.Phase == v1alpha1.BidPhasePublished {
 		if _, ok := b.verified.Load(bid.Name); ok {
