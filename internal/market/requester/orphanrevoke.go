@@ -148,6 +148,12 @@ func (q *Requester) startOrphanRevokes() {
 	if q.deps.VaultWrite == nil {
 		return
 	}
+	if ref := q.cfg.Spec.VaultRef; ref == nil || ref.Name == "" {
+		q.orphanSweep.Do(func() {
+			q.log.Info("requester_atirc_orphan_sweep_skipped", "reason", "the requester names no OpenBaoServer, so it mints into no bundle")
+		})
+		return
+	}
 	q.orphanSweep.Do(func() {
 		q.wg.Go(q.sweepOrphanRevokes)
 	})

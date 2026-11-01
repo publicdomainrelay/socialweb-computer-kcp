@@ -213,8 +213,14 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `ATIRC_TOKEN=<child>` (sent as the ssh session variable `LC_ATIRC_TOKEN` and exported by the
     command, never in the command line) and the child is revoked when the command ends; a held
     `LC_SESSION` session gets none. A failed mint runs the
-    command without it and writes one stderr line. `ssh <handle>@<gateway> atirc agent run <sub>` then
-    mints `<sub>` below the child.
+    command without it and writes one stderr line. A command of exactly the argv `atirc agent run <sub>`
+    instead gets a token the requester mints itself the same way for the agent: `<sub>` when it is
+    the user's handle or ends in `.<handle>`, else `<sub>.<handle>` (DNS labels of letters, digits and
+    `-`, at most 253 chars; anything else is refused with one stderr line before provisioning), and
+    the guest runs plain `atirc agent run` with that token, so the agent joins atirc as
+    `<sub>.<handle>`; its mint failing fails the command, and the token is revoked at command end.
+    A requester with no `vaultRef` (the per-user ssh requesters) mints into no bundle, so it skips the
+    atirc orphan sweep (`requester_atirc_orphan_sweep_skipped`, logged once).
     The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
     standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
     listener `ssh-public`, next to the loopback Exposure); `spec.ssh.webListen` (`--ssh-web-listen

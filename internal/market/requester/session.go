@@ -131,6 +131,12 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 		return commandFailed(io, "provisioning failed: ", err)
 	}
 	defer sshtransport.RemoveGuestKeypair(privateKeyPath)
+	agent := ""
+	if sub, ok := sessionAgentRun(command); ok && atirc {
+		if agent, err = agentSubhandle(sub, q.handle); err != nil {
+			return commandFailed(io, "atirc agent run: ", err)
+		}
+	}
 	userData := ""
 	if atirc {
 		if userData, err = sessionAtircUserData(defaultUserData([]string{publicKey})); err != nil {
@@ -157,9 +163,16 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 	if !provider.PollReady(ctx, privateKeyPath, ticket, DefaultVMReadyTimeout, target.HostKeys) {
 		return commandFailed(io, "guest session failed: ", errors.New("the guest ssh did not answer"))
 	}
-	minted := q.sessionAtirc(ctx, account, atirc, q.contractState(contractName), io)
+	minted, err := q.sessionAtirc(ctx, account, atirc, agent, q.contractState(contractName), io)
+	if err != nil {
+		io.Exit(1)
+		return err
+	}
 	defer q.revokeSessionAtirc(ctx, minted)
-	if minted != nil {
+	switch {
+	case minted != nil && agent != "":
+		command = atircCommand(sessionAgentCommand)
+	case minted != nil:
 		command = atircCommand(command)
 	}
 	code := provider.RunSessionEnv(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), minted.env(), io, target.HostKeys)
