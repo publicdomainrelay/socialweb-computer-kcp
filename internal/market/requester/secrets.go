@@ -233,16 +233,24 @@ func (q *Requester) readSecretsBundle(ctx context.Context, ref commonv1.SecretRe
 	if text == "" {
 		return nil, fmt.Errorf("requester: the secrets bundle %s/%s carries no bundle", ref.Mount, ref.Path)
 	}
+	entries, err := ParseSecretsBundle(text)
+	if err != nil {
+		return nil, fmt.Errorf("requester: the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
+	}
+	return entries, nil
+}
+
+func ParseSecretsBundle(text string) ([]SecretEntry, error) {
 	entries := []SecretEntry{}
 	if err := json.Unmarshal([]byte(text), &entries); err != nil {
-		return nil, fmt.Errorf("requester: the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
+		return nil, errors.New("the bundle is not a JSON array of {path, value, mode}")
 	}
 	for i := range entries {
 		if entries[i].Path == "" || !strings.HasPrefix(entries[i].Path, "/") {
-			return nil, fmt.Errorf("requester: the secrets bundle names the path %q", entries[i].Path)
+			return nil, fmt.Errorf("the bundle names the path %q", entries[i].Path)
 		}
 		if err := checkSecretMode(entries[i].Mode); err != nil {
-			return nil, fmt.Errorf("requester: the secrets bundle entry %d: %w", i, err)
+			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
 	}
 	return entries, nil
