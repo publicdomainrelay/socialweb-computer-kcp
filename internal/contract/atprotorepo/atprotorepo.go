@@ -26,6 +26,8 @@ var (
 	ErrOutOfScope = errors.New("atprotorepo: the collection is outside the granted scope")
 
 	ErrNotBound = errors.New("atprotorepo: the repo has no bound backend")
+
+	ErrSwapMismatch = errors.New("atprotorepo: the record is not at the swap cid")
 )
 
 type Record struct {

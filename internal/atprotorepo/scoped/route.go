@@ -2,6 +2,7 @@ package scoped
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -19,6 +20,16 @@ type routed struct {
 	atprotorepo.Repo
 
 	network atprotorepo.RecordReader
+}
+
+var _ atprotorepo.SwapDeleter = (*routed)(nil)
+
+func (r *routed) DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error {
+	inner, ok := r.Repo.(atprotorepo.SwapDeleter)
+	if !ok {
+		return errors.New("scoped: the routed repo cannot delete a record by its cid")
+	}
+	return inner.DeleteRecordSwap(ctx, collection, rkey, swapCID)
 }
 
 func (r *routed) foreign(repo string) bool {

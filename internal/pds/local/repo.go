@@ -227,6 +227,9 @@ func (r *Repo) deleteRecord(ctx context.Context, collection, rkey string, prev *
 		return err
 	}
 	if _, err := handle.ApplyWrites(ctx, []repo.WriteOp{{Action: repo.ActionDelete, Collection: nsid, Rkey: key, Prev: prev}}, nil); err != nil {
+		if errors.Is(err, repo.ErrInvalidSwap) {
+			return fmt.Errorf("%w: %v", atprotorepo.ErrSwapMismatch, err)
+		}
 		return notFound(err)
 	}
 	return nil

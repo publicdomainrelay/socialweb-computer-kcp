@@ -184,6 +184,10 @@ func (r *Repo) deleteRecord(ctx context.Context, collection, rkey string, opts p
 		return err
 	}
 	if err := r.pds.DeleteRecord(ctx, path, opts); err != nil {
+		var failure *pdsclient.XRPCError
+		if errors.As(err, &failure) && failure.Code == "InvalidSwap" {
+			return fmt.Errorf("%w: %v", atprotorepo.ErrSwapMismatch, err)
+		}
 		return notFound(err)
 	}
 	return nil

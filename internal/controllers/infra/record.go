@@ -404,6 +404,10 @@ func (r *reconciler[T]) recordAbsent(ctx context.Context, req ctlruntime.Request
 	} else {
 		err = writer.DeleteRecord(ctx, collection, rkey)
 	}
+	if errors.Is(err, atprotorepo.ErrSwapMismatch) {
+		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID, "err", err.Error())...)
+		return true, nil
+	}
 	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
 		return false, fmt.Errorf("infra: deleting %s: %w", stored.URI, err)
 	}
