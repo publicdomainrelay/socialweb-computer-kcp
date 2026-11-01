@@ -2248,11 +2248,6 @@ func (in *ComputeContractSpec) DeepCopyInto(out *ComputeContractSpec) {
 		*out = new(ComputeContractNodeJoin)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Association != nil {
-		in, out := &in.Association, &out.Association
-		*out = new(ComputeContractAssociation)
-		**out = **in
-	}
 	if in.TTLSecondsAfterFinished != nil {
 		in, out := &in.TTLSecondsAfterFinished, &out.TTLSecondsAfterFinished
 		*out = new(int32)
@@ -2362,6 +2357,11 @@ func (in *ComputeContractTemplate) DeepCopyInto(out *ComputeContractTemplate) {
 	if in.Agent != nil {
 		in, out := &in.Agent, &out.Agent
 		*out = new(ComputeContractAgent)
+		**out = **in
+	}
+	if in.Association != nil {
+		in, out := &in.Association, &out.Association
+		*out = new(ComputeContractAssociation)
 		**out = **in
 	}
 	return

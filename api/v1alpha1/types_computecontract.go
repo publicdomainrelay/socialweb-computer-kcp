@@ -43,6 +43,8 @@ type ComputeContractTemplate struct {
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	Agent *ComputeContractAgent `json:"agent,omitempty"`
+
+	Association *ComputeContractAssociation `json:"association,omitempty"`
 }
 
 type ComputeContractSpec struct {
@@ -57,8 +59,6 @@ type ComputeContractSpec struct {
 	Adopt bool `json:"adopt,omitempty"`
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
-
-	Association *ComputeContractAssociation `json:"association,omitempty"`
 
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }

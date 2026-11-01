@@ -46,7 +46,8 @@
           "items": { "type": "ref", "ref": "#tunnel" },
           "description": "Guest ports the requester reaches over a tunnel transport. Tags are unique within the contract."
         },
-        "agent": { "type": "ref", "ref": "#agent" }
+        "agent": { "type": "ref", "ref": "#agent" },
+        "association": { "type": "ref", "ref": "#association" }
       }
     },
     "tunnel": {
@@ -76,6 +77,15 @@
       "description": "An atirc agent on the guest, started on demand; its token arrives through the contract's secrets bundle, never here.",
       "properties": {
         "envFile": { "type": "string", "maxLength": 256, "description": "The guest path of the agent's env file; absent means /etc/atirc/atirc.env." }
+      }
+    },
+    "association": {
+      "type": "object",
+      "description": "A requester the guest runs: after the accept the requester writes a contract-scoped com.publicdomainrelay.temp.market.association naming subject and puts its at-uri#cid into the secrets bundle at refFile.",
+      "required": ["subject"],
+      "properties": {
+        "subject": { "type": "string", "format": "did", "description": "The repo DID of the requester the guest runs." },
+        "refFile": { "type": "string", "maxLength": 256, "description": "The guest path of the ref file, under /etc/socialweb-computer/; absent means /etc/socialweb-computer/association-ref." }
       }
     },
     "status": {
