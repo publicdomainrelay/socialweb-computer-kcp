@@ -1,0 +1,156 @@
+plan: "0040"
+title: "A guest workload signs in by OAuth to its own account on the requester's local PDS with its workload identity token, authorized by com.fedproxy.rbac records, then submits a request"
+status: proposed
+source: >
+  2026-11-01, owner (verbatim): "take the reference implementation and study it and understand the
+  com.fedproxy.rbac records and then I want you to find the social Webb computer KCP PDS implementation and I
+  want you to figure out how to allow workload identities to complete. Oauth flows leveraging their account on
+  the local PDS then submit a request."
+principle: >
+  The account owner says, in a com.fedproxy.rbac record in its own repo, which workload (issuer, audience,
+  subject) may sign in to it and with which OAuth scopes. The local PDS authorization server accepts a
+  verified workload identity token in place of a password at /oauth/authorize when, and only when, such a
+  record admits it. Everything after the authorize step is the standard atproto OAuth flow (PAR, PKCE, DPoP,
+  code, token, refresh), so the guest requester is an ordinary OAuth requester. No password, no app password
+  and no PDS inside the guest.
+grounding: >
+  Read at socialweb-computer-kcp 0e83b5b, compute-contract-reference-implementation-poc 10fa82e,
+  atproto-reverse-proxy 95b1448.
+  (1) The record (reference, lib/rbac-helper/mod.ts and spindle/marketRFP.ts):
+  {protects: {<name>: {service, scope}}, roles: {<name>: {role_name, definition: {iss, aud, sub, policies[]}}},
+  policies: {<name>: {meta, schemas: {<path or glob>: {properties: {capability: {enum}, body?, allowed_parameters?}}}}}}.
+  Every record of the actx DID is listed and joined by name; only records whose protects names the service and
+  scope count. The token is verified first against configured issuers, then the record's role iss values narrow
+  (never widen) the trust set; the verified sub selects roles; the longest matching path schema decides; the
+  HTTP method maps to a capability (GET read, POST create, PUT/PATCH update, DELETE delete). Fail closed (T1).
+  aud is api://<api>?actx=<did>, actx is the account whose repo holds the record.
+  (2) fedproxy (atproto-reverse-proxy src/golang/cmd/oauth-client-webapp/main.go HandleProxy) is the same model
+  in front of a PDS: a bearer OIDC token, records of actx, then the request is proxied with the stored atproto
+  OAuth session of actx. This plan moves that gate into the PDS authorization server itself.
+  (3) kcp today: the requester writes com.fedproxy.rbac rkey node.<accept rkey> in its own repo
+  (internal/market/requester/secrets.go nodeRBACRecord: roles only, policies {}, iss = the winning bid's
+  wif.simple issuer_uri, aud api://ATProto?actx=<requester DID>, sub actx:<bidder>:plc:<requester>:role:<vm>).
+  The bidder reads that one record (internal/guestidentity/rbac_reader.go RepoRBAC) and turns every role whose
+  sub and iss match its guest into a GuestIdentityGrant (internal/guestidentity/rbac.go WishesFromRBAC); the
+  openbao controller makes the identity/oidc role (client_id = aud, claims computevm, api, actx, wid_sub,
+  ttl 5 m). In the guest, `guest-login.sh token <audience>` prints the JWT; iss is
+  <bidder ingress>/v1/identity/oidc, keys at <iss>/.well-known/keys. Any audience the requester names in that
+  record is minted with no bidder change.
+  (4) The local PDS (internal/atproto/pds, internal/atproto/oauth): /oauth/par, GET and POST /oauth/authorize,
+  /oauth/token, /oauth/revoke. handleAuthorize (endpoints.go:200) takes identifier+password
+  (Store.Authenticate) or a DPoP access token; nothing else. compose.DesiredPds (internal/app/compose/pds.go:187)
+  enables OAuth with AllowLocalhostClients whenever the Pds has a public URL.
+  (5) Gap: the PDS does not enforce OAuth scopes. Server.authenticate (internal/atproto/pds/auth.go:150) turns
+  any live OAuth session into authInfo{OAuth: true} without its scope, and the repo, blob and getServiceAuth
+  handlers never read it. Today every OAuth session on the local PDS is full access.
+  (6) The guest requester today (`run request --guest-requester`, plan 0036 A5) runs its own localRepo PDS in
+  the guest, creates its own did:plc, and proves itself to the parent with market.associationRequest and
+  guest.requesterDid.
+decisions:
+  - id: D1
+    question: "Whose account does the workload sign in to: a dedicated account per guest on the parent's PDS, or the parent requester's own account with narrowed scopes?"
+    recommended: "A dedicated account per guest (handle r2-<accept rkey>.<parent handle>, no password) on the parent requester's Pds. The guest requester then has its own DID as plan 0036 requires (guest.requesterDid refuses the parent's own DID), its records never mix with the parent's, and release deletes one account. The parent-account variant is the same code with actx = the parent DID and one record instead of two; keep it possible, do not ship it first."
+  - id: D2
+    question: "Where does the workload credential enter: /oauth/authorize (replaces the password step, keeps PAR, PKCE, code) or a jwt-bearer grant at /oauth/token (RFC 7523, no code)?"
+    recommended: "/oauth/authorize, form field workload_token. It is a third branch next to password and DPoP access token in handleAuthorize, the client side reuses oauthclient.ExchangeCode, and the session is an ordinary OAuth session (refresh, revoke, scope checks)."
+  - id: D3
+    question: "Which issuers does the PDS trust?"
+    recommended: "Only an iss that a role of an admitting record of the target account names, https only, through the hardened HTTP client (no loopback, link-local or private address, size and time limits), and only after the unverified aud names a local active account. The record is read from the PDS's own repo store, so no outbound request happens for an account the PDS does not host. An optional Pds spec list (spec.oauth.workloadIssuers) narrows it further, as the reference's own-or-(record and configuration) rule."
+records:
+  requester_repo: >
+    Record A, the parent requester's repo, rkey node.<accept rkey> (the record it already writes): one more role
+    {role_name: <vm>-oauth, definition: {iss: <bidder issuer_uri>, aud: api://atproto-oauth?actx=<workload DID>,
+    sub: <guest subject>, policies: [workload-oauth]}}. Its only job is to make the bidder mint that audience.
+  workload_repo: >
+    Record B, the workload account's repo, rkey node.<accept rkey>:
+    {$type: com.fedproxy.rbac,
+     protects: {workload-oauth: {service: <PDS OAuth issuer>, scope: oauth.authorize}},
+     roles: {<vm>-oauth: {role_name, definition: {iss: <bidder issuer_uri>, aud: api://atproto-oauth?actx=<workload DID>, sub: <guest subject>, policies: [workload-oauth]}}},
+     policies: {workload-oauth: {meta: {policy: workload-oauth}, schemas: {/oauth/authorize: {properties: {
+       capability: {enum: [create]},
+       scope: {enum: [atproto, repo:com.publicdomainrelay.temp.market.rfp, repo:com.publicdomainrelay.temp.market.accept, repo:com.publicdomainrelay.temp.compute.vm, rpc:..., ...]},
+       client_id: {pattern: ^http://localhost}}}}}},
+     expiresAt: <association expiresAt, at most 24 h>, createdAt}.
+    The scope enum is the guest requester's RequesterOAuthScope minus repo:com.fedproxy.rbac (a workload never
+    grants further workloads) and minus account and identity scopes.
+flow: >
+  1 accept: the parent requester creates the workload account on its Pds, writes record B into it and the
+  extra role into record A, writes market.association with subject = the workload DID (it created the account,
+  so no associationRequest proof is needed), and puts /etc/socialweb-computer/workload-identity.json
+  {pdsUrl, did, handle, audience} into the guest's secrets bundle.
+  2 bidder (no change): reads record A, makes a GuestIdentityGrant for api://atproto-oauth?actx=<workload DID>.
+  3 guest: `guest-login.sh token api://atproto-oauth?actx=<did>` prints a 5 m JWT.
+  4 guest requester: discover the PDS auth server, PAR with DPoP and PKCE (loopback client_id), POST
+  /oauth/authorize {request_uri, client_id, workload_token}; the PDS answers {redirect_uri, code} as it does for
+  a password; the client takes the code from the JSON (no browser, no listener) and calls ExchangeCode.
+  5 PDS at authorize: aud parses, actx is a local active account, list the account's com.fedproxy.rbac records
+  whose protects names (issuer, oauth.authorize), verify the JWT against the iss of roles of those records,
+  check wid_sub equals a role's sub and the role's aud equals the token's aud, take the role's policies, the
+  /oauth/authorize schema must allow capability create, every requested scope must be in the scope enum and the
+  client_id must match, the record must not be past expiresAt. Any failure is invalid_grant, logged once with
+  the reason, never the token. The code and the session carry the admitting record's rkey, iss and sub.
+  6 the guest requester signs and publishes market.rfp, market.accept and compute.vm through the session, as an
+  oauthBrowser requester does; the PDS enforces the granted scopes (item W1).
+  7 refresh: re-run the record check (record present, not expired, same role); refuse otherwise. A deleted or
+  changed record B revokes every session it admitted (the PDS sees its own commit in the sequencer).
+  8 release: the parent deletes record A's role, record B and the account (PLC tombstone through plcsweep).
+items:
+  - id: W1-PDS-SCOPES
+    title: "The local PDS enforces the OAuth session's granted scopes"
+    files: [internal/atproto/pds/auth.go, internal/atproto/pds/repo_handlers.go, internal/atproto/pds/blob.go, internal/atproto/pds/service_auth.go, internal/atproto/oauth/scope.go]
+    work: >
+      authInfo carries the session scope; createRecord, putRecord, deleteRecord and applyWrites check
+      repo:<collection>?action=<create|update|delete>; uploadBlob checks blob:; getServiceAuth checks rpc:<lxm>?aud=;
+      a session with transition:generic keeps full access. Without this item the workload session is full access
+      to its account, so it ships first.
+    done_when: "A session granted only repo:com.publicdomainrelay.temp.market.rfp gets 403 ScopeMissing on a createRecord of another collection and 200 on market.rfp; an oauthBrowser requester with today's scope still runs a contract to Held."
+    status: proposed
+  - id: W2-RBAC-POLICY
+    title: "com.fedproxy.rbac protects and policies in Go, with the reference's matcher"
+    files: [internal/contract/workloadauth/workloadauth.go, internal/guestidentity/rbac.go, internal/guestidentity/rbacpolicy.go]
+    work: >
+      RBACRecord gains Protects and Policies (schema subset: capability enum, scope enum, client_id pattern) and
+      ExpiresAt; ports getRBACRecord's protects filter, globMatch, the longest-schema rule and the method to
+      capability map from the reference; a contract interface workloadauth.Authorizer {Authorize(ctx, account,
+      token, request) (Grant, error)} so the PDS takes it as a dependency and never imports guestidentity.
+    status: proposed
+  - id: W3-PDS-AUTHORIZE
+    title: "/oauth/authorize takes workload_token"
+    files: [internal/atproto/oauth/endpoints.go, internal/atproto/oauth/store.go, internal/atproto/pds/server.go, internal/atproto/pds/oauth_store.go, api/v1alpha1 PdsOAuth]
+    work: >
+      A third branch in handleAuthorize (flow step 5) through the injected Authorizer; Session and
+      AuthorizationCode gain a WorkloadGrant {rkey, iss, sub}; handleRefreshGrant re-checks it (step 7); the Pds
+      watches its own commits of com.fedproxy.rbac and revokes sessions whose record went away; a token bucket
+      per actx; PdsOAuth gains workloadIssuers (D3).
+    status: proposed
+  - id: W4-WORKLOAD-ACCOUNT
+    title: "The parent requester provisions the workload account and both records at accept, and removes them at release"
+    files: [internal/market/requester/secrets.go, internal/market/requester/association.go, internal/contract/pds/pds.go, internal/pds/local/accounts.go, internal/atproto/cloudinit]
+    work: >
+      Flow steps 1 and 8, only for a contract that asks for it (spec.workloadAccount, `run request --workload-account`);
+      the account is created through the Pds component's bus handle (the requester holds no session for it) with
+      a random password that is never stored; record B is written through the same handle; the bundle entry
+      workload-identity.json is root 0600 and mirrored to /run/socialweb-r2 like association-ref.
+    status: proposed
+  - id: W5-CLIENT-MODE
+    title: "MarketIdentity mode oauthWorkload, and run request --guest-requester uses it"
+    files: [api/v1alpha1/types_marketidentity.go, internal/marketidentity/atproto/oauth.go, internal/atproto/oauthclient/workload.go, cmd/socialweb-computer/request.go, cmd/socialweb-computer/requestassociation.go]
+    work: >
+      spec {mode: oauthWorkload, pdsUrl, did, workloadAudience, workloadTokenCommand (default guest-login.sh
+      token)}; flow step 4 headless; the session goes to the vault like oauthBrowser; a refused refresh runs step 4
+      again with a fresh token (no human, no pendingAction). --guest-requester reads workload-identity.json and,
+      when present, runs no PDS in the guest, makes no did:plc and writes no associationRequest.
+    status: proposed
+  - id: W6-LIVE
+    title: "Live proof on one market network"
+    work: >
+      run request --associate guest --workload-account --hold; inside the guest, `run request --name r2
+      --guest-requester -- <a small vm>`; the inner contract reaches Held with its RFP in the workload account's
+      repo; a createRecord of com.fedproxy.rbac with that session answers 403; release of the parent deletes the
+      account and the inner contract settles Released; a token for another guest's subject is invalid_grant.
+    status: proposed
+risks:
+  - "W1 changes behavior for every OAuth client of the local PDS; a client that asked for a narrow scope and relied on full access breaks. Read every RequesterOAuthScope and bidder scope against it first."
+  - "One did:plc per guest on plc.directory in prod; the market network uses its own PLC. Tombstone at release, and refuse the option where the PDS has no PLC rotation key."
+  - "The bidder is trusted for the subjects it issues, exactly as for getSecrets today: a dishonest bidder can sign in only to accounts whose record names its own issuer, that is, its own guests."
+  - "Handle r2-<rkey>.<parent handle> resolves only when the parent's PDS serves the parent handle's domain; else the account has a handle.invalid handle, which signing does not need."
