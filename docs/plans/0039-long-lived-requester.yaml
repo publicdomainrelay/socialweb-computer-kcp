@@ -1,6 +1,6 @@
 plan: "0039"
 title: "A long-lived requester from the CLI: run requester in the foreground with a ready file, install requester as a systemd unit, the gateway composed into it, atirc agents from it, and a mixed-prod acceptance against a user-configured bidder"
-status: todo
+status: doing
 source: >
   2026-11-01 atirc, owner (verbatim): "split quickstart into quickstart-local.md and quickstart-prod.md, then write
   a plan for how we are going to address all the Not Supported Today items so that we could bring up a
@@ -200,7 +200,7 @@ items:
       - "bringUp of profile quick is tuned for short invocations (ready timeouts, die-with); a long-lived instance must survive the CLI's terminal closing only under --fg semantics, and nothing must be torn down on a transient kcp error."
       - "Two verbs sharing one passthrough: a refactor of request.go is shared with live run request users; keep run request output identical."
       - "Held contracts across a restart: the requester adopts by status; prove a release after a restart revokes atirc tokens first (cloudinit.RequestRevokeWait)."
-    status: todo
+    status: done
 
   - id: B-INSTALL-REQUESTER
     title: "install requester: account (created when asked), slice, user unit, config.json, linger, upgrade and uninstall, as install bidder"
@@ -245,7 +245,7 @@ items:
       - "install is prod-shaped code shared with install bidder and install gateway; a regression there breaks prod upgrades. Prove install bidder --dry-run output is unchanged."
       - "upgrade.go infers the role from the record; a requester record must never be read as a bidder."
       - "systemd user manager Type=notify through the run requester process: READY=1 must come only after the ready file, or the unit start times out on a slow OAuth sign-in (TimeoutStartSec, as BidderStartGrace)."
-    status: todo
+    status: done
 
   - id: B2-HOSTPROCESS-PATH
     title: "Same-account install through a kubectl-applied HostProcess, documented and proven"
@@ -266,7 +266,7 @@ items:
       restart of that core leaves the unit adopted unchanged; kubectl delete stops it and keeps its state dir.
     risks:
       - "If a root prunes foreign HostProcesses, this path needs a label or a set entry; read compose.CheckWorkloads first."
-    status: todo
+    status: done
 
   - id: C-GATEWAY-COMPOSE
     title: "The gateway in the requester's kcp: profile requester, spec.requesterRef, Cluster by kubectl, k3s control plane and nodes rented by the same requester"
@@ -304,7 +304,7 @@ items:
       - "The nodes-<hex> Infra record mirror writes computer.socialweb.infra to the owner repo: needs the repo link from the gateway root to the requester's repo; Retain only."
       - "Two roots in one kcp share one core: CheckWorkloads per root; profile requester must not render the gateway set's web app or association-watch."
       - "Gateway Revision 39 must not collide with a burned revision on prod; read deploy/apiresourceschema-revisions.txt first."
-    status: todo
+    status: done
 
   - id: D-AGENT-IDENTITY
     title: "atirc agents from the long-lived requester: OAuth and remote-PDS identities proven, and a local-PDS identity that signs service auth"
@@ -339,7 +339,8 @@ items:
       - "Unknown atirc checks (D4): ask atirc-dev through the lead before coding the local-PDS case."
       - "A service-auth path for localRepo also changes what bidders see (submitRfp/submitAccept callbacks may start sending service auth); keep the market callbacks unchanged and use the new source only for the atirc issuer, or prove the bidders accept both."
       - "The guest requester R2 and spec.atircParentRef paths share atirc.go; they must keep their parent-bearer issuer."
-    status: todo
+    status: doing
+    progress: "pdsAccount proven on prod (rc161 CLI, hat.dplc.rip: owner-identity signing, JOIN, revoke before release); OAuth proven (0013 A); localRepo on plc.directory with a public handle built, refused pre-RFP for .local, not yet proven against irc.fedfork.com"
 
   - id: D-AGENT-INGRESS
     title: "Document and prove the ingress options a local-PDS requester needs for the agent, and what a remote-PDS one needs"
@@ -366,7 +367,7 @@ items:
       requester ingress webrtc gets its bundle by getSecrets (SecretsApplied reason GetSecrets).
     risks:
       - "xrpc.fedproxy.com is prod infrastructure shared by every bidder; a new load pattern goes to the lead first."
-    status: todo
+    status: done
 
   - id: E-DEV-COMPUTE-KINDS
     title: "dev up --compute-kinds vm,deno for the network bidders"
@@ -415,7 +416,7 @@ items:
       record in the repo.
     risks:
       - "An OAuth scope change reaches every OAuth identity on rollout (memory: scope add forces re-sign-in for oauthQr identities): it must land only as optional, announced to the lead before an rc."
-    status: todo
+    status: done
 
   - id: F3-BIDDER-OPERATOR-REPO
     title: "vouch-bidder-operator.yaml on an installed bidder: an optional operator sign-in that composes the operator repo"
@@ -438,7 +439,7 @@ items:
       unchanged (0006 compat smoke).
     risks:
       - "A second OAuth session in a prod bidder kcp; the bidder's own oauthQr identity must be untouched (plan 0030)."
-    status: todo
+    status: done
 
   - id: F-MIXED-PROD
     title: "examples/infra/mixed-prod.yaml and acceptance 0013: bring it up against a user-configured bidder with the vouch examples, default policy only"
@@ -477,4 +478,5 @@ items:
       pod runs; a restart mid-run keeps every Held contract; delete releases everything, tokens revoked before
       vm.terminated, the bidder host empty, the vouch records still in both repos; no secret on any terminal or log;
       the Not Supported tables of both quickstarts are empty.
-    status: todo
+    status: done
+    progress: "2026-11-01 prod: A and C on rc159, B on the rc160 CLI (acceptance 0013 Prod Readings)"
