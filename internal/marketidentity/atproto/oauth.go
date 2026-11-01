@@ -63,6 +63,8 @@ type qrTransfer struct {
 
 	url string
 
+	issued time.Time
+
 	expires time.Time
 }
 
@@ -152,7 +154,7 @@ func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alp
 	if err != nil {
 		return failed(status, generation, "OAuthBeginFailed", err.Error()), err
 	}
-	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id), failure: issue.failure}, browserPendingTTL)
+	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id), failure: issue.failure, issued: issuedAt(id, now)}, browserPendingTTL)
 	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, URL: visit, Handle: strings.TrimSpace(id.Spec.Handle),
 		ExpiresAt: expires.UTC().Format(time.RFC3339)}
 	return Result{Status: status, RequeueAfter: time.Until(expires)}, nil
@@ -177,7 +179,7 @@ func (a *Accounts) upgradeURL(ctx context.Context, workspace string, id *v1alpha
 		a.log.Warn("the scope upgrade sign-in url is not issued", "workspace", workspace, "identity", id.Name, "err", err.Error())
 		return signed
 	}
-	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id)}, browserPendingTTL)
+	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id), issued: issuedAt(id, now)}, browserPendingTTL)
 	action.URL, action.ExpiresAt = visit, expires.UTC().Format(time.RFC3339)
 	signed.RequeueAfter = minPositive(signed.RequeueAfter, time.Until(expires))
 	return signed
@@ -205,11 +207,14 @@ type browserIssue struct {
 	failure string
 
 	spent bool
+
+	issued time.Time
 }
 
 func (a *Accounts) browserIssueLive(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64, issue browserIssue, issued bool) bool {
 	action := id.Status.PendingAction
-	if !issued || issue.spent || action == nil || issue.url != action.URL || issue.generation != generation || issue.account != accountKey(id) {
+	if !issued || issue.spent || action == nil || issue.url != action.URL || issue.generation != generation || issue.account != accountKey(id) ||
+		issue.issued.Before(signInRequestedAt(id)) {
 		return false
 	}
 	live, err := a.statesFor(workspace).Has(ctx, issue.state)
@@ -298,8 +303,8 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 	}
 	status.SessionRef = ref
 	qr, ok := a.qr.Get(key)
-	if !ok || !time.Now().Before(qr.expires) {
-		qr, err = a.newQrState(key)
+	if !ok || !time.Now().Before(qr.expires) || qr.issued.Before(signInRequestedAt(id)) {
+		qr, err = a.newQrState(key, id)
 		if err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
 		}
@@ -335,7 +340,7 @@ func (a *Accounts) oauthQr(ctx context.Context, workspace string, id *v1alpha1.M
 		}
 	}
 	if need, ok := signInNeeded(&status, err); ok && err != nil {
-		if qr, err = a.newQrState(key); err != nil {
+		if qr, err = a.newQrState(key, id); err != nil {
 			return failed(status, generation, "OAuthBeginFailed", err.Error()), nil
 		}
 		return Result{Status: qrPending(status, generation, qr, need), RequeueAfter: QRPollInterval}, nil
@@ -821,6 +826,21 @@ func oauthSessionRef(id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentit
 	return status.SessionRef
 }
 
+func signInRequestedAt(id *v1alpha1.MarketIdentity) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(id.Spec.SignInRequestedAt))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
+func issuedAt(id *v1alpha1.MarketIdentity, now time.Time) time.Time {
+	if at := signInRequestedAt(id); at.After(now) {
+		return at
+	}
+	return now
+}
+
 func pendingExpiry(action *v1alpha1.MarketIdentityPendingAction, kind v1alpha1.PendingActionKind, now time.Time) (time.Time, bool) {
 	if action == nil || action.Kind != kind || strings.TrimSpace(action.URL) == "" {
 		return time.Time{}, false
@@ -858,7 +878,7 @@ func qrKey(workspace, name string) string {
 	return workspace + "/" + name
 }
 
-func (a *Accounts) newQrState(key string) (*qrTransfer, error) {
+func (a *Accounts) newQrState(key string, id *v1alpha1.MarketIdentity) (*qrTransfer, error) {
 	did, signer, err := a.qrSigner()
 	if err != nil {
 		return nil, err
@@ -880,7 +900,8 @@ func (a *Accounts) newQrState(key string) (*qrTransfer, error) {
 	if err != nil {
 		return nil, err
 	}
-	qr := &qrTransfer{transfer: transfer, url: qrURL, expires: time.Now().Add(transfer.TTL)}
+	now := time.Now()
+	qr := &qrTransfer{transfer: transfer, url: qrURL, issued: issuedAt(id, now), expires: now.Add(transfer.TTL)}
 	a.qr.SetTTL(key, qr, transfer.TTL)
 	return qr, nil
 }

@@ -11581,6 +11581,18 @@ AtprotoRepo with no DID whose backend is gone (RepoBackendGone), or 24 h in Dele
 releases with the condition RecordOrphaned and `infra_record_orphaned`. An infra with no record in
 status, or a Retained one, releases as before.
 
+- **A new sign-in link is a spec request: MarketIdentity `spec.signInRequestedAt` (2026-10-30, r134).**
+  Before: the page's "Get a new sign-in link" cleared `status.pendingAction`; a status-only patch
+  does not wake the controller (the own-kind predicate passes generation and deletion changes only),
+  so the next URL came at the old URL's expiry requeue (15 min for oauthBrowser and the scope
+  upgrade). Now the composer (the page, the app) writes `spec.signInRequestedAt` (RFC3339, the time
+  of the click) by server-side apply with field manager `socialweb.computer/signin`
+  (`v1alpha1.FieldManagerMarketIdentitySignIn`). The generation change reconciles at once, and a
+  sign-in URL issued before that time is not reused: oauthBrowser and the ScopeUpgrade URL spend the
+  old OAuth state and issue a new authorization URL, oauthQr starts a new QR transfer. A request time
+  ahead of the controller clock counts as the issue time, so a skewed clock never reissues in a
+  loop. A Ready identity with no pending action is not signed out by it.
+
 ## 16. Vocabulary
 
 | | |
