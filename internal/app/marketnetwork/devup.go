@@ -221,6 +221,8 @@ func ReadJoinedNetwork(ctx context.Context, kubeconfig string) (*v1alpha1.Market
 	return o.Spec.Network, nil
 }
 
+const FailedComponentGrace = time.Minute
+
 func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, progress func(v1alpha1.MarketNetworkStatus)) (v1alpha1.MarketNetwork, error) {
 	ri, err := networkClient(kubeconfig)
 	if err != nil {
@@ -228,6 +230,8 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 	}
 	last := ""
 	var o v1alpha1.MarketNetwork
+	var failingSince time.Time
+	failing := ""
 	_, err = kube.Await(ctx, ri, NetworkName, timeout, func(cur *v1alpha1.MarketNetwork) (bool, error) {
 		if cur == nil {
 			return false, nil
@@ -248,12 +252,23 @@ func WaitNetwork(ctx context.Context, kubeconfig string, timeout time.Duration, 
 		if o.Status.Phase == v1alpha1.ApplicationPhaseFailed {
 			return false, fmt.Errorf("marketnetwork: the MarketNetwork failed: %s", o.Status.Message)
 		}
-		if why := networkFailure(o.Status); why != "" {
-			return false, fmt.Errorf("marketnetwork: the MarketNetwork cannot become Ready: %s", why)
+		why := networkFailure(o.Status)
+		switch {
+		case why == "":
+			failingSince, failing = time.Time{}, ""
+		case failingSince.IsZero():
+			failingSince, failing = time.Now(), why
+		case time.Since(failingSince) >= FailedComponentGrace:
+			return false, fmt.Errorf("marketnetwork: the MarketNetwork cannot become Ready: %s (Failed for %s)", why, time.Since(failingSince).Round(time.Second))
+		default:
+			failing = why
 		}
 		return false, nil
 	})
 	if errors.Is(err, kube.ErrAwaitTimeout) {
+		if failing != "" {
+			return o, fmt.Errorf("marketnetwork: the MarketNetwork was not Ready within %s (phase %s: %s; %s)", timeout, o.Status.Phase, o.Status.Message, failing)
+		}
 		return o, fmt.Errorf("marketnetwork: the MarketNetwork was not Ready within %s (phase %s: %s)", timeout, o.Status.Phase, o.Status.Message)
 	}
 	return o, err
