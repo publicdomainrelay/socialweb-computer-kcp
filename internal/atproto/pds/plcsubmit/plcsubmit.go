@@ -188,6 +188,32 @@ func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, se
 	return p.verifyServiceUpdate(ctx, did, &last, op, opCID, endpoint)
 }
 
+func (p *HTTPPLCSubmitter) Tombstone(ctx context.Context, did syntax.DID) error {
+	var ops []plc.Operation
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
+		return err
+	}
+	if len(ops) == 0 {
+		return fmt.Errorf("pds: the PLC log for %s is empty", did)
+	}
+	last := ops[len(ops)-1]
+	if last.Type == plc.TypeTombstone {
+		return nil
+	}
+	if !slices.Contains(last.RotationKeys, p.rotationDID) {
+		return fmt.Errorf("pds: the rotation key %s is not in the PLC log for %s", p.rotationDID, did)
+	}
+	prevCID, err := plc.OperationCID(&last)
+	if err != nil {
+		return fmt.Errorf("pds: computing the PLC operation cid: %w", err)
+	}
+	op, err := plc.CreateTombstone(prevCID, p.rotationKey)
+	if err != nil {
+		return fmt.Errorf("pds: creating the PLC tombstone: %w", err)
+	}
+	return p.submit(ctx, did, op.SignedObject())
+}
+
 func (p *HTTPPLCSubmitter) verifyServiceUpdate(ctx context.Context, did syntax.DID, prev *plc.Operation, expected *plc.Operation, expectedCID string, endpoint string) error {
 	var ops []plc.Operation
 	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {

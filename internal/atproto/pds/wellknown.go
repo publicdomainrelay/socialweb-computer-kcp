@@ -1,15 +1,40 @@
 package pds
 
 import (
+	"net"
 	"net/http"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
-func (s *Server) handleWellKnownDID(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleWellKnownDID(w http.ResponseWriter, r *http.Request) {
+	did := s.serviceDID
+	if account := s.accountForHost(r); account != "" {
+		did = account
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(s.serviceDID))
+	_, _ = w.Write([]byte(did))
+}
+
+func (s *Server) accountForHost(r *http.Request) string {
+	if s.store == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if host == "" || strings.HasPrefix(host, "did:") {
+		return ""
+	}
+	acct, err := s.store.GetAccountByIdentifier(r.Context(), host)
+	if err != nil || acct == nil || !acct.Active || !strings.EqualFold(acct.Handle, host) {
+		return ""
+	}
+	return acct.DID.String()
 }
 
 func (s *Server) handleWellKnownDIDDocument(w http.ResponseWriter, r *http.Request) {
