@@ -49,9 +49,9 @@ func Decide(run *policyv1alpha1.PolicyWorkflowRun, parser Parser) Decision {
 		if len(violations) > 0 {
 			reason += ": " + strings.Join(violations, ", ")
 		}
-		return Decision{Violations: violations, Reason: reason, Run: name}
+		return Decision{Violations: violations, Reason: reason, Run: name, Completed: true}
 	}
-	return Decision{Allow: true, Violations: violations, Run: name}
+	return Decision{Allow: true, Violations: violations, Run: name, Completed: true}
 }
 
 func failure(run *policyv1alpha1.PolicyWorkflowRun) string {
