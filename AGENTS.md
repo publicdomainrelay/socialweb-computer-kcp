@@ -352,6 +352,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `spec.policy` is unset (`install bidder` writes `bidder-policy` to config.json); `open` is insecure
   and runs only when set explicitly, never on prod. The acceptance requester alice must be vouched by
   the bidder operators bob and john (`sh.tangled.graph.vouch`, docs/acceptance/0001-auth-modes.md).
+- A market policy always runs, on both sides and in both lanes. No policy named means the default
+  (`requester-tangled-vouch` on a requester, every contract and RFP carries it; `bidder-tangled-vouch`
+  on a bidder, whose full lane runs it when an RFP attaches none). Free winners get the full run too.
+  A missing evaluator, run client or engine denies. `open` runs the open workflow; it never skips.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify

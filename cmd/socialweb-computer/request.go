@@ -481,9 +481,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
 		}
 	}
-	if !network {
-		r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
-	}
+	r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
 	if nvSet || !network {
 		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
 		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")

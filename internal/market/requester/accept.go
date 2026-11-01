@@ -319,22 +319,18 @@ func (q *Requester) classifyBid(ctx context.Context, bid *BidRecord) error {
 	return nil
 }
 
-func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePolicy bool, workflow string) bool {
-	if !usePolicy {
-		return true
-	}
+func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, workflow string) bool {
+	workflow = q.policy.WorkflowFor(workflow)
 	key := bid.DID + "|" + workflow
 	if decision, ok := q.scopeCache.Get(key); ok {
 		return decision.Allow
-	}
-	if q.policy == nil || (q.policy.Workflow == "" && workflow == "") {
-		return true
 	}
 	self := q.marketDID
 	if operator := strings.TrimSpace(q.cfg.Spec.OperatorDID); operator != "" {
 		self = operator
 	}
 	input := PolicyInput{
+		Workflow:         workflow,
 		SelfDid:          self,
 		SubjectDid:       bid.DID,
 		CounterpartyDid:  bid.DID,

@@ -76,23 +76,22 @@ func commandFailed(io sshtransport.CommandIO, prefix string, err error) error {
 	return err
 }
 
-func (q *Requester) sessionPolicy(lc map[string]string) (string, map[string]string, bool, error) {
-	policyName := cmp.Or(strings.TrimSpace(lc["LC_POLICY"]), q.cfg.PolicyWorkflow)
-	usePolicy := true
+func (q *Requester) sessionPolicy(lc map[string]string) (string, map[string]string, error) {
+	policyName := strings.TrimSpace(lc["LC_POLICY"])
 	switch strings.ToLower(policyName) {
-	case "", "none", "off":
-		usePolicy = false
-		policyName = ""
+	case "none", "off":
+		return "", nil, fmt.Errorf("LC_POLICY %q: a policy always runs; name one, or open", policyName)
 	}
+	policyName = cmp.Or(policyName, q.cfg.PolicyWorkflow, DefaultPolicyWorkflow)
 	policyArgs := map[string]string{}
 	if raw := strings.TrimSpace(lc["LC_POLICY_ARGS"]); raw != "" {
 		parsed, err := participant.ParsePolicyArgs(raw)
 		if err != nil {
-			return "", nil, false, fmt.Errorf("LC_POLICY_ARGS: %w", err)
+			return "", nil, fmt.Errorf("LC_POLICY_ARGS: %w", err)
 		}
 		policyArgs = parsed
 	}
-	return policyName, policyArgs, usePolicy, nil
+	return policyName, policyArgs, nil
 }
 
 func (q *Requester) sessionVMName(lc map[string]string) (string, error) {
@@ -114,7 +113,7 @@ func (q *Requester) guestDialer() sshtransport.Dialer {
 }
 
 func (q *Requester) runTransientCommand(ctx context.Context, account sshtransport.AuthorizedAccount, command string, lc map[string]string, io sshtransport.CommandIO) error {
-	policyName, policyArgs, usePolicy, err := q.sessionPolicy(lc)
+	policyName, policyArgs, err := q.sessionPolicy(lc)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
 	}
@@ -131,7 +130,7 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 		return commandFailed(io, "provisioning failed: ", err)
 	}
 	defer sshtransport.RemoveGuestKeypair(privateKeyPath)
-	target, err := q.provisionSession(ctx, vmName, policyName, policyArgs, publicKey, usePolicy)
+	target, err := q.provisionSession(ctx, vmName, policyName, policyArgs, publicKey)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
 	}
@@ -248,7 +247,7 @@ func (q *Requester) releaseAllHeldSessions(reason string) {
 }
 
 func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, io sshtransport.CommandIO) error {
-	policyName, policyArgs, usePolicy, err := q.sessionPolicy(lc)
+	policyName, policyArgs, err := q.sessionPolicy(lc)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
 	}
@@ -270,11 +269,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		if err != nil {
 			return nil, "", err
 		}
-		requestedPolicy := ""
-		if usePolicy {
-			requestedPolicy = policyName
-		}
-		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, requestedPolicy, policyArgs)
+		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs)
 		if err != nil {
 			q.releaseHeldContract(contractName)
 			_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
@@ -524,7 +519,7 @@ func (q *Requester) releaseHeldSessionTarget(contract, privateKeyPath string) {
 	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
 }
 
-func (q *Requester) provisionSession(ctx context.Context, vmName, policyName string, policyArgs map[string]string, publicKey string, usePolicy bool) (*SessionTarget, error) {
+func (q *Requester) provisionSession(ctx context.Context, vmName, policyName string, policyArgs map[string]string, publicKey string) (*SessionTarget, error) {
 	userData, err := guestseed.WithIrohTransport(defaultUserData([]string{publicKey}), []string{publicKey}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("the guest iroh transport: %w", err)
@@ -545,20 +540,16 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 			return nil, err
 		}
 	}
-	var policyRef *market.StrongRef
-	policyName = strings.TrimSpace(policyName)
-	if policyName != "" {
-		workflow := PolicyWorkflowName(policyName)
-		workflowText, ok := PolicyWorkflowText(policyName)
-		if !ok {
-			return nil, fmt.Errorf("policy %q names no bundled workflow", policyName)
-		}
-		record := BuildPolicyRecord(policyName, workflow, workflowText, q.marketDID, policyArgs, q.nowISO())
-		created, err := q.existingOrPutRecord(ctx, PolicyGhaLiteNSID, sessionRKey("policy", q.repoDID, vmName, policyName), record)
-		if err != nil {
-			return nil, err
-		}
-		policyRef = &created
+	policyName = cmp.Or(strings.TrimSpace(policyName), q.cfg.PolicyWorkflow, DefaultPolicyWorkflow)
+	workflow := PolicyWorkflowName(policyName)
+	workflowText, ok := PolicyWorkflowText(policyName)
+	if !ok {
+		return nil, fmt.Errorf("policy %q names no bundled workflow", policyName)
+	}
+	policyRecord := BuildPolicyRecord(policyName, workflow, workflowText, q.marketDID, policyArgs, q.nowISO())
+	policyRef, err := q.existingOrPutRecord(ctx, PolicyGhaLiteNSID, sessionRKey("policy", q.repoDID, vmName, policyName), policyRecord)
+	if err != nil {
+		return nil, err
 	}
 	options := market.RFPOptions{
 		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
@@ -566,9 +557,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		Ingress:   q.ingressRecords(ctx),
 		Domain:    "compute",
 		CreatedAt: q.nowISO(),
-	}
-	if policyRef != nil {
-		options.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
+		Policies:  []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}},
 	}
 	rfpRKey := sessionRKey("rfp", q.repoDID, vmName)
 	rfp, found, err := q.existingSignedRecord(ctx, market.RFPNSID, rfpRKey)
@@ -594,7 +583,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		q.log.Warn("requester_no_bidders", "session", vmName, "candidates", discovery.Candidates, "dropped", discovery.DroppedText())
 	}
 	q.rememberBidders(discovery.Bidders)
-	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, discovery.Bidders, usePolicy, PolicyWorkflowName(policyName))
+	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, discovery.Bidders, workflow)
 	if err != nil {
 		if noBidders != "" {
 			return nil, fmt.Errorf("%w; %s", err, noBidders)
@@ -646,9 +635,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		ReceiptOk:      new(true),
 		Phase:          v1alpha1.ContractReceipt,
 		SubmitEventRef: stringOf(receipt.Value["submitEvent"]),
-	}
-	if policyRef != nil {
-		state.Policy = &commonv1.StrongRef{URI: policyRef.URI, CID: policyRef.CID}
+		Policy:         &commonv1.StrongRef{URI: policyRef.URI, CID: policyRef.CID},
 	}
 	address, hostKeys, termination, err := q.sessionGuest(ctx, receipt.URI)
 	if err != nil {
@@ -668,7 +655,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	}, nil
 }
 
-func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, usePolicy bool, workflow string) (*BidRecord, Bidder, error) {
+func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, workflow string) (*BidRecord, Bidder, error) {
 	for _, bidder := range bidders {
 		if bidder.Endpoint == "" {
 			continue
@@ -697,7 +684,7 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 		for _, bid := range q.bids.take(rfp.URI) {
 			byURI[bid.URI] = bid
 		}
-		if best := q.sessionBestBid(ctx, byURI, usePolicy, workflow); best != nil {
+		if best := q.sessionBestBid(ctx, rfp, byURI, workflow); best != nil {
 			if bidder, ok := bidderByDID[best.DID]; ok {
 				return best, bidder, true
 			}
@@ -727,14 +714,14 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 	return nil, Bidder{}, errors.New("every bid was denied by policy")
 }
 
-func (q *Requester) sessionBestBid(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
+func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord, bids map[string]BidRecord, workflow string) *BidRecord {
 	var best *BidRecord
 	for _, bid := range bids {
 		candidate := bid
 		if err := q.classifyBid(ctx, &candidate); err != nil {
 			continue
 		}
-		if !q.bidAllowedWithPolicy(ctx, candidate, usePolicy, workflow) {
+		if !q.bidAllowedWithPolicy(ctx, candidate, workflow) {
 			continue
 		}
 		switch {
@@ -747,12 +734,14 @@ func (q *Requester) sessionBestBid(ctx context.Context, bids map[string]BidRecor
 			best = &candidate
 		}
 	}
-	if usePolicy && best != nil && !best.Free {
+	if best != nil {
 		decision := q.policy.Evaluate(ctx, PolicyInput{
+			Workflow:         workflow,
 			SelfDid:          q.marketDID,
 			SubjectDid:       best.DID,
 			CounterpartyDid:  best.DID,
 			RootRequesterDid: q.marketDID,
+			RFP:              &PolicyRef{URI: rfp.URI, CID: rfp.CID},
 			Bid:              &PolicyRef{URI: best.URI, CID: best.CID},
 		})
 		if !decision.Allow {

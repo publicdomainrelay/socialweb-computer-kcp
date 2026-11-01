@@ -1,6 +1,7 @@
 package bidder
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
@@ -28,13 +30,17 @@ type policyEvaluator struct {
 	records *market.RepoStore
 }
 
-func (e *policyEvaluator) Scope(ctx context.Context, input participant.PolicyInput) participant.PolicyDecision {
-	if e.scope == "" {
-		return participant.PolicyDecision{Allow: true}
+func (e *policyEvaluator) workflow() string {
+	if e == nil {
+		return v1alpha1.BidderDefaultPolicy
 	}
+	return cmp.Or(strings.TrimSpace(e.scope), v1alpha1.BidderDefaultPolicy)
+}
+
+func (e *policyEvaluator) Scope(ctx context.Context, input participant.PolicyInput) participant.PolicyDecision {
 	input.Perspective = PerspectiveBidder
 	input.Mode = participant.PolicyModeScope
-	return e.run(ctx, runs.Request{WorkflowRef: e.scope}, input)
+	return e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input)
 }
 
 func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.StrongRef, input participant.PolicyInput) participant.PolicyDecision {
@@ -43,6 +49,12 @@ func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 	}
 	if input.Mode == "" {
 		input.Mode = participant.PolicyModeFull
+	}
+	if len(refs) == 0 {
+		return e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input)
+	}
+	if e == nil || e.records == nil {
+		return participant.PolicyDecision{Reason: "the policy record store is not configured"}
 	}
 	for _, entry := range refs {
 		if _, err := market.ParseRecordRef(entry.URI, entry.CID); err != nil {
@@ -89,7 +101,7 @@ func workflowOfRecord(value map[string]any) (json.RawMessage, error) {
 }
 
 func (e *policyEvaluator) run(ctx context.Context, req runs.Request, input participant.PolicyInput) participant.PolicyDecision {
-	if e.runs == nil {
+	if e == nil || e.runs == nil {
 		return participant.PolicyDecision{Reason: "the policy run client is not configured"}
 	}
 	req.Input = input.Runs()

@@ -311,7 +311,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	policyName := strings.TrimSpace(contract.Spec.Policy)
+	policyName := cmp.Or(strings.TrimSpace(contract.Spec.Policy), q.cfg.PolicyWorkflow, DefaultPolicyWorkflow)
 	policyArgs, err := participant.ParsePolicyArgs(contract.Spec.PolicyArgs)
 	if err != nil {
 		return err
@@ -356,21 +356,14 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	r.step(ctx, "creatingRfp", 1)
 	var policyRef *market.StrongRef
-	policyWorkflow := ""
+	policyWorkflow := PolicyWorkflowName(policyName)
+	workflowText, ok := PolicyWorkflowText(policyName)
+	if !ok {
+		return fmt.Errorf("policy %q names no bundled workflow", policyName)
+	}
 	if state.Policy != nil && state.Policy.URI != "" {
 		policyRef = &market.StrongRef{Type: market.StrongRefNSID, URI: state.Policy.URI, CID: state.Policy.CID}
-		if policyName != "" {
-			policyWorkflow = PolicyWorkflowName(policyName)
-			if _, ok := PolicyWorkflowText(policyName); !ok {
-				return fmt.Errorf("policy %q names no bundled workflow", policyName)
-			}
-		}
-	} else if policyName != "" {
-		policyWorkflow = PolicyWorkflowName(policyName)
-		workflowText, ok := PolicyWorkflowText(policyName)
-		if !ok {
-			return fmt.Errorf("policy %q names no bundled workflow", policyName)
-		}
+	} else {
 		policyRecord := BuildPolicyRecord(policyName, policyWorkflow, workflowText, q.marketDID, policyArgs, q.nowISO())
 		created, err := q.repo.CreateRecord(ctx, q.repoDID, PolicyGhaLiteNSID, policyRecord)
 		if err != nil {
@@ -390,9 +383,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 			Domain:    "compute",
 			CreatedAt: q.nowISO(),
 		}
-		if policyRef != nil {
-			rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
-		}
+		rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 		if q.cfg.Spec.SuspendParticipation {
 			return ErrParticipationSuspended
 		}
@@ -437,8 +428,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.catchUpBids(catchUpCtx, considered, rfpURI, rfpCID)
 	r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
-	usePolicy := policyRef != nil
-	winner, allBids, err := r.collectBids(ctx, rfpURI, usePolicy, policyWorkflow, only)
+	winner, allBids, err := r.collectBids(ctx, rfpURI, policyWorkflow, only)
 	stopCatchUp()
 	if err != nil {
 		return err
@@ -487,24 +477,23 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		Reason:     v1alpha1.ContractChosenBestWithinWindow,
 		Considered: len(allBids),
 	}
+	decision := q.policy.Evaluate(ctx, PolicyInput{
+		Workflow:         policyWorkflow,
+		SelfDid:          q.marketDID,
+		SubjectDid:       winner.DID,
+		CounterpartyDid:  winner.DID,
+		RootRequesterDid: q.marketDID,
+		RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
+		Bid:              &PolicyRef{URI: winner.URI, CID: winner.CID},
+	})
+	if !decision.Allow {
+		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+		state.Error = "winner rejected by policy: " + decision.Reason
+		return errors.New(state.Error)
+	}
+	chosen.Reason = v1alpha1.ContractChosenPolicy
 	if winner.Free {
 		chosen.Reason = v1alpha1.ContractChosenFirstFree
-	}
-	if policyRef != nil && !winner.Free {
-		decision := q.policy.Evaluate(ctx, PolicyInput{
-			SelfDid:          q.marketDID,
-			SubjectDid:       winner.DID,
-			CounterpartyDid:  winner.DID,
-			RootRequesterDid: q.marketDID,
-			RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
-			Bid:              &PolicyRef{URI: winner.URI, CID: winner.CID},
-		})
-		if !decision.Allow {
-			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
-			state.Error = "winner rejected by policy: " + decision.Reason
-			return errors.New(state.Error)
-		}
-		chosen.Reason = v1alpha1.ContractChosenPolicy
 	}
 	r.mu.Lock()
 	r.chosen = chosen
@@ -814,7 +803,7 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	return verification.OK, nil
 }
 
-func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePolicy bool, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
+func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
 	q := r.q
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
@@ -837,7 +826,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	for selected == nil {
 		arrived := q.bids.arrived()
 		add(q.bids.take(rfpURI))
-		if candidate := r.freeWinner(ctx, byURI, usePolicy, workflow); candidate != nil {
+		if candidate := r.freeWinner(ctx, byURI, workflow); candidate != nil {
 			selected = candidate
 			break
 		}
@@ -856,7 +845,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	}
 	add(q.bids.take(rfpURI))
 	if selected == nil {
-		selected = r.bestBid(ctx, byURI, usePolicy, workflow)
+		selected = r.bestBid(ctx, byURI, workflow)
 	}
 	records := make([]v1alpha1.ContractBid, 0, len(byURI))
 	for _, bid := range byURI {
@@ -872,7 +861,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 		switch {
 		case selected != nil && selected.URI == bid.URI:
 			entry.Verdict = v1alpha1.ContractBidChosen
-		case !q.bidAllowedWithPolicy(ctx, bid, usePolicy, workflow):
+		case !q.bidAllowedWithPolicy(ctx, bid, workflow):
 			entry.Verdict = v1alpha1.ContractBidPolicyRejected
 		case selected != nil:
 			entry.Verdict = v1alpha1.ContractBidNotChosen
@@ -887,27 +876,27 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	return selected, records, nil
 }
 
-func (r *contractRunner) freeWinner(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
+func (r *contractRunner) freeWinner(ctx context.Context, bids map[string]BidRecord, workflow string) *BidRecord {
 	for _, bid := range bids {
 		bidCopy := bid
 		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if bidCopy.Free && r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if bidCopy.Free && r.q.bidAllowedWithPolicy(ctx, bidCopy, workflow) {
 			return &bidCopy
 		}
 	}
 	return nil
 }
 
-func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
+func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord, workflow string) *BidRecord {
 	var best *BidRecord
 	for _, bid := range bids {
 		bidCopy := bid
 		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if !r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if !r.q.bidAllowedWithPolicy(ctx, bidCopy, workflow) {
 			continue
 		}
 		if best == nil || bidCopy.Cost < best.Cost {

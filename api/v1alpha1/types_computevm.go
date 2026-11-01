@@ -87,6 +87,9 @@ const (
 	BidderTangledVouchPolicy = "bidder-tangled-vouch"
 	BidderDefaultPolicy      = BidderTangledVouchPolicy
 
+	RequesterTangledVouchPolicy = "requester-tangled-vouch"
+	RequesterDefaultPolicy      = RequesterTangledVouchPolicy
+
 	HostUDPReasonSpec      = "spec"
 	HostUDPReasonOnlyMe    = "policy only-me"
 	HostUDPReasonNotOnlyMe = "policy not only-me"

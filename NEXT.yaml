@@ -952,16 +952,6 @@ paused_2026_10_19:
       Requester-side termination POST returned 404 after the CLI process exited (rc118 baseline).
       rc120 cli-agent-1793350170 released cleanly while the --hold process was still alive;
       recheck the exit-first ordering.
-  - id: TENANT-CONTRACT-POLICY
-    text: >
-      Tenant-cluster contracts get no contract policy (spec.policy empty); they should inherit the
-      requester-tangled-vouch default.
-  - id: REQUESTER-OPEN-WINNER
-    text: >
-      --policy open is not fully open on the requester winner check. Separately, the full winner
-      policy run is skipped for free bids (internal/market/requester/runner.go policyRef != nil
-      && !winner.Free), so free winners get the scope run only. Owner to decide whether free
-      winners also get the full run.
   - id: PAGE-EVENTSTREAM-LINK-DENIED
     text: >
       The page logs "bus: link denied EventStream watch-einfra-<infra> -> EventSource

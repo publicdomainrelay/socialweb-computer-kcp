@@ -62,7 +62,7 @@ const (
 
 	DefaultHTTPTimeout = 30 * time.Second
 
-	DefaultPolicyWorkflow = "requester-tangled-vouch"
+	DefaultPolicyWorkflow = v1alpha1.RequesterDefaultPolicy
 
 	DefaultVMNamePrefix = "compute-"
 

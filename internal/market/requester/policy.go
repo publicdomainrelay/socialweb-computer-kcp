@@ -27,19 +27,20 @@ type PolicyEvaluator struct {
 }
 
 func (e *PolicyEvaluator) Scope(ctx context.Context, input PolicyInput) PolicyDecision {
-	if e == nil || (e.Workflow == "" && input.Workflow == "") {
-		return PolicyDecision{Allow: true}
-	}
 	input.Mode = participant.PolicyModeScope
 	return e.run(ctx, input)
 }
 
 func (e *PolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) PolicyDecision {
-	if e == nil || (e.Workflow == "" && input.Workflow == "") {
-		return PolicyDecision{Allow: true}
-	}
 	input.Mode = cmp.Or(input.Mode, participant.PolicyModeFull)
 	return e.run(ctx, input)
+}
+
+func (e *PolicyEvaluator) WorkflowFor(name string) string {
+	if e == nil {
+		return PolicyWorkflowName(name)
+	}
+	return PolicyWorkflowName(cmp.Or(strings.TrimSpace(name), e.Workflow))
 }
 
 func (e *PolicyEvaluator) run(ctx context.Context, input PolicyInput) PolicyDecision {
@@ -49,10 +50,7 @@ func (e *PolicyEvaluator) run(ctx context.Context, input PolicyInput) PolicyDeci
 	if e.Runs.Engine.Name == "" {
 		return PolicyDecision{Reason: "no PolicyEngine is configured for this requester"}
 	}
-	workflow := cmp.Or(input.Workflow, e.Workflow)
-	if workflow == "" {
-		return PolicyDecision{Reason: "the requester names no policy workflow"}
-	}
+	workflow := e.WorkflowFor(input.Workflow)
 	if e.DID == "" {
 		return PolicyDecision{Reason: "the requester has no DID for the policy run"}
 	}

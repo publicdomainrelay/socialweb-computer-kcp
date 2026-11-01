@@ -458,7 +458,7 @@ func firstAnnotationMessage(raw any) string {
 }
 
 func verdictOfOutputs(outputs models.Outputs) Verdict {
-	allowed := true
+	allowed, answered := true, false
 	violations := []Violation{}
 	for _, raw := range outputs {
 		entry, ok := asMap(raw)
@@ -469,10 +469,14 @@ func verdictOfOutputs(outputs models.Outputs) Verdict {
 		if !exists {
 			continue
 		}
+		answered = true
 		if !isTrue(allowValue) {
 			allowed = false
 		}
 		violations = append(violations, parseViolations(entry["violations"])...)
+	}
+	if !answered {
+		return Deny("the policy workflow produced no allow output", PolicyGhaLiteNSID)
 	}
 	if allowed {
 		return Allow()

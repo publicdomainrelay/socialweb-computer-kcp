@@ -297,8 +297,9 @@ func (m *Mapper) Entry(claim contract.Claim, adopt bool, bases contract.Bases) (
 	if m.cfg.UserDataBase != "" {
 		entry.UserData = m.cfg.UserDataBase
 	}
+	entry.Policy = v1alpha1.RequesterDefaultPolicy
 	if m.cfg.Policy != nil {
-		entry.Policy = m.cfg.Policy.Name
+		entry.Policy = cmp.Or(strings.TrimSpace(m.cfg.Policy.Name), v1alpha1.RequesterDefaultPolicy)
 		args := m.cfg.Policy.Args
 		if args == nil {
 			args = map[string]any{}
