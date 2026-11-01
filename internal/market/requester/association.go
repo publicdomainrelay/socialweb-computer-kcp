@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	ContractAssociationLifetime = 24 * time.Hour
+	ContractAssociationLifetime = market.ContractAssociationLifetime
 
 	associationRetryFirst = 2 * time.Second
 

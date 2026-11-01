@@ -2,6 +2,7 @@ package bidder
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -11,38 +12,73 @@ import (
 
 const AssociationExpiryGrace = 10 * time.Minute
 
-func (b *Bidder) associationExpiry(ctx context.Context, requesterDID string) string {
+func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt string) string {
 	if b.records == nil || requesterDID == "" {
 		return ""
 	}
-	mirror, err := b.records.GetRecord(ctx, requesterDID, trust.BadgeBlueKeysNSID, trust.MirrorRKey)
-	if err != nil {
+	skip := func(reason string, args ...any) string {
+		b.log.Info("bidder_association_expiry_skipped", append([]any{"requester", requesterDID, "reason", reason}, args...)...)
 		return ""
+	}
+	refuse := func(reason string, args ...any) string {
+		b.log.Warn("bidder_association_expiry_refused", append([]any{"requester", requesterDID, "reason", reason}, args...)...)
+		return ""
+	}
+	mirror, err := b.records.GetRecord(ctx, requesterDID, trust.BadgeBlueKeysNSID, trust.MirrorRKey)
+	if errors.Is(err, market.ErrNotFound) {
+		return skip("the requester has no keys mirror")
+	}
+	if err != nil {
+		return refuse("the keys mirror is unread", "err", err.Error())
 	}
 	proof, _ := mirror.Value["proof"].(map[string]any)
 	uri, _ := proof["uri"].(string)
 	cid, _ := proof["cid"].(string)
+	if uri == "" && cid == "" {
+		return skip("the keys mirror names no proof")
+	}
 	if uri == "" || cid == "" || market.NSIDFromURI(uri) != market.AssociationNSID {
-		return ""
+		return refuse("the keys mirror proof is no association strongRef", "proof", uri)
+	}
+	authority := market.ATURIAuthority(uri)
+	if authority == "" || authority == requesterDID {
+		return refuse("the proof is not in an authority's repo", "proof", uri)
 	}
 	record, err := b.records.Resolve(ctx, market.RecordRef{URI: uri, CID: cid})
 	if err != nil {
-		b.log.Warn("bidder_association_expiry_unread", "requester", requesterDID, "proof", uri, "err", err.Error())
-		return ""
+		return refuse("the proof is unread", "proof", uri, "err", err.Error())
 	}
 	if record.CID != cid {
-		b.log.Warn("bidder_association_expiry_unread", "requester", requesterDID, "proof", uri, "err", "the proof cid changed")
-		return ""
+		return refuse("the proof cid changed", "proof", uri)
 	}
-	if _, scoped := record.Value["contract"]; !scoped {
-		return ""
+	assoc, err := market.ParseAssociation(record.Value)
+	if err != nil {
+		return refuse("the proof is no association", "proof", uri, "err", err.Error())
 	}
-	expiresAt, _ := record.Value["expiresAt"].(string)
-	if _, err := time.Parse(time.RFC3339Nano, expiresAt); err != nil {
-		return ""
+	if assoc.Contract == nil {
+		return skip("the proof is not contract-scoped", "proof", uri)
 	}
-	b.log.Info("bidder_association_expiry", "requester", requesterDID, "proof", uri, "expiresAt", expiresAt)
-	return expiresAt
+	if assoc.Subject != requesterDID {
+		return refuse("the proof names another subject", "proof", uri, "subject", assoc.Subject)
+	}
+	if market.ATURIAuthority(assoc.Contract.URI) != authority {
+		return refuse("the proof's contract is not the authority's accept", "proof", uri, "contract", assoc.Contract.URI)
+	}
+	expiresAt, err := market.ParseTime(assoc.ExpiresAt)
+	if err != nil {
+		return refuse("the proof expiresAt is no datetime", "proof", uri, "expiresAt", assoc.ExpiresAt)
+	}
+	start := b.now()
+	if at, err := market.ParseTime(acceptedAt); err == nil && at.Before(start) {
+		start = at
+	}
+	if bound := start.Add(market.ContractAssociationLifetime); bound.Before(expiresAt) {
+		b.log.Info("bidder_association_expiry_capped", "requester", requesterDID, "proof", uri, "expiresAt", assoc.ExpiresAt, "cap", market.FormatTime(bound))
+		expiresAt = bound
+	}
+	out := market.FormatTime(expiresAt)
+	b.log.Info("bidder_association_expiry", "requester", requesterDID, "proof", uri, "authority", authority, "expiresAt", out)
+	return out
 }
 
 func (b *Bidder) releaseAtAssociationExpiry(ctx context.Context, vm *v1alpha1.ComputeVM) time.Duration {

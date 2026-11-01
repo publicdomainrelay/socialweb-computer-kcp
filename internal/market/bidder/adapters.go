@@ -490,6 +490,7 @@ func (b *Bidder) applyProvision(ctx context.Context, request participant.OutboxR
 		bidURI:         accept.Bid.URI,
 		bidCID:         accept.Bid.CID,
 		requesterDID:   payload.RequesterDID,
+		acceptedAt:     accept.CreatedAt,
 		vmPayload:      contract.vmPayload,
 		bidConfig:      contract.bidConfig,
 		bidConfigValue: contract.bidConfigValue,

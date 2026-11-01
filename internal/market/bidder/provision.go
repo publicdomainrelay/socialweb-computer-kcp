@@ -47,6 +47,8 @@ type provisionRequest struct {
 
 	requesterDID string
 
+	acceptedAt string
+
 	vmPayload market.ResolvedRecord
 
 	bidConfig market.StrongRef
@@ -201,7 +203,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
-	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID)
+	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID, req.acceptedAt)
 	created := true
 	if err := b.intents.CreateComputeVM(ctx, *vm); err != nil {
 		if !errors.Is(err, contract.ErrExists) {

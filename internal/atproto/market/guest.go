@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 )
+
+const ContractAssociationLifetime = 24 * time.Hour
 
 const (
 	OnNetworkKindIroh   = "iroh"
