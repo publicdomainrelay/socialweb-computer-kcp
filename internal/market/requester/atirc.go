@@ -291,19 +291,19 @@ type atircReleaseMarker struct {
 	StartedAt int64 `json:"startedAt"`
 }
 
-func (r *contractRunner) revokeAtircToken(ctx context.Context) {
+func (r *contractRunner) revokeAtircToken(ctx context.Context) v1alpha1.AtircRevokesState {
 	contract := r.snapshot()
 	paths := releaseTokenPaths(contract)
 	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil || len(paths) == 0 {
-		return
+		return ""
 	}
 	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}
-	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*atircCallTimeout)
+	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(len(paths)+1)*atircCallTimeout)
 	defer cancel()
 	if err := r.setReleaseMarker(first, contract, marker); err != nil {
 		r.log().Warn("requester_atirc_release_marker_failed", "err", err.Error())
 		r.q.startReleaseRevokes(r, contract, marker, true)
-		return
+		return v1alpha1.AtircRevokesPending
 	}
 	var left []string
 	for _, path := range paths {
@@ -314,10 +314,17 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) {
 	r.log().Info("requester_atirc_release_revoke", "attempt", 0, "left", len(left))
 	if len(left) == 0 {
 		if err := r.setReleaseMarker(first, contract, nil); err == nil {
-			return
+			return v1alpha1.AtircRevokesDone
 		}
 	}
 	r.q.startReleaseRevokes(r, contract, marker, false)
+	return v1alpha1.AtircRevokesPending
+}
+
+func (r *contractRunner) mergeRevokes(ctx context.Context, state v1alpha1.AtircRevokesState) {
+	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, v1alpha1.ComputeContractStatus{AtircRevokes: state}); err != nil && !notFound(err) {
+		r.q.log.Warn("requester_atirc_revokes_status_failed", "contract", r.name, "err", err.Error())
+	}
 }
 
 func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1.ComputeContract, marker *atircReleaseMarker) error {
@@ -418,17 +425,31 @@ func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
 	}
 	r := newContractRunner(q, contract)
 	go func() {
-		ctx, cancel := context.WithTimeout(q.runContext(), atircCallTimeout)
-		marker, err := r.releaseMarker(ctx, contract)
-		cancel()
-		q.releaseRevoking.Delete(contract.Name)
-		if err != nil {
-			q.log.Warn("requester_atirc_release_marker_failed", "contract", contract.Name, "err", err.Error())
-			return
+		var marker *atircReleaseMarker
+		for attempt := 1; ; attempt++ {
+			ctx, cancel := context.WithTimeout(q.runContext(), atircCallTimeout)
+			found, err := r.releaseMarker(ctx, contract)
+			cancel()
+			if err == nil {
+				marker = found
+				break
+			}
+			q.log.Warn("requester_atirc_release_marker_failed", "contract", contract.Name, "attempt", attempt, "err", err.Error())
+			if attempt >= associationRetryAttempts || !r.waitRetry(q.runContext(), attempt) {
+				q.releaseRevoking.Delete(contract.Name)
+				return
+			}
 		}
+		q.releaseRevoking.Delete(contract.Name)
 		if marker != nil && len(marker.Paths) > 0 {
 			q.log.Info("requester_atirc_release_revoke_resumed", "contract", contract.Name, "paths", marker.Paths)
 			q.startReleaseRevokes(r, contract, marker, false)
+			return
+		}
+		if contract.Status.AtircRevokes == v1alpha1.AtircRevokesPending {
+			done, cancelDone := context.WithTimeout(q.runContext(), atircCallTimeout)
+			r.mergeRevokes(done, v1alpha1.AtircRevokesDone)
+			cancelDone()
 		}
 	}()
 }
@@ -455,6 +476,9 @@ func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, marke
 				r.q.log.Warn("requester_atirc_release_marker_failed", "contract", r.name, "step", "clear", "err", err.Error())
 			}
 		}
+		if left == 0 && cleared {
+			r.mergeRevokes(ctx, v1alpha1.AtircRevokesDone)
+		}
 		cancel()
 		r.q.log.Info("requester_atirc_release_revoke", "contract", r.name, "attempt", attempt, "left", left)
 		if left == 0 && cleared {
@@ -462,6 +486,9 @@ func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, marke
 		}
 		if !r.q.now().Before(giveUp) {
 			r.q.log.Warn("requester_atirc_release_revoke_gave_up", "contract", r.name, "left", left)
+			gone, cancelGone := context.WithTimeout(context.WithoutCancel(stop), atircCallTimeout)
+			r.mergeRevokes(gone, v1alpha1.AtircRevokesAbandoned)
+			cancelGone()
 			return
 		}
 		if !r.waitRetry(stop, attempt) {

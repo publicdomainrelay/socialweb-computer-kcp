@@ -68,6 +68,8 @@ type contractRunner struct {
 
 	atircRevoke sync.Once
 
+	atircRevokes v1alpha1.AtircRevokesState
+
 	association *contractAssociation
 
 	associationMu sync.Mutex
@@ -1534,7 +1536,8 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
 	if phase == v1alpha1.ComputeContractReleased {
-		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
+		r.atircRevoke.Do(func() { r.atircRevokes = r.revokeAtircToken(ctx) })
+		status.AtircRevokes = r.atircRevokes
 	}
 	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)
 	if err != nil && !notFound(err) {

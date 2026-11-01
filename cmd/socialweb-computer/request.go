@@ -40,6 +40,7 @@ const (
 	requestIdentityWait = 5 * time.Minute
 	requestSummaryRead  = 10 * time.Second
 	requestAttachProbe  = 10 * time.Second
+	requestRevokeWait   = 15 * time.Minute
 	requestSSHRetryRun  = 20 * time.Second
 	transportIroh       = "iroh"
 	transportWebRTC     = "webrtc"
@@ -1014,10 +1015,23 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 		return nil, fmt.Errorf("setting spec.release: %w", err)
 	}
 	r.log("asked the requester to release the contract (spec.release)")
-	return r.kcp.WaitContract(ctx, r.contractTimeout, func(c *v1alpha1.ComputeContract) bool {
+	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, func(c *v1alpha1.ComputeContract) bool {
 		return c.Status.Phase == v1alpha1.ComputeContractReleased ||
 			(c.Status.Phase == v1alpha1.ComputeContractFailed && c.Spec.Release && c.Status.Contract != nil && c.Status.Contract.Release != nil)
 	}, r.progress)
+	if err != nil || c == nil || c.Status.AtircRevokes != v1alpha1.AtircRevokesPending {
+		return c, err
+	}
+	r.log("waiting for the requester to revoke the contract's atirc tokens before its kcp stops", "timeout", requestRevokeWait.String())
+	revoked, err := r.kcp.WaitContract(ctx, requestRevokeWait, func(c *v1alpha1.ComputeContract) bool {
+		return c.Status.AtircRevokes != v1alpha1.AtircRevokesPending
+	}, r.progress)
+	if err != nil {
+		r.a.log.Warn("the atirc token revokes did not finish; run request release again revokes the rest", "err", err.Error())
+		return c, nil
+	}
+	r.log("the atirc token revokes finished", "state", string(revoked.Status.AtircRevokes))
+	return revoked, nil
 }
 
 func (r *requestRun) carryOn(ctx context.Context) int {

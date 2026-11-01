@@ -231,7 +231,11 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     tokens in the background with a backoff capped at 5 min until each is revoked or expired (24h at
     most after release, from the release time kept in a marker in the bundle secret), starts only
     once that marker is written, stops with the requester and resumes after a restart from the marker;
-    a 401 counts as revoked only for a subhandle read from the env file. Every read-modify-write of a
+    a 401 counts as revoked only for a subhandle read from the env file. The first attempt runs before
+    Released is written and its outcome is `status.atircRevokes` (Done, Pending while retries run,
+    Abandoned after 24 h); `run request release` waits up to 15 min while it is Pending before its kcp
+    stops, and on an already Released contract it starts the kcp, so the requester resumes the revokes
+    from the marker (retrying while its OpenBao starts) and the CLI waits for Done the same way. Every read-modify-write of a
     contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
     token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
     vault and mount.

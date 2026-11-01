@@ -143,6 +143,16 @@ type ComputeContractAgent struct {
 	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/atirc/atirc.env"`
 }
 
+type AtircRevokesState string
+
+const (
+	AtircRevokesPending AtircRevokesState = "Pending"
+
+	AtircRevokesDone AtircRevokesState = "Done"
+
+	AtircRevokesAbandoned AtircRevokesState = "Abandoned"
+)
+
 type ComputeContractAssociation struct {
 	Subject string `json:"subject,omitempty"`
 
@@ -266,6 +276,8 @@ type ComputeContractStatus struct {
 	Association *commonv1.StrongRef `json:"association,omitempty"`
 
 	AssociationMessage string `json:"associationMessage,omitempty"`
+
+	AtircRevokes AtircRevokesState `json:"atircRevokes,omitempty" apigen:"enum=Pending|Done|Abandoned"`
 }
 
 const (
