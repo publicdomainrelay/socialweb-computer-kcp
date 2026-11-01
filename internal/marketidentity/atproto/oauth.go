@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,8 +110,12 @@ func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alp
 	key := qrKey(workspace, id.Name)
 	session, handle, ref, err := a.restoreOAuthSession(ctx, workspace, id, &status)
 	if err == nil {
-		a.browser.Delete(key)
-		return a.sessionSignedIn(ctx, status, generation, session, handle, ref), nil
+		signed := a.sessionSignedIn(ctx, status, generation, session, handle, ref)
+		if signed.Status.PendingAction == nil {
+			a.browser.Delete(key)
+			return signed, nil
+		}
+		return a.upgradeURL(ctx, workspace, id, generation, signed), nil
 	}
 	if errors.Is(err, errNoSessionRef) || ref == nil {
 		return failed(status, generation, "MissingSessionRef", "mode oauthBrowser needs spec.sessionRef for the oauth session; no secret is written to status"), nil
@@ -151,6 +156,41 @@ func (a *Accounts) oauthBrowser(ctx context.Context, workspace string, id *v1alp
 	status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: kind, URL: visit, Handle: strings.TrimSpace(id.Spec.Handle),
 		ExpiresAt: expires.UTC().Format(time.RFC3339)}
 	return Result{Status: status, RequeueAfter: time.Until(expires)}, nil
+}
+
+func (a *Accounts) upgradeURL(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64, signed Result) Result {
+	key := qrKey(workspace, id.Name)
+	now := time.Now()
+	action := signed.Status.PendingAction
+	issue, issued := a.browser.Get(key)
+	if expires, ok := pendingExpiry(id.Status.PendingAction, v1alpha1.PendingActionSignInAgain, now); ok &&
+		a.browserIssueLive(ctx, workspace, id, generation, issue, issued) {
+		action.URL, action.ExpiresAt = id.Status.PendingAction.URL, id.Status.PendingAction.ExpiresAt
+		signed.RequeueAfter = minPositive(signed.RequeueAfter, untilOrZero(expires, now))
+		return signed
+	}
+	if issued && !issue.spent {
+		a.spendBrowserIssue(ctx, workspace, id, issue.state, nil)
+	}
+	visit, state, expires, err := a.beginBrowserAuthorization(ctx, workspace, id)
+	if err != nil {
+		a.log.Warn("the scope upgrade sign-in url is not issued", "workspace", workspace, "identity", id.Name, "err", err.Error())
+		return signed
+	}
+	a.browser.SetTTL(key, browserIssue{state: state, url: visit, generation: generation, account: accountKey(id)}, browserPendingTTL)
+	action.URL, action.ExpiresAt = visit, expires.UTC().Format(time.RFC3339)
+	signed.RequeueAfter = minPositive(signed.RequeueAfter, time.Until(expires))
+	return signed
+}
+
+func minPositive(a, b time.Duration) time.Duration {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0:
+		return a
+	}
+	return min(a, b)
 }
 
 type browserIssue struct {
@@ -725,7 +765,33 @@ func saveSession(ctx context.Context, vault SecretStore, ref *commonv1.SecretRef
 func (a *Accounts) sessionSignedIn(ctx context.Context, status v1alpha1.MarketIdentityStatus, generation int64,
 	session *oauthclient.Session, handle string, ref *commonv1.SecretRef) Result {
 	token, _ := session.AccessToken(ctx)
-	return signedIn(status, generation, session.DID(), handle, session.HostURL(), ref, token)
+	out := signedIn(status, generation, session.DID(), handle, session.HostURL(), ref, token)
+	if missing := a.upgradeScopes(session.Scopes()); len(missing) > 0 {
+		subjects := make([]string, 0, len(missing))
+		for _, scope := range missing {
+			subjects = append(subjects, atprotooauth.ScopeSubject(scope))
+		}
+		out.Status.PendingAction = &v1alpha1.MarketIdentityPendingAction{Kind: v1alpha1.PendingActionSignInAgain,
+			Reason: v1alpha1.PendingActionReasonScopeUpgrade, Handle: strings.TrimSpace(handle), MissingScopes: missing,
+			Message: "the session works; sign in again to grant " + strings.Join(subjects, ", ")}
+	}
+	return out
+}
+
+func (a *Accounts) upgradeScopes(granted []string) []string {
+	if !atprotooauth.KnownGrant(granted) {
+		return nil
+	}
+	var optional []string
+	for _, scope := range a.oauthScopes() {
+		if slices.Contains(atprotooauth.OptionalScopes, scope) {
+			optional = append(optional, scope)
+		}
+	}
+	if len(optional) == 0 {
+		return nil
+	}
+	return atprotooauth.MissingScopes(optional, granted)
 }
 
 func signedIn(status v1alpha1.MarketIdentityStatus, generation int64, did, handle, pdsURL string,

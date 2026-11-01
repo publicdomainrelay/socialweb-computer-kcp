@@ -248,7 +248,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     never the access token's scope claim) include `rpc:chat.atirc.revoke` (RequesterOAuthScope asks
     for it, but it is in `oauth.OptionalScopes`, so the identity's scope check does not require it
     and a session granted without it is not asked to sign in again; such a session never asks for
-    that service auth), then, for an `atircMinted`
+    that service auth; the MarketIdentity stays Ready with `status.pendingAction {kind: signInAgain,
+    reason: ScopeUpgrade, message, missingScopes, handle}`, plus `url` and `expiresAt` for mode
+    oauthBrowser (an authorize URL for the full requested scope, reissued when it expires), cleared
+    once a session grants the full requested set), then, for an `atircMinted`
     entry, with the minting parent's
     bearer, the `spec.atircParentRef` long token, when the subhandle is below it; an entry revoked
     by a 200 is stamped `revoked` there and not revoked again, while a 401 counts as Done but leaves
