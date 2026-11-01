@@ -41,7 +41,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: pds
-      schema: v1alpha1-12.pds.socialweb.computer
+      schema: v1alpha1-13.pds.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

@@ -296,15 +296,33 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	codeID, err := randomToken(32)
-	if err != nil {
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
-		return
-	}
 	sessionID, err := randomToken(32)
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
 		return
+	}
+	redirect, codeID, err := s.issueCode(ctx, request, account, sessionID, now)
+	if errors.Is(err, ErrInvalidRedirectURI) {
+		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "")
+		return
+	}
+	if err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	httpjson.Write(w, http.StatusOK, struct {
+		RedirectURI string `json:"redirect_uri"`
+		Code        string `json:"code"`
+	}{RedirectURI: redirect, Code: codeID})
+
+}
+
+func (s *Server) issueCode(ctx context.Context, request PARRequest, account Account, sessionID string, now time.Time) (string, string, error) {
+	codeID, err := randomToken(32)
+	if err != nil {
+		return "", "", err
 	}
 	code := AuthorizationCode{
 		ID:                  codeID,
@@ -321,21 +339,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:           now.Add(s.config.AuthorizationCodeTTL),
 	}
 	if err := s.codes.CreateCode(ctx, code); err != nil {
-		writeOAuthError(w, http.StatusInternalServerError, "server_error", "")
-		return
+		return "", "", err
 	}
 	redirect, err := authorizeRedirect(request.RedirectURI, codeID, request.State, s.issuer)
 	if err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "")
-		return
+		return "", "", fmt.Errorf("%w: %v", ErrInvalidRedirectURI, err)
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	httpjson.Write(w, http.StatusOK, struct {
-		RedirectURI string `json:"redirect_uri"`
-		Code        string `json:"code"`
-	}{RedirectURI: redirect, Code: codeID})
-
+	return redirect, codeID, nil
 }
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
@@ -481,6 +491,11 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request, form
 	}
 	if session.ID != record.SessionID || claims.Sub != session.Account.DID.String() || claims.CNF.JKT != session.JKT || proof.JKT != session.JKT {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token is not bound to this DPoP key")
+		return
+	}
+	if !s.workloadSessionAllowed(ctx, session.ID) {
+		s.revokeSession(ctx, session.ID, now)
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "the workload grant behind this session is gone")
 		return
 	}
 	if formClient != "" && formClient != session.ClientID {

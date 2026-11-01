@@ -8115,6 +8115,11 @@ func (in *PdsOAuth) DeepCopyInto(out *PdsOAuth) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.WorkloadIssuers != nil {
+		in, out := &in.WorkloadIssuers, &out.WorkloadIssuers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

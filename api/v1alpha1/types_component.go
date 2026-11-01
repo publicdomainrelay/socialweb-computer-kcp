@@ -585,6 +585,10 @@ type PdsOAuth struct {
 	DisableLocalhostClients bool `json:"disableLocalhostClients,omitempty"`
 
 	Scopes []string `json:"scopes,omitempty"`
+
+	DisableWorkloadSignIn bool `json:"disableWorkloadSignIn,omitempty"`
+
+	WorkloadIssuers []string `json:"workloadIssuers,omitempty" apigen:"listType=set"`
 }
 
 type Requester struct {

@@ -140,7 +140,7 @@ func New(cfg Config) (*Server, error) {
 		s.verifier = &serviceauth.Verifier{Audiences: audiences, Directory: cfg.Directory}
 	}
 	s.seq = NewSequencer()
-	cfg.Repos.SetEventSink(s.seq)
+	cfg.Repos.SetEventSink(&commitFanout{sinks: []repo.EventSink{s.seq, repo.EventSinkFunc(s.onWorkloadCommit)}})
 	s.registerRoutes()
 	if cfg.OAuth != nil {
 		if err := s.initOAuth(cfg.OAuth); err != nil {
@@ -185,7 +185,12 @@ func (s *Server) initOAuth(cfg *OAuthConfig) error {
 	if signer.Key == nil {
 		return fmt.Errorf("pds: oauth signer key is required")
 	}
+	workload, err := s.workloadOAuth(cfg)
+	if err != nil {
+		return fmt.Errorf("pds: workload sign-in: %w", err)
+	}
 	server, err := oauth.New(oauth.Config{
+		Workload:                workload,
 		Issuer:                  issuer,
 		Signer:                  signer,
 		Accounts:                s.store,

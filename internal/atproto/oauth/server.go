@@ -54,6 +54,8 @@ type Config struct {
 	DisableLocalhostClients bool
 
 	Scopes []string
+
+	Workload *WorkloadConfig
 }
 
 type Server struct {
@@ -68,6 +70,7 @@ type Server struct {
 	config   Config
 	dpop     *DPoPVerifier
 	clients  *ClientMetadataResolver
+	workload *WorkloadConfig
 }
 
 func New(cfg Config) (*Server, error) {
@@ -109,7 +112,12 @@ func New(cfg Config) (*Server, error) {
 	resolver.CacheTTL = cfg.ClientMetadataTTL
 	resolver.AllowLocalhost = !cfg.DisableLocalhostClients
 
+	if cfg.Workload != nil && (cfg.Workload.Authorizer == nil || cfg.Workload.Grants == nil || cfg.Workload.Accounts == nil) {
+		return nil, fmt.Errorf("oauth: workload sign-in needs an authorizer, a grant store and an account lookup")
+	}
+
 	return &Server{
+		workload: cfg.Workload,
 		issuer:   issuer,
 		signer:   cfg.Signer,
 		accounts: cfg.Accounts,
@@ -220,6 +228,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST /oauth/token", s.handleToken)
 	mux.HandleFunc("POST /oauth/revoke", s.handleRevoke)
+	s.registerWorkload(mux)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -307,7 +316,7 @@ func (s *Server) ResourceHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authorization := r.Header.Get("Authorization")
 		scheme, token, ok := serviceauth.SplitAuthorization(authorization)
-		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) {
+		if !ok || !strings.EqualFold(scheme, AuthSchemeDPoP) || (s.workload != nil && r.URL.Path == PathApproveAuthorization) {
 			next.ServeHTTP(w, r)
 			return
 		}

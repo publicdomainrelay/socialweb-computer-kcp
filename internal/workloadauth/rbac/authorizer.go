@@ -76,7 +76,8 @@ func (a *Authorizer) Admit(ctx context.Context, account, role, subjectToken stri
 	if err := rec.Allows(action); err != nil {
 		return workloadauth.Grant{}, err
 	}
-	return workloadauth.Grant{Account: account, Role: role, Issuer: def.Iss, Subject: def.Sub, Audience: def.Aud}, nil
+	return workloadauth.Grant{Account: account, Role: role, Issuer: def.Iss, Subject: def.Sub, Audience: def.Aud,
+		NotAfter: claims.Expiry, TokenID: claims.ID}, nil
 }
 
 func (a *Authorizer) Check(ctx context.Context, grant workloadauth.Grant, action workloadauth.Action) error {

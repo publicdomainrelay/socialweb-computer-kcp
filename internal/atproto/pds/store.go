@@ -156,6 +156,8 @@ func (s *Store) init(ctx context.Context) error {
 		schemaOAuthPARs,
 		schemaOAuthTokens,
 		schemaOAuthTokensSession,
+		schemaOAuthWorkloadGrants,
+		schemaOAuthWorkloadGrantsRole,
 	} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("pds: creating schema: %w", err)

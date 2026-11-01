@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
+	workloadoidc "github.com/johnandersen777/socialweb-computer-kcp/internal/workloadauth/oidc"
 )
 
 const (
@@ -382,7 +383,18 @@ func (s *Service) oauthConfig(stateDir, baseURL string) (*atpds.OAuthConfig, err
 		RefreshTokenTTL:         time.Duration(opts.RefreshTokenTTLSeconds) * time.Second,
 		DisableLocalhostClients: opts.DisableLocalhostClients || !opts.AllowLocalhostClients,
 		Scopes:                  append([]string(nil), opts.Scopes...),
+		Workload:                s.workloadConfig(opts),
 	}, nil
+}
+
+func (s *Service) workloadConfig(opts *v1alpha1.PdsOAuth) *atpds.WorkloadOAuthConfig {
+	if opts.DisableWorkloadSignIn {
+		return nil
+	}
+	return &atpds.WorkloadOAuthConfig{
+		Verifier: workloadoidc.Narrow(workloadoidc.New(workloadoidc.Config{}), opts.WorkloadIssuers),
+		Log:      s.deps.Log,
+	}
 }
 
 func buildDirectory(plcURL string, client *http.Client, handlers *bus.Bus, egress component.Egress) identity.Directory {

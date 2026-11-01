@@ -46,6 +46,10 @@ type Grant struct {
 	Subject string
 
 	Audience string
+
+	NotAfter time.Time
+
+	TokenID string
 }
 
 type Claims struct {

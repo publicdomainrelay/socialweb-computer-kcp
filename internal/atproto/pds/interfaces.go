@@ -167,6 +167,7 @@ type OAuthConfig struct {
 	AllowMissingDPoPNonce   bool
 	DisableLocalhostClients bool
 	Scopes                  []string
+	Workload                *WorkloadOAuthConfig
 }
 
 type Config struct {
