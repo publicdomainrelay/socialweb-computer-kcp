@@ -1,0 +1,110 @@
+# Acceptance 0003: CLI requester, ssh over WebRTC, per bidder host (ACC34)
+
+Proves the CLI requester (`socialweb-computer run request`) rents a VM on each prod
+bidder and opens ssh to the guest over a WebRTC datachannel, both from a fresh
+invocation kcp and after that kcp restarts from its state dir.
+
+- Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
+  [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
+- One run per host: only `$HOST` bids, the other two bidders suspended
+- Last pass: rc142, 2026-10-31 18:13-18:24Z, all 3 hosts
+
+```mermaid
+sequenceDiagram
+  participant C as CLI requester (alice, oauthQr)
+  participant Q as qr.fedfork.com
+  participant B as bidder $HOST
+  participant G as guest VM
+  C->>C: pendingAction scanQr url (stderr)
+  Q-->>C: session transfer (signed in as alice)
+  C->>B: RFP -> bid -> accept
+  B->>G: boot, hostKeys, publicKey, onNetwork
+  C->>G: WebRTC offer/answer (signalWebRTC events), STUN only
+  C->>G: ssh (StrictHostKeyChecking=yes) uname -a; id
+  C->>B: release -> vm.terminated
+```
+
+## Preconditions
+
+| Item | Need |
+| --- | --- |
+| Hosts | ssh to `hat-7`, `hat-9`; local bidder on this host; kubeconfigs as in 0001 Variables |
+| Bidders | all three `bidder-tangled-vouch`, Ready, same rc as the CLI |
+| Requester | alice signed in by QR (`-- --atproto-oauth-qr`); default localRepo makes an unassociated DID and gets no bids |
+| Vouches | bob + john vouch alice; alice vouches bob + john |
+| Signer | a second shell (or the drives-oauth agent) opens the newest `pendingAction` url and signs alice in; creds file never printed |
+| hat-7 | oauthQr bidder: after a role-scope change re-sign bob first (0001 section 9) |
+| ICE | guest reaches `stun:stun.cloudflare.com:3478`, nothing else |
+
+## Steps
+
+Announce first: `linux-kcp -> all: ACC34 on <host> now; hold VM tests.`
+
+```bash
+SWC=socialweb-computer
+R=~/.tmp/acc34; mkdir -p "$R"; chmod 700 "$R"
+HOST=<local|hat-9|hat-7>
+# 1. suspend the other two MarketBidders (spec.suspend=true), wait both Suspended
+<kubectl for other host> patch marketbidders.socialweb.computer app --type merge -p '{"spec":{"suspend":true}}'
+# 2. fresh invocation: request + hold + first ssh
+NAME=acc34-$HOST-$(date +%s)
+$SWC run request --state-dir "$R" --name "$NAME" --hold \
+  --tunnel ssh:22:webrtc --transport webrtc --exec "uname -a; id" \
+  -- --atproto-oauth-qr > "$R/$NAME-request.log" 2>&1 &
+# 3. sign alice in with the newest url from the log (second shell / drives-oauth)
+command grep -oE 'pendingAction (scanQr|signInAgain) url [^ ]*' "$R/$NAME-request.log" | tail -1
+# 4. wait for uid= in the request log and the --hold process to exit
+# 5. restarted invocation kcp: second ssh from the same state dir
+$SWC run request ssh "$NAME" --state-dir "$R" --transport webrtc --exec "uname -a; id" > "$R/$NAME-ssh.log" 2>&1
+# 6. winner check (host lists a Running ComputeVM for alice), plaintext check
+command grep -c -E 'a=candidate|AGE-SECRET-KEY' "$R/$NAME-request.log" "$R/$NAME-ssh.log"
+# 7. release, then resume the two paused bidders
+$SWC run request release "$NAME" --state-dir "$R"
+```
+
+The scripted form (pause, sign-in watch, both ssh runs, winner, release, resume) lives
+on the lead host as `acc34.sh <host>`; it is a wrapper of the commands above.
+
+## Expected observations
+
+Request log phases (`"phase":` lines), rc142 runs:
+
+| Step | local | hat-9 | hat-7 |
+| --- | --- | --- | --- |
+| start -> `AwaitingScan` | 20 s | 21 s | 20 s |
+| scan -> identity `Ready` | 17 s | 19 s | 18 s |
+| `Requesting` -> `Held` | 31 s | 40 s | 29 s |
+| ssh returned, fresh kcp (`seconds`) | 2.5 s | 5.2 s | 8.9 s |
+| ssh returned, restarted kcp | 6.1 s | 4.9 s | 3.6 s |
+
+- `signed in as aliceoa.bsky.social`, then `Held`
+- `{"msg":"ssh returned","transport":"webrtc","exit":0,"seconds":N}` in both logs
+- output contains `Linux` and `uid=`
+- whole host run (pause -> resume) ~3 min; all three ~10 min
+- earlier baselines: 2026-10-24 local 2.16 s fresh / ~7 s restarted; rc118 CLI run RFP -> Held 29 s, ssh 4.4 s
+
+## Pass criteria
+
+- Each host: `Held`, `uid=` from both invocations, `exit 0`
+- ssh ran with `StrictHostKeyChecking=yes` against guest-reported host keys
+- Winner = `$HOST` (Running ComputeVM for alice DID there while held)
+- Plaintext check counts 0 / 0 (no ICE candidates, no age keys in logs)
+- `run request release` ends `Released`; `$HOST` has no ComputeVM / firecracker left
+- All 3 hosts pass, paused bidders resumed (`Ready`)
+
+## Cleanup
+
+- Resume both paused bidders (`spec.suspend=false`), check all three `Ready`
+- Leftover VM: [0007](0007-bidder-termination.md)
+- `chmod 700` state dir stays; delete old `$R/acc34-*` state dirs when done
+
+## Known pitfalls
+
+| Symptom | Cause / fix |
+| --- | --- |
+| second ssh `exit 255` after 120 s (seen once on local, 18:15Z) | first invocation still held the shared state-dir kcp; wait for the `--hold` process to exit, rerun |
+| `invocation kcp did not come up` on release | same: release before the hold process exited |
+| timeout waiting for guest publicKey on hat-7 | bob's oauthQr session predates a scope change; re-sign bob (0001 section 9) |
+| no bids | alice not signed in by QR (localRepo DID waits in `AwaitingApproval`), or a vouch missing |
+| every canary lands on the old rc | other bidders not paused; suspend them as above |
+| guest publicKey / answer timeout | read the winning bidder journal for `the requester refused the market event` / `submitting the market event to the requester failed` |
