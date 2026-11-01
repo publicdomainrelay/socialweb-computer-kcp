@@ -104,13 +104,18 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name string, ops kindOps[T], scope func(string) bool) error {
 	r := &reconciler[T]{c: c, ops: ops, manager: ctlruntime.FieldManagerPrefix + name, pullManager: ctlruntime.FieldManagerPrefix + name + "-record"}
 	kind := string(ops.kind)
-	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Finalizer(v1alpha1.FinalizerInfra), ctlruntime.Owns[*v1alpha1.ComputeContract](),
+	options := []ctlruntime.Option{ctlruntime.Export(Export), ctlruntime.Finalizer(v1alpha1.FinalizerInfra),
+		ctlruntime.WatchesFiltered("", ctlruntime.WatchFilter[*v1alpha1.ComputeContract]{Changed: contractChanged},
+			func(_ context.Context, _ ctlruntime.Request, obj *v1alpha1.ComputeContract) []ctlruntime.Request {
+				return labelled(obj, kind)
+			}),
 		ctlruntime.WatchesIn(RecordExport, func(_ context.Context, _ ctlruntime.Request, obj *v1alpha1.AtprotoRecord) []ctlruntime.Request {
 			return labelled(obj, kind)
 		}),
-		ctlruntime.WatchesIn(RecordExport, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
-			return append(labelled(obj, kind), c.watched(src.Cluster, kind, obj)...)
-		}),
+		ctlruntime.WatchesFiltered(RecordExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRecordWatch]{Changed: recordWatchChanged},
+			func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
+				return append(labelled(obj, kind), c.watched(src.Cluster, kind, obj)...)
+			}),
 		ctlruntime.WatchesFiltered(RepoExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRepo]{Changed: func(old, new *v1alpha1.AtprotoRepo) bool {
 			return old.Status.DID != new.Status.DID
 		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
@@ -145,7 +150,7 @@ func RepoBindEvents(b *bus.Bus, users func(workspace, name string) []ctlruntime.
 }
 
 func RepoLinkWatch(users func(workspace, name string) []ctlruntime.Request) ctlruntime.Option {
-	return ctlruntime.WatchesIn(LinkExport, func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
+	return ctlruntime.WatchesFiltered(LinkExport, ctlruntime.WatchFilter[*exposurev1alpha1.ComponentLink]{Changed: linkChanged}, func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
 		to := obj.Spec.To
 		if !strings.EqualFold(strings.TrimSpace(to.Kind), RepoKind) {
 			return nil

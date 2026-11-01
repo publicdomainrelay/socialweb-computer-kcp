@@ -11619,6 +11619,19 @@ status, or a Retained one, releases as before.
   runner end, at most 2 min, `requester_atirc_orphan_sweep_release_bound`). The release path and its
   revoke-before-Released order are unchanged.
 
+- **The Infra and EphemeralInfra controllers queue on the fields they read only (2026-10-30, r134).**
+  Before: an idle page (one held contract, no input) ran 20 to 41 EphemeralInfra passes a minute,
+  each a no-op status apply (CPU only, no write). The infra watches had no predicate: `Owns`
+  ComputeContract queued it on every contract status write, its own AtprotoRecordWatch on every
+  `status.cursors` save of the record stream, and the repo ComponentLink watch on every link status
+  write. The reconcile reads none of those. Now the ComputeContract watch (by the infra labels, as
+  `owned` lists them) queues on a generation, label, owner or deletion change, or a change of
+  `status.phase`, `status.message`, the receipt URI or the winner DID; the AtprotoRecordWatch watch on
+  the same metadata or a change of `status.records` (URI and CID) or `status.deleted`; the
+  ComponentLink watch (`RepoLinkWatch`, the InfraCollection's too) on the metadata,
+  `status.observedGeneration` or its Accepted condition. The ExpiresAt requeue and the repo bind
+  events are unchanged. Open: the page reading after the change.
+
 ## 16. Vocabulary
 
 | | |
