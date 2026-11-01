@@ -43,6 +43,6 @@ release everything you rent.
 | requester mint / revoke / lease | 0004, 0011 section 3, 0009 A3 |
 | association / guest requester | 0005 |
 | page build | 0009 A1-A6 on dev, then A3 + A6 on prod |
-| Infra / EphemeralInfra, examples, QUICKSTART | 0012 |
+| Infra / EphemeralInfra, examples, quickstart-local / quickstart-prod | 0012 |
 | iOS app / pkg/embedded | 0010 |
 | OAuth role scope | re-sign every OAuth identity first (0001 section 9 note, 0006), then 0003 hat-7 |
