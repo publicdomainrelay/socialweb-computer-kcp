@@ -46,6 +46,23 @@ func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {
 	return withPlaceholder(bundle, envFile, atircTokenPlaceholder)
 }
 
+func bundlePaths(bundle []byte) ([]string, error) {
+	if len(bundle) == 0 {
+		return nil, nil
+	}
+	var entries []struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(bundle, &entries); err != nil {
+		return nil, fmt.Errorf("the secrets bundle is not a JSON array of {path, value}: %w", err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Path)
+	}
+	return out, nil
+}
+
 func withPlaceholder(bundle []byte, path, value string) ([]byte, error) {
 	entries := []map[string]any{}
 	if len(bundle) > 0 {

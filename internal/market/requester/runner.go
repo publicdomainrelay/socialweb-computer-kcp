@@ -68,6 +68,8 @@ type contractRunner struct {
 
 	atircRevoke sync.Once
 
+	releaseRequested string
+
 	association *contractAssociation
 
 	associationMu sync.Mutex
@@ -212,6 +214,11 @@ func (r *contractRunner) Run(ctx context.Context) {
 	contract := r.snapshot()
 	if contract.Spec.Adopt {
 		r.runAdopt(ctx, contract)
+		return
+	}
+	if err := CheckTokenPaths(contract, nil); err != nil {
+		r.log().Warn("requester_contract_refused", "err", err.Error())
+		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+err.Error(), r.stateCopy(), nil, nil, "refused", 1)
 		return
 	}
 	state := r.stateCopy()
@@ -690,9 +697,11 @@ func acceptedWithoutReceipt(state *v1alpha1.NodeClaimContract) bool {
 }
 
 func (r *contractRunner) releaseDeniedAccept(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
+	r.captureReleaseRequest()
 	reason := cmp.Or(state.Error, "the contract is released")
 	for attempt := 1; !r.recoverReceipt(ctx, state); attempt++ {
 		if attempt > DeniedAcceptReceiptAttempts {
+			r.captureReleaseRequest()
 			release := r.releaseStatus()
 			if release == nil {
 				release = &v1alpha1.ComputeContractRelease{}
@@ -1254,8 +1263,26 @@ func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.Node
 	r.deleteContractRecords(ctx)
 }
 
+func (r *contractRunner) captureReleaseRequest() {
+	requested := r.snapshot().Spec.ReleaseRequestedAt
+	r.mu.Lock()
+	r.releaseRequested = requested
+	r.mu.Unlock()
+}
+
+func (r *contractRunner) releaseRequestedAt() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.releaseRequested
+}
+
+func guestMayRun(state *v1alpha1.NodeClaimContract) bool {
+	return state != nil && state.Receipt != nil && state.Termination == nil && (state.Release == nil || !state.Release.OK)
+}
+
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
 	q := r.q
+	r.captureReleaseRequest()
 	if state == nil || state.Receipt == nil {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		r.deleteContractRecords(ctx)
@@ -1537,9 +1564,13 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		preserved := *contract.Status.Release
 		status.Release = &preserved
 	}
+	if requested := r.releaseRequestedAt(); requested != "" && status.Release != nil &&
+		(phase == v1alpha1.ComputeContractReleased || phase == v1alpha1.ComputeContractFailed) {
+		status.Release.RequestedAt = requested
+	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
 	var startRevokes func()
-	if phase == v1alpha1.ComputeContractReleased || phase == v1alpha1.ComputeContractFailed {
+	if phase == v1alpha1.ComputeContractReleased || (phase == v1alpha1.ComputeContractFailed && !guestMayRun(state)) {
 		r.atircRevoke.Do(func() { status.AtircRevokes, startRevokes = r.revokeAtircToken(ctx) })
 	}
 	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)

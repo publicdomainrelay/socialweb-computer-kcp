@@ -374,13 +374,13 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 	})
 }
 
-func (k *Kcp) Release(ctx context.Context) error {
+func (k *Kcp) Release(ctx context.Context, requestedAt string) error {
 	contracts := k.dyn.Resource(compose.ComputeContractGVR)
 	if _, err := kube.Get[kube.Doc](ctx, contracts, marketrequester.RequesterContract); err != nil {
 		return err
 	}
 	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
-		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true}}
+		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true, "releaseRequestedAt": requestedAt}}
 	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: ReleaseFieldManager, Force: true})
 	return err
 }

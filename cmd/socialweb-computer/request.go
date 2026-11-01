@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -1024,15 +1025,14 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 
 var errRevokesPending = errors.New("the requester did not finish revoking the contract's atirc tokens")
 
-func releaseSettled(c *v1alpha1.ComputeContract) bool {
-	if c.Status.Phase == v1alpha1.ComputeContractReleased {
-		return true
+func releaseSettled(requestedAt string) func(*v1alpha1.ComputeContract) bool {
+	return func(c *v1alpha1.ComputeContract) bool {
+		if c.Status.Phase == v1alpha1.ComputeContractReleased {
+			return true
+		}
+		return c.Status.Phase == v1alpha1.ComputeContractFailed && c.Spec.Release && c.Status.Release != nil &&
+			c.Status.Release.RequestedAt == requestedAt
 	}
-	if c.Status.Phase != v1alpha1.ComputeContractFailed || !c.Spec.Release {
-		return false
-	}
-	return (c.Status.Contract != nil && c.Status.Contract.Release != nil) ||
-		meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed)
 }
 
 func revokesPending(c *v1alpha1.ComputeContract) bool {
@@ -1041,17 +1041,25 @@ func revokesPending(c *v1alpha1.ComputeContract) bool {
 }
 
 func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, error) {
-	if err := r.kcp.Release(ctx); err != nil {
+	requestedAt := market.FormatTime(time.Now())
+	if err := r.kcp.Release(ctx, requestedAt); err != nil {
 		return nil, fmt.Errorf("setting spec.release: %w", err)
 	}
 	wait := r.contractTimeout
 	if current, err := r.kcp.Contract(ctx); err == nil && current != nil {
 		wait = requester.ReleaseWait(*current, r.contractTimeout)
 	}
-	r.log("asked the requester to release the contract (spec.release)", "timeout", wait.String())
-	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled, r.progress)
-	if err != nil || c == nil || !revokesPending(c) {
+	r.log("asked the requester to release the contract (spec.release)", "releaseRequestedAt", requestedAt, "timeout", wait.String())
+	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled(requestedAt), r.progress)
+	if err != nil || c == nil {
 		return c, err
+	}
+	return r.settleRevokes(ctx, c)
+}
+
+func (r *requestRun) settleRevokes(ctx context.Context, c *v1alpha1.ComputeContract) (*v1alpha1.ComputeContract, error) {
+	if c == nil || !revokesPending(c) {
+		return c, nil
 	}
 	r.log("waiting for the requester to revoke the contract's atirc tokens before its kcp stops", "timeout", cloudinit.RequestRevokeWait.String())
 	revoked, err := r.kcp.WaitContract(ctx, cloudinit.RequestRevokeWait, func(c *v1alpha1.ComputeContract) bool {
@@ -1062,6 +1070,10 @@ func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, er
 	}
 	r.log("the atirc token revokes finished", "state", string(revoked.Status.AtircRevokes))
 	return revoked, nil
+}
+
+func (r *requestRun) keptForRevokes(err error) {
+	r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release "+r.inv.Name+"` again to finish the atirc token revokes", "err", err.Error())
 }
 
 func (r *requestRun) carryOn(ctx context.Context) int {
@@ -1114,6 +1126,14 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 			code = exitFailed
 		} else {
 			remove = true
+		}
+	}
+	if remove {
+		if settled, err := r.settleRevokes(context.WithoutCancel(ctx), c); err != nil {
+			r.keptForRevokes(err)
+			remove, code = false, exitFailed
+		} else {
+			c = settled
 		}
 	}
 	r.writeSummary(ctx, c)
@@ -1172,6 +1192,10 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitRefused, "run request: --secrets: %v", err)
 		}
 	}
+	userPaths, err := bundlePaths(bundle)
+	if err != nil {
+		return a.fail(exitRefused, "run request: --secrets: %v", err)
+	}
 	if r.contract.Agent != nil {
 		if bundle, err = withAgentPlaceholder(bundle, r.contract.Agent.EnvFile); err != nil {
 			return a.fail(exitRefused, "run request: --agent: %v", err)
@@ -1187,6 +1211,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		if bundle, err = withPlaceholder(bundle, cloudinit.DefaultAssociationRefFile, ""); err != nil {
 			return a.fail(exitRefused, "run request: --associate: %v", err)
 		}
+	}
+	if err := requester.CheckTokenPaths(v1alpha1.ComputeContract{Spec: r.contract}, userPaths); err != nil {
+		return a.fail(exitRefused, "run request: %v", err)
 	}
 	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC()}
 	if network != "" {
@@ -1363,7 +1390,7 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 		}
 		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
 		if errors.Is(err, errRevokesPending) {
-			r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release " + r.inv.Name + "` again to finish the atirc token revokes")
+			r.keptForRevokes(err)
 		} else {
 			r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release " + r.inv.Name + "` again to retry the release")
 		}

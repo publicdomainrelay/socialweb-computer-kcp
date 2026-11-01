@@ -237,8 +237,13 @@ var guestRequesterReleaseScript = `#!/usr/bin/env bash
 set -uo pipefail
 command -v socialweb-computer >/dev/null || exit 0
 ` + guestRequesterEnv + `fail=0
+pids=()
 for name in $(socialweb-computer run request list --json | jq -r '.[] | select(.phase != "Released") | .name'); do
-  timeout ` + seconds(GuestRequesterReleaseEach) + ` socialweb-computer run request release --contract-timeout ` + seconds(RequestReleaseWait) + `s "${name}" || fail=1
+  timeout --kill-after=30 ` + seconds(GuestRequesterReleaseEach) + ` socialweb-computer run request release --contract-timeout ` + seconds(RequestReleaseWait) + `s "${name}" &
+  pids+=("$!")
+done
+for pid in "${pids[@]}"; do
+  wait "${pid}" || fail=1
 done
 exit "${fail}"
 `

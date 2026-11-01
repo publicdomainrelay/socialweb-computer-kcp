@@ -231,16 +231,24 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     tokens in the background with a backoff capped at 5 min until each is revoked or expired (24h at
     most after release, from the release time kept in a marker in the bundle secret), starts only
     once that marker is written, stops with the requester and resumes after a restart from the marker;
-    a 401 counts as revoked only for a subhandle read from the env file. The first attempt runs before
-    Released (or Failed) is written and its outcome is `status.atircRevokes` (Done only when every
-    token path answered 200, a 401 for its own token, holds no token or is past its exp; Pending while
-    retries run; Abandoned after 24 h); only that first write and the retries set it, a later status
-    write never does, and no token is minted once it is set. `run request release` waits up to
-    `cloudinit.RequestRevokeWait` (15 min) while it is Pending or unset on a contract that names token
-    paths; on that timeout it exits non-zero and keeps the invocation's state, and a rerun starts the
-    kcp so the requester resumes the revokes, from the marker or, with no marker, over every token path
-    again. A denied accept whose receipt never arrives leaves the contract Failed with ReleaseFailed,
-    and a rerun of `run request release` looks for the receipt and releases again. Every read-modify-write of a
+    every mint is also recorded (path, subhandle, token, exp) under `atircMinted` in the bundle secret,
+    and a minted subhandle counts as revoked only on a 200, a 401 for its own token, or its exp; a 401
+    counts for an unrecorded (rc126) token only for a subhandle read from the env file. The first
+    attempt runs before Released is written, or Failed when no guest can still run (no receipt, an
+    acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
+    when every token path is revoked that way or never held a token; Pending while retries run;
+    Abandoned after 24 h); only that first write and the retries set it, a later status write never
+    does, and no token is minted once it is set. `run request` and `run request release` share one
+    settle step before they remove an invocation: they wait up to `cloudinit.RequestRevokeWait`
+    (15 min) while it is Pending or unset on a contract that names token paths; on that timeout they
+    exit non-zero and keep the invocation's state, and a rerun of `run request release` starts the kcp
+    so the requester resumes the revokes, from the marker or, with no marker, over every token path
+    again. A refFile, agent envFile or `--secrets` path equal to a token path is refused (CLI and
+    requester admission). Every release request stamps `spec.releaseRequestedAt` (SSA, the release
+    field manager) and the outcome it answers is `status.release.requestedAt`; a denied accept whose
+    receipt never arrives leaves the contract Failed with ReleaseFailed, and a new release request
+    restarts its runner, looks for the receipt and releases again; the CLI waits for an outcome of its
+    own request (with the receipt waits added to its release wait). Every read-modify-write of a
     contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
     token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
     vault and mount.

@@ -331,6 +331,9 @@ func recordContract(value map[string]any) (commonv1.StrongRef, bool) {
 }
 
 func (r *contractRunner) putBundleEntry(ctx context.Context, contract v1alpha1.ComputeContract, entry SecretEntry) error {
+	if tokenFile(contract, entry.Path) {
+		return fmt.Errorf("%w: %s", ErrTokenPathConflict, entry.Path)
+	}
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	bundleRef := *contract.Spec.SecretsRef

@@ -267,6 +267,8 @@ type Requester struct {
 
 	releaseRevoking sync.Map
 
+	releaseRetried sync.Map
+
 	bundleLocks sync.Map
 
 	waiting map[string]bool

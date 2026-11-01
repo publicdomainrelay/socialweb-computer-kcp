@@ -41,6 +41,8 @@ const (
 
 	atircReleaseKey = "atircReleasePending"
 
+	atircMintedKey = "atircMinted"
+
 	atircCallTimeout = 30 * time.Second
 
 	maxAtircLabel = 14
@@ -243,12 +245,54 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		next[k] = v
 	}
 	next["bundle"] = string(raw)
+	minted, err := withMinted(data, atircMinted{Path: path, Subhandle: subhandle, Token: token, Exp: exp.Unix()}, q.now())
+	if err != nil {
+		return err
+	}
+	next[atircMintedKey] = minted
 	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
 		return fmt.Errorf("write the bundle: %w", err)
 	}
 	r.addSecretEntries(current)
 	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339))
 	return nil
+}
+
+type atircMinted struct {
+	Path string `json:"path"`
+
+	Subhandle string `json:"subhandle"`
+
+	Token string `json:"token"`
+
+	Exp int64 `json:"exp"`
+}
+
+func mintedOf(data map[string]any) ([]atircMinted, error) {
+	text, _ := data[atircMintedKey].(string)
+	if text == "" {
+		return nil, nil
+	}
+	var out []atircMinted
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		return nil, fmt.Errorf("parse the minted atirc tokens: %w", err)
+	}
+	return out, nil
+}
+
+func withMinted(data map[string]any, add atircMinted, now time.Time) (string, error) {
+	minted, err := mintedOf(data)
+	if err != nil {
+		return "", err
+	}
+	kept := []atircMinted{add}
+	for _, m := range minted {
+		if m.Exp > now.Unix() && m != add {
+			kept = append(kept, m)
+		}
+	}
+	raw, err := json.Marshal(kept)
+	return string(raw), err
 }
 
 func atircTokenExp(token, env string) (time.Time, bool) {
@@ -298,10 +342,14 @@ func ReleaseRevokesExpected(contract v1alpha1.ComputeContract) bool {
 }
 
 func ReleaseWait(contract v1alpha1.ComputeContract, base time.Duration) time.Duration {
+	wait := base
 	if fromGuest(contract) {
-		return base + GuestRequesterReleaseTimeout
+		wait += GuestRequesterReleaseTimeout
 	}
-	return base
+	if acceptedWithoutReceipt(contract.Status.Contract) {
+		wait += DeniedAcceptReceiptAttempts * DefaultReceiptTimeout
+	}
+	return wait
 }
 
 func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRevokesState, func()) {
@@ -514,11 +562,32 @@ func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, marke
 
 func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.ComputeContract, path string) bool {
 	r.bundleMu.Lock()
-	_, _, entries, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
+	_, data, entries, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
 	r.bundleMu.Unlock()
 	if err != nil {
 		r.q.log.Warn("requester_atirc_revoke_failed", "contract", r.name, "step", "read the bundle", "err", err.Error())
 		return false
+	}
+	minted, err := mintedOf(data)
+	if err != nil {
+		r.q.log.Warn("requester_atirc_revoke_failed", "contract", r.name, "step", "read the minted tokens", "err", err.Error())
+		return false
+	}
+	recorded, done := false, true
+	for _, m := range minted {
+		if m.Path != path {
+			continue
+		}
+		recorded = true
+		if !r.q.now().Before(time.Unix(m.Exp, 0)) {
+			continue
+		}
+		if _, err := r.revokeAtircSubhandle(ctx, m.Token, m.Subhandle); err != nil {
+			done = false
+		}
+	}
+	if recorded {
+		return done
 	}
 	token, subhandle, env := "", "", ""
 	for _, e := range entries {

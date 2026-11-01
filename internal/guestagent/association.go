@@ -20,7 +20,7 @@ const (
 
 	refetchTimeout = 10 * time.Minute
 
-	requesterStopTimeout = 2 * time.Minute
+	GuestRequesterStopTimeout = 2 * time.Minute
 
 	secretsRefetchEnv = "SECRETS_REFETCH"
 )
@@ -321,7 +321,7 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 	if a.cfg.Association == nil {
 		return
 	}
-	stopCtx, cancelStop := context.WithTimeout(a.ctx, requesterStopTimeout)
+	stopCtx, cancelStop := context.WithTimeout(a.ctx, GuestRequesterStopTimeout)
 	out, err := exec.CommandContext(stopCtx, "systemctl", "stop", RequesterUnit).CombinedOutput()
 	cancelStop()
 	if err != nil {

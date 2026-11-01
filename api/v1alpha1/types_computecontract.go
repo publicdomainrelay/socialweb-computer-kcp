@@ -56,6 +56,8 @@ type ComputeContractSpec struct {
 
 	Release bool `json:"release,omitempty"`
 
+	ReleaseRequestedAt string `json:"releaseRequestedAt,omitempty"`
+
 	OwnerDid string `json:"ownerDid,omitempty"`
 
 	Adopt bool `json:"adopt,omitempty"`
@@ -234,6 +236,8 @@ type ComputeContractRelease struct {
 	Attempts int `json:"attempts,omitempty"`
 
 	LastError string `json:"lastError,omitempty"`
+
+	RequestedAt string `json:"requestedAt,omitempty"`
 }
 
 type ComputeContractEvent struct {

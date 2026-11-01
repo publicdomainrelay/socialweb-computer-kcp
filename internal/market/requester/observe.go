@@ -155,7 +155,9 @@ func releaseDeadlineOf(release *v1alpha1.ComputeContractRelease) (time.Time, boo
 }
 
 func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeContract, deadline time.Time) {
-	if contract.Status.Phase == v1alpha1.ComputeContractFailed {
+	requested := contract.Spec.ReleaseRequestedAt
+	if contract.Status.Phase == v1alpha1.ComputeContractFailed && contract.Status.Release.RequestedAt == requested {
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	message := fmt.Sprintf("vm.delete was not acknowledged by %s (the contract TTL)", deadline.UTC().Format(time.RFC3339))
@@ -166,9 +168,15 @@ func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeCo
 	status.ObservedGeneration = contract.Generation
 	status.Phase = v1alpha1.ComputeContractFailed
 	status.Message = message
+	release := *contract.Status.Release
+	release.RequestedAt = requested
+	status.Release = &release
 	addContractConditions(&status, contract.Generation, status.Phase, message, q.now(), false)
 	q.log.Warn("requester_release_bound", "contract", contract.Name, "deadline", deadline.UTC().Format(time.RFC3339), "lastError", contract.Status.Release.LastError)
 	q.mergeStatus(ctx, contract.Name, status)
+	failed := contract
+	failed.Status = status
+	q.resumeReleaseRevokes(failed)
 }
 
 func (q *Requester) runnerFor(name string) *contractRunner {
@@ -194,6 +202,13 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 	if runner != nil {
 		runner.Update(contract)
 		return
+	}
+	if finished && releaseRequestedAgain(contract) && q.releaseRetryOnce(contract) {
+		q.log.Info("requester_contract_release_requested_again", "contract", contract.Name, "releaseRequestedAt", contract.Spec.ReleaseRequestedAt)
+		q.mu.Lock()
+		delete(q.finished, contract.Name)
+		q.mu.Unlock()
+		finished = false
 	}
 	if finished {
 		return
@@ -253,6 +268,20 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 		q.runnerDone(started, account)
 	})
 	q.mu.Unlock()
+}
+
+func (q *Requester) releaseRetryOnce(contract v1alpha1.ComputeContract) bool {
+	previous, seen := q.releaseRetried.Swap(contract.Name, contract.Spec.ReleaseRequestedAt)
+	return !seen || previous != contract.Spec.ReleaseRequestedAt
+}
+
+func releaseRequestedAgain(contract v1alpha1.ComputeContract) bool {
+	requested := contract.Spec.ReleaseRequestedAt
+	if !contract.Spec.Release || requested == "" || contract.Status.Phase != v1alpha1.ComputeContractFailed ||
+		!meta.IsStatusConditionTrue(contract.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed) || contractTerminal(contract) {
+		return false
+	}
+	return contract.Status.Release == nil || contract.Status.Release.RequestedAt != requested
 }
 
 func (q *Requester) markFinished(name string) {

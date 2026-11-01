@@ -18,6 +18,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	atmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	market "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
@@ -347,7 +348,16 @@ func (h *handle) CreateComputeContract(ctx context.Context, contract v1alpha1.Co
 }
 
 func (h *handle) ReleaseComputeContract(ctx context.Context, name string) error {
-	return h.applySpecField(ctx, market.KindComputeContract, name, "release", true, FieldManagerContractRelease)
+	found, err := h.exists(ctx, market.KindComputeContract, name)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: %s %s", market.ErrNotFound, market.KindComputeContract, name)
+	}
+	doc := skeleton(market.KindComputeContract, name)
+	doc["spec"] = map[string]any{"release": true, "releaseRequestedAt": atmarket.FormatTime(time.Now())}
+	return h.apply(ctx, market.KindComputeContract, name, doc, FieldManagerContractRelease)
 }
 
 func (h *handle) DeleteComputeContract(ctx context.Context, name string) error {
