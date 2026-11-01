@@ -1,7 +1,7 @@
 # SYSTEM: socialweb-computer, the whole system
 
 - one page map of every component, repo, host and flow
-- deep dives: [KCP.md](KCP.md) (kcp, workspaces, API catalog), [ARCHITECTURE.md](ARCHITECTURE.md) (decisions, invariants; open by heading)
+- deep dives: [KCP.md](KCP.md) (kcp, workspaces, API catalog), [protocol/README.md](protocol/README.md) (every lexicon, its use and its step in the sequence), [ARCHITECTURE.md](ARCHITECTURE.md) (decisions, invariants; open by heading)
 - rules for agents: [../AGENTS.md](../AGENTS.md)
 - no history here. what was done when: git log, `docs/plans/*.yaml`
 
@@ -141,6 +141,7 @@ flowchart LR
 ## Market Protocol
 
 - lexicons: `lexicons/` (NSID prefix `com.publicdomainrelay.temp.`)
+- every lexicon, field by field, with its sequence step: [protocol/README.md](protocol/README.md)
 - applications talk ONLY over this protocol. a shared kcp is never a data channel
 
 ### Records
@@ -157,7 +158,7 @@ flowchart LR
 | `market.association`, `market.associationRequest` | requester | requester / guest requester | contract-scoped association (guest requester R2) |
 | `badgeBlueKeys` | operator / user | operator / user | key claims: bidder association (`bidder_associate`), requester association, ssh key claims |
 | `sh.tangled.graph.vouch` | operators, users | voucher | trust edge read by tangled-vouch policies |
-| `computer.socialweb.infra`, `computer.socialweb.ephemeralInfra` | gateway / owner | owner | Infra mirror of tenant cluster nodes; per-account index at rkey `self` |
+| `computer.socialweb.infra`, `computer.socialweb.ephemeralInfra` | the owner's kcp (infra controller: CLI, gateway, page, iOS) | owner | the record of an Infra / EphemeralInfra object (two-way sync); per-account index at rkey `self`; never deleted ([protocol/infra.md](protocol/infra.md)) |
 
 ### XRPC
 
@@ -529,6 +530,6 @@ flowchart LR
 
 ## See Also
 
-- [KCP.md](KCP.md), [ARCHITECTURE.md](ARCHITECTURE.md), [bidder.md](bidder.md), [deploy.md](deploy.md), [gateway.md](gateway.md)
+- [KCP.md](KCP.md), [protocol/README.md](protocol/README.md), [ARCHITECTURE.md](ARCHITECTURE.md), [bidder.md](bidder.md), [deploy.md](deploy.md), [gateway.md](gateway.md)
 - [../deploy/market-network/README.md](../deploy/market-network/README.md)
 - [acceptance/](acceptance/), [ATIRC-WORKFLOW.md](ATIRC-WORKFLOW.md)
