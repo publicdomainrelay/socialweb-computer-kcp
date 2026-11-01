@@ -20,6 +20,8 @@ const (
 
 	refetchTimeout = 10 * time.Minute
 
+	requesterStopTimeout = 2 * time.Minute
+
 	secretsRefetchEnv = "SECRETS_REFETCH"
 )
 
@@ -319,13 +321,14 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 	if a.cfg.Association == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(a.ctx, refetchTimeout+time.Minute)
-	defer cancel()
-	if out, err := exec.CommandContext(ctx, "systemctl", "stop", RequesterUnit).CombinedOutput(); err != nil {
+	stopCtx, cancelStop := context.WithTimeout(a.ctx, requesterStopTimeout)
+	out, err := exec.CommandContext(stopCtx, "systemctl", "stop", RequesterUnit).CombinedOutput()
+	cancelStop()
+	if err != nil {
 		a.log.Warn("guest_r2_release", "seq", seq, "step", "stop "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
 	}
 	record := r2ReleasedRecord{Type: R2ReleasedNSID, Ok: true, CreatedAt: createdAt()}
-	if out, err := exec.CommandContext(ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(a.ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
 		record.Ok, record.Message = false, tail("releasing the guest requester's contracts: "+err.Error()+": "+string(out), 500)
 	}
 	a.log.Info("guest_r2_release", "seq", seq, "ok", record.Ok, "message", record.Message)

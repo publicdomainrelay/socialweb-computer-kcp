@@ -214,6 +214,7 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 			q.mergeStatus(ctx, contract.Name, status)
 		}
 		q.markFinished(contract.Name)
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	account := contract.Spec.OwnerDid
@@ -262,6 +263,7 @@ func (q *Requester) markFinished(name string) {
 
 func (q *Requester) mergeStatus(ctx context.Context, name string, status v1alpha1.ComputeContractStatus) {
 	status.PendingEvents = nil
+	status.AtircRevokes = ""
 	if err := q.deps.Intents.MergeComputeContractStatus(ctx, name, status); err != nil {
 		q.log.Warn("requester_contract_status_failed", "contract", name, "err", err)
 	}

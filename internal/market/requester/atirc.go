@@ -173,6 +173,8 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		return errors.New("the contract has no secrets bundle")
 	case uri == "":
 		return errors.New("the contract has no record to name the subhandle after yet")
+	case contract.Status.AtircRevokes != "" || r.snapshot().Status.AtircRevokes != "":
+		return errors.New("the contract's atirc tokens are revoked; none is minted again")
 	}
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
@@ -291,19 +293,29 @@ type atircReleaseMarker struct {
 	StartedAt int64 `json:"startedAt"`
 }
 
-func (r *contractRunner) revokeAtircToken(ctx context.Context) v1alpha1.AtircRevokesState {
-	contract := r.snapshot()
-	paths := releaseTokenPaths(contract)
-	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil || len(paths) == 0 {
-		return ""
+func ReleaseRevokesExpected(contract v1alpha1.ComputeContract) bool {
+	return contract.Spec.SecretsRef != nil && len(releaseTokenPaths(contract)) > 0
+}
+
+func ReleaseWait(contract v1alpha1.ComputeContract, base time.Duration) time.Duration {
+	if fromGuest(contract) {
+		return base + GuestRequesterReleaseTimeout
 	}
+	return base
+}
+
+func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRevokesState, func()) {
+	contract := r.snapshot()
+	if !ReleaseRevokesExpected(contract) || r.q.deps.VaultWrite == nil {
+		return "", nil
+	}
+	paths := releaseTokenPaths(contract)
 	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}
 	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(len(paths)+1)*atircCallTimeout)
 	defer cancel()
 	if err := r.setReleaseMarker(first, contract, marker); err != nil {
 		r.log().Warn("requester_atirc_release_marker_failed", "err", err.Error())
-		r.q.startReleaseRevokes(r, contract, marker, true)
-		return v1alpha1.AtircRevokesPending
+		return v1alpha1.AtircRevokesPending, func() { r.q.startReleaseRevokes(r, contract, marker, true) }
 	}
 	var left []string
 	for _, path := range paths {
@@ -314,11 +326,10 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) v1alpha1.AtircRev
 	r.log().Info("requester_atirc_release_revoke", "attempt", 0, "left", len(left))
 	if len(left) == 0 {
 		if err := r.setReleaseMarker(first, contract, nil); err == nil {
-			return v1alpha1.AtircRevokesDone
+			return v1alpha1.AtircRevokesDone, nil
 		}
 	}
-	r.q.startReleaseRevokes(r, contract, marker, false)
-	return v1alpha1.AtircRevokesPending
+	return v1alpha1.AtircRevokesPending, func() { r.q.startReleaseRevokes(r, contract, marker, false) }
 }
 
 func (r *contractRunner) mergeRevokes(ctx context.Context, state v1alpha1.AtircRevokesState) {
@@ -417,7 +428,10 @@ func (r *contractRunner) waitRetry(stop context.Context, attempt int) bool {
 }
 
 func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
-	if contract.Spec.SecretsRef == nil || q.deps.VaultWrite == nil || len(releaseTokenPaths(contract)) == 0 {
+	if !ReleaseRevokesExpected(contract) || q.deps.VaultWrite == nil {
+		return
+	}
+	if state := contract.Status.AtircRevokes; state == v1alpha1.AtircRevokesDone || state == v1alpha1.AtircRevokesAbandoned {
 		return
 	}
 	if _, running := q.releaseRevoking.LoadOrStore(contract.Name, true); running {
@@ -440,17 +454,18 @@ func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
 				return
 			}
 		}
+		write := marker == nil || len(marker.Paths) == 0
+		if write {
+			marker = &atircReleaseMarker{Paths: releaseTokenPaths(contract), StartedAt: q.now().Unix()}
+		}
+		if contract.Status.AtircRevokes != v1alpha1.AtircRevokesPending {
+			pending, cancelPending := context.WithTimeout(q.runContext(), atircCallTimeout)
+			r.mergeRevokes(pending, v1alpha1.AtircRevokesPending)
+			cancelPending()
+		}
 		q.releaseRevoking.Delete(contract.Name)
-		if marker != nil && len(marker.Paths) > 0 {
-			q.log.Info("requester_atirc_release_revoke_resumed", "contract", contract.Name, "paths", marker.Paths)
-			q.startReleaseRevokes(r, contract, marker, false)
-			return
-		}
-		if contract.Status.AtircRevokes == v1alpha1.AtircRevokesPending {
-			done, cancelDone := context.WithTimeout(q.runContext(), atircCallTimeout)
-			r.mergeRevokes(done, v1alpha1.AtircRevokesDone)
-			cancelDone()
-		}
+		q.log.Info("requester_atirc_release_revoke_resumed", "contract", contract.Name, "paths", marker.Paths, "rebuilt", write)
+		q.startReleaseRevokes(r, contract, marker, write)
 	}()
 }
 

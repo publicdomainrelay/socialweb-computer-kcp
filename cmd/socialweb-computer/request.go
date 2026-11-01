@@ -42,7 +42,6 @@ const (
 	requestIdentityWait = 5 * time.Minute
 	requestSummaryRead  = 10 * time.Second
 	requestAttachProbe  = 10 * time.Second
-	requestRevokeWait   = 15 * time.Minute
 	requestSSHRetryRun  = 20 * time.Second
 	transportIroh       = "iroh"
 	transportWebRTC     = "webrtc"
@@ -1023,25 +1022,43 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 	}
 }
 
+var errRevokesPending = errors.New("the requester did not finish revoking the contract's atirc tokens")
+
+func releaseSettled(c *v1alpha1.ComputeContract) bool {
+	if c.Status.Phase == v1alpha1.ComputeContractReleased {
+		return true
+	}
+	if c.Status.Phase != v1alpha1.ComputeContractFailed || !c.Spec.Release {
+		return false
+	}
+	return (c.Status.Contract != nil && c.Status.Contract.Release != nil) ||
+		meta.IsStatusConditionTrue(c.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed)
+}
+
+func revokesPending(c *v1alpha1.ComputeContract) bool {
+	state := c.Status.AtircRevokes
+	return requester.ReleaseRevokesExpected(*c) && state != v1alpha1.AtircRevokesDone && state != v1alpha1.AtircRevokesAbandoned
+}
+
 func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, error) {
 	if err := r.kcp.Release(ctx); err != nil {
 		return nil, fmt.Errorf("setting spec.release: %w", err)
 	}
-	r.log("asked the requester to release the contract (spec.release)")
-	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, func(c *v1alpha1.ComputeContract) bool {
-		return c.Status.Phase == v1alpha1.ComputeContractReleased ||
-			(c.Status.Phase == v1alpha1.ComputeContractFailed && c.Spec.Release && c.Status.Contract != nil && c.Status.Contract.Release != nil)
-	}, r.progress)
-	if err != nil || c == nil || c.Status.AtircRevokes != v1alpha1.AtircRevokesPending {
+	wait := r.contractTimeout
+	if current, err := r.kcp.Contract(ctx); err == nil && current != nil {
+		wait = requester.ReleaseWait(*current, r.contractTimeout)
+	}
+	r.log("asked the requester to release the contract (spec.release)", "timeout", wait.String())
+	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled, r.progress)
+	if err != nil || c == nil || !revokesPending(c) {
 		return c, err
 	}
-	r.log("waiting for the requester to revoke the contract's atirc tokens before its kcp stops", "timeout", requestRevokeWait.String())
-	revoked, err := r.kcp.WaitContract(ctx, requestRevokeWait, func(c *v1alpha1.ComputeContract) bool {
-		return c.Status.AtircRevokes != v1alpha1.AtircRevokesPending
+	r.log("waiting for the requester to revoke the contract's atirc tokens before its kcp stops", "timeout", cloudinit.RequestRevokeWait.String())
+	revoked, err := r.kcp.WaitContract(ctx, cloudinit.RequestRevokeWait, func(c *v1alpha1.ComputeContract) bool {
+		return !revokesPending(c)
 	}, r.progress)
-	if err != nil {
-		r.a.log.Warn("the atirc token revokes did not finish; run request release again revokes the rest", "err", err.Error())
-		return c, nil
+	if err != nil || revoked == nil {
+		return c, fmt.Errorf("%w (atircRevokes %q): %v", errRevokesPending, c.Status.AtircRevokes, err)
 	}
 	r.log("the atirc token revokes finished", "state", string(revoked.Status.AtircRevokes))
 	return revoked, nil
@@ -1345,6 +1362,11 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 			phase = string(c.Status.Phase)
 		}
 		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
+		if errors.Is(err, errRevokesPending) {
+			r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release " + r.inv.Name + "` again to finish the atirc token revokes")
+		} else {
+			r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release " + r.inv.Name + "` again to retry the release")
+		}
 		r.writeSummary(ctx, c)
 		r.stop(context.WithoutCancel(ctx), false)
 		r.writeSummary(ctx, nil)

@@ -68,8 +68,6 @@ type contractRunner struct {
 
 	atircRevoke sync.Once
 
-	atircRevokes v1alpha1.AtircRevokesState
-
 	association *contractAssociation
 
 	associationMu sync.Mutex
@@ -283,6 +281,11 @@ func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.Node
 	}
 	if state != nil && state.Release != nil && !state.Release.OK {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the release did not finish: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", attempts)
+		return
+	}
+	if r.released() && acceptedWithoutReceipt(state) {
+		r.log().Warn("requester_contract_release_failed", "err", err)
+		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "the release did not find the receipt of the accept: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", attempts)
 		return
 	}
 	if r.released() && (state == nil || state.Receipt == nil) {
@@ -1535,13 +1538,16 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		status.Release = &preserved
 	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
-	if phase == v1alpha1.ComputeContractReleased {
-		r.atircRevoke.Do(func() { r.atircRevokes = r.revokeAtircToken(ctx) })
-		status.AtircRevokes = r.atircRevokes
+	var startRevokes func()
+	if phase == v1alpha1.ComputeContractReleased || phase == v1alpha1.ComputeContractFailed {
+		r.atircRevoke.Do(func() { status.AtircRevokes, startRevokes = r.revokeAtircToken(ctx) })
 	}
 	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)
 	if err != nil && !notFound(err) {
 		r.log().Warn("requester_contract_status_failed", "err", err)
+	}
+	if startRevokes != nil {
+		startRevokes()
 	}
 	return err
 }
@@ -1558,7 +1564,7 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	if r.resumed {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
 	}
-	if phase == v1alpha1.ComputeContractReleasing {
+	if phase == v1alpha1.ComputeContractReleasing || phase == v1alpha1.ComputeContractFailed {
 		if release := r.releaseStatus(); release != nil && release.LastError != "" {
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
 		}

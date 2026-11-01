@@ -232,10 +232,15 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     most after release, from the release time kept in a marker in the bundle secret), starts only
     once that marker is written, stops with the requester and resumes after a restart from the marker;
     a 401 counts as revoked only for a subhandle read from the env file. The first attempt runs before
-    Released is written and its outcome is `status.atircRevokes` (Done, Pending while retries run,
-    Abandoned after 24 h); `run request release` waits up to 15 min while it is Pending before its kcp
-    stops, and on an already Released contract it starts the kcp, so the requester resumes the revokes
-    from the marker (retrying while its OpenBao starts) and the CLI waits for Done the same way. Every read-modify-write of a
+    Released (or Failed) is written and its outcome is `status.atircRevokes` (Done only when every
+    token path answered 200, a 401 for its own token, holds no token or is past its exp; Pending while
+    retries run; Abandoned after 24 h); only that first write and the retries set it, a later status
+    write never does, and no token is minted once it is set. `run request release` waits up to
+    `cloudinit.RequestRevokeWait` (15 min) while it is Pending or unset on a contract that names token
+    paths; on that timeout it exits non-zero and keeps the invocation's state, and a rerun starts the
+    kcp so the requester resumes the revokes, from the marker or, with no marker, over every token path
+    again. A denied accept whose receipt never arrives leaves the contract Failed with ReleaseFailed,
+    and a rerun of `run request release` looks for the receipt and releases again. Every read-modify-write of a
     contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
     token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
     vault and mount.
@@ -247,9 +252,15 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user. With no command in the guest,
     `run request r2 <name> [--r2-name r2] [--agent] [--hold]` publishes guest.r2Start and the guest agent
     starts `socialweb-r2.service` as the user `r2`; releasing the parent publishes guest.r2Release first
-    and waits (12 min at most) for guest.r2Released after `socialweb-r2-release.service` released the
-    guest requester's contracts; a bidder releases a VM whose requester's contract-scoped association
-    expired 10 min ago (ComputeVM `spec.associationExpiresAt`).
+    and waits for guest.r2Released after `socialweb-r2-release.service` released the guest requester's
+    contracts. The bounds nest, from the constants in `internal/atproto/cloudinit`: each guest
+    `run request release` gets RequestReleaseWait + RequestRevokeWait + 2 min, the release unit 1 min
+    more, the cascade (GuestRequesterReleaseTimeout) the unit stop plus 1 min more, and the parent's
+    `run request release` waits the cascade plus `--contract-timeout`; the outcome is
+    `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose
+    requester's contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`,
+    at most 24 h after the accept, only from a proof in another repo than the requester's that names
+    the requester as subject and the authority's own accept as contract; each skip is logged).
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own

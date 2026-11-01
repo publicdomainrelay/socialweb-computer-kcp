@@ -8,10 +8,11 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
-const GuestRequesterReleaseTimeout = 12 * time.Minute
+const GuestRequesterReleaseTimeout = cloudinit.GuestRequesterReleaseTimeout
 
 func GuestRequesterReleaseEventName(contract string) string {
 	name := "r2-release-" + contract
@@ -26,6 +27,9 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 	contract := r.snapshot()
 	if !fromGuest(contract) || state == nil || state.GuestRequester == nil || state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified ||
 		q.deps.ContractEvents == nil || contract.UID == "" {
+		return
+	}
+	if state.R2Release != nil && state.R2Release.Phase != v1alpha1.ContractR2ReleaseRequested {
 		return
 	}
 	receiptURI := receiptURIOf(state)
@@ -83,7 +87,11 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 			return
 		}
 	}
-	timer := time.NewTimer(GuestRequesterReleaseTimeout)
+	wait := GuestRequesterReleaseTimeout
+	if at, err := market.ParseTime(state.R2Release.RequestedAt); err == nil {
+		wait = max(at.Add(GuestRequesterReleaseTimeout).Sub(q.now()), 0)
+	}
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	for {
 		select {
