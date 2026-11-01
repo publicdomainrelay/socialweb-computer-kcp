@@ -47,14 +47,14 @@ items:
     title: "socialweb-wasm/internal/browsersandbox: js/wasm runner (sandbox.Runner + sandbox.Prober, Kind browser) and the !js stub"
     owner: wasm
     depends_on: [S1-API, S2-CONTRACT, W0-PROBE]
-    status: planned
+    status: done
   - id: W2-BRIDGE
     title: "Page half: scripts/browser/policy_sandbox.js (opaque iframe relay, per-run Worker, BOOTSTRAP/FOOTER), kcp_worker.js __socialwebSandbox bridge, app.js MessageChannel"
     owner: wasm
     depends_on: [W0-PROBE]
-    status: planned
+    status: done
   - id: W3-WIRING
     title: "Page wiring: orchestrator uses controllers/policy.Register with OpenSandbox: browsersandbox.Open; requester overlay sets Sandbox {Provider: browser}; PolicyEngine in the status feed; dev server rejects Origin null on /debug/*"
     owner: wasm
     depends_on: [W1-RUNNER, W2-BRIDGE]
-    status: planned
+    status: done
