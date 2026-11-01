@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,6 +23,10 @@ const (
 	PongWriteTimeout = 10 * time.Second
 
 	MaxBufferedBytes = 2 * MaxFrameBytes
+
+	CloseAbnormal = 1006
+
+	RestoredCloseReason = "restored from a memory snapshot"
 )
 
 type DialFunc func(ctx context.Context, network, address string) (net.Conn, error)
@@ -48,6 +53,11 @@ type CloseError struct {
 
 func (e *CloseError) Error() string {
 	return fmt.Sprintf("wsconn: websocket closed: code %d reason %q clean %t", e.Code, e.Reason, e.Clean)
+}
+
+func Restored(err error) bool {
+	var closeErr *CloseError
+	return errors.As(err, &closeErr) && closeErr.Code == CloseAbnormal && closeErr.Reason == RestoredCloseReason
 }
 
 func Dial(ctx context.Context, target string, dial DialFunc) (*Conn, error) {

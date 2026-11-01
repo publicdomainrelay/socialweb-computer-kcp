@@ -17,7 +17,6 @@ const (
 	socketConnecting = 0
 	socketOpen       = 1
 	closeNormal      = 1000
-	closeAbnormal    = 1006
 	frameOverhead    = 64
 )
 
@@ -115,11 +114,11 @@ func (c *Conn) onOpen(js.Value) {
 func (c *Conn) onError(js.Value) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.endLocked(&CloseError{Code: closeAbnormal, Reason: "error event"})
+	c.endLocked(&CloseError{Code: CloseAbnormal, Reason: "error event"})
 }
 
 func (c *Conn) onClose(event js.Value) {
-	closeErr := &CloseError{Code: closeAbnormal}
+	closeErr := &CloseError{Code: CloseAbnormal}
 	if event.Type() == js.TypeObject {
 		if code := event.Get("code"); code.Type() == js.TypeNumber {
 			closeErr.Code = code.Int()
