@@ -1,0 +1,111 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-vouch-alice
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: sh.tangled.graph.vouch
+  rkey: "did:plc:lpfuqerea3deuoyrn7ojser4"
+  deletionPolicy: Retain
+  record: {"$type": "sh.tangled.graph.vouch", "createdAt": "2026-08-05T01:26:51+03:00", "kind": "vouch", "reason": "Whooooo areee yoouuu???"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-claim-bidder-4vcig7s4
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: com.publicdomainrelay.temp.badgeBlueKeys
+  rkey: bidder_associate-did-plc-4vcig7s43z3nyqrnepmcfzqt
+  deletionPolicy: Retain
+  record: {"$type": "com.publicdomainrelay.temp.badgeBlueKeys", "challenge": "did:plc:ocnuqjlzgohypj3zoznermms", "createdAt": "2026-10-23T17:23:25.492Z", "keyId": "did:plc:4vcig7s43z3nyqrnepmcfzqt", "name": "bidder-epmcfzqt", "nonce": "254f1b9384cc47d2b7bf8e3bfd11b6e0", "service": "bidder_associate"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-claim-bidder-2l2wdry7
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: com.publicdomainrelay.temp.badgeBlueKeys
+  rkey: bidder_associate-did-plc-2l2wdry77c7jtucbslstagkj
+  deletionPolicy: Retain
+  record: {"$type": "com.publicdomainrelay.temp.badgeBlueKeys", "challenge": "did:plc:ocnuqjlzgohypj3zoznermms", "createdAt": "2026-10-23T17:23:24.563Z", "keyId": "did:plc:2l2wdry77c7jtucbslstagkj", "name": "bidder-slstagkj", "nonce": "2a6f96bdbfde455bb21192d60939abe1", "service": "bidder_associate"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-profile-bsky
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: app.bsky.actor.profile
+  rkey: self
+  deletionPolicy: Retain
+  record: {"$type": "app.bsky.actor.profile", "avatar": {"$type": "blob", "mimeType": "image/png", "ref": {"$link": "bafkreiaxswukrvlmy7k4vpn7ox7ukg6ogbozdnqeblduotstjxdvk3ov2e"}, "size": 20652}, "createdAt": "2026-08-04T20:00:36.245Z", "displayName": "", "labels": {"$type": "com.atproto.label.defs#selfLabels", "values": [{"val": "bot"}]}}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-profile-tangled
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: sh.tangled.actor.profile
+  rkey: self
+  deletionPolicy: Retain
+  record: {"$type": "sh.tangled.actor.profile", "avatar": {"$type": "blob", "mimeType": "image/png", "ref": {"$link": "bafkreidixoyshftoztftc3tssjyxvshevbjvukashv5axqdwqhtfhrlpve"}, "size": 17167}, "bluesky": false, "description": "Bob the Virtual Machine Builder", "links": ["https://socialweb.computer", "", "", "", ""], "location": "", "preferredHandle": "", "pronouns": "he/him", "stats": ["", ""]}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-atirc-operator
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: com.fedfork.irc.agentOperator
+  rkey: self
+  deletionPolicy: Retain
+  record: {"$type": "com.fedfork.irc.agentOperator", "createdAt": "2026-10-30T07:29:05Z", "owner": "did:plc:5svqtrhheairglgiiyvutzik"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-bot-registration
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: bot.did.registration
+  rkey: self
+  deletionPolicy: Retain
+  record: {"$type": "bot.did.registration", "createdAt": "2026-10-30T07:29:10Z", "did": "did:plc:ocnuqjlzgohypj3zoznermms", "kind": "agent", "operator": "did:plc:5svqtrhheairglgiiyvutzik"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-rbacdid-allowself
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: com.publicdomainrelay.temp.auth.allowlist.rbacDid
+  rkey: 3msbt7ah2222m
+  deletionPolicy: Retain
+  record: {"$type": "com.publicdomainrelay.temp.auth.allowlist.rbacDid", "allowed": {"allowSelf": ["did:plc:ocnuqjlzgohypj3zoznermms"]}, "createdAt": "2026-08-04T20:13:39.712Z", "protects": {"allowSelf": {"scope": "account.auth", "service": ""}}}

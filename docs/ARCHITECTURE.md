@@ -11687,6 +11687,70 @@ status, or a Retained one, releases as before.
   boot's provider sets, sequential; a restart skips them), ready 5.7 s twice (8.4 and 8.7 s with the
   QPS and parallel list only). The page and iOS readings after rc134 are open.
 
+### The test accounts' minimum state is declared AtprotoRecords in deploy/testaccounts (2026-10-31, r137)
+
+Owner request: alice (aliceoa.bsky.social, did:plc:lpfuqerea3deuoyrn7ojser4, requester) and bob
+(bobvmbuilder.bsky.social, did:plc:ocnuqjlzgohypj3zoznermms, bidder operator) are test accounts, and
+the state a live run needs before it starts is kept as IaC. Before: that state existed only in the
+two repos, mixed with the churn of every run, and nothing said which records a cleanup must keep.
+Inventory 2026-10-31 by public reads (describeRepo, listRecords for inventory only): alice 49
+collections, 5897 records; bob 31 collections, 5424 records. Classes:
+
+| class | alice | bob | writer |
+| --- | --- | --- | --- |
+| declared minimum | sh.tangled.graph.vouch bob and john; badgeBlueKeys `requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72` (the gateway requester, live mirror); app.bsky and sh.tangled profile; com.fedfork.irc.agentOperator, bot.did.registration; auth.allowlist.rbacDid | sh.tangled.graph.vouch alice; badgeBlueKeys `bidder_associate-` of the two live bidder hosts (did:plc:4vcig7s43z3nyqrnepmcfzqt, did:plc:2l2wdry77c7jtucbslstagkj, live mirror and heartbeat); the same profiles, atirc and rbacDid records | tangled, bsky, atirc (outside this repository); the claims by the association flow (`scripts/associate-bidder.ts`, the did-key associator) |
+| minimum, runtime-owned | badgeBlueKeys 32-character base58 key claims (`market.BadgeBlueKeysRkey`, one per page, iOS or CLI requester key), market.association (contract-scoped) | market.offering `3msbt7akfhk2m`, market.heartbeat `self`, the bidder key claim | `internal/market/requester` identity.go, association.go; `internal/market/bidder` offering.go, `internal/controllers/marketpresence` |
+| run churn | compute.vm 1078, market.rfp 1076, policy.ghalite 796 (one per RFP, `runner.go` CreateRecord), market.event 677, market.accept 464, vm.delete 419, guest.* 260, config.wif.simple 147, ephemeralInfra 46, fedproxy.rbac node.* | market.event 1241, market.bid 754, bids.free 754, config.wif.simple 754, vm.onNetwork 655, market.receipt 354, guest.* 318, vm.hostKeys 137, vm.terminated 131, fedproxy.rbac 226 | `internal/market/requester`, `internal/market/bidder`, `internal/controllers/infra` |
+| stale or another app | badgeBlueKeys claims of DIDs with no mirror (6c7zf6, 5ipkef), market.offering 30 (July), ccrfp, temp.rfp, agent.*, dev.cocore.*, network.comind.*, sh.tangled repo/spindle/publicKey, fedproxy.sshPublicKey, posts, likes, follows | badgeBlueKeys `bidder_associate-` of 4 DIDs with no mirror, org.tangled.*, vibescrobble | earlier releases and other apps |
+
+Decision. The declared records are AtprotoRecord objects (the existing abstraction: one getRecord
+at a deterministic rkey, a putRecord only when the repo differs), one file set per account:
+`deploy/testaccounts/<account>/identity.yaml` (handle, did, PDS, the expected OAuth scope sets from
+`oauth.RequesterOAuthScope`, `compose.GatewayAtprotoScope` and `oauth.BidderOAuthScope`, the
+declared list with each record's live cid, the runtime-owned records and the retention keep list;
+never a credential, token or jti) and `kcp/` (one ComponentLink, `testaccount-<account>-records`,
+granting `repo.write` on the declared collections from the AtprotoRecords labelled
+`socialweb.computer/testaccount=<account>` to the account's AtprotoRepo
+`atprotorepo.RepoName(did)`, and the AtprotoRecords). Every object carries
+`socialweb.computer/declared-state=testaccounts`; every record is `deletionPolicy: Retain`, so
+deleting the object never deletes the repo record, and has no swapCid, so a deleted record is put
+back. The record bodies are the live values byte for byte (16 of 16 equal by getRecord at
+2026-10-31, cids in identity.yaml), so the first apply writes nothing. The objects name no
+workspace: they bind to the AtprotoRepo of the workspace they are applied in. The credential stays
+where it is: the AtprotoRepo's RemoteRepo uses the MarketIdentity's session (the gateway's web app
+session for alice, the bidder's OAuth session for bob), so the YAML holds no SecretRef of its own.
+Not in the YAML: live contracts (ComputeContract, EphemeralInfra, their records) are run state and
+apply never touches them; the runtime-owned records are written by their components and a
+declaration would fight their refreshes. No Go change was needed: AtprotoRecord publishes any
+collection with a fixed rkey.
+
+Apply path (the lead; files outside `deploy.FS`, never in a release binary). alice: the prod
+gateway kcp, workspace `root:app`, where the session-owner MarketIdentity (label
+`apps.socialweb.computer/session-owner=true`) composes `repo-did-plc-lpfuqerea3deuoyrn7ojser4`.
+bob: the prod bidder host whose MarketIdentity `bidder` reports bob's did (an OAuth bidder),
+workspace `root`, `repo-did-plc-ocnuqjlzgohypj3zoznermms`. Both: `kubectl apply --server-side
+--field-manager socialweb.computer/testaccounts -f deploy/testaccounts/<account>/kcp/` against
+`<kcp>/clusters/<workspace>` (the `kc` helper of `docs/inspect.md`), after `--dry-run=server`.
+Read back: every AtprotoRecord `status.phase` Applied, reason InSync, `status.cid` equal to the
+identity.yaml cid. While the AtprotoRepo is absent (alice is a session owner only while she has a
+cluster or an infra in use) the records stay Failed RepoNotReady and wake on the repo bind.
+
+Scope limits. The OAuth sessions hold no scope for sh.tangled.graph.vouch, the profiles,
+com.fedfork.irc.agentOperator and bot.did.registration, nor rbacDid for alice (bob has create only),
+so for those the IaC verifies (InSync on equal, Failed WriteFailed on drift) and a repair is a
+password-session write by the owner; the badgeBlueKeys claims are repaired through the session
+(`write: oauth` in identity.yaml). Adding those scopes forces a new sign-in of every OAuth session,
+so it waits for a planned one.
+
+Retention (r137, `MarketRequester spec.retention`). The requester sweep runs in page, iOS, CLI and
+gateway kcps, which do not hold these objects, so the keep rule is in the repo itself: (collection,
+rkey). The sweep covers only the churn allowlist (market.rfp, accept, event, compute.vm, vm.delete,
+the requester-written guest.*, policy.ghalite, ephemeralInfra); every declared record is outside
+it; badgeBlueKeys is never swept; an rkey starting `fixture-` is kept in every collection (reserved
+for a later declared record in a churn collection); `spec.retention.keep` takes the identity.yaml
+list; the `socialweb.computer/declared-state=testaccounts` label is an extra guard where the
+objects exist.
+
 ## 16. Vocabulary
 
 | | |

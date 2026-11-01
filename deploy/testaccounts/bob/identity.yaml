@@ -1,0 +1,73 @@
+account: bob
+role: bidder operator
+handle: bobvmbuilder.bsky.social
+did: did:plc:ocnuqjlzgohypj3zoznermms
+pds: https://phellinus.us-west.host.bsky.network
+repo: repo-did-plc-ocnuqjlzgohypj3zoznermms
+labels:
+  socialweb.computer/testaccount: bob
+  socialweb.computer/declared-state: testaccounts
+apply:
+  kcp: the prod bidder host kcp whose MarketIdentity bidder reports status.did = did (bob signed in by OAuth, mode oauthQr or oauthBrowser)
+  identity: MarketIdentity bidder
+  workspace: root
+  objects: kcp/
+  fieldManager: socialweb.computer/testaccounts
+counterparties:
+  alice: did:plc:lpfuqerea3deuoyrn7ojser4
+  bidderHosts:
+    - did:plc:4vcig7s43z3nyqrnepmcfzqt
+    - did:plc:2l2wdry77c7jtucbslstagkj
+oauthScopes:
+  - name: bidder
+    source: internal/atproto/oauth BidderOAuthScope
+    scopes:
+      - atproto
+      - repo:com.publicdomainrelay.temp.auth.allowlist.rbacDid?action=create
+      - repo:com.publicdomainrelay.temp.market.bid?action=create
+      - repo:com.publicdomainrelay.temp.market.bids.free?action=create
+      - repo:com.publicdomainrelay.temp.market.receipt?action=create
+      - repo:com.publicdomainrelay.temp.market.event?action=create
+      - repo:com.publicdomainrelay.temp.compute.config.wif.simple?action=create
+      - repo:com.publicdomainrelay.temp.compute.vm?action=create
+      - repo:com.publicdomainrelay.temp.market.rfp?action=create
+      - repo:com.publicdomainrelay.temp.market.accept?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.vm.delete?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.vm.onNetwork?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.vm.terminated?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.vm.hostKeys?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.publicKey?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.signalWebRTC?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.secretsApplied?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.secretsRequested?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.requesterDid?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.r2Released?action=create
+      - repo:com.fedproxy.rbac?action=create
+      - repo:com.publicdomainrelay.temp.market.bidderAssociation?action=create
+      - repo:computer.socialweb.temp.policy.ghalite?action=create
+      - repo:computer.socialweb.temp.policy.typescript?action=create
+      - repo:com.publicdomainrelay.temp.market.offering?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.heartbeat?action=create&action=update
+      - repo:com.publicdomainrelay.temp.badgeBlueKeys?action=create&action=update&action=delete
+      - repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete
+      - rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitBid?aud=*
+      - rpc:com.publicdomainrelay.temp.market.submitEvent?aud=*
+optionalScopes: []
+declared:
+  - {object: testaccount-bob-vouch-alice, collection: sh.tangled.graph.vouch, rkey: "did:plc:lpfuqerea3deuoyrn7ojser4", cid: bafyreibk6yrjtbfyubhuhckhlxvluftci3lddwojyswcguvgwzeaaqip7i, write: verify, readBy: bidder-tangled-vouch (the operator vouches the requester)}
+  - {object: testaccount-bob-claim-bidder-4vcig7s4, collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: bidder_associate-did-plc-4vcig7s43z3nyqrnepmcfzqt, cid: bafyreib56shw3mjyejpicaxan5pnbksgbetp2xgksyfgpcfpl4h2eakvx4, write: oauth, readBy: trust operatorOf (the bidder host's mirror names bob)}
+  - {object: testaccount-bob-claim-bidder-2l2wdry7, collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: bidder_associate-did-plc-2l2wdry77c7jtucbslstagkj, cid: bafyreibb5hr27m6fjp3rctag66sb56t5z6e6wzlnsxcxs32ljhlp2lznqu, write: oauth, readBy: trust operatorOf (the bidder host's mirror names bob)}
+  - {object: testaccount-bob-profile-bsky, collection: app.bsky.actor.profile, rkey: self, cid: bafyreihjykthjmsbjlbjnahdvj3hj7oqhn75r67n6uerkrclbq5t3odhha, write: verify, readBy: bsky and atirc display}
+  - {object: testaccount-bob-profile-tangled, collection: sh.tangled.actor.profile, rkey: self, cid: bafyreibw5uvto2wxwcvrdyroduxogrwffpxupr4qj5zysd2ebqwdomiayi, write: verify, readBy: tangled}
+  - {object: testaccount-bob-atirc-operator, collection: com.fedfork.irc.agentOperator, rkey: self, cid: bafyreihuhajo3ck7b7axoatpczm7gbm3adakd4dbfevgtdkbv5cctwvrua, write: verify, readBy: atirc mint (agent operator)}
+  - {object: testaccount-bob-bot-registration, collection: bot.did.registration, rkey: self, cid: bafyreifnyprsrxk76wvcvzk5x2bzzuag736tfy33vaozmgliukkj2eqo5a, write: verify, readBy: atirc agent registration}
+  - {object: testaccount-bob-rbacdid-allowself, collection: com.publicdomainrelay.temp.auth.allowlist.rbacDid, rkey: 3msbt7ah2222m, cid: bafyreidh6idu6ohys4425xcxs3ygy535th4emxtyeofkcbpuduj3mft4ti, write: create, readBy: fedproxy account.auth allowSelf}
+runtimeOwned:
+  - {collection: com.publicdomainrelay.temp.market.offering, rkeys: 3msbt7akfhk2m, writer: "internal/market/bidder offering.go (refreshes refreshedAt)"}
+  - {collection: com.publicdomainrelay.temp.market.heartbeat, rkeys: self, writer: "internal/market/bidder offering.go and internal/controllers/marketpresence (rewrites createdAt)"}
+  - {collection: com.publicdomainrelay.temp.badgeBlueKeys, rkeys: 32-character base58 BadgeBlueKeysRkey, writer: "internal/market/bidder offering.go (the bidder key claim)"}
+retentionKeep:
+  collections: [app.bsky.*, sh.tangled.*, org.tangled.*, town.delve.*, com.fedfork.irc.agentOperator, bot.did.registration, com.publicdomainrelay.temp.auth.allowlist.rbacDid, com.publicdomainrelay.temp.badgeBlueKeys, com.publicdomainrelay.temp.market.offering, com.publicdomainrelay.temp.market.heartbeat]
+  rkeyPrefix: fixture-
