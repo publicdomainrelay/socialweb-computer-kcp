@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/workloadoauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/workloadauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 )
 
 const (
@@ -86,8 +87,32 @@ func runOAuthRevoke(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 	return a.oauthReport(vals, map[string]any{"deleted": "at://" + account + "/" + workloadauth.RBACCollection + "/" + roleName})
 }
 
+func oauthWIDDefaults(account, roleName string) (string, string) {
+	if account != "" && roleName != "" {
+		return account, roleName
+	}
+	raw, err := os.ReadFile(requester.OAuthWIDFile)
+	if err != nil {
+		return account, roleName
+	}
+	var wid struct {
+		Account string `json:"account"`
+		Role    string `json:"role"`
+	}
+	if json.Unmarshal(raw, &wid) != nil {
+		return account, roleName
+	}
+	if account == "" {
+		account = wid.Account
+	}
+	if roleName == "" {
+		roleName = wid.Role
+	}
+	return account, roleName
+}
+
 func runOAuthApprove(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
-	account, roleName := strings.TrimSpace(vals.String("oauth-account")), strings.TrimSpace(vals.String("oauth-role"))
+	account, roleName := oauthWIDDefaults(strings.TrimSpace(vals.String("oauth-account")), strings.TrimSpace(vals.String("oauth-role")))
 	if _, err := syntax.ParseDID(account); err != nil {
 		return a.fail(exitRefused, "oauth approve: --oauth-account must be the account DID: %v", err)
 	}

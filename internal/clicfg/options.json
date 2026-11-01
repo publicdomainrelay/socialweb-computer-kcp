@@ -818,7 +818,7 @@
     },
     "oauth-account": {
       "type": "string",
-      "description": "oauth allow, revoke and approve: the account DID whose com.fedproxy.rbac record grants the workload"
+      "description": "oauth allow, revoke and approve: the account DID whose com.fedproxy.rbac record grants the workload; oauth approve defaults it (and --oauth-role) from /etc/socialweb-computer/oauth-wid.json, which a contract's spec.oauthClients puts into the guest's secrets bundle"
     },
     "oauth-role": {
       "type": "string",
