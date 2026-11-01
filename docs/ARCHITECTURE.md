@@ -11545,7 +11545,9 @@ bearer's chain, so the signed claim `leases` is root to leaf; the requester acce
 `leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
 mint. Every error answer is a failed mint, retried with backoff. The configured atirc endpoint is
 lease-aware (v0.1.0-ff02afe and later, rc131): a 200 to a leased mint whose token has no `leases`
-claim is revoked and fails the mint (reason LeaseClaimMissing), never a plain token; rc130's
+claim is revoked and fails the mint (reason LeaseClaimMissing, permanent: not retried and never
+overwritten by GaveUp; a token whose revoke fails is recorded in `atircMinted`, so the release revoke
+and the orphan sweep revoke it later), never a plain token; rc130's
 per-endpoint fallback and its `<atircMintedRef path>-lease` vault record are gone. A mint without a
 lease is unchanged. The agent mint's outcome is the ComputeContract condition `AtircTokenMinted`
 (Leased, Unleased, Present, MintFailed, LeaseClaimMissing, GaveUp); the r2

@@ -172,6 +172,13 @@ func agentMintFailReason(err error) string {
 	return "MintFailed"
 }
 
+func agentMintFailMessage(attempt int, err error) string {
+	if errors.Is(err, errAtircLeaseMissing) {
+		return fmt.Sprintf("attempt %d, not retried: %s", attempt, err.Error())
+	}
+	return fmt.Sprintf("attempt %d of %d: %s", attempt, associationRetryAttempts, err.Error())
+}
+
 func liveAtircEntry(entries []SecretEntry, path string, now time.Time) bool {
 	for _, e := range entries {
 		if e.Path != path {
@@ -293,8 +300,8 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 		return
 	}
 	r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", 1, "err", err.Error())
-	r.noteAgentMint(ctx, false, agentMintFailReason(err), fmt.Sprintf("attempt 1 of %d: %s", associationRetryAttempts, err.Error()))
-	if lease == nil {
+	r.noteAgentMint(ctx, false, agentMintFailReason(err), agentMintFailMessage(1, err))
+	if lease == nil || errors.Is(err, errAtircLeaseMissing) {
 		return
 	}
 	if _, retrying := r.q.atircMintRetrying.LoadOrStore(contract.Name, true); retrying {
@@ -317,7 +324,10 @@ func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1
 				return
 			}
 			r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", attempt, "err", err.Error())
-			r.noteAgentMint(ctx, false, agentMintFailReason(err), fmt.Sprintf("attempt %d of %d: %s", attempt, associationRetryAttempts, err.Error()))
+			r.noteAgentMint(ctx, false, agentMintFailReason(err), agentMintFailMessage(attempt, err))
+			if errors.Is(err, errAtircLeaseMissing) {
+				return
+			}
 		}
 		r.log().Warn("requester_atirc_mint_gave_up", "envFile", envFile, "attempts", associationRetryAttempts)
 		r.noteAgentMint(ctx, false, "GaveUp", fmt.Sprintf("no atirc agent token after %d attempts", associationRetryAttempts))
@@ -405,7 +415,8 @@ func (r *contractRunner) mintAtirc(ctx context.Context, issuer atircIssuer, in a
 	}
 	refuse := func(cause error) (string, string, error) {
 		if _, revokeErr := r.revokeAtircSubhandle(ctx, token, in.Subhandle); revokeErr != nil {
-			return "", "", fmt.Errorf("mint %s: %w; its revoke failed: %w", in.Subhandle, cause, revokeErr)
+			return "", "", &atircUnrevoked{token: token, subhandle: in.Subhandle,
+				err: fmt.Errorf("mint %s: %w; its revoke failed: %w", in.Subhandle, cause, revokeErr)}
 		}
 		return "", "", fmt.Errorf("mint %s: %w", in.Subhandle, cause)
 	}
@@ -486,6 +497,10 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		return "", fmt.Errorf("no token is minted while the atirc minted index cannot record %s: %w", subhandle, err)
 	}
 	token, reason, err := r.mintAtirc(ctx, issuer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Lease: lease})
+	var unrevoked *atircUnrevoked
+	if errors.As(err, &unrevoked) {
+		r.recordUnrevoked(ctx, kv, ref, data, contract, path, exp, unrevoked)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -519,6 +534,39 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	r.mintedEntry(ctx, contract, current, true)
 	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339), "lease", reason)
 	return reason, nil
+}
+
+type atircUnrevoked struct {
+	token string
+
+	subhandle string
+
+	err error
+}
+
+func (e *atircUnrevoked) Error() string { return e.err.Error() }
+
+func (e *atircUnrevoked) Unwrap() error { return e.err }
+
+func (r *contractRunner) recordUnrevoked(ctx context.Context, kv vault.KV, ref commonv1.SecretRef, data map[string]any,
+	contract v1alpha1.ComputeContract, path string, exp time.Time, u *atircUnrevoked) {
+	if claimed, ok := atircTokenExp(u.token, ""); ok {
+		exp = claimed
+	}
+	minted, err := withMinted(data, atircMinted{Path: path, Subhandle: u.subhandle, Token: u.token, Exp: exp.Unix(), UID: string(contract.UID)}, r.q.now())
+	if err == nil {
+		next := make(map[string]any, len(data)+1)
+		for k, v := range data {
+			next[k] = v
+		}
+		next[atircMintedKey] = minted
+		err = kv.Write(ctx, ref.Mount, ref.Path, next)
+	}
+	if err != nil {
+		r.log().Warn("requester_atirc_unrevoked_unrecorded", "subhandle", u.subhandle, "path", path, "err", err.Error())
+		return
+	}
+	r.log().Warn("requester_atirc_unrevoked_recorded", "subhandle", u.subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339))
 }
 
 type atircMinted struct {
