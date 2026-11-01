@@ -20,7 +20,12 @@ This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
 the next placement, and every VM released when the cluster returned to zero.
 It passed again, all nine sections, on `v0.0.0-rc142` (2026-10-31) with every
-bidder on rc142.
+bidder on rc142, and on `v0.0.0-rc154` (2026-11-01, gateway, ssh gateway and
+every bidder on rc154): first VM on hat-7 in 43 s, one VM per host (hat-7,
+local, hat-9), back to zero, heartbeat freeze and advance, offering unchanged,
+drift reverted, typo fails closed InvalidKey, ACC34 exit 0 on every host
+(fresh / restarted kcp: local 2.2 / 3.2 s, hat-9 3.1 / 2.2 s, hat-7 4.9 / 4.5 s),
+no plaintext signaling in any log.
 Plan 0026 (abstract kinds, the bus with default-deny ComponentLinks) changed
 the object names and fields it reads; the commands below use the plan 0026
 names. Every kind is read by its full resource name (for example
