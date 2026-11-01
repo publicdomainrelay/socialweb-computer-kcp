@@ -183,7 +183,7 @@ type Deps struct {
 
 	AwaitRepo func(ctx context.Context, did string)
 
-	WatchVaults func() (<-chan struct{}, func())
+	WatchBinds func() (<-chan struct{}, func())
 
 	Policy runs.ResolveFunc
 
@@ -636,7 +636,7 @@ func (q *Requester) Start(ctx context.Context) error {
 	}
 	repoMs := time.Since(startedAt).Milliseconds()
 	if len(q.cfg.OwnerSessions) > 0 || q.cfg.IdentityMode == IdentityModeOAuth {
-		if err := q.bindSignerKeyAfterVaults(ctx); err != nil {
+		if err := q.bindSignerKeyAfterBinds(ctx); err != nil {
 			return err
 		}
 	}

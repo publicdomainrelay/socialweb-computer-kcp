@@ -107,11 +107,11 @@ func (q *Requester) authenticateOwnerSession(ctx context.Context) error {
 	return nil
 }
 
-func (q *Requester) bindSignerKeyAfterVaults(ctx context.Context) error {
-	if q.deps.WatchVaults == nil {
+func (q *Requester) bindSignerKeyAfterBinds(ctx context.Context) error {
+	if q.deps.WatchBinds == nil {
 		return q.bindSignerKey(ctx)
 	}
-	wake, cancel := q.deps.WatchVaults()
+	wake, cancel := q.deps.WatchBinds()
 	defer cancel()
 	waiting := false
 	for {
@@ -124,7 +124,7 @@ func (q *Requester) bindSignerKeyAfterVaults(ctx context.Context) error {
 		}
 		if !waiting {
 			waiting = true
-			q.log.Info("requester_signer_key_waits_for_vault", "reason", "a vault bind wakes the next try; no bind within "+signerBindVaultWait.String()+" fails the start", "err", err.Error())
+			q.log.Info("requester_signer_key_waits_for_vault", "reason", "a Vault, MarketIdentity or AtprotoRepo bind wakes the next try; no bind within "+signerBindVaultWait.String()+" fails the start", "err", err.Error())
 		}
 		select {
 		case <-ctx.Done():
