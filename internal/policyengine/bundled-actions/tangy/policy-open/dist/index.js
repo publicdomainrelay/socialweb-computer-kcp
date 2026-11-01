@@ -5791,7 +5791,7 @@ var didDocument = external_exports.object({
   service: external_exports.array(service).optional()
 });
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/errors.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/errors.js
 var DidNotFoundError = class extends Error {
   constructor(did) {
     super(`Could not resolve DID: ${did}`);
@@ -8931,7 +8931,7 @@ var verifySignature = (didKey, data, sig, opts) => {
   return plugin.verifySignature(didKey, data, sig, opts);
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/atproto-data.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/atproto-data.js
 var getKey = (doc) => {
   const key = getSigningKey(doc);
   if (!key) return void 0;
@@ -8988,7 +8988,7 @@ var ensureAtprotoKey = (doc) => {
   return signingKey;
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/base-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/base-resolver.js
 var BaseResolver = class {
   constructor(cache2) {
     this.cache = cache2;
@@ -9054,7 +9054,7 @@ var BaseResolver = class {
   }
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/util.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/util.js
 async function timed(ms, fn) {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), ms);
@@ -9067,7 +9067,7 @@ async function timed(ms, fn) {
   }
 }
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/web-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/web-resolver.js
 var DOC_PATH = "/.well-known/did.json";
 var DidWebResolver = class extends BaseResolver {
   constructor(timeout, cache2) {
@@ -9104,7 +9104,7 @@ var DidWebResolver = class extends BaseResolver {
   }
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/plc-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/plc-resolver.js
 var DidPlcResolver = class extends BaseResolver {
   constructor(plcUrl, timeout, cache2) {
     super(cache2);
@@ -9133,7 +9133,7 @@ var DidPlcResolver = class extends BaseResolver {
   }
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/did/did-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/did/did-resolver.js
 var DidResolver = class extends BaseResolver {
   constructor(opts) {
     super(opts.didCache);
@@ -9166,7 +9166,7 @@ var DidResolver = class extends BaseResolver {
   }
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/handle/index.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/handle/index.js
 import * as dns from "node:dns/promises";
 var SUBDOMAIN = "_atproto";
 var PREFIX = "did=";
@@ -9251,7 +9251,7 @@ var HandleResolver = class {
   }
 };
 
-// ../../../../../node_modules/.deno/@atproto+identity@0.5.2/node_modules/@atproto/identity/dist/id-resolver.js
+// ../../../../../node_modules/.deno/@atproto+identity@0.5.6/node_modules/@atproto/identity/dist/id-resolver.js
 var IdResolver = class {
   constructor(opts = {}) {
     const { timeout = 3e3, plcUrl, didCache } = opts;
@@ -9633,7 +9633,22 @@ async function scopeDecide(opts) {
       continue;
     }
     const needsSnapshot = policy.needsTrustSnapshot === true || policy.needsVouchSet === true;
-    if (needsSnapshot) snapshot ??= await buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, counterpartyDid);
+    if (needsSnapshot && !snapshot) {
+      try {
+        snapshot = await buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, counterpartyDid);
+      } catch (err) {
+        firstDeny ??= {
+          allow: false,
+          violations: [
+            {
+              msg: `scope denied by ${name2}: ${String(err)}`,
+              policyId: name2
+            }
+          ]
+        };
+        continue;
+      }
+    }
     const verdict = policy.decide({
       did: counterpartyDid,
       selfDid,
