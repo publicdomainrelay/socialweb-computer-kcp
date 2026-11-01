@@ -207,9 +207,12 @@ type XRPCError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	Wait       time.Duration
 }
 
 func (e *XRPCError) HTTPStatus() int { return e.StatusCode }
+
+func (e *XRPCError) RetryAfter() time.Duration { return e.Wait }
 
 func (e *XRPCError) Error() string {
 	if e == nil {

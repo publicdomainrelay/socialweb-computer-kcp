@@ -188,7 +188,7 @@ func decodeJSONBody(body []byte, out any) error {
 func convertError(err error) error {
 	if failure, ok := errors.AsType[*xrpc.Error](err); ok {
 		return &XRPCError{StatusCode: failure.Status, Code: cmp.Or(failure.Name, "HTTPError"),
-			Message: cmp.Or(failure.Message, http.StatusText(failure.Status))}
+			Message: cmp.Or(failure.Message, http.StatusText(failure.Status)), Wait: failure.Wait}
 	}
 	if errors.Is(err, xrpc.ErrNoCredentials) {
 		return fmt.Errorf("%w: %v", ErrAuthenticationRequired, err)

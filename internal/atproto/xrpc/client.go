@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
@@ -128,6 +129,7 @@ func (c *Client) do(ctx context.Context, method, nsid, target string, body []byt
 			if reply.Status < 200 || reply.Status > 299 {
 				failure := newError(reply.Status, reply.Body)
 				failure.verdict = verdict
+				failure.Wait = retryAfter(reply.Status, reply.Header, time.Now())
 				return Reply{}, failure
 			}
 			if over {
