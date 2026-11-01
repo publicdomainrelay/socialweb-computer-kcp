@@ -55,13 +55,13 @@ func (f GrantStoreFuncs) Delete(ctx context.Context, name string) error {
 }
 
 type RBACSource interface {
-	Records(ctx context.Context, requesterDID string) ([]RBACRecord, error)
+	Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error)
 }
 
-type RBACSourceFunc func(context.Context, string) ([]RBACRecord, error)
+type RBACSourceFunc func(context.Context, string, string) ([]RBACRecord, error)
 
-func (f RBACSourceFunc) Records(ctx context.Context, requesterDID string) ([]RBACRecord, error) {
-	return f(ctx, requesterDID)
+func (f RBACSourceFunc) Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error) {
+	return f(ctx, requesterDID, acceptURI)
 }
 
 type GrantSubject struct {
@@ -70,6 +70,8 @@ type GrantSubject struct {
 	OwnerUID string
 
 	RequesterDID string
+
+	AcceptURI string
 
 	Subject string
 }
@@ -279,7 +281,7 @@ func (s *Syncer) syncOnce(ctx context.Context, subject GrantSubject) error {
 	if s.opts.Issuer != nil {
 		issuer = s.opts.Issuer()
 	}
-	records, readable, err := s.records(ctx, subject.RequesterDID)
+	records, readable, err := s.records(ctx, subject.RequesterDID, subject.AcceptURI)
 	if err != nil {
 		if suppressed, due := s.rbacWarnDue(subject.RequesterDID); due {
 			s.opts.Log.Warn("the requester's RBAC records are unreadable; the grants it already holds stay",
@@ -343,8 +345,8 @@ func (s *Syncer) rbacWarnDue(requesterDID string) (int, bool) {
 	return last.suppressed, true
 }
 
-func (s *Syncer) records(ctx context.Context, requesterDID string) ([]RBACRecord, bool, error) {
-	records, err := s.opts.RBAC.Records(ctx, requesterDID)
+func (s *Syncer) records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, bool, error) {
+	records, err := s.opts.RBAC.Records(ctx, requesterDID, acceptURI)
 	if err != nil {
 		return nil, false, err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 )
 
@@ -24,7 +25,7 @@ type RepoRBAC struct {
 	Log *slog.Logger
 }
 
-func (h *RepoRBAC) Records(ctx context.Context, requesterDID string) ([]RBACRecord, error) {
+func (h *RepoRBAC) Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error) {
 	if h == nil || h.Reader == nil {
 		return nil, errors.New("guestidentity: the RBAC reader has no record reader")
 	}
@@ -32,6 +33,24 @@ func (h *RepoRBAC) Records(ctx context.Context, requesterDID string) ([]RBACReco
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	if key := market.RBACRKeyOfAccept(acceptURI); key != "" {
+		record, err := h.Reader.GetRecord(ctx, requesterDID, RBACCollection, key)
+		switch {
+		case err == nil:
+			var rb RBACRecord
+			if err := json.Unmarshal(record.Value, &rb); err != nil {
+				log.Warn("a requester RBAC record is not one and is skipped", "requester", requesterDID, "rkey", key, "err", err.Error())
+				return []RBACRecord{}, nil
+			}
+			return []RBACRecord{rb}, nil
+		case !errors.Is(err, atprotorepo.ErrNotFound):
+			return nil, fmt.Errorf("guestidentity: reading the RBAC record %s of %s: %w", key, requesterDID, err)
+		}
+	}
+	return h.listed(ctx, requesterDID, log)
+}
+
+func (h *RepoRBAC) listed(ctx context.Context, requesterDID string, log *slog.Logger) ([]RBACRecord, error) {
 	out := []RBACRecord{}
 	cursor := ""
 	seen := map[string]bool{}

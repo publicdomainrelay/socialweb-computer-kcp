@@ -533,7 +533,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.mu.Lock()
 	r.chosen = chosen
 	r.mu.Unlock()
-	if err := r.prepareWorkloadGrant(ctx, state, winner); err != nil {
+	acceptRKey := acceptRKeyFor(q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
+	if err := r.prepareWorkloadGrant(ctx, state, winner, acceptRKey); err != nil {
 		return err
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected
@@ -544,7 +545,6 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, "accepting", 1)
 
-	acceptRKey := sessionRKey("accept", q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
 	accept, found, err := q.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return fmt.Errorf("read the market.accept record: %w", err)

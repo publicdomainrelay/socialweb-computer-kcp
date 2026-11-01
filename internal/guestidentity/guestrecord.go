@@ -64,6 +64,18 @@ func Ended(o *v1alpha1.ComputeVM) bool {
 	return o.Status.Phase == v1alpha1.ComputeVMPhaseLost || o.Status.Phase == v1alpha1.ComputeVMPhaseFailed
 }
 
+func AcceptURIOf(o *v1alpha1.ComputeVM) string {
+	switch {
+	case o == nil:
+		return ""
+	case o.Spec.Accept != nil && o.Spec.Accept.URI != "":
+		return o.Spec.Accept.URI
+	case o.Spec.Contract != nil:
+		return o.Spec.Contract.Accept.URI
+	}
+	return ""
+}
+
 func Releasing(o *v1alpha1.ComputeVM) bool {
 	if o == nil {
 		return false

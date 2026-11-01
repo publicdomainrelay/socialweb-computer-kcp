@@ -5755,7 +5755,9 @@ the run made (canary-dry, the leaked canary-to and canary-dry2) and never again,
 
 - **The requester's RBAC records are the source of the guest's identity grants, on 2026-10-15 (plan 0009
   M3-RBAC-TO-OPENBAO).** For each live guest the bidder reads the `com.fedproxy.rbac` records of its
-  requester's repo (the DID resolved through the PLC directory, `listRecords`) when it accepts, on every
+  requester's repo (the DID resolved through the PLC directory; since rc129 one `getRecord` at rkey
+  `node.<accept rkey>`, the rkey the requester writes it at, and `listRecords` only when that record is
+  missing, for records written before rc129) when it accepts, on every
   firehose event for that collection and DID, and every `--compute-provider-kcp-guest-identity-resync-sec`
   (30 s; the market network's requester keeps its repo in its own process, no relay crawls it and its
   commits are not on the firehose, so the read is also the floor under a lost event). A role of a record
