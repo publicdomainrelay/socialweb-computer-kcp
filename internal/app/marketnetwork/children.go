@@ -175,7 +175,7 @@ func (ctl *Controller) placeChild(ctx context.Context, r compose.Root, ch child,
 	if err := ctl.ensureAppWorkspace(ctx, r, ch.app.Name); err != nil {
 		return rec, err
 	}
-	if err := devinstance.EnsureChildWorkspace(ctx, cfg.Kubeconfig, ch.id, devinstance.ChildWorkspaceReady); err != nil {
+	if err := devinstance.EnsureChildWorkspace(ctx, cfg.Kubeconfig, ch.id, devinstance.ChildWorkspaceReady, ctl.log().With("child", ch.id)); err != nil {
 		return rec, err
 	}
 	kubeconfig, err := ctl.coreCredential(ctx, r, ch)
@@ -303,6 +303,34 @@ func (ctl *Controller) takeUnserved() error {
 	}
 	ctl.unserved = nil
 	return fmt.Errorf("the workspace of %s does not serve its root API yet; retried with backoff (%s)", strings.Join(names, ", "), strings.Join(parts, "; "))
+}
+
+func (ctl *Controller) markUnplaced(app, msg string) {
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
+	if ctl.unplaced == nil {
+		ctl.unplaced = map[string]string{}
+	}
+	ctl.unplaced[app] = msg
+}
+
+func (ctl *Controller) takeUnplaced() error {
+	ctl.unservedMu.Lock()
+	defer ctl.unservedMu.Unlock()
+	if len(ctl.unplaced) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(ctl.unplaced))
+	for name := range ctl.unplaced {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, name+": "+ctl.unplaced[name])
+	}
+	ctl.unplaced = nil
+	return fmt.Errorf("%s not placed yet; retried with backoff (%s)", strings.Join(names, ", "), strings.Join(parts, "; "))
 }
 
 func (ctl *Controller) applyRoot(ctx context.Context, r compose.Root, rec devinstance.Record, kind v1alpha1.ApplicationKind, obj any) error {
@@ -608,6 +636,9 @@ func (ctl *Controller) ensureApp(ctx context.Context, r compose.Root, app v1alph
 	}
 	rec, err := ctl.placeChild(ctx, r, ch, gw)
 	if err != nil {
+		if ctx.Err() == nil {
+			ctl.markUnplaced(app.Name, err.Error())
+		}
 		return fail(err)
 	}
 	out.KcpURL, out.Workspace = rec.KcpURL, rec.BaseWorkspace

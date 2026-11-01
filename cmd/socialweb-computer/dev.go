@@ -491,7 +491,7 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 	var m hostsvc.Manager
 	var sup devinstance.Devsup
 	if par != nil {
-		if err := devinstance.EnsureChildWorkspace(ctx, par.Kubeconfig, l.ID, devinstance.ChildWorkspaceReady); err != nil {
+		if err := devinstance.EnsureChildWorkspace(ctx, par.Kubeconfig, l.ID, devinstance.ChildWorkspaceReady, a.log); err != nil {
 			lock.Close()
 			return upReport{}, a.fail(exitFailed, "dev up: %v", err)
 		}
