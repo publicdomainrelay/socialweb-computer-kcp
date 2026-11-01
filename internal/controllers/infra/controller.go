@@ -249,7 +249,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		return r.finalize(ctx, req, obj, v, contracts)
 	}
 	if err := r.retainOnce(ctx, req, v); err != nil {
-		return ctlruntime.Result{}, err
+		r.c.log.Warn("infra_record_retain_failed", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "err", err.Error())
 	}
 	now := time.Now().UTC()
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Record: v.status.Record,

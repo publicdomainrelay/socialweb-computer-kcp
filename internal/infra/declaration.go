@@ -10,6 +10,7 @@ import (
 	"math"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -482,6 +483,31 @@ func Final(kind Kind, raw json.RawMessage, o Observed) (json.RawMessage, error) 
 		value["$type"] = kind.NSID()
 	}
 	return json.Marshal(value)
+}
+
+const MaxSuccessors = 64
+
+func Successor(name, uid string, n int) string {
+	switch {
+	case n <= 0:
+		return name
+	case n == 1:
+		return SuccessorRkey(name, uid)
+	}
+	return SuccessorRkey(name, uid) + "-" + strconv.Itoa(n)
+}
+
+func InSuccession(name, uid, rkey string) bool {
+	base := SuccessorRkey(name, uid)
+	if rkey == name || rkey == base {
+		return true
+	}
+	tail, ok := strings.CutPrefix(rkey, base+"-")
+	if !ok {
+		return false
+	}
+	n, err := strconv.Atoi(tail)
+	return err == nil && n >= 2 && n <= MaxSuccessors && strconv.Itoa(n) == tail
 }
 
 func SuccessorRkey(name, uid string) string {

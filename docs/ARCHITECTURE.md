@@ -11887,8 +11887,11 @@ Now:
   `EndLost`, `infra_record_end_lost`), so a kept Infra never requests its contracts again.
 - G3: a new object (no `status.record`) whose name is the rkey of an ended or expired record binds
   `<name>-<first 8 hex of its UID>` instead (`infra_record_successor`) and keeps it in
-  `status.record.uri`; later passes use that URI. An object whose record was Retained (unbound)
-  counts as new when it binds again. This covers the gateway's `nodes-<hash>` of a Cluster created
+  `status.record.uri`; later passes use that URI. When that rkey holds an ended record too, it binds
+  the next free one, `<name>-<uid8>-2` up to `-64` (`infra.MaxSuccessors`), probing each by one
+  getRecord on the binding pass only, so an older ended record of its name never freezes a live
+  object. An object whose record was Retained (unbound) counts as new when it binds again; the end
+  written at unbind is Publish-filtered (no contract messages). This covers the gateway's `nodes-<hash>` of a Cluster created
   again (its record was ended at unbind), a kubectl re-apply and a reused page tab id. A reader that builds the URI
   from the name must read `status.record.uri` (page G6).
 - G4: the InfraCollection never lists. It reads the index at `computer.socialweb.infra/self` from its

@@ -179,9 +179,10 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		return nil, err
 	}
 	name := v.object.GetName()
+	uid := string(v.object.GetUID())
 	rkey := name
-	successor := infra.SuccessorRkey(name, string(v.object.GetUID()))
 	stored := v.status.Record
+	fresh := stored == nil || strings.TrimSpace(stored.URI) == "" || stored.Direction == v1alpha1.InfraSyncRetained
 	follow := strings.TrimSpace(b.URI) != ""
 	if follow {
 		uri, err := syntax.ParseATURI(strings.TrimSpace(b.URI))
@@ -192,8 +193,11 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 			return nil, fmt.Errorf("infra: spec.record.uri %s is not a %s record of the repo %s", b.URI, nsid, did)
 		}
 		rkey = uri.RecordKey().String()
-	} else if stored != nil && strings.TrimSpace(stored.URI) == recordURI(did, nsid, successor) {
-		rkey = successor
+	} else if !fresh {
+		if uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI)); err == nil && uri.Authority().String() == did &&
+			uri.Collection().String() == nsid && infra.InSuccession(name, uid, uri.RecordKey().String()) {
+			rkey = uri.RecordKey().String()
+		}
 	}
 	publish := Publishing(b)
 	render := v.declaration
@@ -211,22 +215,11 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 			conds.New(v1alpha1.InfraConditionSynced, false, "Reserved", "rkey self is reserved", gen)}
 		return out, nil
 	}
-	got, err := reader.GetRecord(ctx, did, nsid, rkey)
-	present := err == nil
-	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
-		return nil, ReadFailed(fmt.Errorf("infra: reading %s: %w", out.uri, err))
-	}
+	var got atprotorepo.Record
+	var present bool
 	var decoded infra.Decoded
 	var derr error
-	if present {
-		decoded, derr = infra.Decode(v.kind, got.Value)
-	}
-	fresh := stored == nil || strings.TrimSpace(stored.URI) == "" || stored.Direction == v1alpha1.InfraSyncRetained
-	if present && !follow && fresh && rkey == name && (decoded.Over(v.kind, now) || errors.Is(derr, infra.ErrReserved)) {
-		r.c.log.Info("infra_record_successor", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "ended", out.uri,
-			"endedAt", decoded.EndedAt, "successor", successor)
-		rkey = successor
-		out.rkey, out.uri = rkey, recordURI(did, nsid, rkey)
+	for n := 0; ; n++ {
 		got, err = reader.GetRecord(ctx, did, nsid, rkey)
 		present = err == nil
 		if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
@@ -236,6 +229,17 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		if present {
 			decoded, derr = infra.Decode(v.kind, got.Value)
 		}
+		if follow || !fresh || !present || !(decoded.Over(v.kind, now) || errors.Is(derr, infra.ErrReserved)) {
+			break
+		}
+		if n+1 > infra.MaxSuccessors {
+			return nil, fmt.Errorf("infra: %d successor rkeys of %s all hold ended records", infra.MaxSuccessors, name)
+		}
+		next := infra.Successor(name, uid, n+1)
+		r.c.log.Info("infra_record_successor", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "ended", out.uri,
+			"endedAt", decoded.EndedAt, "successor", next)
+		rkey = next
+		out.rkey, out.uri = rkey, recordURI(did, nsid, rkey)
 	}
 	if err := r.ensureWatch(ctx, req, v, repo, rkey, b.EventSourceRefs); err != nil {
 		return nil, err
@@ -498,7 +502,7 @@ func (r *reconciler[T]) finalObserved(v view) infra.Observed {
 	if out.EndedAt == "" {
 		out.EndedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	if Publishing(v.spec.Record) {
+	if v.spec.Record == nil || Publishing(v.spec.Record) {
 		out = out.Published()
 	}
 	return out
@@ -513,8 +517,7 @@ func (r *reconciler[T]) owns(v view, rkey string) bool {
 			return false
 		}
 	}
-	name := v.object.GetName()
-	return rkey == name || rkey == infra.SuccessorRkey(name, string(v.object.GetUID()))
+	return infra.InSuccession(v.object.GetName(), string(v.object.GetUID()), rkey)
 }
 
 func arInSync(ar *v1alpha1.AtprotoRecord) bool {
