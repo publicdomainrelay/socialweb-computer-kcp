@@ -250,7 +250,10 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     entry, with the minting parent's
     bearer, the `spec.atircParentRef` long token, when the subhandle is below it; an entry revoked
     by a 200 is stamped `revoked` there and not revoked again, while a 401 counts as Done but leaves
-    it unstamped. A derived subhandle, a claim mismatch, no grant and no parentRef, or each of them
+    it unstamped: an unstamped entry stays in the bundle and its bundle in the orphan-sweep index
+    until its exp, the sweep revokes it again on each requester start and sweeps once more at the
+    latest such exp, and a bundle is finished for the sweep only when every entry of its contract is
+    stamped or expired (the release marker stays until then). A derived subhandle, a claim mismatch, no grant and no parentRef, or each of them
     answered 401/403 uses the token itself; a leased token is revoked before
     vm.delete, while its lease is alive, and a 401 saying the lease is not alive counts as revoked
     (`requester_atirc_revoked` byLease). The first
