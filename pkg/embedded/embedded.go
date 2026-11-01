@@ -121,6 +121,8 @@ type Config struct {
 
 	ProviderIdentities []byte
 
+	BeforeRequester func(ctx context.Context) error
+
 	Log *slog.Logger
 }
 
@@ -190,6 +192,15 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 		}
 	} else if err := restoreProviderIdentities(parent, cfg.Rest, cfg.ProviderWorkspace, identities, log); err != nil {
 		return nil, err
+	}
+	if cfg.BeforeRequester != nil {
+		if err := applyRequesterBindings(parent, cfg, log); err != nil {
+			return nil, err
+		}
+		if err := cfg.BeforeRequester(parent); err != nil {
+			return nil, fmt.Errorf("embedded: the app's BeforeRequester hook: %w", err)
+		}
+		log.Info("embedded: the app's BeforeRequester hook ran")
 	}
 
 	ctx, cancel := context.WithCancel(parent)

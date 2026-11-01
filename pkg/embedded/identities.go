@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kcpapply"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 )
@@ -163,4 +165,43 @@ func splitAfterPhase(set manifests.Set, phase string) []manifests.Set {
 
 func endsWithPhase(set manifests.Set, phase string) bool {
 	return len(set.Phases) > 0 && set.Phases[len(set.Phases)-1].Name == phase
+}
+
+const requesterSet = "market-requester"
+
+var requesterBindingPhases = []string{"schemas", "bindings"}
+
+func applyRequesterBindings(parent context.Context, cfg Config, log *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(parent, ApplyStallTimeout)
+	defer cancel()
+	applier, err := kcpapply.New(cfg.Rest, kcpapply.Options{Base: RootWorkspace, FieldManager: FieldManager, WaitTimeout: 3 * time.Minute, Log: log})
+	if err != nil {
+		return fmt.Errorf("embedded: manifest applier: %w", err)
+	}
+	ix, err := manifests.Load()
+	if err != nil {
+		return err
+	}
+	set, ok := ix.Set(requesterSet)
+	if !ok {
+		return fmt.Errorf("embedded: deploy/sets.yaml names no %s set", requesterSet)
+	}
+	var phases []manifests.Phase
+	for _, p := range set.Phases {
+		if slices.Contains(requesterBindingPhases, p.Name) {
+			phases = append(phases, p)
+		}
+	}
+	if len(phases) != len(requesterBindingPhases) {
+		return fmt.Errorf("embedded: the %s set has no %v phases", requesterSet, requesterBindingPhases)
+	}
+	set.Phases = phases
+	values, err := manifests.DecodeValues(set.Values, nil)
+	if err != nil {
+		return fmt.Errorf("embedded: decoding values for %s: %w", requesterSet, err)
+	}
+	if _, err := applier.Apply(ctx, set, values); err != nil {
+		return fmt.Errorf("embedded: applying the %s schemas and bindings: %w", requesterSet, err)
+	}
+	return nil
 }
