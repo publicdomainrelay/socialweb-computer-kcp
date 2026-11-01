@@ -133,6 +133,9 @@ In the local network both records are kcp objects written through ComponentLinks
 - [vouch-bidder-operator.yaml](../examples/infra/vouch-bidder-operator.yaml), in `root:bidder-1`: the bidder operator's
   record for the requester, through the network's link `link-records-operator` (label `apps.socialweb.computer/record-repo: operator`)
 
+Both AtprotoRecords are `deletionPolicy: Retain`: `kubectl delete` of either removes the kcp object and keeps the vouch
+record in the repo. Nothing here deletes a user's record; remove a vouch from the account itself (`goat`).
+
 ```bash
 DID=$(k root:qs get marketrequesters.socialweb.computer app -o jsonpath='{.status.did}')
 REPO=repo-$(echo "$DID" | tr ':' '-')

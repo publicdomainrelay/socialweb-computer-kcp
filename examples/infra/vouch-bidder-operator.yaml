@@ -11,7 +11,7 @@ spec:
     name: operator
   collection: sh.tangled.graph.vouch
   rkey: REPLACE-REQUESTER-DID
-  deletionPolicy: Delete
+  deletionPolicy: Retain
   record:
     $type: sh.tangled.graph.vouch
     subject: REPLACE-REQUESTER-DID
