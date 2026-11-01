@@ -795,7 +795,7 @@
     },
     "compute-kinds": {
       "type": "string",
-      "description": "run bidder and dev up --profile market-network: comma-separated compute kinds the bidder serves (vm, deno; spec.computeKinds of the MarketBidder, on every network bidder for dev up); unset, vm only. For run bidder without --network, no vm makes it a deno sandbox bidder, which needs --host-backend=proc and --fg"
+      "description": "run bidder, install bidder and dev up --profile market-network: comma-separated compute kinds the bidder serves (vm, deno; spec.computeKinds of the MarketBidder, on every network bidder for dev up); unset, vm only; install bidder writes it to config.json. For run bidder without --network, no vm makes it a deno sandbox bidder, which needs --host-backend=proc and --fg"
     }
   }
 }

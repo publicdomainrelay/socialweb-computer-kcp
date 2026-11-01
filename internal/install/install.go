@@ -164,11 +164,12 @@ const (
 	OptGuestHostUDP   = "guest-host-udp"
 	OptBidderPolicy   = "bidder-policy"
 	OptBidderOperator = "bidder-operator-signin"
+	OptComputeKinds   = "compute-kinds"
 )
 
 var GatewayListen = map[string]string{OptKcpFront: "127.0.0.1:6443", OptTLSFront: "127.0.0.1:8443", OptCertFront: "127.0.0.1:8444"}
 
-var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase, OptNoGuestLANUDP, OptGuestHostUDP, OptBidderPolicy, OptBidderOperator}
+var Passed = []string{OptKcpFront, OptTLSFront, OptCertFront, OptSpecFile, OptGuestImg, OptGuestImgBase, OptNoGuestLANUDP, OptGuestHostUDP, OptBidderPolicy, OptBidderOperator, OptComputeKinds}
 
 func Rooted(root string) bool { return root != "" && filepath.Clean(root) != "/" }
 
