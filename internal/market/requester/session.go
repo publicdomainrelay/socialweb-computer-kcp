@@ -593,18 +593,6 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	if err != nil {
 		return nil, err
 	}
-	submitBid, err := q.submitBidRef(ctx)
-	if err != nil {
-		return nil, err
-	}
-	options := market.RFPOptions{
-		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
-		SubmitBid: submitBid,
-		Ingress:   q.ingressRecords(ctx),
-		Domain:    "compute",
-		CreatedAt: q.nowISO(),
-		Policies:  []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}},
-	}
 	rfpRKey := sessionRKey("rfp", q.repoDID, vmName)
 	rfp, found, err := q.existingSignedRecord(ctx, market.RFPNSID, rfpRKey)
 	if err != nil {
@@ -614,6 +602,19 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		return nil, ErrParticipationSuspended
 	}
 	if !found {
+		var submitBid string
+		submitBid, err = q.submitBidRef(ctx)
+		if err != nil {
+			return nil, err
+		}
+		options := market.RFPOptions{
+			Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
+			SubmitBid: submitBid,
+			Ingress:   q.ingressRecords(ctx),
+			Domain:    "compute",
+			CreatedAt: q.nowISO(),
+			Policies:  []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}},
+		}
 		rfp, err = market.CreateRFPAt(ctx, q.repo, q.repoDID, rfpRKey, options, q.signer)
 		if err != nil {
 			return nil, err
