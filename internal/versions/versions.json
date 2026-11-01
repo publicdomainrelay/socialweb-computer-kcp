@@ -1496,14 +1496,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "5f8a127446c2e940d322c9f791c2d4d309bd55432effdf4373b179fe3dcfb9a4",
-          "rawBytes": 96659830,
-          "zstdBytes": 29316740
+          "treeSha256": "94b53602d11afe1642cfd0e0bf420b7bfb979354119ac57747c848b2ba064d2d",
+          "rawBytes": 96707854,
+          "zstdBytes": 29309130
         },
         "linux/arm64": {
-          "treeSha256": "5f8a127446c2e940d322c9f791c2d4d309bd55432effdf4373b179fe3dcfb9a4",
-          "rawBytes": 96659830,
-          "zstdBytes": 29316740
+          "treeSha256": "94b53602d11afe1642cfd0e0bf420b7bfb979354119ac57747c848b2ba064d2d",
+          "rawBytes": 96707854,
+          "zstdBytes": 29309130
         }
       }
     }
@@ -1565,15 +1565,15 @@
         }
       },
       "atirc": {
-        "version": "0.1.0-43fa7bc",
-        "source": "the immutable versioned atirc linux/amd64 release binary that atirc-dev publishes at https://irc.fedfork.com/dl/v0.1.0-43fa7bc (the binary of the irc.fedfork.com server at that version), run on the guest as atirc agent run by atirc-agent.service (plan 0035); linux/arm64 is out of scope, so build-guest-downloads.sh makes no atirc-aarch64",
+        "version": "0.1.0-8bde950",
+        "source": "the immutable versioned atirc linux/amd64 release binary that atirc-dev publishes at https://irc.fedfork.com/dl/v0.1.0-8bde950 (the binary of the irc.fedfork.com server at that version), run on the guest as atirc agent run by atirc-agent.service (plan 0035); linux/arm64 is out of scope, so build-guest-downloads.sh makes no atirc-aarch64",
         "verify": "the sha256 of the binary, checked by scripts/build-guest-downloads.sh after the download; never irc.fedfork.com/dl/<arch>, which serves whatever binary the server runs",
         "fetch": {
           "linux/amd64": {
             "kind": "binary",
-            "url": "https://irc.fedfork.com/dl/v0.1.0-43fa7bc",
-            "sha256": "b17fde30bb5112ff6ff4b553f4bb3fbfd49b595ad1b2ad7d546919aed1e36cc3",
-            "bytes": 39627248
+            "url": "https://irc.fedfork.com/dl/v0.1.0-8bde950",
+            "sha256": "08f41d6e08783c3dec27614fde8b9ea024bad4cd08a08a9cfdc7b7f95f2907a6",
+            "bytes": 39675272
           }
         }
       }
