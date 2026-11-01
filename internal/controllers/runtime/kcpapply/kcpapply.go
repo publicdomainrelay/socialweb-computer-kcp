@@ -726,7 +726,42 @@ func (a *Applier) wait(ctx context.Context, set manifests.Set, p manifests.Phase
 		a.opts.Log.Warn("wait not met; continuing", "kind", w.Kind, "name", w.Name, "workspace", ws, "for", w.For, "dryRun", a.opts.DryRun, "err", last)
 		return wr, nil
 	}
+	if w.Kind == "Workspace" {
+		if why := a.workspaceStall(ctx, ws, names); why != "" {
+			last = fmt.Errorf("%v; %s", last, why)
+		}
+	}
 	return wr, fmt.Errorf("%w: %s %v in %s for %s after %s (last error: %v)", ErrWaitTimedOut, w.Kind, names, ws, w.For, a.opts.WaitTimeout, last)
+}
+
+func (a *Applier) workspaceStall(ctx context.Context, ws string, names []string) string {
+	var out []string
+	for _, name := range names {
+		dyn, err := dynamic.NewForConfig(a.ForWorkspace(ws))
+		if err != nil {
+			continue
+		}
+		u, err := dyn.Resource(kcpgvr.Workspaces).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			continue
+		}
+		phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+		initializers, _, _ := unstructured.NestedStringSlice(u.Object, "status", "initializers")
+		why := fmt.Sprintf("Workspace %s phase %s initializers %v", name, phase, initializers)
+		if child, err := dynamic.NewForConfig(a.ForWorkspace(ws + ":" + name)); err == nil {
+			if lc, err := child.Resource(kcpgvr.LogicalClusters).Get(ctx, "cluster", metav1.GetOptions{}); err == nil {
+				conditions, _, _ := unstructured.NestedSlice(lc.Object, "status", "conditions")
+				for _, raw := range conditions {
+					c, _ := raw.(map[string]any)
+					if c["status"] == "False" {
+						why += fmt.Sprintf("; %v=False %v: %v", c["type"], c["reason"], c["message"])
+					}
+				}
+			}
+		}
+		out = append(out, why)
+	}
+	return strings.Join(out, "; ")
 }
 
 func (a *Applier) watchFor(ctx context.Context, dyn dynamic.Interface, gvr schema.GroupVersionResource, namespaced bool, w manifests.Wait, names []string) (bool, string, error) {
