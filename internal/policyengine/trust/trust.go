@@ -381,7 +381,7 @@ func BuildSnapshotWith(ctx context.Context, host Host, selfDid, counterpartyDid,
 		trusted = append(trusted, operator)
 	}
 	snapshot.TrustedOperators = trusted
-	vouchers := distinct(append(append([]string(nil), trusted...), operators[counterpartyDid]))
+	vouchers := distinct(append(append([]string(nil), trusted...), counterpartyDid, operators[counterpartyDid]))
 	subjects := distinct([]string{selfDid, operators[selfDid], counterpartyDid, operators[counterpartyDid]})
 	pairs := 0
 	vouchResults := make(chan vouchResult, len(vouchers)*len(subjects))

@@ -92,55 +92,54 @@ var require_dist = __commonJS({
 
 // ../deno-typescript/tangled-vouch.ts
 var BIDDER_TANGLED_VOUCH_POLICY_NAME = "bidder-tangled-vouch";
-function decide({ did, selfDid, vouchedDids, query }) {
-  if (did === selfDid) return true;
-  if (vouchedDids?.has(did)) return true;
-  if (query) {
-    for (const op2 of query.trustedOperators()) {
-      if (query.vouchedBy(op2).has(did)) return true;
-    }
-    const op = query.operatorOf(did);
-    if (op === void 0) return void 0;
-    return query.isVouched(selfDid, op) || query.isVouched(op, selfDid);
+function trustVouched(query, did) {
+  const op = query.operatorOf(did);
+  for (const t of query.trustedOperators()) {
+    const vouched = query.vouchedBy(t);
+    if (vouched.has(did) || op !== void 0 && vouched.has(op)) return true;
   }
   return false;
 }
-async function evaluateTangledVouch(ctx) {
-  ctx.log("info", "tangled-vouch evaluate", {
+function vouchesTrusted(query, did) {
+  const op = query.operatorOf(did);
+  const trusted = query.trustedOperators();
+  for (const voucher of op !== void 0 && op !== did ? [did, op] : [did]) {
+    const vouched = query.vouchedBy(voucher);
+    for (const t of trusted) {
+      if (vouched.has(t)) return true;
+    }
+  }
+  return false;
+}
+function operatedByTrusted(query, did) {
+  const op = query.operatorOf(did);
+  return op !== void 0 && query.trustedOperators().has(op);
+}
+function trustQuery(ctx) {
+  return buildTrustSnapshot((did) => ctx.resolveOperatorDid(did), (did) => ctx.getVouchedDids(did), ctx.selfDid, ctx.subjectDid);
+}
+async function evaluateTrust(ctx, label, allows, msg) {
+  ctx.log("info", label + " evaluate", {
     subjectDid: ctx.subjectDid,
     selfDid: ctx.selfDid
   });
-  if (ctx.subjectDid === ctx.selfDid) return {
-    allow: true,
-    violations: []
-  };
-  const operatorDid = await ctx.resolveOperatorDid(ctx.subjectDid) ?? ctx.subjectDid;
-  if (operatorDid === ctx.selfDid) return {
-    allow: true,
-    violations: []
-  };
   try {
-    const vouchedDids = await ctx.getVouchedDids(ctx.selfDid);
-    const ok = vouchedDids.has(operatorDid);
-    if (!ok) {
-      ctx.log("info", "tangled-vouch: operator not in vouch set", {
-        operatorDid,
-        selfDid: ctx.selfDid,
-        vouchedCount: vouchedDids.size
-      });
-      return {
-        allow: false,
-        violations: [
-          {
-            msg: "not vouched",
-            policyId: ctx.policyName
-          }
-        ]
-      };
-    }
-    return {
+    if (allows(await trustQuery(ctx), ctx.selfDid, ctx.subjectDid)) return {
       allow: true,
       violations: []
+    };
+    ctx.log("info", label + ": " + msg, {
+      subjectDid: ctx.subjectDid,
+      selfDid: ctx.selfDid
+    });
+    return {
+      allow: false,
+      violations: [
+        {
+          msg,
+          policyId: ctx.policyName
+        }
+      ]
     };
   } catch (err) {
     return {
@@ -153,6 +152,17 @@ async function evaluateTangledVouch(ctx) {
       ]
     };
   }
+}
+function tangledVouchAllows(query, selfDid, did) {
+  if (did === selfDid) return true;
+  return operatedByTrusted(query, did) || trustVouched(query, did);
+}
+function decide({ did, selfDid, query }) {
+  if (!query) return void 0;
+  return tangledVouchAllows(query, selfDid, did);
+}
+function evaluateTangledVouch(ctx) {
+  return evaluateTrust(ctx, "tangled-vouch", tangledVouchAllows, "not vouched");
 }
 function createBidderTangledVouchPolicy() {
   return {
@@ -9697,6 +9707,7 @@ async function buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, c
   await vouches(selfDid);
   await vouches(selfOp);
   if (coOp && coOp !== selfDid && coOp !== selfOp) await vouches(coOp);
+  if (counterpartyDid && !trustedOps.has(counterpartyDid)) await vouches(counterpartyDid);
   const operatorOf = /* @__PURE__ */ new Map([
     [
       selfDid,

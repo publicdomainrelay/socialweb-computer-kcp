@@ -92,57 +92,54 @@ var require_dist = __commonJS({
 
 // ../deno-typescript/mutuals.ts
 var REQUESTER_MUTUALS_POLICY_NAME = "requester-mutuals";
-function decide({ did, selfDid, vouchedDids, query }) {
-  if (did === selfDid) return true;
-  if (vouchedDids?.has(did)) return true;
-  if (query) {
-    for (const op2 of query.trustedOperators()) {
-      if (query.vouchedBy(op2).has(did)) return true;
-    }
-    const op = query.operatorOf(did);
-    if (op === void 0) return void 0;
-    return query.isVouched(selfDid, op) && query.isVouched(op, selfDid);
+function trustVouched(query, did) {
+  const op = query.operatorOf(did);
+  for (const t of query.trustedOperators()) {
+    const vouched = query.vouchedBy(t);
+    if (vouched.has(did) || op !== void 0 && vouched.has(op)) return true;
   }
   return false;
 }
-async function evaluateMutuals(ctx) {
-  ctx.log("info", "mutuals evaluate", {
+function vouchesTrusted(query, did) {
+  const op = query.operatorOf(did);
+  const trusted = query.trustedOperators();
+  for (const voucher of op !== void 0 && op !== did ? [did, op] : [did]) {
+    const vouched = query.vouchedBy(voucher);
+    for (const t of trusted) {
+      if (vouched.has(t)) return true;
+    }
+  }
+  return false;
+}
+function operatedByTrusted(query, did) {
+  const op = query.operatorOf(did);
+  return op !== void 0 && query.trustedOperators().has(op);
+}
+function trustQuery(ctx) {
+  return buildTrustSnapshot((did) => ctx.resolveOperatorDid(did), (did) => ctx.getVouchedDids(did), ctx.selfDid, ctx.subjectDid);
+}
+async function evaluateTrust(ctx, label, allows, msg) {
+  ctx.log("info", label + " evaluate", {
     subjectDid: ctx.subjectDid,
     selfDid: ctx.selfDid
   });
-  if (ctx.subjectDid === ctx.selfDid) return {
-    allow: true,
-    violations: []
-  };
-  const operatorDid = await ctx.resolveOperatorDid(ctx.subjectDid) ?? ctx.subjectDid;
-  if (operatorDid === ctx.selfDid) return {
-    allow: true,
-    violations: []
-  };
   try {
-    const selfFollows = await ctx.getVouchedDids(ctx.selfDid);
-    const operatorFollows = await ctx.getVouchedDids(operatorDid);
-    const mutual = selfFollows.has(operatorDid) && operatorFollows.has(ctx.selfDid);
-    if (!mutual) {
-      ctx.log("info", "mutuals: not mutual follows", {
-        operatorDid,
-        selfDid: ctx.selfDid,
-        selfFollowsCount: selfFollows.size,
-        operatorFollowsCount: operatorFollows.size
-      });
-      return {
-        allow: false,
-        violations: [
-          {
-            msg: "not mutual follows",
-            policyId: ctx.policyName
-          }
-        ]
-      };
-    }
-    return {
+    if (allows(await trustQuery(ctx), ctx.selfDid, ctx.subjectDid)) return {
       allow: true,
       violations: []
+    };
+    ctx.log("info", label + ": " + msg, {
+      subjectDid: ctx.subjectDid,
+      selfDid: ctx.selfDid
+    });
+    return {
+      allow: false,
+      violations: [
+        {
+          msg,
+          policyId: ctx.policyName
+        }
+      ]
     };
   } catch (err) {
     return {
@@ -155,6 +152,18 @@ async function evaluateMutuals(ctx) {
       ]
     };
   }
+}
+function mutualsAllows(query, selfDid, did) {
+  if (did === selfDid) return true;
+  if (operatedByTrusted(query, did)) return true;
+  return trustVouched(query, did) && vouchesTrusted(query, did);
+}
+function decide({ did, selfDid, query }) {
+  if (!query) return void 0;
+  return mutualsAllows(query, selfDid, did);
+}
+function evaluateMutuals(ctx) {
+  return evaluateTrust(ctx, "mutuals", mutualsAllows, "not mutual follows");
 }
 function createRequesterMutualPolicy() {
   return {
@@ -9699,6 +9708,7 @@ async function buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, c
   await vouches(selfDid);
   await vouches(selfOp);
   if (coOp && coOp !== selfDid && coOp !== selfOp) await vouches(coOp);
+  if (counterpartyDid && !trustedOps.has(counterpartyDid)) await vouches(counterpartyDid);
   const operatorOf = /* @__PURE__ */ new Map([
     [
       selfDid,

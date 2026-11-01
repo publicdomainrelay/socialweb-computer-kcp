@@ -9641,6 +9641,7 @@ async function buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, c
   await vouches(selfDid);
   await vouches(selfOp);
   if (coOp && coOp !== selfDid && coOp !== selfOp) await vouches(coOp);
+  if (counterpartyDid && !trustedOps.has(counterpartyDid)) await vouches(counterpartyDid);
   const operatorOf = /* @__PURE__ */ new Map([
     [
       selfDid,

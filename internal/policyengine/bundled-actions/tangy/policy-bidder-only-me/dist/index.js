@@ -92,51 +92,77 @@ var require_dist = __commonJS({
 
 // ../deno-typescript/only-me.ts
 var BIDDER_ONLY_ME_POLICY_NAME = "bidder-only-me";
-function decide({ did, selfDid, query }) {
-  if (did === selfDid) return true;
-  if (!query) return void 0;
-  return query.sameOperator(did, selfDid);
+function trustVouched(query, did) {
+  const op = query.operatorOf(did);
+  for (const t of query.trustedOperators()) {
+    const vouched = query.vouchedBy(t);
+    if (vouched.has(did) || op !== void 0 && vouched.has(op)) return true;
+  }
+  return false;
 }
-async function evaluateOnlyMe(ctx) {
-  ctx.log("info", "only-me evaluate", {
+function vouchesTrusted(query, did) {
+  const op = query.operatorOf(did);
+  const trusted = query.trustedOperators();
+  for (const voucher of op !== void 0 && op !== did ? [did, op] : [did]) {
+    const vouched = query.vouchedBy(voucher);
+    for (const t of trusted) {
+      if (vouched.has(t)) return true;
+    }
+  }
+  return false;
+}
+function operatedByTrusted(query, did) {
+  const op = query.operatorOf(did);
+  return op !== void 0 && query.trustedOperators().has(op);
+}
+function trustQuery(ctx) {
+  return buildTrustSnapshot((did) => ctx.resolveOperatorDid(did), (did) => ctx.getVouchedDids(did), ctx.selfDid, ctx.subjectDid);
+}
+async function evaluateTrust(ctx, label, allows, msg) {
+  ctx.log("info", label + " evaluate", {
     subjectDid: ctx.subjectDid,
     selfDid: ctx.selfDid
   });
-  const counterpartyOp = await ctx.resolveOperatorDid(ctx.subjectDid);
-  if (!counterpartyOp) {
-    ctx.log("info", "only-me: no operator association", {
-      subjectDid: ctx.subjectDid
+  try {
+    if (allows(await trustQuery(ctx), ctx.selfDid, ctx.subjectDid)) return {
+      allow: true,
+      violations: []
+    };
+    ctx.log("info", label + ": " + msg, {
+      subjectDid: ctx.subjectDid,
+      selfDid: ctx.selfDid
     });
     return {
       allow: false,
       violations: [
         {
-          msg: "no operator association",
+          msg,
           policyId: ctx.policyName
         }
       ]
     };
-  }
-  const selfOp = await ctx.resolveOperatorDid(ctx.selfDid) ?? ctx.selfDid;
-  if (counterpartyOp !== selfOp) {
-    ctx.log("info", "only-me: operator mismatch", {
-      counterpartyOp,
-      selfOp
-    });
+  } catch (err) {
     return {
       allow: false,
       violations: [
         {
-          msg: "operator mismatch",
+          msg: String(err),
           policyId: ctx.policyName
         }
       ]
     };
   }
-  return {
-    allow: true,
-    violations: []
-  };
+}
+function onlyMeAllows(query, selfDid, did) {
+  if (did === selfDid) return true;
+  return operatedByTrusted(query, did);
+}
+function decide({ did, selfDid, query }) {
+  if (!query) return void 0;
+  return onlyMeAllows(query, selfDid, did);
+}
+function evaluateOnlyMe(ctx) {
+  return evaluateTrust(ctx, "only-me", onlyMeAllows, "operator mismatch");
 }
 function createBidderOnlyMePolicy() {
   return {
@@ -9680,6 +9706,7 @@ async function buildTrustSnapshot(resolveOperatorDid, getVouchedDids, selfDid, c
   await vouches(selfDid);
   await vouches(selfOp);
   if (coOp && coOp !== selfDid && coOp !== selfOp) await vouches(coOp);
+  if (counterpartyDid && !trustedOps.has(counterpartyDid)) await vouches(counterpartyDid);
   const operatorOf = /* @__PURE__ */ new Map([
     [
       selfDid,
