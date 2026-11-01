@@ -3650,6 +3650,7 @@ internal/controllers/events/                registers the event source, event st
 internal/controllers/eventsource/           EventSource: binds the backend kind; the helpers the three backend controllers share
 internal/controllers/eventstream/           EventStream: connects an EventSource to a sink
 internal/controllers/exposure/              Exposure: publishes a service through its ingress
+internal/controllers/exposurelocal/         Exposure, in process: Ready on a given origin, routes to the bus handler; no listener, no ingress (pkg/embedded)
 internal/controllers/firecrackervm/         FirecrackerVM: places and runs the guest through internal/compute/firecracker
 internal/controllers/guestcontrolplane/     GuestControlPlane: its inputs from ComputeVM, GuestIdentityGrant, MarketIdentity, OpenBaoServer and Exposure
 internal/controllers/guestidentitygrant/    GuestIdentityGrant
@@ -3687,6 +3688,7 @@ internal/controllers/subnetlease/           SubnetLease
 internal/controllers/tenantnode/            a tenant cluster's Node objects, through internal/cloudprovider
 internal/controllers/ttl/                   deletes expired objects and reports what it deleted per kind
 internal/controllers/vault/                 Vault: binds the backendRef (OpenBaoServer or RemoteOpenBao); roots and secrets on the bus
+internal/controllers/vaultmemory/           OpenBaoServer and Vault, in process: a memory KV per workspace on the bus, with snapshot and restore; no OpenBao (pkg/embedded)
 internal/controllers/vaultcertificate/      VaultCertificate
 internal/controllers/vaultcredential/       VaultCredential
 ```
