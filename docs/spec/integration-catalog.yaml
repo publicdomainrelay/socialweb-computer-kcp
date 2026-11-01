@@ -12,6 +12,11 @@ kinds:
   soak: a verb or lane of the soak program in test/soak
   wire: a deleted unit test that asserted an externally observable wire rule; terse
   acceptance: a row of the plan 0026 acceptance matrix, proven live on the named hosts
+  policyspec: >
+    a policy engine specification test (owner-authorized 2026-10-30, ahead of plan 0027): go test in
+    process, the real RunReconciler, engine and bundled gha-lite actions in the pinned deno, the real
+    trust resolver over a fake PDS, no network; every case asserts the selected policy ran for the
+    decision and that its verdict and the decision are right
 
 harness:
   network: >
@@ -1499,6 +1504,199 @@ entries:
       - "the nf_tables table cannot load in the guest namespace: the VM does not start"
       - "a ComputeVM with no spec.hostPorts: no TCP port of 192.0.2.1 connects"
     cleanup: run request release <name>; standard teardown.
+
+  - id: PolicySpecHarness
+    kind: fixture
+    source: internal/policyengine/policytest
+    actors: [policy engine, deno sandbox, fake PDS, trust resolver]
+    setup: >
+      Deno from SOCIALWEB_POLICYTEST_DENO, the embedded deno (embed_deno), the build-staged pinned zip
+      ~/.tmp/socialweb-computer-build/cache/deno-embed/<versions.json sha256>.zip (extracted to
+      <user cache>/policy_engine/deno-embedded/<version>), or PATH; none fails the suite. A fake PDS and
+      PLC answer the atproto client in memory. The sandbox points every proxy at 127.0.0.1:9 and can be
+      set unfenced, unavailable or hung. An in-process policy.Runner runs each PolicyWorkflowRun through
+      the RunReconciler and keeps its spec and final status. Trust cases (policytest.TrustCases):
+      unvouched, vouched by self, vouched by a verified or a self-claimed self operator, verified or
+      forged counterparty operator, a claim for the other role, a direct vouch of an operated
+      counterparty, a reverse vouch only, mutual operator vouches, denounced, stranger vouches, same
+      verified operator, counterparty operated by self, forged same operator, different operators, and a
+      contract-scoped association held, expired, released or terminated.
+    asserts: the fixtures are deterministic; no case reads the network.
+    cleanup: each case has its own harness; nothing outlives the test.
+
+  - id: TestTrustPolicyMatrix
+    kind: policyspec
+    source: internal/policyengine/spec/trust_test.go
+    actors: [bidder, requester, policy engine]
+    setup: >
+      Per policy (tangled-vouch, only-me, mutuals, open) x perspective (bidder, requester) x lane (scope,
+      full) x trust case, a fresh harness and one run of <perspective>-<policy> (or open) with self and
+      the counterparty of that perspective.
+    asserts: >
+      The workflow ran to completion and its action logged a verdict; the action verdict and the
+      decision match: tangled-vouch allows self, a counterparty whose verified operator is self or
+      self's operator, and a counterparty or its verified operator vouched by self or self's verified
+      operator; only-me allows only a counterparty operated by self or self's verified operator,
+      contract-scoped only while the contract is held and unexpired; mutuals also needs the vouch back;
+      open allows. A self-claimed operator, a forged mirror, a reverse vouch alone, a claim for the
+      other role, a denounce or a stranger's vouch never counts. Both lanes give the same verdict.
+    cases:
+      - "matrix/<workflow>/<scope|full>/<bidder|requester>/<trust case>"
+      - "red on rc125: PT-1 reverse vouch admits in scope; PT-2 mutuals scope admits one-way; PT-3 full denies a direct vouch of an operated counterparty; PT-4 scope denies a counterparty operated by self; PT-6 a counterparty of self's own operator is denied"
+    cleanup: none.
+
+  - id: TestAlwaysRunOpen
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [bidder, requester, policy engine]
+    setup: The open workflow in both lanes and both perspectives.
+    asserts: open runs its action in the sandbox and succeeds before it allows; it never skips.
+    cleanup: none.
+
+  - id: TestWorkPolicies
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [bidder, requester, policy engine]
+    setup: under-4-cpus with no demand, an RFP without payload and an unreadable payload; bid-payload on a free and a paid bid.
+    asserts: >
+      under-4-cpus allows without a demand and denies "failed to resolve demand payload" when the
+      payload cannot be read; bid-payload allows a free bid and denies a paid one by default.
+    cleanup: none.
+
+  - id: TestStrictOutputs
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [policy engine]
+    setup: Inline workflows in both lanes - literal allow, no allow output, allow "yes", one job of two denying, a run step.
+    asserts: >
+      Only the literal allow allows. No allow output denies "no allow output", a non-boolean allow
+      denies, any job's allow=false denies with its violation, a run step is refused net-only.
+    cleanup: none.
+
+  - id: TestRecordTypesFailClosed
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [policy engine, PDS]
+    setup: A PolicyWorkflow whose recordRef names a gha-lite, a typescript, a denoWorker and an unknown record.
+    asserts: >
+      The gha-lite record runs and allows; the others fail before any code runs (empty console) with
+      "typescript policy records are disabled", "denoWorker policy records are disabled" or "unknown
+      policy record type", and deny.
+    cleanup: none.
+
+  - id: TestCacheKeyOnlyWhenDeclared
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [policy engine, run client]
+    setup: Inline workflows that do and do not declare the cache-key input; open for two counterparties and two lanes.
+    asserts: >
+      The run client always sends runs.CacheKey; a declaring workflow sees a key that starts with it,
+      a non-declaring one sees none. Other parties or another lane get another key.
+    cleanup: none.
+
+  - id: TestFailClosed
+    kind: policyspec
+    source: internal/policyengine/spec/engine_test.go
+    actors: [policy engine, deno sandbox, trust host, PDS]
+    setup: >
+      bidder-tangled-vouch and open, both lanes; a vouched control allows first, then the sandbox is
+      unfenced, unavailable or hung past a 2s deadline, the trust host errors, the PDS is down, the run
+      cannot be created, or the run is cancelled mid-flight.
+    asserts: >
+      Each denies with its cause (enforces no fence, unavailable, deadline, the trust host error, could
+      not be created, cancelled); a PDS outage denies tangled-vouch and leaves open allowed.
+    cleanup: none.
+
+  - id: TestEngineVerdictCache
+    kind: policyspec
+    source: internal/policyengine/spec/cache_test.go
+    actors: [policy engine, trust resolver]
+    setup: bidder- and requester-tangled-vouch repeated with the same and with other inputs.
+    asserts: >
+      A repeated decision still runs and is served from the verdict cache with the uncached verdict;
+      another counterparty, another RFP or another policy body never hits; after a vouch is deleted
+      and the trust cache invalidated the next decision denies; a deny stays a deny; a verdict older
+      than 30s is not served; a trust TTL of 2s expires a cached vouch.
+    cases:
+      - "red on rc125: PT-5 full lane serves a stale allow after the vouch is gone"
+    cleanup: none.
+
+  - id: TestBidderDecisionSites
+    kind: policyspec
+    source: internal/market/bidder/policy_spec_test.go
+    actors: [bidder, policy engine, PDS]
+    setup: >
+      The bidder's policyEvaluator and fullInput as validateBid (bids.go) and acceptContract
+      (adapters.go) call them: own policy unset, bidder-tangled-vouch, bidder-only-me or open, with and
+      without an attached requester-tangled-vouch record in the requester's repo, over every trust case.
+    asserts: >
+      always-run/bidder-<rfp-to-bid|accept>/<mode>/attached-<none|policy>/<case>: the scope run of the
+      own workflow ran and answered right; a scope deny denies with no full run; otherwise the full run
+      of the own workflow and of every attached record ran and answered right, and the decision allows
+      only if all allow. Unset spec.policy runs bidder-tangled-vouch.
+    cleanup: none.
+
+  - id: TestBidderAttachedPoliciesFailClosed
+    kind: policyspec
+    source: internal/market/bidder/policy_spec_test.go
+    actors: [bidder, policy engine, PDS]
+    setup: A vouched requester whose RFP attaches a denying workflow, a typescript record, a missing record or a record whose cid changed.
+    asserts: The own scope and full runs ran and allowed; the bid is denied with the attached record's cause.
+    cleanup: none.
+
+  - id: TestBidderFailClosedWithoutEngine
+    kind: policyspec
+    source: internal/market/bidder/policy_spec_test.go
+    actors: [bidder, policy engine]
+    setup: No run client, an unfenced sandbox, or an attached workflow with no allow output.
+    asserts: The bid decision denies with a reason.
+    cleanup: none.
+
+  - id: TestRequesterDecisionSites
+    kind: policyspec
+    source: internal/market/requester/policy_spec_test.go
+    actors: [requester, policy engine, PDS]
+    setup: >
+      A requester (requester.New) whose contract policy is unset, requester-tangled-vouch,
+      requester-only-me, requester-mutuals or open, gated by its own bundled policy record, with one
+      bid over every trust case.
+    asserts: >
+      always-run/requester-free-winner (runner.go freeWinner), requester-best-bid (bestBid) and
+      requester-session-pick-<free|paid> (sessionBestBid): the gate's scope run ran and answered right;
+      the session pick runs the full policy only after a scope allow and answers right; the bid is
+      picked only when the policy allows.
+    cleanup: none.
+
+  - id: TestRequesterAttachedPolicyGate
+    kind: policyspec
+    source: internal/market/requester/policy_spec_test.go
+    actors: [requester, PDS]
+    setup: attachedPolicy over records in the requester's and in a foreign repo.
+    asserts: >
+      The requester's own bundled record is the gate; a foreign repo, another body under a bundled
+      name, another policy name, a changed cid and a non gha-lite record are refused; an unnamed
+      contract policy gates on requester-tangled-vouch and refuses an attached open.
+    cleanup: none.
+
+  - id: TestRequesterDefaultPolicyRuns
+    kind: policyspec
+    source: internal/market/requester/policy_spec_test.go
+    actors: [requester, policy engine]
+    setup: PolicyEvaluator with no policy name, both lanes, an unvouched bidder.
+    asserts: requester-tangled-vouch runs and denies; "", "tangled-vouch" in any case map to requester-tangled-vouch.
+    cleanup: none.
+
+  - id: TestRequesterScopeCache
+    kind: policyspec
+    source: internal/market/requester/policy_spec_test.go
+    actors: [requester, policy engine]
+    setup: bidAllowedWithPolicy twice for one bid, then for another bidder, then after 31s and a revoked vouch.
+    asserts: >
+      A repeated scope decision gives the same verdict and still records an engine run; another bidder
+      runs its own policy and is denied; after the TTL a revoked vouch denies; a deny stays a deny.
+    cases:
+      - "red on rc125: the requester scope cache answers without an engine run"
+    cleanup: none.
 
 deleted_fixtures:
   - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)

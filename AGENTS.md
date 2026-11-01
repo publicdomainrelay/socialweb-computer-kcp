@@ -336,6 +336,11 @@ Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
   each states what a component must do (actors, inputs, observable outcome), never how it does it.
   Only high-level integration tests are written.
 - Rust tests under `rust/` are outside this rule and stay.
+- The policy engine specification tests are authorized by the owner (2026-10-30) and must pass:
+  `internal/policyengine/spec`, the policy decision tests in `internal/market/bidder` and
+  `internal/market/requester`, and their harness `internal/policyengine/policytest` (real engine, real
+  bundled actions in the pinned deno, a fake PDS, no network). Every case asserts that the selected
+  policy ran for the decision and that its verdict and the decision are right. No skip.
 
 ## Prod deployments
 
@@ -419,7 +424,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
     `go generate ./...` must leave `api`, `internal/atproto/market` and `deploy` unchanged;
-    `go vet ./...`; `scripts/check-architecture.sh`; `go build` and `go vet` of each Go asset module
+    `go vet ./...`; `scripts/check-architecture.sh`; the policy engine specification tests
+    (`go test ./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/`; they
+    find deno through `SOCIALWEB_POLICYTEST_DENO`, the embedded deno, the build-staged pinned zip in
+    `~/.tmp/socialweb-computer-build/cache/deno-embed`, or PATH, and fail without one); `go build` and `go vet` of each Go asset module
     in `internal/versions/versions.json`; `go build` and `go vet` for darwin/arm64, darwin/amd64,
     windows/amd64, windows/arm64 and linux/arm64, each with a `-tags release` build of
     `cmd/socialweb-computer`; and the `-tags release` build of every release platform.
