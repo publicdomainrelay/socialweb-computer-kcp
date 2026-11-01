@@ -522,6 +522,16 @@ func (k *Kcp) AwaitContract(ctx context.Context, timeout time.Duration, done fun
 		func(c *v1alpha1.ComputeContract) (bool, error) { return c != nil && done(c), nil })
 }
 
+func (k *Kcp) AwaitRecord(ctx context.Context, name string, timeout time.Duration, done func(*v1alpha1.AtprotoRecord) (bool, error)) (*v1alpha1.AtprotoRecord, error) {
+	return kube.Await(ctx, k.dyn.Resource(compose.AtprotoRecordGVR), name, timeout,
+		func(r *v1alpha1.AtprotoRecord) (bool, error) {
+			if r == nil {
+				return false, nil
+			}
+			return done(r)
+		})
+}
+
 func networkClient(kubeconfig string) (kube.Resource, error) {
 	cfg, err := kcpserver.FrontRestConfig(kubeconfig)
 	if err != nil {

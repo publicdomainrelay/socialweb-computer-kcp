@@ -537,6 +537,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 			return ctlruntime.Result{}, err
 		}
 	}
+	if req := o.Spec.Identity.AssociationRequest; req != nil {
+		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate, *req); err != nil {
+			return p.fail(err)
+		}
+	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, RequesterComponent)
 	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), pdsStateDir, did, requesterDir)
 	if err != nil {

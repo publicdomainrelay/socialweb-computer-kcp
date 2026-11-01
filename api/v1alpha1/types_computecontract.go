@@ -260,6 +260,8 @@ type ComputeContractStatus struct {
 	PendingEvents []ComputeContractEvent `json:"pendingEvents,omitempty"`
 
 	Association *commonv1.StrongRef `json:"association,omitempty"`
+
+	AssociationMessage string `json:"associationMessage,omitempty"`
 }
 
 const (

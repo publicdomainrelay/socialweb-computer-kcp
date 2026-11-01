@@ -15,6 +15,8 @@ const (
 
 	DefaultAssociationRefFile = AssociationRefDir + "/association-ref"
 
+	DefaultAssociationRequestFile = AssociationRefDir + "/association-request.json"
+
 	GuestAgentAssociationPath = GuestAgentConfigDir + "/association.json"
 
 	GuestRequesterDIDPath = GuestAgentStateDir + "/requester-did"

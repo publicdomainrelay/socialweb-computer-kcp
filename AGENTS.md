@@ -197,12 +197,20 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association
     after the accept; with fromGuest, user_data writes `/etc/socialweb-guest-agent/association.json`,
-    the requester inside the guest (`run request --association-ref`, run as root, finding the ref file
-    empty) writes its DID to `/run/socialweb-guest-agent/requester-did`, socialweb-guest-agent posts
-    guest.requesterDid (did:plc or did:web, never the requester's own DID; the first one stands), the
-    requester writes the record and the ref into the bundle and publishes guest.secretsUpdated, and the
-    guest agent fetches the bundle again (`SECRETS_REFETCH=1 setup-secrets.sh`, or the sealed fallback).
-    The atirc token of such a contract is minted with the record as its `assoc`.
+    the bundle carries `/etc/socialweb-computer/association-request.json` {authority, contract (the
+    accept uri), nonce}; the requester inside the guest (`run request --association-ref`, run as root,
+    finding the ref file empty) writes that as a market.associationRequest record in its own repo at
+    rkey `requester_associate-<authority>`, then its DID to `/run/socialweb-guest-agent/requester-did`;
+    socialweb-guest-agent posts guest.requesterDid (did:plc or did:web, never the requester's own DID;
+    the first one stands); the requester reads that request record by one getRecord in the reported
+    repo and writes nothing unless authority, contract and nonce match exactly; then it writes the
+    record at rkey `requester_associate-<subject>-<accept rkey>` (never over a record of another
+    contract, and release deletes only its own), the ref into the bundle, publishes
+    guest.secretsUpdated, and the guest agent fetches the bundle again (`SECRETS_REFETCH=1
+    setup-secrets.sh`, or the sealed fallback). A failed step retries with a bounded backoff and shows in
+    `status.associationMessage`. The atirc token is minted with the record as its `assoc` (a fromGuest
+    contract first gets an unbound token for the agent, replaced by one for the subhandle
+    `<label>-<rkey>-a` and revoked once the bound one is written).
     `run request --associate <did>|guest` asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`

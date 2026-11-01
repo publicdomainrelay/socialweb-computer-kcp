@@ -70,13 +70,21 @@ type contractRunner struct {
 
 	association *contractAssociation
 
-	associationSubjects map[string]bool
-
 	associationMu sync.Mutex
 
-	associating atomic.Bool
+	associationKick chan struct{}
 
 	atircAssoc commonv1.StrongRef
+
+	bundleMu sync.Mutex
+
+	associationRecords map[string]string
+
+	pendingGuest *GuestEvent
+
+	associationAttempts int
+
+	associationRetry *time.Timer
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -87,6 +95,8 @@ func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contrac
 		bids:      append([]v1alpha1.ContractBid(nil), contract.Status.Bids...),
 		releaseCh: make(chan struct{}),
 		done:      make(chan struct{}),
+
+		associationKick: make(chan struct{}, 1),
 	}
 	if contract.Status.Chosen != nil {
 		chosen := *contract.Status.Chosen
@@ -977,11 +987,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			}
 			r.log().Info("requester_guest_secrets", "event", payloadKind(parsed.Kind), "via", parsed.SecretsVia)
 		case market.ComputeEventsGuestRequesterDIDNSID:
-			if !r.acceptGuestRequester(ctx, state, parsed) {
-				return false
-			}
-			r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
-			r.ensureAssociation(ctx, state.Accept, state)
+			r.onGuestRequester(ctx, state, parsed)
 			return false
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
@@ -1034,6 +1040,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			}
 		case <-retryC:
 			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
+		case <-r.associationKick:
+			r.associationStep(ctx, state)
 		}
 	}
 }
@@ -1070,10 +1078,7 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			return false
 		}
 		if parsed.Kind == market.ComputeEventsGuestRequesterDIDNSID {
-			if r.acceptGuestRequester(ctx, state, parsed) {
-				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
-				r.ensureAssociation(ctx, state.Accept, state)
-			}
+			r.onGuestRequester(ctx, state, parsed)
 			return false
 		}
 		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID || parsed.Kind == market.ComputeEventsGuestSecretsAppliedNSID {
@@ -1118,6 +1123,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			}
 		case <-retryC:
 			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
+		case <-r.associationKick:
+			r.associationStep(ctx, state)
 		}
 	}
 }
@@ -1386,9 +1393,9 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 	}
 }
 
-func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, bids []v1alpha1.ContractBid, chosen *v1alpha1.ContractChosen, step string, attempts int32) {
+func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, bids []v1alpha1.ContractBid, chosen *v1alpha1.ContractChosen, step string, attempts int32) error {
 	if r.isGone() {
-		return
+		return errRunnerGone
 	}
 	contract := r.snapshot()
 	status := v1alpha1.ComputeContractStatus{
@@ -1416,13 +1423,17 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		status.Release = &preserved
 	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
-	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
+	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)
+	if err != nil && !notFound(err) {
 		r.log().Warn("requester_contract_status_failed", "err", err)
 	}
 	if phase == v1alpha1.ComputeContractReleased {
 		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
 	}
+	return err
 }
+
+var errRunnerGone = errors.New("requester: the contract runner is gone")
 
 func notFound(err error) bool {
 	return err != nil && (errors.Is(err, contractmarket.ErrNotFound) || strings.Contains(err.Error(), "not found"))

@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.market.associationRequest",
+  "description": "The repository that holds this record asks the authority to associate it for one contract: the proof that the subject DID of a com.publicdomainrelay.temp.compute.events.guest.requesterDid event controls this repository. Record key: <service>-<authority with : replaced by ->.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["authority", "service", "contract", "nonce", "createdAt"],
+        "properties": {
+          "authority": { "type": "string", "format": "did", "description": "The DID asked to write the association." },
+          "service": { "type": "string", "knownValues": ["requester_associate", "bidder_associate"], "description": "The role the association is asked for." },
+          "contract": { "type": "string", "format": "at-uri", "description": "The authority's market.accept of the contract whose guest runs this repository's requester." },
+          "nonce": { "type": "string", "maxLength": 128, "description": "The nonce the authority put into that contract's secrets bundle." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

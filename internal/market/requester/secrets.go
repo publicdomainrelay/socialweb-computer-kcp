@@ -445,8 +445,8 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 	if envFile != "" {
 		modules = append(modules, cloudinit.AgentModule(cloudinit.AgentOptions{EnvFile: envFile}))
 	}
-	if a := contract.Spec.Association; a != nil && a.FromGuest && strings.TrimSpace(a.Subject) != "" {
-		return "", errors.New("spec.association takes a subject or fromGuest, not both")
+	if a := contract.Spec.Association; a != nil && a.FromGuest == (strings.TrimSpace(a.Subject) != "") {
+		return "", errors.New("spec.association takes exactly one of a subject or fromGuest")
 	}
 	if fromGuest(contract) {
 		if contract.Spec.SecretsRef == nil {

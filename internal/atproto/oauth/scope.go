@@ -38,6 +38,7 @@ const (
 	CollectionFedproxySSHKey        = "com.fedproxy.sshPublicKey"
 	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
+	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
 	CollectionPolicyTypeScript      = "computer.socialweb.temp.policy.typescript"
 	CollectionInfra                 = "computer.socialweb.infra"
@@ -67,6 +68,7 @@ var (
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
+		[]string{collectionScope(CollectionAssociationRequest, "create", "update", "delete")},
 		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint},

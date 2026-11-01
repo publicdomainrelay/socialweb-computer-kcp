@@ -274,6 +274,50 @@ func (v *Association) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type AssociationRequest struct {
+	Type      string                     `json:"$type"`
+	Authority string                     `json:"authority"`
+	Contract  string                     `json:"contract"`
+	CreatedAt string                     `json:"createdAt"`
+	Nonce     string                     `json:"nonce"`
+	Service   string                     `json:"service"`
+	Extra     map[string]json.RawMessage `json:"-"`
+	absent    map[string]json.RawMessage
+}
+
+func (AssociationRequest) NSID() string {
+	return "com.publicdomainrelay.temp.market.associationRequest"
+}
+
+func ParseAssociationRequest(value map[string]any) (*AssociationRequest, error) {
+	var out AssociationRequest
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.market.associationRequest", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v AssociationRequest) MarshalJSON() ([]byte, error) {
+	type plain AssociationRequest
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.market.associationRequest"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *AssociationRequest) UnmarshalJSON(b []byte) error {
+	type plain AssociationRequest
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = AssociationRequest(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type AttestedSignature struct {
 	Type      string                     `json:"$type,omitempty"`
 	CID       string                     `json:"cid"`

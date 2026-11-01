@@ -28,6 +28,8 @@ const (
 
 	AtircTokenEnv = "ATIRC_TOKEN"
 
+	AtircSubhandleEnv = "ATIRC_SUBHANDLE"
+
 	AtircTokenLifetime = 24 * time.Hour
 
 	atircCallTimeout = 30 * time.Second
@@ -110,6 +112,15 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		r.log().Warn("requester_atirc_mint_failed", "step", step, "err", err.Error())
 		return false
 	}
+	subhandle := atircSubhandle(q.handle, rfpURI)
+	if assoc != nil && fromGuest(contract) {
+		subhandle = atircBoundSubhandle(q.handle, rfpURI)
+	}
+	if subhandle == "" {
+		return fail("subhandle", fmt.Errorf("handle %q and RFP %q make no subhandle", q.handle, rfpURI))
+	}
+	r.bundleMu.Lock()
+	defer r.bundleMu.Unlock()
 	ref := *contract.Spec.SecretsRef
 	kv, data, entries, err := r.readAtircBundle(ctx, ref)
 	if err != nil {
@@ -122,12 +133,12 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 			current, at = e, i
 		}
 	}
-	if assoc == nil && atircToken(current.Value) != "" {
-		return true
+	previousToken, previousSubhandle := atircToken(current.Value), atircEnvSubhandle(current.Value)
+	if previousToken != "" && previousSubhandle == "" {
+		previousSubhandle = atircSubhandle(q.handle, rfpURI)
 	}
-	subhandle := atircSubhandle(q.handle, rfpURI)
-	if subhandle == "" {
-		return fail("subhandle", fmt.Errorf("handle %q and RFP %q make no subhandle", q.handle, rfpURI))
+	if assoc == nil && previousToken != "" {
+		return true
 	}
 	exp := q.now().Add(AtircTokenLifetime)
 	if !deadline.IsZero() && deadline.Before(exp) {
@@ -140,7 +151,7 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err != nil {
 		return fail("mint", err)
 	}
-	current.Value = withAtircToken(current.Value, token)
+	current.Value = withAtircToken(current.Value, token, subhandle)
 	current.Mode = "0600"
 	if at < 0 {
 		entries = append(entries, current)
@@ -165,6 +176,9 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 		bound = assoc.URI
 	}
 	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "envFile", envFile, "exp", exp.UTC().Format(time.RFC3339), "assoc", bound)
+	if previousToken != "" && previousSubhandle != subhandle {
+		r.revokeAtircSubhandle(ctx, previousToken, previousSubhandle)
+	}
 	return true
 }
 
@@ -176,39 +190,43 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) {
 	if err != nil || envFile == "" || state == nil || state.RFPURI == "" || q.deps.VaultWrite == nil {
 		return
 	}
-	subhandle := atircSubhandle(q.handle, state.RFPURI)
-	if subhandle == "" {
-		return
-	}
-	fail := func(step string, err error) {
-		r.log().Warn("requester_atirc_revoke_failed", "subhandle", subhandle, "step", step, "err", err.Error())
-	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
 	defer cancel()
+	r.bundleMu.Lock()
 	_, _, entries, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
+	r.bundleMu.Unlock()
 	if err != nil {
-		fail("read the bundle", err)
+		r.log().Warn("requester_atirc_revoke_failed", "step", "read the bundle", "err", err.Error())
 		return
 	}
-	token := ""
+	token, subhandle := "", ""
 	for _, e := range entries {
 		if e.Path == envFile {
-			token = atircToken(e.Value)
+			token, subhandle = atircToken(e.Value), atircEnvSubhandle(e.Value)
 		}
 	}
-	if token == "" {
+	if subhandle == "" {
+		subhandle = atircSubhandle(q.handle, state.RFPURI)
+	}
+	if token == "" || subhandle == "" {
 		return
 	}
+	r.revokeAtircSubhandle(ctx, token, subhandle)
+}
+
+func (r *contractRunner) revokeAtircSubhandle(ctx context.Context, token, subhandle string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), atircCallTimeout)
+	defer cancel()
 	var out struct {
 		RevokedAt int64 `json:"revokedAt"`
 	}
-	err = r.postAtirc(ctx, AtircRevokeNSID, token, atircRevokeInput{Subhandle: subhandle}, &out)
+	err := r.postAtirc(ctx, AtircRevokeNSID, token, atircRevokeInput{Subhandle: subhandle}, &out)
 	var xerr *atircError
 	switch {
 	case errors.As(err, &xerr) && xerr.status == http.StatusUnauthorized:
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "already", true)
 	case err != nil:
-		fail("revoke", err)
+		r.log().Warn("requester_atirc_revoke_failed", "subhandle", subhandle, "step", "revoke", "err", err.Error())
 	default:
 		r.log().Info("requester_atirc_revoked", "subhandle", subhandle, "revokedAt", time.Unix(out.RevokedAt, 0).UTC().Format(time.RFC3339))
 	}
@@ -311,9 +329,18 @@ func atircSubhandle(handle, rfpURI string) string {
 	return label + "-" + strings.ToLower(rkey) + "." + handle
 }
 
-func atircToken(env string) string {
+func atircBoundSubhandle(handle, rfpURI string) string {
+	subhandle := atircSubhandle(handle, rfpURI)
+	label, rest, ok := strings.Cut(subhandle, ".")
+	if !ok || label == "" {
+		return ""
+	}
+	return label + "-a." + rest
+}
+
+func atircEnvValue(env, name string) string {
 	for line := range strings.Lines(env) {
-		value, ok := strings.CutPrefix(strings.TrimSpace(line), AtircTokenEnv+"=")
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), name+"=")
 		if value = strings.TrimSpace(value); ok && value != "" {
 			return value
 		}
@@ -321,10 +348,19 @@ func atircToken(env string) string {
 	return ""
 }
 
-func withAtircToken(env, token string) string {
+func atircToken(env string) string {
+	return atircEnvValue(env, AtircTokenEnv)
+}
+
+func atircEnvSubhandle(env string) string {
+	return atircEnvValue(env, AtircSubhandleEnv)
+}
+
+func withAtircToken(env, token, subhandle string) string {
 	var b strings.Builder
 	for line := range strings.Lines(env) {
-		if strings.HasPrefix(strings.TrimSpace(line), AtircTokenEnv+"=") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, AtircTokenEnv+"=") || strings.HasPrefix(trimmed, AtircSubhandleEnv+"=") {
 			continue
 		}
 		b.WriteString(line)
@@ -333,5 +369,6 @@ func withAtircToken(env, token string) string {
 		}
 	}
 	b.WriteString(AtircTokenEnv + "=" + token + "\n")
+	b.WriteString(AtircSubhandleEnv + "=" + subhandle + "\n")
 	return b.String()
 }

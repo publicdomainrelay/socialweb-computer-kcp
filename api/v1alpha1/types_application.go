@@ -152,9 +152,19 @@ type ApplicationIdentity struct {
 
 	AssociationRef *commonv1.StrongRef `json:"associationRef,omitempty"`
 
+	AssociationRequest *AssociationRequest `json:"associationRequest,omitempty"`
+
 	OAuthClientID string `json:"oauthClientID,omitempty" apigen:"userEndpoint"`
 
 	OAuthRedirectURI string `json:"oauthRedirectURI,omitempty" apigen:"userEndpoint"`
+}
+
+type AssociationRequest struct {
+	Authority string `json:"authority"`
+
+	Contract string `json:"contract"`
+
+	Nonce string `json:"nonce"`
 }
 
 type MarketCommsMode string
