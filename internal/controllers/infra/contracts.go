@@ -90,6 +90,25 @@ func (r *reconciler[T]) contracts(ctx context.Context, req ctlruntime.Request, v
 	return out, left, nil
 }
 
+func (r *reconciler[T]) releaseDeclared(ctx context.Context, req ctlruntime.Request, v view, existing []v1alpha1.ComputeContract) error {
+	byName := map[string]*v1alpha1.ComputeContract{}
+	for i := range existing {
+		byName[existing[i].Labels[v1alpha1.InfraContractLabel]] = &existing[i]
+	}
+	for _, c := range v.declaration.Contracts {
+		cc := byName[c.Name]
+		if cc == nil {
+			continue
+		}
+		if step := infra.Plan(c.State, c.ReleaseRequestedAt, cc, ""); step.Release {
+			if err := r.apply(ctx, req, v, cc, step); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func contractStatus(name string, cc *v1alpha1.ComputeContract, phase v1alpha1.InfraContractPhase) v1alpha1.InfraContractStatus {
 	out := v1alpha1.InfraContractStatus{Name: name, Phase: phase}
 	if cc == nil {

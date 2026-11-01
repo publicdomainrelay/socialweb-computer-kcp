@@ -270,6 +270,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			if !Publishing(v.spec.Record) && end.Ended {
 				recordErr = nil
 			} else if !Publishing(v.spec.Record) {
+				if err := r.releaseDeclared(ctx, req, v, contracts); err != nil {
+					return ctlruntime.Result{}, errors.Join(recordErr, err)
+				}
 				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
 				return requeueAt(v, end, backoff), errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)))
 			}
