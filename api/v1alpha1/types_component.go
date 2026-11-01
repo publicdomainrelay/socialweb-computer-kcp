@@ -725,6 +725,8 @@ type GatewayAPISpec struct {
 	PostSignInURL string `json:"postSignInURL,omitempty" apigen:"userEndpoint"`
 
 	NodeMarket *GatewayNodeMarket `json:"nodeMarket,omitempty"`
+
+	NodesOnly bool `json:"nodesOnly,omitempty"`
 }
 
 type GatewayNodeMarket struct {
@@ -741,6 +743,8 @@ type GatewayNodeMarket struct {
 	NodePolicyArgs string `json:"nodePolicyArgs,omitempty"`
 
 	InfraRecord *GatewayInfraRecord `json:"infraRecord,omitempty"`
+
+	VaultMount string `json:"vaultMount,omitempty"`
 }
 
 type GatewayInfraRecord struct {

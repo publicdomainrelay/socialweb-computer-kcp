@@ -195,6 +195,16 @@ func TeardownWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ct
 	})
 }
 
+func SiblingWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
+	return ctlruntime.WatchesIn(export, func(_ context.Context, src ctlruntime.Request, _ C) []ctlruntime.Request {
+		var out []ctlruntime.Request
+		for _, name := range c.rootsIn(src.Cluster, rootKind) {
+			out = append(out, ctlruntime.Request{Cluster: src.Cluster, Name: name})
+		}
+		return out
+	})
+}
+
 func (c *Composer) deletingOf(rootKind string) []ctlruntime.Request {
 	c.roots.mu.Lock()
 	defer c.roots.mu.Unlock()

@@ -145,6 +145,13 @@ func Evaluate(f Facts) []Result {
 	return out
 }
 
+func EvaluateRequesterGateway(f Facts) []Result {
+	if f.VersionErr != "" {
+		return []Result{fail(CheckCgroupV2, f.VersionErr, "run run requester --with-gateway on Linux")}
+	}
+	return []Result{cgroupV2(f), delegation(f), subids(f), uidmapHelpers(f), tzdata(f)}
+}
+
 func Failed(rs []Result) []string {
 	var out []string
 	for _, r := range rs {

@@ -52,7 +52,11 @@
     },
     "with-gateway": {
       "type": "boolean",
-      "description": "dev up --profile market-network: also compose a Gateway child application in its own workspace of the network's kcp"
+      "description": "dev up --profile market-network: also compose a Gateway child application in its own workspace of the network's kcp. run requester: also apply a Gateway root of profile requester (spec.requesterRef: the MarketRequester app) into the requester's workspace and run its clusterprovider in the run requester process, so a tenant cluster's k3s and kine are HostProcesses of the requester's core and its nodes are rented by the MarketRequester's Requester under the user's DID; preflights cgroup v2, delegation, subuid/subgid and the uidmap helpers; recorded in requester.json, so a restart keeps it"
+    },
+    "cluster": {
+      "type": "string",
+      "description": "run requester cluster and kubeconfig: the tenant cluster, a DNS label; run requester cluster <name> --cluster <c> makes the account and home workspaces of the requester's DID and the Cluster {account: <did>, running: true} in root:<account>:<c>; run requester kubeconfig <name> --cluster <c> prints the path of its admin kubeconfig"
     },
     "app-values": {
       "type": "string",

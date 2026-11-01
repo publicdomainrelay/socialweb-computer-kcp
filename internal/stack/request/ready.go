@@ -46,6 +46,8 @@ type ReadyIngress struct {
 
 type ReadyGateway struct {
 	Workspace string `json:"workspace"`
+	Name      string `json:"name"`
+	Clusters  string `json:"clusters"`
 }
 
 type Ready struct {
@@ -114,12 +116,13 @@ func ReadyOf(st v1alpha1.ApplicationStatus, id *v1alpha1.MarketIdentity) (did, h
 }
 
 type RequesterRecord struct {
-	Schema    int                          `json:"schema"`
-	Name      string                       `json:"name"`
-	Network   string                       `json:"network,omitempty"`
-	Identity  string                       `json:"identity,omitempty"`
-	Spec      v1alpha1.MarketRequesterSpec `json:"spec"`
-	CreatedAt time.Time                    `json:"createdAt"`
+	Schema      int                          `json:"schema"`
+	Name        string                       `json:"name"`
+	Network     string                       `json:"network,omitempty"`
+	Identity    string                       `json:"identity,omitempty"`
+	Spec        v1alpha1.MarketRequesterSpec `json:"spec"`
+	WithGateway bool                         `json:"withGateway,omitempty"`
+	CreatedAt   time.Time                    `json:"createdAt"`
 }
 
 func (r RequesterRecord) SameShape(o RequesterRecord) bool {

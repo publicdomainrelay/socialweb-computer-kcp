@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 )
 
 const (
@@ -163,4 +166,35 @@ func outboundCABundle(dir, networkCA string) (string, error) {
 		return "", err
 	}
 	return out, os.Rename(out+".tmp", out)
+}
+
+func NetworkOutbound(ctx context.Context, n *v1alpha1.MarketNetworkValue, tlsDir, record string, log *slog.Logger) (net.Addr, func(), error) {
+	if n != nil && n.CABundle != "" && os.Getenv("SSL_CERT_FILE") == "" {
+		bundle, err := outboundCABundle(tlsDir, n.CABundle)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		os.Setenv("SSL_CERT_FILE", bundle)
+		log.Info("the system roots and the market network's CA are this gateway's outbound trust: every vault it places verifies a bidder's issuer with them",
+			"bundle", bundle)
+	}
+	if n == nil {
+		return nil, func() {}, nil
+	}
+	m, ok, err := guestTLSEgress(n.GuestTLSURL())
+	if err != nil || !ok {
+		return nil, func() {}, err
+	}
+	addr, stop, err := runEgress(ctx, m, record, log)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	os.Setenv("HTTPS_PROXY", "http://"+addr.String())
+	log.Info("the market network's guest TLS front is this gateway's egress for its port-less names: every vault it places fetches a bidder's issuer through it",
+		"egress", addr.String(), "names", "*."+m.host+":443", "target", m.target)
+	return addr, stop, nil
+}
+
+func RequesterEgressRecord(l devinstance.Layout) string {
+	return filepath.Join(l.KcpDir(), egressRecord)
 }

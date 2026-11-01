@@ -66,6 +66,7 @@ func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer),
 		compose.TeardownWatch[*v1alpha1.Cluster](c, compose.ExportClusters, Kind)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
+	opts = append(opts, compose.SiblingWatch[*v1alpha1.MarketRequester](c, compose.ExportApplications, Kind))
 	opts = append(opts, ctl.publishWatches()...)
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("gateway: registering the Gateway controller: %w", err)
@@ -138,7 +139,11 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	st.Components = []v1alpha1.ApplicationComponent{}
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, ws: r.Workspace + ":" + compose.ComponentWorkspace, st: st}
 	if r.Deleting {
-		res, err := p.delete(ctx)
+		del := p.delete
+		if requesterProfile(o) {
+			del = p.deleteRequester
+		}
+		res, err := del(ctx)
 		if err == nil && !res.Waiting {
 			ctl.publishers.forget(req)
 		}
@@ -296,6 +301,9 @@ func (p *pass) baseLinks() []compose.Link {
 
 func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	c, r, o, ws := p.c, p.r, p.o, p.ws
+	if requesterProfile(o) {
+		return p.requester(ctx)
+	}
 	pdsAccountHandle := compose.PdsHandle(ws, "gateway", "")
 	switch o.Spec.Profile {
 	case ProfileGatewayProd, ProfileGatewayNetwork:

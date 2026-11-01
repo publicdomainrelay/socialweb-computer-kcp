@@ -279,6 +279,9 @@ kubectl --kubeconfig "$TK" logs deploy/quickstart-k8s
 ```
 
 - prints `quickstart-k8s-ok`; the node is `<account>-tenant-node1`
+- a tenant cluster of your own requester instead of the network's gateway, on a network brought up without
+  `--with-gateway` (its gateway child would serve every Cluster): `run requester --network $I --name me --with-gateway`, then `run requester cluster me --cluster c1` and `run requester kubeconfig me --cluster c1`
+  ([quickstart-prod.md](quickstart-prod.md) section 8); its `nodes-<hex>` Infra is in `root:me`
 - the Infra mirrors to `at://<owner did>/computer.socialweb.infra/nodes-<hex>` (`status.record.uri`)
 - the NodeClaim is in the cluster's home workspace (`spec.clusterRef.workspace`): `status.phase`, `status.contract.winner.did`, `status.infra`
 
@@ -355,4 +358,3 @@ Each one is an item of plan [0039](plans/0039-long-lived-requester.yaml):
 | gap | plan 0039 item |
 |---|---|
 | an atirc agent join from a local network requester (its DID is on the network PLC and its handle is `.local`; a local PDS on plc.directory with a public handle and ingress mints: [quickstart-prod.md](quickstart-prod.md) section 5) | D-AGENT-IDENTITY is on main; the join is a prod step: [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) |
-| creating a tenant cluster by writing an object: the gateway composes the cluster's Infra from NodeClaims; a Cluster you apply needs the gateway in your own requester kcp | C-GATEWAY-COMPOSE |

@@ -122,6 +122,23 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   `run requester password <name>` reads one from stdin into `identity/requester/keys` of the requester's vault.
   `upgrade` takes the role from the install record. The same-account form is a kubectl-applied HostProcess
   (`examples/infra/requester-hostprocess.yaml`); no root prunes a HostProcess outside its set.
+- `run requester --with-gateway` (plan 0039 C-GATEWAY-COMPOSE, `cmd/socialweb-computer/requestergateway.go`,
+  `internal/stack/gatewaykcp/requester.go`, `internal/app/gateway/requester.go`) applies a Gateway root `gateway` of
+  profile `requester` with `spec.requesterRef` (the MarketRequester `app` of the same workspace) and runs its
+  clusterprovider in the `run requester` process. With requesterRef the Gateway composes no PlanAccount, Pds,
+  Requester, PolicyEngine, root vault or web app: only the rbac phase of the gateway set (the NodeClaim agent) and a
+  nodes-only GatewayAPI (`spec.nodesOnly`, the NodeClaim binding and the downloads route) whose node bundles go to
+  the requester's vault (`nodeMarket.vaultMount` requester); the nodes' Infra is in the requester workspace and the
+  MarketRequester's Requester rents them as the user's DID. A Gateway without requesterRef composes what it did
+  before. Its clusterprovider serves only the clusters of the requester's DID (`SOCIALWEB_CLUSTERPROVIDER_ACCOUNT`:
+  the registry and the Cluster controller skip every other account), and `--with-gateway` is refused in a market
+  network that has a gateway child (that provider serves every Cluster of the network's kcp). The cluster's k3s,
+  kine and OpenBao are HostProcesses of the requester's core; in a market network the
+  child core runs the gateway's outbound trust and egress (`gatewaykcp.NetworkOutbound`) when
+  `<instance state>/gateway` exists, which `run requester --with-gateway` makes before the network places it.
+  `requester.json` records `withGateway`; the ready file gains `gateway {workspace, name, clusters}`;
+  `run requester cluster <name> --cluster <c>` makes the home workspace `root:<account>:<c>` and its Cluster, and
+  `run requester kubeconfig <name> --cluster <c>` prints its admin kubeconfig path.
 - Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
   XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Firehose has no
   inbound endpoint. Both (the requester default) is the ingress plus the same streams as Firehose. In

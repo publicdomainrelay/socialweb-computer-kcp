@@ -101,6 +101,27 @@ func Gather(ctx context.Context, o Options) Facts {
 	return f
 }
 
+func GatherRequesterGateway(o Options) Facts {
+	uid := os.Getuid()
+	f := Facts{Role: RoleGateway, UID: uid, Euid: os.Geteuid(), StateDir: o.StateDir}
+	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		f.Account = u.Username
+	}
+	f.CgroupV2 = cgroup2()
+	mgr := filepath.Join("/sys/fs/cgroup/user.slice", fmt.Sprintf("user-%d.slice", uid), fmt.Sprintf("user@%d.service", uid))
+	if b, err := os.ReadFile(filepath.Join(mgr, "cgroup.controllers")); err != nil {
+		f.ManagerControllersErr = err.Error()
+	} else {
+		f.ManagerControllers = strings.Fields(string(b))
+	}
+	f.Tzdata = fsx.Exists("/usr/share/zoneinfo/UTC")
+	sub, _ := os.ReadFile("/etc/subuid")
+	sg, _ := os.ReadFile("/etc/subgid")
+	f.Subuid, f.Subgid = string(sub), string(sg)
+	f.Helpers = helpers()
+	return f
+}
+
 func randomSuffix() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)

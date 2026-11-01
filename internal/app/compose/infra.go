@@ -863,28 +863,41 @@ func (c *Composer) DeleteAccountClusters(ctx context.Context) (int, error) {
 		if account.Spec.Type == nil || account.Spec.Type.Name != AccountWorkspaceType {
 			continue
 		}
-		path := clusterhome.RootWorkspace + ":" + account.Name
-		hri, err := c.Client(path, WorkspaceGVR)
+		n, err := c.deleteClustersIn(ctx, clusterhome.RootWorkspace+":"+account.Name)
+		left += n
 		if err != nil {
 			return left, err
 		}
-		homes, err := kube.List[tenancyv1alpha1.Workspace](ctx, hri, metav1.ListOptions{})
-		if apierrors.IsNotFound(err) {
+	}
+	return left, nil
+}
+
+func (c *Composer) DeleteClustersOf(ctx context.Context, did string) (int, error) {
+	return c.deleteClustersIn(ctx, clusterhome.AccountPath(did))
+}
+
+func (c *Composer) deleteClustersIn(ctx context.Context, path string) (int, error) {
+	hri, err := c.Client(path, WorkspaceGVR)
+	if err != nil {
+		return 0, err
+	}
+	homes, err := kube.List[tenancyv1alpha1.Workspace](ctx, hri, metav1.ListOptions{})
+	if apierrors.IsNotFound(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	left := 0
+	for _, home := range homes {
+		if home.Spec.Mount != nil {
 			continue
 		}
-		if err != nil {
+		n, err := c.DeleteAll(ctx, path+":"+home.Name, v1alpha1.ClusterGVR)
+		if err != nil && home.DeletionTimestamp == nil {
 			return left, err
 		}
-		for _, home := range homes {
-			if home.Spec.Mount != nil {
-				continue
-			}
-			n, err := c.DeleteAll(ctx, path+":"+home.Name, v1alpha1.ClusterGVR)
-			if err != nil && home.DeletionTimestamp == nil {
-				return left, err
-			}
-			left += n
-		}
+		left += n
 	}
 	return left, nil
 }

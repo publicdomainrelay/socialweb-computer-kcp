@@ -4147,6 +4147,11 @@ func (in *GatewaySpec) DeepCopyInto(out *GatewaySpec) {
 		*out = new(GatewayClusterProvider)
 		**out = **in
 	}
+	if in.RequesterRef != nil {
+		in, out := &in.RequesterRef, &out.RequesterRef
+		*out = new(commonv1alpha1.ObjectRef)
+		**out = **in
+	}
 	return
 }
 

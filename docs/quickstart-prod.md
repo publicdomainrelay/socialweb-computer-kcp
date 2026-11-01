@@ -10,8 +10,9 @@
 - also on main: that requester installed as a systemd unit of its own account (section 7a, `install requester`) or as a
   HostProcess of an account's core (section 7b); the atirc agent from a local PDS or a pdsAccount identity is built
   (section 5) and not yet proven on prod
-- what is planned: the gateway in the requester kcp (section 7, plan [0039](plans/0039-long-lived-requester.yaml) item
-  C-GATEWAY-COMPOSE)
+- also on main: your own tenant cluster in the requester kcp (section 8, `run requester --with-gateway`, plan
+  [0039](plans/0039-long-lived-requester.yaml) item C-GATEWAY-COMPOSE), proven on a local network; a node from a remote
+  prod bidder is the lead's run
 - acceptance: [acceptance/0012-infra-quickstart.md](acceptance/0012-infra-quickstart.md) "Prod Step For The Agent Join" and
   "Prod Readings"; [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) for
   [../examples/infra/mixed-prod.yaml](../examples/infra/mixed-prod.yaml) on a bidder you configured; the runbook rules of [acceptance/README.md](acceptance/README.md) apply (announce on atirc first, release
@@ -157,7 +158,7 @@ kubectl --kubeconfig "$W/kubeconfig" apply -f examples/infra/k8s-cluster.yaml
 ```
 
 - a pod that does not fit makes a NodeClaim; the gateway's Infra `nodes-<hex>` rents the node from a prod bidder
-- running the gateway (cluster control plane and node market) inside your own requester is plan 0039 item C-GATEWAY-COMPOSE
+- your own tenant cluster without the prod gateway: section 8 (`run requester --with-gateway`)
 
 ## 7. A Long-Lived Requester From The CLI: run requester
 
@@ -330,17 +331,65 @@ kubectl delete hostprocess requester-lr2                        # SIGTERM: stops
 
 Still planned in plan 0039:
 
-- the gateway in the same kcp (item C-GATEWAY-COMPOSE): `kubectl apply` a Cluster, its k3s control plane runs as
-  HostProcesses of the requester's core, and its nodes are rented by the same requester
 - its live pass: [../examples/infra/mixed-prod.yaml](../examples/infra/mixed-prod.yaml) (vm1, sbx1, agent1 pinned to one
   bidder, no policy field) by acceptance [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) (item
   ACC39-MIXED-PROD; written, not yet run on prod)
+
+## 8. Your Own Tenant Cluster: run requester --with-gateway
+
+`run requester --with-gateway` (plan 0039 item C-GATEWAY-COMPOSE) composes the gateway into the requester's own kcp. One
+identity: the MarketRequester's Requester rents the cluster's nodes under your DID and the default policy; there is no
+second sign-in, no gateway PDS, no gateway Requester and no web app.
+
+```bash
+$SWC run requester --name me --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
+until jq -e .gateway "$ST/requesters/me/ready.json" >/dev/null 2>&1; do sleep 1; done
+$SWC run requester cluster me --cluster c1 --state-dir "$ST"         # account + home workspace and the Cluster
+TK=$($SWC run requester kubeconfig me --cluster c1 --state-dir "$ST") # once the Cluster is Ready
+kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml
+kubectl --kubeconfig "$TK" wait --for=condition=Ready pod -l app=quickstart-k8s --timeout=5m
+kubectl --kubeconfig "$TK" logs deploy/quickstart-k8s                # quickstart-k8s-ok
+kubectl get infras.socialweb.computer                                # nodes-<hex>, in the requester workspace
+kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node scales to zero, its contract Released
+```
+
+- what it composes: a Gateway root `gateway` of profile `requester` with `spec.requesterRef` naming the MarketRequester
+  `app`, in the requester's own workspace. It composes no PlanAccount, Pds, Requester, identity or web app of its own, only
+  a nodes-only GatewayAPI (`spec.nodesOnly`): the NodeClaim binding and the meshd and node-agent downloads, nothing else
+  is served. The NodeClaim controller writes the cluster's Infra `nodes-<hex>` into the requester workspace, the
+  requester runs its ComputeContracts as your DID with `requester-tangled-vouch`, the node join bundles go to the
+  requester's own vault (`requester/contracts/<contract>/bundle`, served by getSecrets), and the Infra record mirrors to
+  your repo (`computer.socialweb.infra/nodes-<hex>`, Retain: never deleted)
+- the cluster provider runs in the `run requester` process and serves only the clusters of your DID; in a local
+  market network `--with-gateway` is refused when the network has a gateway child (`dev up --with-gateway`), whose
+  provider serves every Cluster of the network's kcp
+- the cluster's k3s, kine, OpenBao, front and links are
+  HostProcesses of the requester's core (`kubectl get hostprocesses.socialweb.computer`), with state under
+  `<instance state>/clusterprovider` (the ready file's `gateway.clusters`)
+- a Cluster lives in a home workspace `root:<account>:<cluster>` of your DID: `run requester cluster` makes the account
+  workspace, its AtprotoIdentity, the home workspace and the Cluster `{account: <did>, running: true}`; delete the
+  Cluster there to tear it down
+- the ready file gains `gateway {workspace, name, clusters}` once the Gateway is Ready; `requester.json` records
+  `withGateway`, so a restart keeps the gateway and the clusters
+- preflight: cgroup v2, user manager delegation, one subuid/subgid range and setuid newuidmap/newgidmap (the
+  `check-host -role gateway` fixes); a dev build or a release build (k3s and external-secrets are embedded)
+- proven (2026-11-01, own market network, `--network`, bidder policy `bidder-tangled-vouch`, both vouches): Gateway
+  Ready 3 s after the requester, `run requester cluster` Ready in 17 s with 11 HostProcesses in the requester workspace,
+  the NodeClaim's Infra `nodes-<hex>` in `root:<requester>` and its contract Held in 21 s (owner DID, attached
+  `requester-tangled-vouch`, SecretsApplied GetSecrets), the pod logged `quickstart-k8s-ok`, the node scaled to zero and
+  the contract Released 2.5 min after the Deployment was deleted, the Infra record stayed in the repo; Ctrl-C and
+  restart with nothing after `--`: the same DID, the gateway Ready 9 s after the start, the Cluster still Ready, k3s
+  `/readyz` ok, every cluster HostProcess adopted by unit name and InvocationID but the cluster OpenBao (restarted in
+  place). The first node join of a fresh network waited about 4 min for the bidder's guest OIDC discovery to report its
+  configured issuer (it reported `https://127.0.0.1:0` until then)
+- on prod the node's meshd download base is the local Exposure (`http://192.0.2.1:<port>`), which reaches only a bidder
+  on the same host; renting a node from a remote prod bidder needs a public origin for that download (open, the lead's run)
 
 ## Not Supported On Prod Today
 
 | gap | where it is planned |
 |---|---|
-| a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
+| a node of your own tenant cluster from a remote prod bidder (the meshd download base is local) | plan 0039 C-GATEWAY-COMPOSE, the lead's prod run |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |

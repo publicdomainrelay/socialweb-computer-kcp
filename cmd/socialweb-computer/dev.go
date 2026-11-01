@@ -1019,6 +1019,11 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		}
 		return exitOK
 	}
+	if stop, err := a.requesterGatewayOutbound(ctx, rec); err != nil {
+		return a.fail(exitFailed, "internal dev-core: the requester's gateway outbound: %v", err)
+	} else {
+		defer stop()
+	}
 	cfg := devcore.Config{Layout: rec.Layout, ReadyTimeout: timeout, Log: a.log, SignInGuard: bidder.CheckSignIn}
 	if rec.VM == nil && rec.Role == table.RoleBidder && rec.AdminKubeconfig != "" {
 		if err := computevm.ApplyBidderSets(ctx, computevm.Config{Handle: rec.Layout.ID, Log: a.log}, rec.AdminKubeconfig,
