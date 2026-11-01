@@ -109,3 +109,17 @@ spec:
   rkey: 3msbt7ah2222m
   deletionPolicy: Retain
   record: {"$type": "com.publicdomainrelay.temp.auth.allowlist.rbacDid", "allowed": {"allowSelf": ["did:plc:ocnuqjlzgohypj3zoznermms"]}, "createdAt": "2026-08-04T20:13:39.712Z", "protects": {"allowSelf": {"scope": "account.auth", "service": ""}}}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-vouch-hat
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: sh.tangled.graph.vouch
+  rkey: "did:plc:j4yw65srpdumubaadp7ijmy5"
+  deletionPolicy: Retain
+  record: {"$type": "sh.tangled.graph.vouch", "createdAt": "2026-10-31T06:17:47Z", "kind": "vouch", "reason": "test account for socialweb market testing"}

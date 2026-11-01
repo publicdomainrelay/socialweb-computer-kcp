@@ -15,6 +15,7 @@ apply:
   fieldManager: socialweb.computer/testaccounts
 counterparties:
   alice: did:plc:lpfuqerea3deuoyrn7ojser4
+  hat: did:plc:j4yw65srpdumubaadp7ijmy5
   bidderHosts:
     - did:plc:4vcig7s43z3nyqrnepmcfzqt
     - did:plc:2l2wdry77c7jtucbslstagkj
@@ -57,6 +58,7 @@ oauthScopes:
 optionalScopes: []
 declared:
   - {object: testaccount-bob-vouch-alice, collection: sh.tangled.graph.vouch, rkey: "did:plc:lpfuqerea3deuoyrn7ojser4", cid: bafyreibk6yrjtbfyubhuhckhlxvluftci3lddwojyswcguvgwzeaaqip7i, write: verify, readBy: bidder-tangled-vouch (the operator vouches the requester)}
+  - {object: testaccount-bob-vouch-hat, collection: sh.tangled.graph.vouch, rkey: "did:plc:j4yw65srpdumubaadp7ijmy5", cid: bafyreic2p2gqwvp5fuwcoibnamem25pq5ux3ocgxiz3xzmnuyutbjrhzrq, write: verify, readBy: bidder-tangled-vouch (the operator vouches the requester)}
   - {object: testaccount-bob-claim-bidder-4vcig7s4, collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: bidder_associate-did-plc-4vcig7s43z3nyqrnepmcfzqt, cid: bafyreib56shw3mjyejpicaxan5pnbksgbetp2xgksyfgpcfpl4h2eakvx4, write: oauth, readBy: trust operatorOf (the bidder host's mirror names bob)}
   - {object: testaccount-bob-claim-bidder-2l2wdry7, collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: bidder_associate-did-plc-2l2wdry77c7jtucbslstagkj, cid: bafyreibb5hr27m6fjp3rctag66sb56t5z6e6wzlnsxcxs32ljhlp2lznqu, write: oauth, readBy: trust operatorOf (the bidder host's mirror names bob)}
   - {object: testaccount-bob-profile-bsky, collection: app.bsky.actor.profile, rkey: self, cid: bafyreihjykthjmsbjlbjnahdvj3hj7oqhn75r67n6uerkrclbq5t3odhha, write: verify, readBy: bsky and atirc display}

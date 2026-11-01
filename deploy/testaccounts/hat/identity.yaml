@@ -1,0 +1,22 @@
+account: hat
+role: requester
+handle: hat.dplc.rip
+did: did:plc:j4yw65srpdumubaadp7ijmy5
+pds: https://pds.rip
+labels:
+  socialweb.computer/testaccount: hat
+  socialweb.computer/declared-state: testaccounts
+apply:
+  kcp: none; hat's repo is bound in no shared kcp, so its declared records are verify-only
+  credentials: ~/.hat_dplc_rip_source on the lead host only (handle, did, password, service); never in this file
+counterparties:
+  bob: did:plc:ocnuqjlzgohypj3zoznermms
+  john: did:plc:5svqtrhheairglgiiyvutzik
+oauthScopes:
+  - name: requester
+    source: internal/atproto/oauth RequesterOAuthScope (page, iOS, run request); same set as alice
+notes:
+  - pds.rip sits behind Cloudflare and refuses the default Python-urllib user agent (error 1010); readers send a product user agent
+declared:
+  - {object: testaccount-hat-vouch-bob, collection: sh.tangled.graph.vouch, rkey: "did:plc:ocnuqjlzgohypj3zoznermms", cid: bafyreic2p2gqwvp5fuwcoibnamem25pq5ux3ocgxiz3xzmnuyutbjrhzrq, write: verify, readBy: requester-tangled-vouch (the requester vouches the bidder operator)}
+  - {object: testaccount-hat-vouch-john, collection: sh.tangled.graph.vouch, rkey: "did:plc:5svqtrhheairglgiiyvutzik", cid: bafyreic2p2gqwvp5fuwcoibnamem25pq5ux3ocgxiz3xzmnuyutbjrhzrq, write: verify, readBy: requester-tangled-vouch (the requester vouches the bidder operator)}
