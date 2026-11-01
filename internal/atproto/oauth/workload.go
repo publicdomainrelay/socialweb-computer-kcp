@@ -380,6 +380,11 @@ func (s *Server) handleApproveAuthorization(w http.ResponseWriter, r *http.Reque
 		writeXRPCError(w, http.StatusUnauthorized, "InvalidToken", "the token's audience is not its account")
 		return
 	}
+	fresh, err := s.nonces.RecordJTI(ctx, "wid-token\x00"+claims.JTI, time.Unix(claims.Exp, 0))
+	if err != nil || !fresh {
+		writeXRPCError(w, http.StatusUnauthorized, "InvalidToken", "the workload token was already used")
+		return
+	}
 	var in approveAuthorizationInput
 	if !decodeWorkloadInput(w, r, &in) {
 		return
@@ -398,11 +403,6 @@ func (s *Server) handleApproveAuthorization(w http.ResponseWriter, r *http.Reque
 	if err := s.workload.Authorizer.Check(ctx, grant, workloadauth.Action{Path: PathApproveAuthorization, Method: http.MethodPost, Body: doc}); err != nil {
 		log.Warn("pds_workload_approve_refused", "account", did.String(), "role", role, "client", pending.ClientID, "err", err.Error())
 		writeXRPCError(w, http.StatusForbidden, "Forbidden", err.Error())
-		return
-	}
-	fresh, err := s.nonces.RecordJTI(ctx, "wid-token\x00"+claims.JTI, time.Unix(claims.Exp, 0))
-	if err != nil || !fresh {
-		writeXRPCError(w, http.StatusUnauthorized, "InvalidToken", "the workload token was already used")
 		return
 	}
 	account, err := s.workload.Accounts.ActiveAccount(ctx, did)

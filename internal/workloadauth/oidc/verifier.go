@@ -1,11 +1,15 @@
 package oidc
 
 import (
+	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
+	_ "crypto/sha256"
+	_ "crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -178,8 +182,11 @@ func (v *Verifier) parse(ctx context.Context, token, issuer, audience string, re
 	if err != nil {
 		return workloadauth.Claims{}, err
 	}
-	parser := jwt.NewParser(
-		jwt.WithValidMethods(signingMethods),
+	mapped, err := verifySignature(token, keys)
+	if err != nil {
+		return workloadauth.Claims{}, refused("token verification failed: %v", err)
+	}
+	validator := jwt.NewValidator(
 		jwt.WithIssuer(issuer),
 		jwt.WithAudience(audience),
 		jwt.WithExpirationRequired(),
@@ -187,20 +194,8 @@ func (v *Verifier) parse(ctx context.Context, token, issuer, audience string, re
 		jwt.WithLeeway(v.leeway),
 		jwt.WithTimeFunc(v.now),
 	)
-	mapped := jwt.MapClaims{}
-	if _, err := parser.ParseWithClaims(token, mapped, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		if key, ok := keys[kid]; ok && kid != "" {
-			return key, nil
-		}
-		if kid == "" && len(keys) == 1 {
-			for _, key := range keys {
-				return key, nil
-			}
-		}
-		return nil, fmt.Errorf("no key %q in the issuer's set", kid)
-	}); err != nil {
-		return workloadauth.Claims{}, refused("token verification failed: %v", err)
+	if err := validator.Validate(mapped); err != nil {
+		return workloadauth.Claims{}, refused("token claims: %v", err)
 	}
 	out := workloadauth.Claims{Issuer: issuer}
 	out.Subject, _ = mapped["sub"].(string)
@@ -226,6 +221,103 @@ func (v *Verifier) parse(ctx context.Context, token, issuer, audience string, re
 	}
 	out.ID, _ = mapped["jti"].(string)
 	return out, nil
+}
+
+func verifySignature(token string, keys map[string]any) (jwt.MapClaims, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("not a compact JWS")
+	}
+	rawHeader, err := decode(parts[0])
+	if err != nil {
+		return nil, errors.New("malformed header")
+	}
+	var header struct {
+		Alg  string   `json:"alg"`
+		Kid  string   `json:"kid"`
+		Crit []string `json:"crit"`
+	}
+	if err := json.Unmarshal(rawHeader, &header); err != nil {
+		return nil, errors.New("malformed header")
+	}
+	if len(header.Crit) > 0 {
+		return nil, errors.New("critical header parameters are not supported")
+	}
+	if !slices.Contains(signingMethods, header.Alg) {
+		return nil, fmt.Errorf("algorithm %q is not accepted", header.Alg)
+	}
+	key, ok := keys[header.Kid]
+	if !ok || header.Kid == "" {
+		if header.Kid != "" || len(keys) != 1 {
+			return nil, fmt.Errorf("no key %q in the issuer's set", header.Kid)
+		}
+		for _, only := range keys {
+			key = only
+		}
+	}
+	sig, err := decode(parts[2])
+	if err != nil {
+		return nil, errors.New("malformed signature")
+	}
+	if err := verifyWith(header.Alg, key, []byte(parts[0]+"."+parts[1]), sig); err != nil {
+		return nil, err
+	}
+	rawClaims, err := decode(parts[1])
+	if err != nil {
+		return nil, errors.New("malformed claims")
+	}
+	claims := jwt.MapClaims{}
+	decoder := json.NewDecoder(bytes.NewReader(rawClaims))
+	decoder.UseNumber()
+	if err := decoder.Decode(&claims); err != nil {
+		return nil, errors.New("malformed claims")
+	}
+	return claims, nil
+}
+
+func verifyWith(alg string, key any, input, sig []byte) error {
+	hashFor := map[string]crypto.Hash{"256": crypto.SHA256, "384": crypto.SHA384, "512": crypto.SHA512}
+	if alg == "EdDSA" {
+		pub, ok := key.(ed25519.PublicKey)
+		if !ok || !ed25519.Verify(pub, input, sig) {
+			return errors.New("signature does not verify")
+		}
+		return nil
+	}
+	hash, ok := hashFor[alg[2:]]
+	if !ok {
+		return fmt.Errorf("algorithm %q is not accepted", alg)
+	}
+	h := hash.New()
+	h.Write(input)
+	digest := h.Sum(nil)
+	switch alg[:2] {
+	case "RS", "PS":
+		pub, ok := key.(*rsa.PublicKey)
+		if !ok {
+			return errors.New("the key is not an RSA key")
+		}
+		if alg[:2] == "RS" {
+			return rsa.VerifyPKCS1v15(pub, hash, digest, sig)
+		}
+		return rsa.VerifyPSS(pub, hash, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: hash})
+	case "ES":
+		pub, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			return errors.New("the key is not an EC key")
+		}
+		size := (pub.Curve.Params().BitSize + 7) / 8
+		if (alg == "ES256" && size != 32) || (alg == "ES384" && size != 48) || len(sig) != 2*size {
+			return errors.New("the signature does not fit the key")
+		}
+		r := new(big.Int).SetBytes(sig[:size])
+		s := new(big.Int).SetBytes(sig[size:])
+		if !ecdsa.Verify(pub, digest, r, s) {
+			return errors.New("signature does not verify")
+		}
+		return nil
+	}
+	return fmt.Errorf("algorithm %q is not accepted", alg)
 }
 
 func (v *Verifier) clientFor(issuer string) (*http.Client, error) {

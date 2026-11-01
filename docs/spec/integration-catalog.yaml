@@ -1724,6 +1724,70 @@ entries:
       - "red on rc125: the requester scope cache answers without an engine run"
     cleanup: none.
 
+  - id: TestWorkloadSignsInToAnAppAsItsAccountAndTheAppWritesWithinItsScope
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8); in process, no network
+    actors: [our PDS with OAuth and workload sign-in, in-process PLC, an OIDC workload issuer, a third-party OAuth app (atproto loopback client, PAR, DPoP)]
+    setup: >
+      One account on our PDS; a com.fedproxy.rbac record at rkey vm1 protecting the PDS service DID,
+      naming the issuer, the audience <did>#role/vm1, the workload subject and the app's client_id
+      with scopes atproto and repo:com.vibescrobble.scrobble?action=create.
+    asserts: >
+      The workload starts the app's sign-in, exchanges its OIDC JWT at exchangeToken, approves the
+      app's PAR at approveAuthorization and completes the app's callback; the app then holds a
+      session for the account, its createRecord of com.vibescrobble.scrobble lands in the account's
+      repo, and its createRecord of a collection outside the granted scope answers 403
+      ScopeMissingError.
+    cleanup: test temp dir and servers.
+
+  - id: TestAnotherWorkloadSubjectOrIssuerIsRefused
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [our PDS, two OIDC issuers, the app]
+    asserts: The exchange answers 403 for a token of another subject and for a token of another issuer than the role names.
+    cleanup: test temp dir and servers.
+
+  - id: TestNoRecordNoSignIn
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [our PDS, an OIDC issuer, the app]
+    asserts: With no com.fedproxy.rbac record at the role's rkey the exchange answers 403.
+    cleanup: test temp dir and servers.
+
+  - id: TestAScopeOutsideTheRecordIsRefusedAndTheRequestStaysPending
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [our PDS, an OIDC issuer, the app]
+    asserts: >
+      An approval of a PAR whose scope the record does not allow answers 403 and leaves the PAR
+      pending; after the record is updated to allow it, a new exchange approves the same request_uri
+      and the app's callback succeeds.
+    cleanup: test temp dir and servers.
+
+  - id: TestTokensAreSingleUseAndBoundToTheirKey
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [our PDS, an OIDC issuer, the app]
+    asserts: >
+      A workload JWT is exchanged once (a second exchange answers 403); the PDS token presented with
+      another DPoP key answers 401; it approves once and a second approval with it answers 401.
+    cleanup: test temp dir and servers.
+
+  - id: TestDeletingTheRecordEndsTheSessionsItAdmitted
+    kind: integration
+    source: test/integration/workloadoauth_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S8)
+    actors: [our PDS, an OIDC issuer, the app]
+    asserts: >
+      A refresh succeeds while the record stands; after the record is deleted the app's access token
+      answers 401 within 10 s and its refresh answers 400 invalid_grant.
+    cleanup: test temp dir and servers.
+
 deleted_fixtures:
   - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)
   - testdata/apiresourceschema/v1alpha1-1.nodeclaims.socialweb.computer.yaml (read only by internal/apigen tests)

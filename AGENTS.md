@@ -590,6 +590,10 @@ Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
   `internal/market/requester`, and their harness `internal/policyengine/policytest` (real engine, real
   bundled actions in the pinned deno, a fake PDS, no network). Every case asserts that the selected
   policy ran for the decision and that its verdict and the decision are right. No skip.
+- The workload OAuth integration tests are authorized by the owner (2026-11-01, plan 0040 S8) and must
+  pass: `test/integration` (in process: our PDS, an in-process PLC, an OIDC issuer and an atproto
+  OAuth app; no network; entries in `docs/spec/integration-catalog.yaml`). The live acceptance in the
+  same package runs only with `SWC_LIVE_WORKLOAD_OAUTH=1`.
 
 ## Prod deployments
 
