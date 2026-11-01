@@ -29,6 +29,10 @@ const (
 
 	DefaultShutdownTimeout = 30 * time.Second
 
+	PublicEndpoint = "ssh-public"
+
+	publicAcceptBackoff = 100 * time.Millisecond
+
 	requestTimeout = 30 * time.Second
 
 	directoryTTL = 60 * time.Second

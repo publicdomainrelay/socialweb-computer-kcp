@@ -394,12 +394,20 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		VaultRef:          vault,
 		Hostnames:         hostnames,
 		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+		PublicListen:      publicListen(o.Spec),
 	}}
 	out := []compose.Desired{compose.PolicyEngineDesired(), requester, sshServer}
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, marketrequester.RequesterComponent, "http", network, hostnames, false, true)...)
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindSshServer, SshServerComponent, "http", network, hostnames, true, false)...)
 	out = append(out, compose.SSHExposures(ws, SshServerComponent)...)
 	return compose.ApplyOverrides(o.Spec.Components, out)
+}
+
+func publicListen(spec v1alpha1.SshGatewaySpec) string {
+	if spec.Ssh == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Ssh.PublicListen)
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {

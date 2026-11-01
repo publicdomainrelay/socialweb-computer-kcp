@@ -212,6 +212,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `ATIRC_TOKEN=<child>` only (the client token is never forwarded, logged or stored) and the child
     is revoked when the command ends. A failed mint runs the command without it and writes one stderr
     line. `ssh <handle>@<gateway> atirc agent run <sub>` then mints `<sub>` below the child.
+    The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
+    standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
+    listener `ssh-public`, next to the loopback Exposure).
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

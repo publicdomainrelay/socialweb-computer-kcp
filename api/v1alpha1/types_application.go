@@ -815,7 +815,13 @@ type SshGatewaySpec struct {
 
 	OwnerSessionsFile string `json:"ownerSessionsFile,omitempty" apigen:"userEndpoint"`
 
+	Ssh *SshGatewaySsh `json:"ssh,omitempty"`
+
 	Components ComponentOverrides `json:"components,omitempty"`
+}
+
+type SshGatewaySsh struct {
+	PublicListen string `json:"publicListen,omitempty"`
 }
 
 type MarketNetwork struct {

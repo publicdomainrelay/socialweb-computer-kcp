@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
@@ -62,6 +64,10 @@ type Service struct {
 	httpURL string
 
 	sshURL string
+
+	publicURL string
+
+	public net.Listener
 
 	gateway *gateway.Gateway
 }
@@ -146,19 +152,57 @@ func (s *Service) Start(ctx context.Context) error {
 		handlers.Remove(key)
 		return fail(fmt.Errorf("sshserver: registering the stream: %w", err))
 	}
+	publicURL := ""
+	if addr := strings.TrimSpace(s.spec.PublicListen); addr != "" {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			handlers.Remove(key)
+			return fail(fmt.Errorf("sshserver: the public ssh listener %s: %w", addr, err))
+		}
+		publicURL = "ssh://" + ln.Addr().String()
+		s.mu.Lock()
+		s.public = ln
+		s.mu.Unlock()
+		go s.servePublic(runCtx, ln)
+	}
 	s.mu.Lock()
 	s.key = key
 	s.httpURL = httpURL
 	s.sshURL = sshURL
+	s.publicURL = publicURL
 	s.ready = true
 	s.mu.Unlock()
-	s.log.Info("sshserver_registered", "http", host, "ssh", host)
+	s.log.Info("sshserver_registered", "http", host, "ssh", host, "public", publicURL)
 	s.readiness.Signal()
 
 	<-runCtx.Done()
 	s.shutdown(ctx)
 	close(s.done)
 	return nil
+}
+
+func (s *Service) servePublic(ctx context.Context, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			s.log.Warn("sshserver_public_accept_failed", "err", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(publicAcceptBackoff):
+			}
+			continue
+		}
+		go func() {
+			defer conn.Close()
+			if err := s.gateway.ServeConn(ctx, conn); err != nil && ctx.Err() == nil {
+				s.log.Info("sshserver_public_conn_closed", "err", err)
+			}
+		}()
+	}
 }
 
 func (s *Service) setup(ctx context.Context) error {
@@ -230,10 +274,14 @@ func (s *Service) Endpoints() []component.Endpoint {
 	if s.httpURL == "" || s.sshURL == "" {
 		return nil
 	}
-	return []component.Endpoint{
+	out := []component.Endpoint{
 		{Name: "http", Protocol: component.ProtocolHTTP, URL: s.httpURL},
 		{Name: "ssh", Protocol: component.ProtocolSSH, URL: s.sshURL},
 	}
+	if s.publicURL != "" {
+		out = append(out, component.Endpoint{Name: PublicEndpoint, Protocol: component.ProtocolSSH, URL: s.publicURL})
+	}
+	return out
 }
 
 func (s *Service) Stop(ctx context.Context) error {
@@ -264,7 +312,12 @@ func (s *Service) shutdown(ctx context.Context) {
 	}
 	s.stopped = true
 	g := s.gateway
+	public := s.public
+	s.public = nil
 	s.mu.Unlock()
+	if public != nil {
+		_ = public.Close()
+	}
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancel()
 	if g != nil {
@@ -276,5 +329,6 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	s.started = false
 	s.ready = false
+	s.publicURL = ""
 	s.mu.Unlock()
 }

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-12.sshservers.socialweb.computer
+  name: v1alpha1-13.sshservers.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -350,6 +350,8 @@ spec:
               hostKeyRef:
                 type: string
               ownerSessionsFile:
+                type: string
+              publicListen:
                 type: string
               maxConnections:
                 type: integer
