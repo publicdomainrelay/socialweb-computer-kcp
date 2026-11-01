@@ -107,7 +107,16 @@ items:
     status: done
   - id: A5
     title: "authority write path: requester writes a contract-owned association record for a subject it starts (app password or OAuth)"
-    status: doing
+    status: done
+  - id: A6
+    title: "R2 joins the owner's atirc channel: the authority's requester mints a child atirc token for the verified guest requester (subhandle r2-<accept rkey>.<authority handle>) into the bundle, revoked on release"
+    status: done
+  - id: A7
+    title: "zero-command guest requester: a requester-originated guest.r2Start event makes socialweb-guest-agent start socialweb-r2.service (run request --guest-requester as the agent user), started from the page or run request"
+    status: done
+  - id: A8
+    title: "parent release cascades to the guest requester (guest.r2Release/r2Released), bidder backstop at the association expiresAt, bounded denied-accept release"
+    status: done
   - id: P1
     title: "page: associate-agent-DID action + Associated display (wasm)"
     status: done
@@ -116,6 +125,6 @@ items:
     status: done
   - id: V1
     title: "acceptance: alice (app password) requests a VM whose CLI requester R2 is associated by a contract-scoped record; bidder-only-me allows R2; a forged self-claim is denied; deleting the record revokes"
-    status: planned
+    status: done
 open_questions:
   - "Q4 chains (later): does only-me compare the root authority or the immediate one; default maxDepth?"

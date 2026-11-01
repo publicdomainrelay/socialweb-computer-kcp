@@ -48,6 +48,8 @@ type Verdict struct {
 	Reason string
 
 	Run string
+
+	Completed bool
 }
 
 type Evaluator interface {

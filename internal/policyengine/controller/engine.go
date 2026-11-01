@@ -73,12 +73,13 @@ type runState struct {
 }
 
 type Engine struct {
-	config     Config
-	resolver   workflow.ActionResolver
-	cacheStore *cache.Store
-	log        func(level, msg string, meta map[string]any)
-	sem        chan struct{}
-	queueDepth int
+	config        Config
+	resolver      workflow.ActionResolver
+	cacheStore    *cache.Store
+	scopeVerdicts *cache.Store
+	log           func(level, msg string, meta map[string]any)
+	sem           chan struct{}
+	queueDepth    int
 
 	mu       sync.Mutex
 	runs     map[string]*runState
@@ -111,13 +112,14 @@ func NewEngine(config Config) *Engine {
 		log = func(string, string, map[string]any) {}
 	}
 	return &Engine{
-		config:     config,
-		resolver:   resolver,
-		cacheStore: cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
-		log:        log,
-		sem:        make(chan struct{}, config.Limits.MaxConcurrentRuns),
-		queueDepth: config.Limits.QueueDepth,
-		runs:       make(map[string]*runState),
+		config:        config,
+		resolver:      resolver,
+		cacheStore:    cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
+		scopeVerdicts: cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
+		log:           log,
+		sem:           make(chan struct{}, config.Limits.MaxConcurrentRuns),
+		queueDepth:    config.Limits.QueueDepth,
+		runs:          make(map[string]*runState),
 	}
 }
 
@@ -335,10 +337,10 @@ func (e *Engine) executeWithID(ctx context.Context, runID string, request *Polic
 	if result != nil {
 		statusValue.ExitStatus = result.ExitStatus
 		statusValue.Outputs = result.Outputs
-		statusValue.Cache = result.Cache
+		statusValue.Cache = withoutTrust(result.Cache)
 		statusValue.ConsoleOutput = truncateConsole(result.ConsoleOutput, e.config.Limits.MaxConsoleBytes)
 		statusValue.Annotations = result.Annotations
-		e.cacheStore.Merge(result.Cache)
+		e.cacheStore.Merge(statusValue.Cache)
 	}
 	outcome := Outcome{Status: statusValue}
 	if result != nil {
@@ -397,7 +399,7 @@ func (e *Engine) seedRequest(request *PolicyEngineRequest, seed models.Cache) *P
 	maps.Copy(merged, seed)
 	context["cache"] = merged
 	copyRequest.Context = context
-	e.cacheStore.Merge(merged)
+	e.cacheStore.Merge(withoutTrust(merged))
 	return &copyRequest
 }
 

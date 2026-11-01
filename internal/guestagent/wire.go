@@ -17,6 +17,16 @@ const (
 
 	AgentStartNSID = nsidPrefix + "events.guest.agentStart"
 
+	RequesterDIDNSID = nsidPrefix + "events.guest.requesterDid"
+
+	SecretsUpdatedNSID = nsidPrefix + "events.guest.secretsUpdated"
+
+	R2StartNSID = nsidPrefix + "events.guest.r2Start"
+
+	R2ReleaseNSID = nsidPrefix + "events.guest.r2Release"
+
+	R2ReleasedNSID = nsidPrefix + "events.guest.r2Released"
+
 	secretsViaGetSecrets = "getSecrets"
 
 	secretsViaSealed = "sealed"

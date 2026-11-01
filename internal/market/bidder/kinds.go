@@ -7,6 +7,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 )
 
 var ErrKindUnsupported = fmt.Errorf("bidder: the RFP asks for a compute kind this bidder does not serve")
@@ -52,4 +53,23 @@ func (b *Bidder) inboxServesKind(ctx context.Context, rfpURI, rfpCID string) (st
 		return kind, false
 	}
 	return kind, b.servesKind(kind)
+}
+
+func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string, error) {
+	payload, err := b.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
+	if err != nil {
+		return "", fmt.Errorf("bidder: resolving the RFP payload for its guest tools: %w", err)
+	}
+	userData, _ := payload.Value["user_data"].(string)
+	needs := guestseed.GuestBinariesNeeded(userData)
+	if len(needs.Tools) == 0 {
+		return "", nil
+	}
+	if err := needs.ToolsErr(); err != nil {
+		return err.Error(), nil
+	}
+	if _, err := guestseed.GuestBinaryPins(b.cfg.GuestDownloads, needs.Tools); err != nil {
+		return err.Error(), nil
+	}
+	return "", nil
 }

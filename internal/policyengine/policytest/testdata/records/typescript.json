@@ -1,0 +1,1 @@
+{"$type": "computer.socialweb.temp.policy.typescript", "name": "allow-all", "source": "export default () => ({ allow: true, violations: [] });"}

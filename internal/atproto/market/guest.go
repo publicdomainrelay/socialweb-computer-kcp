@@ -1,6 +1,17 @@
 package market
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/bluesky-social/indigo/atproto/syntax"
+)
+
+const ContractAssociationLifetime = 24 * time.Hour
 
 const (
 	OnNetworkKindIroh   = "iroh"
@@ -42,7 +53,8 @@ func IsGuestEventNSID(nsid string) bool {
 func IsRequesterGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID,
-		ComputeEventsGuestAgentStartNSID:
+		ComputeEventsGuestAgentStartNSID, ComputeEventsGuestSecretsUpdatedNSID, ComputeEventsGuestR2StartNSID,
+		ComputeEventsGuestR2ReleaseNSID:
 		return true
 	}
 	return false
@@ -51,8 +63,35 @@ func IsRequesterGuestEventNSID(nsid string) bool {
 func IsGuestOriginatedEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
-		ComputeEventsGuestSecretsRequestedNSID:
+		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID, ComputeEventsGuestR2ReleasedNSID:
 		return true
 	}
 	return false
+}
+
+func ValidGuestRequesterDID(did, authority string) error {
+	parsed, err := syntax.ParseDID(strings.TrimSpace(did))
+	switch {
+	case err != nil || parsed.String() != did:
+		return fmt.Errorf("market: the guest requester DID %q is not a DID", did)
+	case parsed.Method() != "plc":
+		return fmt.Errorf("market: the guest requester DID %s is not a did:plc; a guest-reported did:web would make the authority fetch a host the guest names", did)
+	case did == authority:
+		return fmt.Errorf("market: the guest requester DID %s is the authority's own DID", did)
+	}
+	return nil
+}
+
+func ContractScopedRKey(service, did, acceptURI string) string {
+	sum := sha256.Sum256([]byte(did))
+	return service + "-" + hex.EncodeToString(sum[:])[:32] + "-" + acceptURI[strings.LastIndex(acceptURI, "/")+1:]
+}
+
+var guestRequesterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func ValidGuestRequesterName(name string) error {
+	if !guestRequesterNameRE.MatchString(name) {
+		return fmt.Errorf("market: the guest requester name %q is not a DNS label", name)
+	}
+	return nil
 }

@@ -10,12 +10,14 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
@@ -33,6 +35,10 @@ const (
 	RecordExport = "marketidentities"
 
 	RepoExport = "applications"
+
+	LinkExport = "exposures"
+
+	repoBindQueue = 64
 
 	CollectionKind = "InfraCollection"
 
@@ -110,6 +116,8 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
 			return c.repoUsers(kind, src.Workspace, obj.Name)
 		}),
+		RepoLinkWatch(func(workspace, name string) []ctlruntime.Request { return c.repoUsers(kind, workspace, name) }),
+		ctlruntime.Events(RepoBindEvents(c.bus, func(workspace, name string) []ctlruntime.Request { return c.repoUsers(kind, workspace, name) })),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) { c.forget(kind, req) })}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -118,6 +126,32 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		return fmt.Errorf("infra: registering the %s controller: %w", kind, err)
 	}
 	return nil
+}
+
+func RepoBindEvents(b *bus.Bus, users func(workspace, name string) []ctlruntime.Request) <-chan ctlruntime.Request {
+	ch := make(chan ctlruntime.Request, repoBindQueue)
+	b.Subscribe(func(key bus.Key) {
+		if key.Kind != RepoKind {
+			return
+		}
+		for _, req := range users(key.Workspace, key.Name) {
+			select {
+			case ch <- req:
+			default:
+			}
+		}
+	})
+	return ch
+}
+
+func RepoLinkWatch(users func(workspace, name string) []ctlruntime.Request) ctlruntime.Option {
+	return ctlruntime.WatchesIn(LinkExport, func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
+		to := obj.Spec.To
+		if !strings.EqualFold(strings.TrimSpace(to.Kind), RepoKind) {
+			return nil
+		}
+		return users(to.InWorkspace(src.Workspace), to.Name)
+	})
 }
 
 func labelled(obj metav1.Object, kind string) []ctlruntime.Request {
@@ -203,23 +237,41 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	now := time.Now().UTC()
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Record: v.status.Record,
 		Conditions: slices.Clone(v.status.Conditions)}
+	var ephemeral *v1alpha1.EphemeralInfraStatus
+	var end infra.End
+	if v.ephemeral != nil {
+		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, now)
+		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
+		if end.Ended {
+			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
+		}
+	}
 	var rec *recordSync
 	var recordErr error
+	backoff := false
 	if v.spec.Record != nil {
 		rec, err = r.syncRecord(ctx, req, v, now)
+		reason, isUnresolved := Unresolved(err)
+		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
 		if err != nil {
-			reason := "RecordUnavailable"
+			syncedReason := "RecordUnavailable"
 			if errors.Is(err, ErrRepoNoDID) {
-				reason = "RepoPending"
+				syncedReason = "RepoPending"
 			}
-			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, reason, err.Error())
+			if isUnresolved {
+				syncedReason = reason
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, syncedReason, err.Error())
 			recordErr = err
-			if errors.Is(err, ErrRepoNoDID) {
+			if errors.Is(err, ErrRepoNoDID) || isUnresolved {
 				recordErr = nil
 			}
-			if !Publishing(v.spec.Record) {
+			backoff = isUnresolved
+			if !Publishing(v.spec.Record) && end.Ended {
+				recordErr = nil
+			} else if !Publishing(v.spec.Record) {
 				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-				return ctlruntime.Result{}, errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral)))
+				return requeueAt(v, end, backoff), errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)))
 			}
 		}
 	}
@@ -258,15 +310,6 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			}
 		}
 	}
-	var ephemeral *v1alpha1.EphemeralInfraStatus
-	var end infra.End
-	if v.ephemeral != nil {
-		end = infra.Ending(v.object.GetCreationTimestamp().Time, v.declaration, *v.ephemeral, now)
-		ephemeral = &v1alpha1.EphemeralInfraStatus{ExpiresAt: end.ExpiresAt.Format(time.RFC3339)}
-		if end.Ended {
-			ephemeral.EndedAt, ephemeral.EndReason = end.At.Format(time.RFC3339), end.Reason
-		}
-	}
 	statuses, left, err := r.contracts(ctx, req, v, contracts, end.Ended)
 	if err != nil {
 		return ctlruntime.Result{}, err
@@ -298,12 +341,42 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			r.c.log.Info("infra_ephemeral_ended", "workspace", req.Workspace, "name", req.Name, "reason", end.Reason)
 			return ctlruntime.Result{}, req.Delete(ctx, obj)
 		}
-		return ctlruntime.Result{}, nil
+		return ctlruntime.Result{Backoff: backoff}, nil
 	}
-	if v.ephemeral != nil {
-		return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second)}, nil
+	return requeueAt(v, end, backoff), nil
+}
+
+func requeueAt(v view, end infra.End, backoff bool) ctlruntime.Result {
+	if v.ephemeral == nil {
+		return ctlruntime.Result{Backoff: backoff}
 	}
-	return ctlruntime.Result{}, nil
+	return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second), Backoff: backoff}
+}
+
+func (r *reconciler[T]) noteUnresolved(req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, isUnresolved bool, reason string, err error) {
+	if !isUnresolved {
+		err = nil
+	}
+	NoteUnresolved(r.c.log, v.status.Conditions, &status.Conditions, status.ObservedGeneration, reason, err,
+		"kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+}
+
+func NoteUnresolved(log *slog.Logger, prior []metav1.Condition, conditions *[]metav1.Condition, generation int64, reason string, err error, attrs ...any) {
+	held := meta.FindStatusCondition(prior, v1alpha1.InfraConditionRecordUnresolved)
+	if err == nil {
+		if held == nil {
+			return
+		}
+		meta.RemoveStatusCondition(conditions, v1alpha1.InfraConditionRecordUnresolved)
+		if held.Status == metav1.ConditionTrue {
+			log.Info("infra_record_resolved", attrs...)
+		}
+		return
+	}
+	conds.Set(conditions, generation, v1alpha1.InfraConditionRecordUnresolved, true, reason, err.Error())
+	if held == nil || held.Status != metav1.ConditionTrue || held.Reason != reason || held.Message != err.Error() {
+		log.Info("infra_record_unresolved", append(attrs, "reason", reason, "err", err.Error())...)
+	}
 }
 
 func summary(statuses []v1alpha1.InfraContractStatus) string {
@@ -338,14 +411,28 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		left++
 	}
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Phase: v1alpha1.InfraPhaseDeleting, Contracts: statuses,
-		Record: v.status.Record, Conditions: v.status.Conditions,
+		Record: v.status.Record, Conditions: slices.Clone(v.status.Conditions),
 		Message: fmt.Sprintf("%d ComputeContract(s) releasing", left)}
+	backoff := false
 	if left == 0 && v.spec.Record != nil {
 		gone, err := r.deleteRecord(ctx, req, v)
-		if err != nil {
+		reason, isUnresolved := Unresolved(err)
+		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
+		orphaned := RecordOrphaned(err)
+		switch {
+		case err != nil && (orphaned || time.Since(v.object.GetDeletionTimestamp().Time) > atprotorepo.RecordDeleteGiveUp):
+			if !orphaned {
+				reason = "DeleteGaveUp"
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionRecordOrphaned, true, reason, err.Error())
+			status.Message = "the record is released without a delete: " + err.Error()
+			r.c.log.Warn("infra_record_orphaned", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", err.Error())
+		case isUnresolved || errors.Is(err, ErrRepoNoDID):
+			status.Message = "the record delete waits: " + err.Error()
+			left, backoff = 1, true
+		case err != nil:
 			return ctlruntime.Result{Waiting: true}, err
-		}
-		if !gone {
+		case !gone:
 			status.Message = "the record is being deleted"
 			left = 1
 		}
@@ -354,7 +441,7 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		return ctlruntime.Result{Waiting: true}, err
 	}
 	if left > 0 {
-		return ctlruntime.Result{Waiting: true}, nil
+		return ctlruntime.Result{Waiting: true, Backoff: backoff}, nil
 	}
 	r.c.forget(string(v.kind), req)
 	r.c.log.Info("infra_released", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)

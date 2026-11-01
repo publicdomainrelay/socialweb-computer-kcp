@@ -68,13 +68,23 @@ type contractRunner struct {
 
 	atircRevoke sync.Once
 
-	association *contractAssociation
+	releaseRequested string
 
-	associationSubjects map[string]bool
+	association *contractAssociation
 
 	associationMu sync.Mutex
 
-	associating atomic.Bool
+	associationKick chan struct{}
+
+	bundleMu *sync.Mutex
+
+	associationRecords map[string]string
+
+	associationAttempts int
+
+	associationRetry *time.Timer
+
+	atircMint *atircMintOutcome
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -85,6 +95,10 @@ func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contrac
 		bids:      append([]v1alpha1.ContractBid(nil), contract.Status.Bids...),
 		releaseCh: make(chan struct{}),
 		done:      make(chan struct{}),
+
+		associationKick: make(chan struct{}, 1),
+
+		bundleMu: q.bundleLock(contract.Name),
 	}
 	if contract.Status.Chosen != nil {
 		chosen := *contract.Status.Chosen
@@ -151,6 +165,19 @@ func (r *contractRunner) requestRelease() {
 	r.releaseOnce.Do(func() { close(r.releaseCh) })
 }
 
+func (r *contractRunner) untilRelease(ctx context.Context, ref func(context.Context) (string, error)) (string, error) {
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-r.releaseCh:
+			cancel()
+		case <-waitCtx.Done():
+		}
+	}()
+	return ref(waitCtx)
+}
+
 func (r *contractRunner) stop() {
 	r.gone.Store(true)
 	if r.cancel != nil {
@@ -205,6 +232,15 @@ func (r *contractRunner) Run(ctx context.Context) {
 		return
 	}
 	state := r.stateCopy()
+	tokenPathConflict := CheckTokenPaths(contract, nil)
+	if tokenPathConflict != nil {
+		if (state == nil || state.RFPURI == "") && !r.released() {
+			r.log().Warn("requester_contract_refused", "err", tokenPathConflict.Error())
+			r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+tokenPathConflict.Error(), state, nil, nil, "refused", 1)
+			return
+		}
+		r.log().Warn("requester_contract_token_path_conflict", "err", tokenPathConflict.Error())
+	}
 	if contract.Status.Phase == v1alpha1.ComputeContractReleased && state != nil && state.Receipt != nil {
 		r.resumeReleased(ctx, state)
 		return
@@ -216,9 +252,6 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 	}
 	state = r.stateCopy()
-	if state != nil && state.RFPURI != "" {
-		r.ensureAtircToken(ctx, contract, state.RFPURI)
-	}
 	if state != nil && state.Receipt != nil {
 		if err := r.resumeReceipt(ctx, state); err != nil && !r.q.stopping() {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
@@ -228,6 +261,12 @@ func (r *contractRunner) Run(ctx context.Context) {
 	if r.released() {
 		if r.recoverReceipt(ctx, state) {
 			if err := r.releaseContract(ctx, state, winnerDID(state)); err != nil && !r.q.stopping() {
+				r.recordFailure(ctx, r.stateCopy(), err, 1)
+			}
+			return
+		}
+		if acceptedWithoutReceipt(state) {
+			if err := r.releaseDeniedAccept(ctx, state, winnerDID(state)); err != nil && !r.q.stopping() {
 				r.recordFailure(ctx, r.stateCopy(), err, 1)
 			}
 			return
@@ -265,6 +304,11 @@ func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.Node
 	}
 	if state != nil && state.Release != nil && !state.Release.OK {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the release did not finish: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", attempts)
+		return
+	}
+	if r.released() && acceptedWithoutReceipt(state) {
+		r.log().Warn("requester_contract_release_failed", "err", err)
+		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "the release did not find the receipt of the accept: "+err.Error(), state, r.currentBids(), r.currentChosen(), "releaseFailed", attempts)
 		return
 	}
 	if r.released() && (state == nil || state.Receipt == nil) {
@@ -311,7 +355,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	policyName := strings.TrimSpace(contract.Spec.Policy)
+	policyName := cmp.Or(strings.TrimSpace(contract.Spec.Policy), q.cfg.PolicyWorkflow, DefaultPolicyWorkflow)
 	policyArgs, err := participant.ParsePolicyArgs(contract.Spec.PolicyArgs)
 	if err != nil {
 		return err
@@ -356,21 +400,14 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	r.step(ctx, "creatingRfp", 1)
 	var policyRef *market.StrongRef
-	policyWorkflow := ""
+	policyWorkflow := PolicyWorkflowName(policyName)
+	workflowText, ok := PolicyWorkflowText(policyName)
+	if !ok {
+		return fmt.Errorf("policy %q names no bundled workflow", policyName)
+	}
 	if state.Policy != nil && state.Policy.URI != "" {
 		policyRef = &market.StrongRef{Type: market.StrongRefNSID, URI: state.Policy.URI, CID: state.Policy.CID}
-		if policyName != "" {
-			policyWorkflow = PolicyWorkflowName(policyName)
-			if _, ok := PolicyWorkflowText(policyName); !ok {
-				return fmt.Errorf("policy %q names no bundled workflow", policyName)
-			}
-		}
-	} else if policyName != "" {
-		policyWorkflow = PolicyWorkflowName(policyName)
-		workflowText, ok := PolicyWorkflowText(policyName)
-		if !ok {
-			return fmt.Errorf("policy %q names no bundled workflow", policyName)
-		}
+	} else {
 		policyRecord := BuildPolicyRecord(policyName, policyWorkflow, workflowText, q.marketDID, policyArgs, q.nowISO())
 		created, err := q.repo.CreateRecord(ctx, q.repoDID, PolicyGhaLiteNSID, policyRecord)
 		if err != nil {
@@ -379,20 +416,26 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		policyRef = &created
 		state.Policy = &commonv1.StrongRef{URI: created.URI, CID: created.CID}
 	}
+	gate, err := q.attachedPolicy(ctx, *policyRef, policyWorkflow)
+	if err != nil {
+		return err
+	}
 	rfpURI, rfpCID := "", ""
 	if state.RFP != nil && state.RFP.URI != "" {
 		rfpURI, rfpCID = state.RFP.URI, state.RFP.CID
 	} else {
+		submitBid, err := r.untilRelease(ctx, q.submitBidRef)
+		if err != nil {
+			return err
+		}
 		rfpOptions := market.RFPOptions{
 			Payload:   market.RecordRef{URI: state.Payload.URI, CID: state.Payload.CID},
-			SubmitBid: q.submitBidRef(),
+			SubmitBid: submitBid,
 			Ingress:   q.ingressRecords(ctx),
 			Domain:    "compute",
 			CreatedAt: q.nowISO(),
 		}
-		if policyRef != nil {
-			rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
-		}
+		rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 		if q.cfg.Spec.SuspendParticipation {
 			return ErrParticipationSuspended
 		}
@@ -406,7 +449,6 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		rfpURI, rfpCID = rfp.URI, rfp.CID
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; collecting bids", state, nil, nil, "collectingBids", 1)
-	r.ensureAtircToken(ctx, contract, rfpURI)
 
 	if state.Accept != nil && state.Accept.URI != "" {
 		return r.resumeAccepted(ctx, state)
@@ -437,8 +479,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.catchUpBids(catchUpCtx, considered, rfpURI, rfpCID)
 	r.solicitBids(ctx, bidders, rfpURI, rfpCID)
 
-	usePolicy := policyRef != nil
-	winner, allBids, err := r.collectBids(ctx, rfpURI, usePolicy, policyWorkflow, only)
+	winner, allBids, err := r.collectBids(ctx, rfpURI, gate, only)
 	stopCatchUp()
 	if err != nil {
 		return err
@@ -487,29 +528,28 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		Reason:     v1alpha1.ContractChosenBestWithinWindow,
 		Considered: len(allBids),
 	}
+	decision := q.policy.Evaluate(ctx, gate.Input(PolicyInput{
+		SelfDid:          q.marketDID,
+		SubjectDid:       winner.DID,
+		CounterpartyDid:  winner.DID,
+		RootRequesterDid: q.marketDID,
+		RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
+		Bid:              &PolicyRef{URI: winner.URI, CID: winner.CID},
+	}))
+	if !decision.Allow {
+		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+		state.Error = "winner rejected by policy: " + decision.Reason
+		return errors.New(state.Error)
+	}
+	chosen.Reason = v1alpha1.ContractChosenPolicy
 	if winner.Free {
 		chosen.Reason = v1alpha1.ContractChosenFirstFree
-	}
-	if policyRef != nil && !winner.Free {
-		decision := q.policy.Evaluate(ctx, PolicyInput{
-			SelfDid:          q.marketDID,
-			SubjectDid:       winner.DID,
-			CounterpartyDid:  winner.DID,
-			RootRequesterDid: q.marketDID,
-			RFP:              &PolicyRef{URI: rfpURI, CID: rfpCID},
-			Bid:              &PolicyRef{URI: winner.URI, CID: winner.CID},
-		})
-		if !decision.Allow {
-			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
-			state.Error = "winner rejected by policy: " + decision.Reason
-			return errors.New(state.Error)
-		}
-		chosen.Reason = v1alpha1.ContractChosenPolicy
 	}
 	r.mu.Lock()
 	r.chosen = chosen
 	r.mu.Unlock()
-	if err := r.prepareWorkloadGrant(ctx, state, winner); err != nil {
+	acceptRKey := acceptRKeyFor(q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
+	if err := r.prepareWorkloadGrant(ctx, state, winner, acceptRKey); err != nil {
 		return err
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected
@@ -520,7 +560,6 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the winner is selected; accepting", state, allBids, chosen, "accepting", 1)
 
-	acceptRKey := sessionRKey("accept", q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
 	accept, found, err := q.existingSignedRecord(ctx, market.AcceptNSID, acceptRKey)
 	if err != nil {
 		return fmt.Errorf("read the market.accept record: %w", err)
@@ -529,10 +568,15 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		return ErrParticipationSuspended
 	}
 	if !found {
+		var submitEvent string
+		submitEvent, err = r.untilRelease(ctx, q.submitEventRef)
+		if err != nil {
+			return err
+		}
 		accept, err = market.CreateAcceptAt(ctx, q.repo, q.repoDID, acceptRKey, market.AcceptOptions{
 			RFP:         market.RecordRef{URI: rfpURI, CID: rfpCID},
 			Bid:         market.RecordRef{URI: winner.URI, CID: winner.CID},
-			SubmitEvent: q.submitEventRef(),
+			SubmitEvent: submitEvent,
 			Ingress:     q.ingressRecords(ctx),
 			CreatedAt:   q.nowISO(),
 		}, q.signer)
@@ -638,6 +682,17 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 	if bidderDID == "" {
 		return errors.New("the recorded contract names no winning bidder")
 	}
+	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+		if !errors.Is(err, ErrPolicyRejected) {
+			return fmt.Errorf("the recorded accept is not resubmitted: %w", err)
+		}
+		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+		state.Error = "the recorded accept is not resubmitted: " + err.Error()
+		if releaseErr := r.releaseDeniedAccept(ctx, state, bidderDID); releaseErr != nil {
+			return fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr)
+		}
+		return errors.New(state.Error)
+	}
 	bidder, ok := r.q.bidderForDID(ctx, bidderDID)
 	if !ok {
 		return fmt.Errorf("no endpoint is known for the winning bidder %s", bidderDID)
@@ -657,6 +712,79 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 		return fmt.Errorf("no receipt arrived within %s", r.q.cfg.ReceiptTimeout)
 	}
 	return r.acceptReceipt(ctx, state, accept.Value, acceptRef.URI, receipt)
+}
+
+const DeniedAcceptReceiptAttempts = 4
+
+func acceptedWithoutReceipt(state *v1alpha1.NodeClaimContract) bool {
+	return state != nil && state.Receipt == nil && state.Accept != nil && state.Accept.URI != "" && winnerDID(state) != ""
+}
+
+func (r *contractRunner) releaseDeniedAccept(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
+	r.captureReleaseRequest()
+	reason := cmp.Or(state.Error, "the contract is released")
+	for attempt := 1; !r.recoverReceipt(ctx, state); attempt++ {
+		if attempt > DeniedAcceptReceiptAttempts {
+			r.captureReleaseRequest()
+			release := r.releaseStatus()
+			if release == nil {
+				release = &v1alpha1.ComputeContractRelease{}
+			}
+			release.LastError = fmt.Sprintf("no receipt arrived for the accept %s after %d waits of %s; the guest the bidder may have provisioned stays until a release finds the receipt: run `socialweb-computer run request release %s` (spec.release) again, or the bidder ends it at its own TTL",
+				state.Accept.URI, DeniedAcceptReceiptAttempts, r.q.cfg.ReceiptTimeout, r.name)
+			r.setRelease(release)
+			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, reason+"; "+release.LastError, state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(attempt-1))
+			return errors.New(release.LastError)
+		}
+		release := r.releaseStatus()
+		if release == nil {
+			release = &v1alpha1.ComputeContractRelease{}
+		}
+		release.Attempts = attempt
+		release.LastError = fmt.Sprintf("waiting for the bidder's receipt of the accept to release its guest (attempt %d of %d)", attempt, DeniedAcceptReceiptAttempts)
+		r.setRelease(release)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, reason+"; "+release.LastError, state, r.currentBids(), r.currentChosen(), "releasing", int32(attempt))
+		receipt, err := r.q.waitReceiptWithin(ctx, bidderDID, state.Accept.URI, r.q.cfg.ReceiptTimeout)
+		if err != nil {
+			return err
+		}
+		if receipt != nil && r.recoverReceipt(ctx, state) {
+			break
+		}
+	}
+	return r.releaseContract(ctx, state, bidderDID)
+}
+
+func (q *Requester) recordedWinnerAllowed(ctx context.Context, state *v1alpha1.NodeClaimContract, policyName string) error {
+	bidderDID := winnerDID(state)
+	if bidderDID == "" || state.Policy == nil || state.Policy.URI == "" || state.RFP == nil || state.RFP.URI == "" ||
+		state.Bid == nil || state.Bid.URI == "" {
+		return errors.New("the recorded contract names no winner, policy, RFP or bid")
+	}
+	gate, err := q.attachedPolicy(ctx, market.StrongRef{Type: market.StrongRefNSID, URI: state.Policy.URI, CID: state.Policy.CID},
+		PolicyWorkflowName(policyName))
+	if err != nil {
+		return err
+	}
+	decision := q.policy.Evaluate(ctx, gate.Input(PolicyInput{
+		SelfDid:          q.marketDID,
+		SubjectDid:       bidderDID,
+		CounterpartyDid:  bidderDID,
+		RootRequesterDid: q.marketDID,
+		RFP:              &PolicyRef{URI: state.RFP.URI, CID: state.RFP.CID},
+		Bid:              &PolicyRef{URI: state.Bid.URI, CID: state.Bid.CID},
+	}))
+	switch {
+	case decision.Allow:
+		return nil
+	case !decision.Completed:
+		return errors.New("the policy run for the recorded winner " + bidderDID + " did not complete: " + decision.Reason)
+	}
+	return fmt.Errorf("%w: the recorded winner %s: %s", ErrPolicyRejected, bidderDID, decision.Reason)
+}
+
+func (r *contractRunner) contractPolicyName() string {
+	return cmp.Or(strings.TrimSpace(r.snapshot().Spec.Policy), r.q.cfg.PolicyWorkflow, DefaultPolicyWorkflow)
 }
 
 func (r *contractRunner) recoverReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract) bool {
@@ -703,6 +831,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Termination != nil {
 		return nil
 	}
+	r.ensureAtircToken(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receipt.URI, winnerDID(state))
 }
 
@@ -712,6 +841,20 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 		return nil
 	}
 	bidderDID := winnerDID(state)
+	if r.released() {
+		return r.releaseContract(ctx, state, bidderDID)
+	}
+	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+		if !errors.Is(err, ErrPolicyRejected) {
+			return fmt.Errorf("the held contract is not resumed: %w", err)
+		}
+		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+		state.Error = "the held contract is not resumed: " + err.Error()
+		if releaseErr := r.releaseContract(ctx, state, bidderDID); releaseErr != nil {
+			return fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr)
+		}
+		return errors.New(state.Error)
+	}
 	if r.released() {
 		return r.releaseContract(ctx, state, bidderDID)
 	}
@@ -731,6 +874,9 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	} else {
 		state.ReceiptOk = new(true)
 	}
+	if r.released() {
+		return r.releaseContract(ctx, state, bidderDID)
+	}
 	if state.Phase != v1alpha1.ContractNetwork && state.Phase != v1alpha1.ContractReleased {
 		state.Phase = v1alpha1.ContractReceipt
 	}
@@ -740,6 +886,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Timestamps.Receipt == "" {
 		state.Timestamps.Receipt = r.q.nowISO()
 	}
+	r.ensureAtircToken(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receiptRef.URI, bidderDID)
 }
 
@@ -814,7 +961,7 @@ func (r *contractRunner) verifyRecordedReceipt(ctx context.Context, state *v1alp
 	return verification.OK, nil
 }
 
-func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePolicy bool, workflow string, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
+func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, workflow PolicyGate, only []string) (*BidRecord, []v1alpha1.ContractBid, error) {
 	q := r.q
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
@@ -837,7 +984,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	for selected == nil {
 		arrived := q.bids.arrived()
 		add(q.bids.take(rfpURI))
-		if candidate := r.freeWinner(ctx, byURI, usePolicy, workflow); candidate != nil {
+		if candidate := r.freeWinner(ctx, byURI, workflow); candidate != nil {
 			selected = candidate
 			break
 		}
@@ -856,7 +1003,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	}
 	add(q.bids.take(rfpURI))
 	if selected == nil {
-		selected = r.bestBid(ctx, byURI, usePolicy, workflow)
+		selected = r.bestBid(ctx, byURI, workflow)
 	}
 	records := make([]v1alpha1.ContractBid, 0, len(byURI))
 	for _, bid := range byURI {
@@ -872,7 +1019,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 		switch {
 		case selected != nil && selected.URI == bid.URI:
 			entry.Verdict = v1alpha1.ContractBidChosen
-		case !q.bidAllowedWithPolicy(ctx, bid, usePolicy, workflow):
+		case !q.bidAllowedWithPolicy(ctx, bid, workflow):
 			entry.Verdict = v1alpha1.ContractBidPolicyRejected
 		case selected != nil:
 			entry.Verdict = v1alpha1.ContractBidNotChosen
@@ -887,27 +1034,27 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, usePoli
 	return selected, records, nil
 }
 
-func (r *contractRunner) freeWinner(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
+func (r *contractRunner) freeWinner(ctx context.Context, bids map[string]BidRecord, workflow PolicyGate) *BidRecord {
 	for _, bid := range bids {
 		bidCopy := bid
 		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if bidCopy.Free && r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if bidCopy.Free && r.q.bidAllowedWithPolicy(ctx, bidCopy, workflow) {
 			return &bidCopy
 		}
 	}
 	return nil
 }
 
-func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord, usePolicy bool, workflow string) *BidRecord {
+func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord, workflow PolicyGate) *BidRecord {
 	var best *BidRecord
 	for _, bid := range bids {
 		bidCopy := bid
 		if err := r.q.classifyBid(ctx, &bidCopy); err != nil {
 			continue
 		}
-		if !r.q.bidAllowedWithPolicy(ctx, bidCopy, usePolicy, workflow) {
+		if !r.q.bidAllowedWithPolicy(ctx, bidCopy, workflow) {
 			continue
 		}
 		if best == nil || bidCopy.Cost < best.Cost {
@@ -982,6 +1129,9 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 				return false
 			}
 			r.log().Info("requester_guest_secrets", "event", payloadKind(parsed.Kind), "via", parsed.SecretsVia)
+		case market.ComputeEventsGuestRequesterDIDNSID:
+			r.onGuestRequester(ctx, state, parsed)
+			return false
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
 		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID {
@@ -989,7 +1139,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		return false
 	}
-	if slices.ContainsFunc(pending, handle) {
+	if r.released() || slices.ContainsFunc(pending, handle) {
 		return nil
 	}
 	var retry eventRetry
@@ -1033,6 +1183,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			}
 		case <-retryC:
 			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
+		case <-r.associationKick:
+			r.associationStep(ctx, state)
 		}
 	}
 }
@@ -1049,7 +1201,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		nsid := market.NSIDFromURI(event.Payload.URI)
 		switch nsid {
 		case market.ComputeEventsVMTerminatedNSID, market.ComputeEventsVMOnNetworkNSID,
-			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
+			market.ComputeEventsGuestRequesterDIDNSID:
 		default:
 			return false
 		}
@@ -1065,6 +1218,10 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 				r.log().Info("requester_guest_network", "tag", parsed.Tag, "address", parsed.Address)
 				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
 			}
+			return false
+		}
+		if parsed.Kind == market.ComputeEventsGuestRequesterDIDNSID {
+			r.onGuestRequester(ctx, state, parsed)
 			return false
 		}
 		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID || parsed.Kind == market.ComputeEventsGuestSecretsAppliedNSID {
@@ -1109,6 +1266,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			}
 		case <-retryC:
 			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
+		case <-r.associationKick:
+			r.associationStep(ctx, state)
 		}
 	}
 }
@@ -1136,12 +1295,75 @@ func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.Node
 	r.deleteContractRecords(ctx)
 }
 
+func (r *contractRunner) captureReleaseRequest() {
+	requested := r.snapshot().Spec.ReleaseRequestedAt
+	r.mu.Lock()
+	r.releaseRequested = requested
+	r.mu.Unlock()
+}
+
+func (r *contractRunner) releaseRequestedAt() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.releaseRequested
+}
+
+func guestMayRun(state *v1alpha1.NodeClaimContract) bool {
+	return state != nil && state.Receipt != nil && state.ReceiptOk != nil && *state.ReceiptOk && state.Termination == nil &&
+		(state.Release == nil || !state.Release.OK)
+}
+
+func (r *contractRunner) applyReleaseBacklog(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	receiptURI := receiptURIOf(state)
+	if receiptURI == "" {
+		return
+	}
+	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
+	defer closeEvents()
+	apply := func(event MarketEvent) {
+		switch market.NSIDFromURI(event.Payload.URI) {
+		case market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsVMTerminatedNSID:
+		default:
+			return
+		}
+		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
+		if err != nil {
+			r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
+			return
+		}
+		switch parsed.Kind {
+		case market.ComputeEventsGuestRequesterDIDNSID:
+			r.recordGuestRequester(ctx, state, parsed)
+		case market.ComputeEventsVMTerminatedNSID:
+			if applyTermination(state, parsed.Termination, r.q.nowISO()) {
+				r.log().Info("requester_release_found_termination", "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
+			}
+		}
+	}
+	for _, event := range pending {
+		apply(event)
+	}
+	_ = r.q.drainEvents(ctx, r.name, receiptURI)
+	for {
+		select {
+		case event := <-events:
+			apply(event)
+		default:
+			return
+		}
+	}
+}
+
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
 	q := r.q
+	r.captureReleaseRequest()
 	if state == nil || state.Receipt == nil {
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		r.deleteContractRecords(ctx)
 		return nil
+	}
+	if state.Release == nil || !state.Release.OK {
+		r.applyReleaseBacklog(ctx, state)
 	}
 	if state.Termination != nil {
 		state.Phase = v1alpha1.ContractReleased
@@ -1191,6 +1413,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.log().Info("requester_release", "receipt", receiptURIOf(state), "bidder", bidderDID, "deadline", release.Deadline, "attempts", release.Attempts)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
+	r.releaseGuestRequester(ctx, state)
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
 	for err != nil {
 		release.Attempts++
@@ -1370,6 +1593,18 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: the contract status holds no bidder-signed vm.hostKeys", state, nil, nil, "adopting", 1)
 		return
 	}
+	if err := r.q.recordedWinnerAllowed(ctx, state, r.contractPolicyName()); err != nil {
+		if errors.Is(err, ErrPolicyRejected) {
+			state.Outcome = v1alpha1.ContractOutcomePolicyRejected
+			state.Error = "adopt: " + err.Error()
+			if releaseErr := r.releaseContract(ctx, state, winnerDID(state)); releaseErr != nil && !r.q.stopping() {
+				r.recordFailure(ctx, state, fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr), 1)
+			}
+			return
+		}
+		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "adopt: "+err.Error(), state, nil, nil, "adopting", 1)
+		return
+	}
 	state.Phase = v1alpha1.ContractNetwork
 	r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "adopted: no RFP was sent and no vm.delete was submitted", state, nil, nil, "adopted", 1)
 	if err := r.waitForRelease(ctx, state, state.Receipt.URI, winnerDID(state)); err != nil && !r.q.stopping() {
@@ -1377,9 +1612,9 @@ func (r *contractRunner) runAdopt(ctx context.Context, contract v1alpha1.Compute
 	}
 }
 
-func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, bids []v1alpha1.ContractBid, chosen *v1alpha1.ContractChosen, step string, attempts int32) {
+func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.ComputeContractPhase, message string, state *v1alpha1.NodeClaimContract, bids []v1alpha1.ContractBid, chosen *v1alpha1.ContractChosen, step string, attempts int32) error {
 	if r.isGone() {
-		return
+		return errRunnerGone
 	}
 	contract := r.snapshot()
 	status := v1alpha1.ComputeContractStatus{
@@ -1406,14 +1641,26 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		preserved := *contract.Status.Release
 		status.Release = &preserved
 	}
+	if requested := r.releaseRequestedAt(); requested != "" && status.Release != nil &&
+		(phase == v1alpha1.ComputeContractReleased || phase == v1alpha1.ComputeContractFailed) {
+		status.Release.RequestedAt = requested
+	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
-	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
+	var startRevokes func()
+	if phase == v1alpha1.ComputeContractReleased || (phase == v1alpha1.ComputeContractFailed && !guestMayRun(state)) {
+		r.atircRevoke.Do(func() { status.AtircRevokes, startRevokes = r.revokeAtircToken(ctx) })
+	}
+	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)
+	if err != nil && !notFound(err) {
 		r.log().Warn("requester_contract_status_failed", "err", err)
 	}
-	if phase == v1alpha1.ComputeContractReleased {
-		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
+	if startRevokes != nil {
+		startRevokes()
 	}
+	return err
 }
+
+var errRunnerGone = errors.New("requester: the contract runner is gone")
 
 func notFound(err error) bool {
 	return err != nil && (errors.Is(err, contractmarket.ErrNotFound) || strings.Contains(err.Error(), "not found"))
@@ -1425,7 +1672,7 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	if r.resumed {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionResumed, metav1.ConditionTrue, "Recovered", "the recorded status.contract was resumed", now)
 	}
-	if phase == v1alpha1.ComputeContractReleasing {
+	if phase == v1alpha1.ComputeContractReleasing || phase == v1alpha1.ComputeContractFailed {
 		if release := r.releaseStatus(); release != nil && release.LastError != "" {
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "DestroyFailed", release.LastError, now)
 		}
@@ -1436,6 +1683,15 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseAcknowledged, metav1.ConditionTrue, "Acknowledged", message, now)
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
+	}
+	if state != nil && state.R2Release != nil {
+		rel := state.R2Release
+		ok := rel.Phase == v1alpha1.ContractR2ReleaseReleased
+		message := "the guest requester's release is " + string(rel.Phase)
+		if rel.Message != "" {
+			message += ": " + rel.Message
+		}
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionGuestRequesterReleased, conds.Status(ok), string(rel.Phase), message, now)
 	}
 	switch {
 	case state != nil && state.SecretsApplied != nil && state.SecretsApplied.Via == market.GuestSecretsViaSealed:
@@ -1453,6 +1709,9 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 	}
 	if state != nil && state.Termination != nil {
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionTerminated, metav1.ConditionTrue, "BidderTerminated", terminationMessage(state.Termination), now)
+	}
+	if mint := r.agentMintOutcome(); mint != nil {
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionAtircTokenMinted, conds.Status(mint.ok), mint.reason, mint.message, now)
 	}
 }
 
@@ -1519,6 +1778,10 @@ func contractHostKeys(keys []v1alpha1.ComputeVMHostKey) []v1alpha1.ContractHostK
 }
 
 func (r *contractRunner) sealSecrets(ctx context.Context, state *v1alpha1.NodeClaimContract) {
+	if r.released() {
+		r.log().Info("requester_guest_secrets_not_sealed", "reason", "the release is requested")
+		return
+	}
 	contract := r.snapshot()
 	contract.Status.Contract = cloneNodeClaimContract(state)
 	if grant := r.grantValue(); grant != nil {
@@ -1541,6 +1804,8 @@ func payloadKind(nsid string) string {
 		return "secretsRequested"
 	case market.ComputeEventsGuestSecretsAppliedNSID:
 		return "secretsApplied"
+	case market.ComputeEventsGuestRequesterDIDNSID:
+		return "requesterDid"
 	default:
 		return nsid
 	}

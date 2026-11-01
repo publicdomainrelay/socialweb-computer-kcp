@@ -62,6 +62,55 @@ type secretsState struct {
 	fetched chan struct{}
 
 	once sync.Once
+
+	unminted map[string]bool
+}
+
+func (s *secretsState) withholdUnminted(paths ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, path := range paths {
+		if s.unminted == nil {
+			s.unminted = map[string]bool{}
+		}
+		s.unminted[path] = true
+	}
+}
+
+func (s *secretsState) minted(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unminted[path] {
+		return false
+	}
+	delete(s.unminted, path)
+	return true
+}
+
+func (s *secretsState) servable(entries []SecretEntry) []SecretEntry {
+	if s == nil {
+		return entries
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.servableLocked(entries)
+}
+
+func (s *secretsState) servableLocked(entries []SecretEntry) []SecretEntry {
+	if len(s.unminted) == 0 {
+		return entries
+	}
+	out := make([]SecretEntry, 0, len(entries))
+	for _, entry := range entries {
+		if s.unminted[entry.Path] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func newSecretsState(name string, log *slog.Logger) *secretsState {
@@ -116,7 +165,6 @@ func (s *secretsState) markFetched(now string) bool {
 func (s *secretsState) fetch(ctx context.Context, authorization string) ([]SecretEntry, error) {
 	s.mu.Lock()
 	issuer, audience, subject, verifier := s.issuer, s.audience, s.subject, s.verifier
-	entries := append([]SecretEntry(nil), s.entries...)
 	already := s.fetchedAt
 	s.mu.Unlock()
 	if verifier == nil || issuer == "" || audience == "" || subject == "" {
@@ -137,6 +185,9 @@ func (s *secretsState) fetch(ctx context.Context, authorization string) ([]Secre
 		s.log.Warn("the guest's secrets token names another subject", "contract", s.name, "subject", subject)
 		return nil, &RequestError{Status: http.StatusUnauthorized, Code: "InvalidToken"}
 	}
+	s.mu.Lock()
+	entries := s.servableLocked(append([]SecretEntry(nil), s.entries...))
+	s.mu.Unlock()
 	if already == "" {
 		s.markFetched(time.Now().UTC().Format(time.RFC3339Nano))
 	}
@@ -392,6 +443,9 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	}
 	state := newSecretsState(r.name, r.q.log)
 	state.addEntries(entries...)
+	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" && !liveAtircEntry(entries, envFile, r.q.now()) {
+		state.withholdUnminted(envFile)
+	}
 	url := ""
 	if inbound {
 		if url, err = r.q.ingressExposureURL(ctx); err != nil {
@@ -412,15 +466,55 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 		}
 		state.addEntries(SecretEntry{Path: cloudinit.NodeClaimDocPath, Value: string(doc) + "\n"})
 		record := nodeRBACRecord(grant.Role, grant.Issuer, grant.Subject, audience, grant.Audience, true)
-		key := secretsRBACKey(r.name)
-		if _, err := r.q.repo.PutRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key, record); err != nil {
+		key := r.rbacKeyOf(contract.Status.Contract)
+		if key == "" {
+			return nil
+		}
+		if err := r.putRBAC(ctx, key, record); err != nil {
 			return fmt.Errorf("requester: rewriting the contract's RBAC record: %w", err)
 		}
-		r.mu.Lock()
-		r.rbacRKey = key
-		r.mu.Unlock()
 	}
 	return nil
+}
+
+func (r *contractRunner) rbacKeyOf(state *v1alpha1.NodeClaimContract) string {
+	switch {
+	case state == nil:
+		return ""
+	case state.Accept != nil && state.Accept.URI != "":
+		return market.RBACRKeyOfAccept(state.Accept.URI)
+	case state.RFP != nil && state.RFP.URI != "" && state.Bid != nil && state.Bid.URI != "":
+		return market.RBACRKey(acceptRKeyFor(r.q.repoDID, r.name, state.RFP.URI, state.RFP.CID, state.Bid.URI, state.Bid.CID))
+	}
+	return ""
+}
+
+func acceptRKeyFor(repoDID, contract, rfpURI, rfpCID, bidURI, bidCID string) string {
+	return sessionRKey("accept", repoDID, contract, rfpURI, rfpCID, bidURI, bidCID)
+}
+
+func (r *contractRunner) putRBAC(ctx context.Context, key string, record map[string]any) error {
+	if _, err := r.q.repo.PutRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key, record); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.rbacRKey = key
+	r.mu.Unlock()
+	r.deleteLegacyRBAC(ctx)
+	return nil
+}
+
+func (r *contractRunner) deleteLegacyRBAC(ctx context.Context) {
+	key := secretsRBACKey(r.name)
+	if _, err := r.q.repo.GetRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key); err != nil {
+		if !rbacGone(err) {
+			r.log().Warn("requester_rbac_legacy_unread", "rkey", key, "err", err)
+		}
+		return
+	}
+	if err := r.q.repo.DeleteRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key); err != nil && !rbacGone(err) {
+		r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
+	}
 }
 
 func (r *contractRunner) contractModules(userData string, contract v1alpha1.ComputeContract) (string, error) {
@@ -445,6 +539,22 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 	if envFile != "" {
 		modules = append(modules, cloudinit.AgentModule(cloudinit.AgentOptions{EnvFile: envFile}))
 	}
+	if a := contract.Spec.Association; a != nil && a.FromGuest == (strings.TrimSpace(a.Subject) != "") {
+		return "", errors.New("spec.association takes exactly one of a subject or fromGuest")
+	}
+	if fromGuest(contract) {
+		if contract.Spec.SecretsRef == nil {
+			return "", errors.New("spec.association.fromGuest needs spec.secretsRef: the association ref reaches the guest in the secrets bundle")
+		}
+		refFile, err := associationRefFile(contract)
+		if err != nil {
+			return "", err
+		}
+		modules = append(modules, cloudinit.AssociationModule(refFile))
+	}
+	if len(contract.Spec.GuestTools) > 0 {
+		modules = append(modules, cloudinit.GuestToolsModule(contract.Spec.GuestTools))
+	}
 	if r.secrets != nil {
 		inbound := r.q.cfg.InboundXRPC()
 		if inbound {
@@ -464,7 +574,7 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 	return cloudinit.BuildUserData(cloudinit.BuildOptions{Base: userData, Modules: modules, Ctx: values})
 }
 
-func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alpha1.NodeClaimContract, winner *BidRecord) error {
+func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alpha1.NodeClaimContract, winner *BidRecord, acceptRKey string) error {
 	if winner == nil || (r.nodeJoin == nil && r.secrets == nil) {
 		return nil
 	}
@@ -511,13 +621,9 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 		nodeAud = cloudinit.NodeAudience(r.nodeJoin.ClusterRef.Name, vmName)
 	}
 	record := nodeRBACRecord(vmName, cfg.IssuerURI, subject, audience, nodeAud, r.nodeJoin != nil)
-	key := secretsRBACKey(r.name)
-	if _, err := r.q.repo.PutRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key, record); err != nil {
+	if err := r.putRBAC(ctx, market.RBACRKey(acceptRKey), record); err != nil {
 		return fmt.Errorf("requester: writing the contract's RBAC record: %w", err)
 	}
-	r.mu.Lock()
-	r.rbacRKey = key
-	r.mu.Unlock()
 	return nil
 }
 
@@ -532,19 +638,33 @@ func (r *contractRunner) cleanup() {
 
 func (r *contractRunner) deleteRBAC(ctx context.Context) {
 	r.mu.Lock()
-	key := r.rbacRKey
+	held := r.rbacRKey
 	r.mu.Unlock()
-	if key == "" || r.q.repo == nil {
+	if r.q.repo == nil || (held == "" && r.snapshot().Spec.SecretsRef == nil) {
 		return
 	}
 	deleteCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := r.q.repo.DeleteRecord(deleteCtx, r.q.repoDID, FedproxyRBACNSID, key); err != nil && !errors.Is(err, market.ErrNotFound) && !strings.Contains(err.Error(), "not found") {
-		r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
+	keys := []string{held}
+	if key := r.rbacKeyOf(r.stateCopy()); key != held {
+		keys = append(keys, key)
 	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if err := r.q.repo.DeleteRecord(deleteCtx, r.q.repoDID, FedproxyRBACNSID, key); err != nil && !rbacGone(err) {
+			r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
+		}
+	}
+	r.deleteLegacyRBAC(deleteCtx)
 	r.mu.Lock()
 	r.rbacRKey = ""
 	r.mu.Unlock()
+}
+
+func rbacGone(err error) bool {
+	return errors.Is(err, market.ErrNotFound) || strings.Contains(err.Error(), "not found")
 }
 
 func (r *contractRunner) secretsFetched() string {

@@ -97,6 +97,8 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
 			return c.repoUsers(ops.kind, src.Workspace, obj.Name)
 		}),
+		infractl.RepoLinkWatch(func(workspace, name string) []ctlruntime.Request { return c.repoUsers(ops.kind, workspace, name) }),
+		ctlruntime.Events(infractl.RepoBindEvents(c.bus, func(workspace, name string) []ctlruntime.Request { return c.repoUsers(ops.kind, workspace, name) })),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
 			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 		})}
@@ -223,14 +225,20 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	gen := obj.GetGeneration()
 	status := v1alpha1.InfraCollectionStatus{ObservedGeneration: gen, Collection: nsid, Did: previous.Did, Records: previous.Records,
 		Children: previous.Children, Conditions: slices.Clone(previous.Conditions)}
+	attrs := []any{"kind", r.ops.kind, "workspace", req.Workspace, "name", req.Name}
 	fail := func(err error) (ctlruntime.Result, error) {
 		status.Message = err.Error()
 		reason, retry := "ListFailed", err
-		if errors.Is(err, infractl.ErrRepoNoDID) {
+		unresolvedReason, unresolved := infractl.Unresolved(err)
+		switch {
+		case errors.Is(err, infractl.ErrRepoNoDID):
 			reason, retry = "RepoPending", nil
+		case unresolved:
+			reason, retry = unresolvedReason, nil
+			infractl.NoteUnresolved(r.c.log, previous.Conditions, &status.Conditions, gen, unresolvedReason, err, attrs...)
 		}
 		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, reason, err.Error())
-		return ctlruntime.Result{}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
+		return ctlruntime.Result{Backoff: unresolved}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
 	}
 	repo, err := infractl.RepoRef(req.Workspace, spec.RepoRef)
 	if err != nil {
@@ -242,6 +250,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if err != nil {
 		return fail(err)
 	}
+	infractl.NoteUnresolved(r.c.log, previous.Conditions, &status.Conditions, gen, "", nil, attrs...)
 	owner := metav1.OwnerReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: r.ops.kind, Name: req.Name, UID: obj.GetUID(), Controller: ptr.To(true)}
 	labels := map[string]string{v1alpha1.InfraKindLabel: r.ops.kind, v1alpha1.InfraNameLabel: req.Name}
 	if err := infractl.EnsureWatch(ctx, r.c.dynamic, r.manager, req.Workspace, infra.ChildName(r.ops.child, "coll", req.Name), labels, owner,

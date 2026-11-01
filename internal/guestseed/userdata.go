@@ -453,6 +453,9 @@ func Provision(opts ProvisionOptions) (string, error) {
 
 func guestBinaryModules(opts ProvisionOptions, acceptPath string) ([]any, error) {
 	needs := GuestBinariesNeeded(opts.UserData)
+	if err := needs.ToolsErr(); err != nil {
+		return nil, err
+	}
 	if !needs.Any() {
 		return nil, nil
 	}

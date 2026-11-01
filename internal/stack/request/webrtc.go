@@ -63,6 +63,11 @@ func (s *ContractSignaling) PublishOffer(ctx context.Context, tag, ciphertext st
 		Kind: market.GuestSignalKindOffer, Tag: tag, Ciphertext: ciphertext})
 }
 
+func (s *ContractSignaling) PublishR2Start(ctx context.Context, start v1alpha1.ContractEventR2Start) (string, error) {
+	suffix := "r2-" + start.Name
+	return s.eventName(suffix), s.create(ctx, suffix, v1alpha1.ContractEventSpec{NSID: v1alpha1.ContractEventNSIDGuestR2Start, R2Start: &start})
+}
+
 func (s *ContractSignaling) PublishAgentStart(ctx context.Context) (string, error) {
 	return s.eventName("agent"), s.create(ctx, "agent", v1alpha1.ContractEventSpec{NSID: v1alpha1.ContractEventNSIDGuestAgentStart})
 }

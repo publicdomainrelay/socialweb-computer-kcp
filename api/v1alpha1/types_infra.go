@@ -39,7 +39,7 @@ type EphemeralInfraList struct {
 type InfraSpec struct {
 	Description string `json:"description,omitempty" apigen:"maxLength=1024"`
 
-	Contracts []InfraContract `json:"contracts,omitempty"`
+	Contracts []InfraContract `json:"contracts,omitempty" apigen:"listType=map,listMapKey=name"`
 
 	Secrets []InfraContractSecret `json:"secrets,omitempty" apigen:"listType=map,listMapKey=contract"`
 
@@ -65,6 +65,8 @@ type InfraContract struct {
 	Name string `json:"name" apigen:"maxLength=63,pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
 
 	State InfraContractState `json:"state,omitempty" apigen:"default=Staged,enum=Staged|Requested|Released"`
+
+	ReleaseRequestedAt string `json:"releaseRequestedAt,omitempty"`
 
 	ComputeContractTemplate `json:",inline"`
 }
@@ -243,4 +245,8 @@ const (
 	InfraConditionSyncConflict = "SyncConflict"
 
 	InfraConditionRecordValid = "RecordValid"
+
+	InfraConditionRecordUnresolved = "RecordUnresolved"
+
+	InfraConditionRecordOrphaned = "RecordOrphaned"
 )

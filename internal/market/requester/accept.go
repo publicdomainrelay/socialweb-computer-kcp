@@ -319,32 +319,21 @@ func (q *Requester) classifyBid(ctx context.Context, bid *BidRecord) error {
 	return nil
 }
 
-func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, usePolicy bool, workflow string) bool {
-	if !usePolicy {
-		return true
-	}
-	key := bid.DID + "|" + workflow
-	if decision, ok := q.scopeCache.Get(key); ok {
-		return decision.Allow
-	}
-	if q.policy == nil || (q.policy.Workflow == "" && workflow == "") {
-		return true
-	}
+func (q *Requester) bidAllowedWithPolicy(ctx context.Context, bid BidRecord, workflow PolicyGate) bool {
 	self := q.marketDID
 	if operator := strings.TrimSpace(q.cfg.Spec.OperatorDID); operator != "" {
 		self = operator
 	}
-	input := PolicyInput{
+	input := workflow.Input(PolicyInput{
 		SelfDid:          self,
 		SubjectDid:       bid.DID,
 		CounterpartyDid:  bid.DID,
 		RootRequesterDid: self,
-	}
+	})
 	if rfp, _ := bid.Record["rfp"].(map[string]any); rfp != nil {
 		input.RFP = &PolicyRef{URI: stringOf(rfp["uri"]), CID: stringOf(rfp["cid"])}
 	}
 	decision := q.policy.Scope(ctx, input)
-	q.scopeCache.Set(key, decision)
 	if !decision.Allow {
 		q.log.Info("requester_bid_policy_denied", "bidder", bid.DID, "reason", decision.Reason)
 	}

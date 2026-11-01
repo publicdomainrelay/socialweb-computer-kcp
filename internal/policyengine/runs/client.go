@@ -3,6 +3,8 @@ package runs
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -117,6 +119,7 @@ func (c *Client) Spec(req Request) policyv1alpha1.PolicyWorkflowRunSpec {
 		raw = []byte("{}")
 	}
 	inputs["policy-args"] = string(raw)
+	inputs["cache-key"] = CacheKey(req, input, raw)
 	deadline := int64(opt.Positive(req.Timeout, c.Timeout) / time.Second)
 	if deadline <= 0 {
 		deadline = int64(DefaultTimeout / time.Second)
@@ -147,6 +150,25 @@ func (c *Client) runName() string {
 		now = c.Now
 	}
 	return fmt.Sprintf("%s-%d-%d", cmp.Or(c.Prefix, "policy"), now().UnixNano(), c.counter.Add(1))
+}
+
+func CacheKey(req Request, input Input, args []byte) string {
+	name := req.WorkflowRef
+	if name == "" {
+		sum := sha256.Sum256(req.Workflow)
+		name = "inline-" + hex.EncodeToString(sum[:8])
+	}
+	refPart := func(ref *commonv1.StrongRef) string {
+		if ref == nil || ref.URI == "" {
+			return ""
+		}
+		return ref.URI + "/" + ref.CID
+	}
+	parties := strings.Join([]string{input.Mode, input.Perspective, input.SelfDid, input.SubjectDid, input.CounterpartyDid,
+		input.RootRequesterDid, req.Source}, "|")
+	argsSum := sha256.Sum256(args)
+	return fmt.Sprintf("policy/%s/%s|%s|%s|%s:%s", name, parties, refPart(input.RFP), refPart(input.Bid), refPart(input.Accept),
+		hex.EncodeToString(argsSum[:8]))
 }
 
 func strongRef(ref *commonv1.StrongRef) *commonv1.StrongRef {

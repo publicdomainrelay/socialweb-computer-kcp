@@ -4093,6 +4093,79 @@ closed so far was found by reading the code against this document, or by running
 reading the document. The practice worth keeping: the artefact was run and each guard was watched to
 fail, rather than the code read against this document alone.
 
+- **Opened 2026-10-30 (plan 0036 A7): R2-START, the guest requester started with no command in the guest.**
+  A contract with `spec.association.fromGuest` gets, in user_data, the user `r2` (group `socialweb-r2`,
+  linger on), `socialweb-r2.service` (User=r2, not started at boot, `EnvironmentFile`-style
+  `/run/socialweb-r2/r2-start.env` read by `/usr/local/bin/socialweb-r2-run.sh`, which runs `run request
+  --name <name> --guest-requester [--agent] [--hold]` and, with both, `run request agent <name>`) and
+  `socialweb-r2-release.service` (oneshot, User=r2, releases every guest requester invocation that is not
+  Released, 120 s each, 600 s in all). `run request r2 <name> [--r2-name <n>] [--agent] [--hold]` (or the
+  page) creates an outbound ContractEvent with NSID `com.publicdomainrelay.temp.compute.events.guest.r2Start`
+  and `spec.r2Start {name, agent, hold}`; the requester publishes it (`fromGuest` only), the bidder
+  queues it, socialweb-guest-agent writes the env file (root:socialweb-r2 0640) and starts the unit.
+  `run request --associate guest` adds `guestTools: [socialweb-computer]`. New requester scope token:
+  `repo:com.publicdomainrelay.temp.compute.events.guest.r2Start?action=create&action=update`. Open:
+  the page's r2Start button (wasm), and a live run of the unit.
+- **Opened 2026-10-30 (plan 0036 A8): R2-CASCADE, a parent release releases the guest requester's
+  contracts.** (1) The requester, releasing a fromGuest contract whose guest requester is Verified,
+  first publishes `guest.r2Release` (outbound ContractEvent `r2-release-<contract>`); the guest agent
+  stops `socialweb-r2.service`, runs `socialweb-r2-release.service` and posts `guest.r2Released {ok,
+  message}`; the requester waits for it at most 12 min (`GuestRequesterReleaseTimeout`, status step
+  `releasingGuestRequester`), then sends vm.delete as before. New scope tokens: requester
+  `repo:...guest.r2Release?action=create&action=update`, bidder `repo:...guest.r2Released?action=create`.
+  (2) Bidder backstop, the smallest safe mechanism: at provisioning the bidder reads the requester's
+  association mirror and its proof (one getRecord each); for a contract-scoped association it writes
+  the record's expiresAt into the ComputeVM `spec.associationExpiresAt`, and its ComputeVM observer
+  requeues to expiresAt plus 10 min (`AssociationExpiryGrace`) and then releases the VM. A guest
+  requester's VM therefore cannot outlive its association by more than the grace, even when the
+  cascade did not run (a destroyed parent guest, a lost event); a parent released earlier is caught by
+  the cascade, not by the backstop, which bounds the worst case at expiresAt (24 h at most). (3) A
+  denied accept with no receipt: `releaseDeniedAccept` waits for the receipt up to 4 times
+  (`DeniedAcceptReceiptAttempts`, `ReceiptTimeout` each), each attempt in `status.release.lastError`
+  and the `ReleaseFailed` condition; when it gives up the message names the manual path, `run request
+  release <name>` (spec.release), which a Failed contract with an accept and a winner but no receipt now
+  takes again (`RequesterContractDone` is false for it), finding the receipt at its stable rkey. Release
+  revokes (A6) now run their first attempt before Released is written, the guest requester's token
+  first, because a CLI requester stops its kcp right after Released (the rc126 V1 run lost the R2
+  revoke this way). Open: live runs of all three.
+- **Opened 2026-10-30: QR-NO-EXPECTED-ACCOUNT, an oauthQr requester with no expected account takes the
+  first verified sign-in.** The device polls `com.fedfork.atprotoOauthQR` with the nonce in the
+  `x-oauth-qr-nonce` header (not the query), and qr.fedfork.com (aceed9c) returns `verifiedDid` after it
+  checked the posted session at the account's PDS. The MarketIdentity refuses a transfer whose
+  `verifiedDid` is empty or differs from `userDid` (reason `QRSessionUnverified`, a new QR URL), so
+  `checkAccount` compares a DID the PDS vouched for. A bidder in mode oauthQr must name its account
+  (`spec.identity.did` or `spec.identity.handle`, `run bidder --handle`); the composer fails the
+  MarketBidder otherwise, and hat-7 names `bobvmbuilder.bsky.social`. The CLI requester
+  (`run request -- --atproto-oauth-qr`) may name none: then `checkAccount` has nothing to compare, and
+  whoever completes a verified sign-in at the QR URL within its 5-minute window becomes the requester's
+  account. The CLI prints `signed in as <handle> (<did>)`, and `-- --expect-handle <handle>` sets
+  `spec.identity.handle` so `checkAccount` pins the account (`AccountMismatch` and a new QR otherwise).
+  Open: whether a requester with no expected account should stay allowed, given the QR URL is printed to
+  stderr and logs.
+
+- **Opened 2026-10-30 (plan 0036 V1): GUEST-SELF-BINARY, the socialweb-computer binary in a guest.** R2
+  (`socialweb-computer run request` inside a guest) needs the CLI there; the release binary (~560 MB of
+  embedded assets) is too big for `socialweb-guest-downloads`. Decision: `spec.guestTools: [socialweb-computer]`
+  on ComputeContractTemplate, so Infra and EphemeralInfra `spec.contracts[].guestTools` reach the
+  ComputeContract the infra composer creates (the page requests only through them); the
+  `computer.socialweb.infra#contract` lexicon carries `guestTools` (array of string, knownValues
+  `socialweb-computer`). It is opt-in per contract and fixed at request time, because
+  user_data is fixed at provisioning while `spec.association` is set later by `run request associate`,
+  and tying it to `spec.agent` would put 560 MB on every agent VM. The requester writes the marker
+  `/etc/socialweb-computer/guest-tools/socialweb-computer` into user_data; the bidder's
+  `GuestBinariesNeeded` turns each marker into a pin; the bidder and its GuestControlPlane pin and serve
+  `/proc/self/exe` (one sha256 per process, `internal/kit/selfexe`; the open fd stays the running inode
+  across an upgrade's rename) as `socialweb-computer-x86_64`, streamed by `http.ServeContent`, never held
+  in memory. `setup-guest-binaries.service` fetches, checks the sha256 and installs it like every other
+  guest binary. A bidder accepts only the tools in `guestseed.GuestTools`. linux/amd64 bidders only: a
+  bidder with no pin for a requested tool refuses the bid up front (`bidder_guest_tools_unserved`, Bid
+  Failed GuestToolsUnserved, no bid record). Both run in the one core process of the bidder stack
+  (`internal/stack/bidder/core.go`, componentcore), so the pin in user_data and the served file are one
+  hash. The guest script now ends for good (exit 2, `RestartPreventExitStatus=2`) when a requested
+  binary has no pin for the guest's arch, or when every attempt got HTTP 404 (the bidder's download set
+  changed after provisioning, e.g. an upgrade swapped its binary); other failures still exit 1 and the
+  unit retries. Open: no live run yet (instrument: a V1 guest that runs `socialweb-computer version`); a
+  guest disk needs about 600 MB free; a non-release (dev) binary in a guest lacks its embedded assets.
 - **Opened 2026-10-25 (plan 0034 follow-ups; the text and closing instrument of each is in `NEXT.yaml`).**
   RELAY-SSH-ROUTE: fedproxy's atprp-ssh-relay lets a dead `-R` session take the Caddy route of a live
   one and deletes the live route when the dead one is reaped; fix on branch fix/ssh-session-drop.
@@ -4104,10 +4177,10 @@ fail, rather than the code read against this document alone.
   the rkey before createdAt. RELEASE-NO-CONTRACT-WAIT: releasing a VM-less contract waits 3 m and
   exits 1.
 
-- **Opened 2026-10-30 (stable rkeys; the text and closing instrument are in `NEXT.yaml`).**
-  LEGACY-TID-CLAIMS: the trust resolver reads the mirror, the operator claim and each vouch by one
-  getRecord at a stable rkey; only `trust.legacyClaimListed` still lists an operator repo, for the TID
-  claims did-key-associator wrote before it used putRecord (john holds 12, bob 1).
+- **Closed 2026-10-30 (stable rkeys).** LEGACY-TID-CLAIMS: the 11 TID operator claims in john's repo
+  and the 1 in bob's were re-written at their `trust.ClaimRKey` rkeys (same CID) and the TID copies
+  deleted; `trust.legacyClaimListed` is gone, so the trust resolver reads the mirror, the operator
+  claim and each vouch by one getRecord at a stable rkey and lists no repo.
 
 - **Plan 0013 soak paused 2026-10-19 06:28Z (third reading, partial).** `dev-soak-3` ran rc18 code
   1 h warm-up + 2 h 43 min of the fit window at ~1.1 RFP/s: 15,311 RFPs created, 0 failed; 227 tenant
@@ -5682,7 +5755,9 @@ the run made (canary-dry, the leaked canary-to and canary-dry2) and never again,
 
 - **The requester's RBAC records are the source of the guest's identity grants, on 2026-10-15 (plan 0009
   M3-RBAC-TO-OPENBAO).** For each live guest the bidder reads the `com.fedproxy.rbac` records of its
-  requester's repo (the DID resolved through the PLC directory, `listRecords`) when it accepts, on every
+  requester's repo (the DID resolved through the PLC directory; since rc129 one `getRecord` at rkey
+  `node.<accept rkey>`, the rkey the requester writes it at, and `listRecords` only when that record is
+  missing, for records written before rc129) when it accepts, on every
   firehose event for that collection and DID, and every `--compute-provider-kcp-guest-identity-resync-sec`
   (30 s; the market network's requester keeps its repo in its own process, no relay crawls it and its
   commits are not on the firehose, so the read is also the floor under a lost event). A role of a record
@@ -11454,6 +11529,54 @@ unless `--policy` names one. The browser page builds its own ComputeContracts an
 requester policy until its policy sandbox is fenced (NEXT.yaml). Read on prod before the change
 (lead, patched spec.policy): hat-7 bid for alice under `bidder-tangled-vouch`, Held in 27 s, ssh
 over webrtc, Released. alice is vouched by bob and john, and vouches both.
+
+### atirc agent tokens are leased to the contract and minted after the receipt (2026-10-30, rc130)
+
+Owner decision: an atirc agent or guest requester token dies when its contract ends, checked by the
+atirc server at use time, so a revoke needs no requester state (a memory-only browser page, a lost
+page). Before, the requester minted the agent token right after the RFP and the r2 token after the
+fromGuest association, and only the release revoke (and exp, 24h at most) ended them. Now the agent
+token is minted after the receipt is verified (`acceptReceipt`, `resumeReceipt`) and the r2 token
+needs a verified receipt too; every chat.atirc.mint carries `lease {receipt {uri, cid}, termination,
+association? {uri, cid}, contract?}`: the bidder's market.receipt, the at-uri of its vm.terminated
+record at `market.EventRKeys(market.TerminationKey(receiptURI))` (the rkey the policy engine reads),
+the requester_associate record for the r2 token, and the accept uri. The server appends it to the
+bearer's chain, so the signed claim `leases` is root to leaf; the requester accepts a token only when
+`leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
+mint. Every error answer is a failed mint, retried with backoff. The configured atirc endpoint is
+lease-aware (v0.1.0-ff02afe and later, rc131): a 200 to a leased mint whose token has no `leases`
+claim is revoked and fails the mint (reason LeaseClaimMissing, permanent: not retried and never
+overwritten by GaveUp; a token whose revoke fails is recorded in `atircMinted`, so the release revoke
+and the orphan sweep revoke it later), never a plain token; rc130's
+per-endpoint fallback and its `<atircMintedRef path>-lease` vault record are gone. A mint without a
+lease is unchanged. The agent mint's outcome is the ComputeContract condition `AtircTokenMinted`
+(Leased, Unleased, Present, MintFailed, LeaseClaimMissing, GaveUp); the r2
+mint's failures show in `status.associationMessage`. Until the agent token is minted,
+getSecrets and the sealed fallback serve the bundle without the agent envFile entry; a whole-bundle
+503 would outlast setup-secrets (10 tries 5 s apart, a oneshot with no restart) and leave the guest
+with no secrets. Every fresh mint of that entry publishes guest.secretsUpdated, whether or not the
+guest fetched before it, so the guest fetches the bundle again. Index before mint, no mint after the
+release started, `atircMinted` and the release revoke are unchanged. UUID, manual and plain tokens
+are unchanged.
+
+### An Infra keeps its finalizer until its record is deleted or confirmed absent (2026-10-30, rc131)
+
+Before, the Infra and EphemeralInfra finalizer deleted the child AtprotoRecord and released once it was
+gone, and the AtprotoRecord finalizer released without a delete on any unbound repo, so the infra went
+and its PDS record stayed. Now the AtprotoRecord finalizer releases without a delete only when its
+AtprotoRepo is gone (404), its repoRef is invalid, or 24 h after its deletion
+(`atprotorepo.RecordDeleteGiveUp`), each logged `atprotorecord_released_without_delete`; on an
+unbound repo it keeps its finalizer and its repo binding, so the bind wakes it, and requeues on the
+runtime backoff. The infra finalizer deletes a child AtprotoRecord that holds a published record (not
+Retain) only when the repo resolves, and once the child is gone it reads `status.record.uri` by one
+getRecord: 404 releases; the same CID as `status.record.cid` is deleted again through a repo.write
+handle (the Infra and EphemeralInfra links grant it) with that CID as the swap; another CID is someone
+else's record and releases (`infra_record_replaced`). While the repo is unresolvable or has no DID
+yet, the infra stays in Deleting and requeues with `Result.Backoff`, woken by the AtprotoRepo bind,
+link and DID watches. An AtprotoRepo 404 (RepoNotFound, as after `compose.PruneLocalAccounts`), an
+AtprotoRepo with no DID whose backend is gone (RepoBackendGone), or 24 h in Deleting (DeleteGaveUp)
+releases with the condition RecordOrphaned and `infra_record_orphaned`. An infra with no record in
+status, or a Retained one, releases as before.
 
 ## 16. Vocabulary
 

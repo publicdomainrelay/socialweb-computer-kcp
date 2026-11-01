@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
 	policyengine "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/status"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/workflow"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -66,6 +67,7 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 		}
 		return failedOutcome(contextErr), nil
 	}
+	bindCacheKey(inputs, workflowRaw, workflowCR, requestContext)
 	request := &PolicyEngineRequest{
 		Inputs:   inputs,
 		Workflow: workflowRaw,
@@ -75,10 +77,16 @@ func (r *RunReconciler) ReconcilePolicyWorkflowRun(ctx context.Context, run *pol
 		Deadline: r.deadline(run, workflowCR),
 		Cache:    seed,
 	}
+	memo := scopeMemoKey(workflowRaw, inputs)
+	if served, ok := r.Engine.servedScope(memo); ok {
+		served.Status.Restarts = run.Status.Restarts
+		return served, nil
+	}
 	outcome, err := r.Engine.Execute(ctx, request, opts)
 	if err != nil {
 		return failedOutcome(err), nil
 	}
+	r.Engine.rememberScope(memo, outcome)
 	outcome.Status.Restarts = run.Status.Restarts
 	return outcome, nil
 }
@@ -247,10 +255,10 @@ func runCacheSeed(run *policyv1alpha1.PolicyWorkflowRun) models.Cache {
 		return models.Cache{}
 	}
 	if len(run.Spec.Cache) > 0 {
-		return CacheFromAPI(run.Spec.Cache)
+		return withoutTrust(CacheFromAPI(run.Spec.Cache))
 	}
 	if len(run.Status.Cache) > 0 {
-		return CacheFromAPI(run.Status.Cache)
+		return withoutTrust(CacheFromAPI(run.Status.Cache))
 	}
 	return models.Cache{}
 }
@@ -276,17 +284,15 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 		cache = models.Cache{}
 	}
 	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
-		if _, seeded := cache["trust/"+counterpartyDid]; !seeded {
-			selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
-			if stringInput(inputs, "perspective") == perspectiveRequester {
-				selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
-			}
-			snapshot, err := trust.BuildSnapshotWith(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService, associationOf(run))
-			if err != nil {
-				return nil, err
-			}
-			cache["trust/"+counterpartyDid] = snapshot.CacheFiles()
+		selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
+		if stringInput(inputs, "perspective") == perspectiveRequester {
+			selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
 		}
+		snapshot, err := trust.BuildSnapshotWith(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService, associationOf(run))
+		if err != nil {
+			return nil, err
+		}
+		cache[trustCachePrefix+counterpartyDid] = snapshot.CacheFiles()
 	}
 	if len(cache) > 0 {
 		context["cache"] = cache
@@ -343,6 +349,20 @@ func normalizeWorkflow(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+const CacheKeyInput = "cache-key"
+
+func declaresInput(raw json.RawMessage, name string) bool {
+	parsed, err := workflow.Parse(raw)
+	if err != nil || parsed == nil {
+		return false
+	}
+	on, _ := parsed.On.(map[string]any)
+	dispatch, _ := on["workflow_dispatch"].(map[string]any)
+	inputs, _ := dispatch["inputs"].(map[string]any)
+	_, ok := inputs[name]
+	return ok
 }
 
 func bundledWorkflow(name string) (json.RawMessage, bool) {

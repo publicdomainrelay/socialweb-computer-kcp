@@ -37,6 +37,12 @@ const (
 	ContractEventNSIDGuestSecrets = "com.publicdomainrelay.temp.compute.events.guest.secrets"
 
 	ContractEventNSIDGuestAgentStart = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
+
+	ContractEventNSIDGuestSecretsUpdated = "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
+
+	ContractEventNSIDGuestR2Start = "com.publicdomainrelay.temp.compute.events.guest.r2Start"
+
+	ContractEventNSIDGuestR2Release = "com.publicdomainrelay.temp.compute.events.guest.r2Release"
 )
 
 type ContractEventSpec struct {
@@ -44,7 +50,7 @@ type ContractEventSpec struct {
 
 	Direction ContractEventDirection `json:"direction,omitempty" apigen:"default=outbound,enum=outbound|inbound"`
 
-	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC|com.publicdomainrelay.temp.compute.events.guest.secrets|com.publicdomainrelay.temp.compute.events.guest.agentStart"`
+	NSID string `json:"nsid" apigen:"enum=com.publicdomainrelay.temp.compute.events.guest.publicKey|com.publicdomainrelay.temp.compute.events.guest.signalWebRTC|com.publicdomainrelay.temp.compute.events.guest.secrets|com.publicdomainrelay.temp.compute.events.guest.agentStart|com.publicdomainrelay.temp.compute.events.guest.secretsUpdated|com.publicdomainrelay.temp.compute.events.guest.r2Start|com.publicdomainrelay.temp.compute.events.guest.r2Release"`
 
 	Kind string `json:"kind,omitempty" apigen:"maxLength=32"`
 
@@ -57,6 +63,16 @@ type ContractEventSpec struct {
 	RecipientRef *commonv1.LocalObjectRef `json:"recipientRef,omitempty"`
 
 	InReplyTo *commonv1.StrongRef `json:"inReplyTo,omitempty"`
+
+	R2Start *ContractEventR2Start `json:"r2Start,omitempty"`
+}
+
+type ContractEventR2Start struct {
+	Name string `json:"name" apigen:"pattern=^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"`
+
+	Agent bool `json:"agent,omitempty"`
+
+	Hold bool `json:"hold,omitempty"`
 }
 
 type ContractEventPhase string

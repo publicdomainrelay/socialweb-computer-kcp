@@ -8,7 +8,7 @@ case "$mode" in
   --full) run=full ;;
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
-    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, cross-OS and release builds" >&2
+    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests, cross-OS and release builds" >&2
     echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
     echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
@@ -68,6 +68,10 @@ echo "check.sh: ok go vet"
 
 scripts/check-architecture.sh || fail "architecture rules (scripts/check-architecture.sh)"
 echo "check.sh: ok architecture rules"
+
+policyspec="./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/"
+go test -count=1 -timeout 5m $policyspec || fail "policy engine specification tests (go test $policyspec)"
+echo "check.sh: ok policy engine specification tests"
 
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"

@@ -16,6 +16,8 @@ const (
 	CapabilityWrite = "repo.write"
 
 	CapabilitySubscribe = "repo.subscribe"
+
+	RecordDeleteGiveUp = 24 * time.Hour
 )
 
 var (
@@ -24,6 +26,8 @@ var (
 	ErrOutOfScope = errors.New("atprotorepo: the collection is outside the granted scope")
 
 	ErrNotBound = errors.New("atprotorepo: the repo has no bound backend")
+
+	ErrSwapMismatch = errors.New("atprotorepo: the record is not at the swap cid")
 )
 
 type Record struct {
@@ -96,6 +100,10 @@ type RecordWriter interface {
 	PutRecord(ctx context.Context, collection, rkey string, value json.RawMessage) (commonv1.StrongRef, error)
 
 	DeleteRecord(ctx context.Context, collection, rkey string) error
+}
+
+type SwapDeleter interface {
+	DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error
 }
 
 type Subscriber interface {

@@ -32,6 +32,26 @@ const RepoKind = "AtprotoRepo"
 
 var ErrRepoNoDID = errors.New("reports no did yet")
 
+var ErrRecordUnresolved = errors.New("infra: the record's repo cannot be resolved")
+
+type unresolved struct {
+	reason string
+
+	err error
+}
+
+func (e unresolved) Error() string { return e.err.Error() }
+
+func (e unresolved) Unwrap() []error { return []error{ErrRecordUnresolved, e.err} }
+
+func Unresolved(err error) (string, bool) {
+	var u unresolved
+	if errors.As(err, &u) {
+		return u.reason, true
+	}
+	return "", false
+}
+
 type recordSync struct {
 	action infra.Action
 
@@ -63,10 +83,10 @@ type recordSync struct {
 func RepoRef(workspace string, ref commonv1.ObjectRef) (commonv1.ObjectRef, error) {
 	kind := strings.TrimSpace(ref.Kind)
 	if kind != "" && !strings.EqualFold(kind, RepoKind) {
-		return commonv1.ObjectRef{}, fmt.Errorf("infra: the repoRef must name an %s, not %s", RepoKind, kind)
+		return commonv1.ObjectRef{}, unresolved{reason: "RepoRefInvalid", err: fmt.Errorf("infra: the repoRef must name an %s, not %s", RepoKind, kind)}
 	}
 	if strings.TrimSpace(ref.Name) == "" {
-		return commonv1.ObjectRef{}, errors.New("infra: the repoRef names no AtprotoRepo")
+		return commonv1.ObjectRef{}, unresolved{reason: "RepoRefInvalid", err: errors.New("infra: the repoRef names no AtprotoRepo")}
 	}
 	return commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: RepoKind, Name: strings.TrimSpace(ref.Name), Workspace: ref.InWorkspace(workspace)}, nil
 }
@@ -77,18 +97,43 @@ func Repo(ctx context.Context, b *bus.Bus, dynamic kube.Factory, self, ref commo
 		return "", nil, err
 	}
 	repo, err := kube.Get[v1alpha1.AtprotoRepo](ctx, dyn.Resource(v1alpha1.AtprotoRepoGVR), ref.Name)
+	if apierrors.IsNotFound(err) {
+		return "", nil, unresolved{reason: "RepoNotFound", err: fmt.Errorf("infra: the AtprotoRepo %s does not exist", ref.String())}
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("infra: reading the AtprotoRepo %s: %w", ref.String(), err)
 	}
 	did := strings.TrimSpace(repo.Status.DID)
 	if did == "" {
+		if backendGone(ctx, dynamic, ref.Workspace, repo.Spec.BackendRef) {
+			return "", nil, unresolved{reason: "RepoBackendGone", err: fmt.Errorf("infra: the AtprotoRepo %s has no DID and its backend %s %s does not exist",
+				ref.String(), repo.Spec.BackendRef.Kind, repo.Spec.BackendRef.Name)}
+		}
 		return "", nil, fmt.Errorf("infra: the AtprotoRepo %s %w", ref.String(), ErrRepoNoDID)
 	}
 	reader, err := bus.Resolve[atprotorepo.RecordReader](ctx, b, self, ref, bus.Capability{Name: atprotorepo.CapabilityRead, Scope: []string{nsid}})
 	if err != nil {
-		return "", nil, fmt.Errorf("infra: the repo.read handle of %s: %w", ref.String(), err)
+		return "", nil, unresolved{reason: "RepoUnreadable", err: fmt.Errorf("infra: the repo.read handle of %s: %w", ref.String(), err)}
 	}
 	return did, reader, nil
+}
+
+func backendGone(ctx context.Context, dynamic kube.Factory, workspace string, ref commonv1.ObjectRef) bool {
+	var gvr schema.GroupVersionResource
+	switch strings.TrimSpace(ref.Kind) {
+	case "LocalRepo":
+		gvr = v1alpha1.LocalRepoGVR
+	case "RemoteRepo":
+		gvr = v1alpha1.RemoteRepoGVR
+	default:
+		return false
+	}
+	dyn, err := dynamic(ref.InWorkspace(workspace))
+	if err != nil {
+		return false
+	}
+	_, err = kube.Get[metav1.PartialObjectMetadata](ctx, dyn.Resource(gvr), strings.TrimSpace(ref.Name))
+	return apierrors.IsNotFound(err)
 }
 
 func collectionOwned(obj metav1.Object) bool {
@@ -285,17 +330,89 @@ func (r *reconciler[T]) deleteRecord(ctx context.Context, req ctlruntime.Request
 	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, records, name)
 	switch {
 	case apierrors.IsNotFound(err):
-		return true, nil
+		return r.recordAbsent(ctx, req, v)
 	case err != nil:
 		return false, err
 	case !ar.DeletionTimestamp.IsZero():
 		return false, nil
+	}
+	if holdsRecord(ar) {
+		if _, _, err := r.recordRepo(ctx, req, v); err != nil && !RecordOrphaned(err) {
+			return false, err
+		}
 	}
 	if err := records.Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
 	r.c.log.Info("infra_record_deleting", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "atprotoRecord", name)
 	return false, nil
+}
+
+func RecordOrphaned(err error) bool {
+	reason, ok := Unresolved(err)
+	return ok && (reason == "RepoNotFound" || reason == "RepoBackendGone")
+}
+
+func holdsRecord(ar *v1alpha1.AtprotoRecord) bool {
+	return ar.Spec.DeletionPolicy != v1alpha1.RecordDeletionRetain &&
+		(strings.TrimSpace(ar.Status.URI) != "" || strings.TrimSpace(ar.Status.Cid) != "")
+}
+
+func (r *reconciler[T]) recordRepo(ctx context.Context, req ctlruntime.Request, v view) (commonv1.ObjectRef, atprotorepo.RecordReader, error) {
+	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
+	if err != nil {
+		return commonv1.ObjectRef{}, nil, err
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	_, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
+	return repo, reader, err
+}
+
+func (r *reconciler[T]) recordAbsent(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
+	stored := v.status.Record
+	if stored == nil || stored.Direction == v1alpha1.InfraSyncRetained || strings.TrimSpace(stored.URI) == "" {
+		return true, nil
+	}
+	uri, err := syntax.ParseATURI(strings.TrimSpace(stored.URI))
+	if err != nil {
+		return true, nil
+	}
+	repo, reader, err := r.recordRepo(ctx, req, v)
+	if err != nil {
+		return false, err
+	}
+	collection, rkey := uri.Collection().String(), uri.RecordKey().String()
+	got, err := reader.GetRecord(ctx, uri.Authority().String(), collection, rkey)
+	switch {
+	case errors.Is(err, atprotorepo.ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("infra: confirming %s is deleted: %w", stored.URI, err)
+	}
+	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI, "cid", got.CID}
+	if want := strings.TrimSpace(stored.CID); want == "" || got.CID != want {
+		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID)...)
+		return true, nil
+	}
+	writer, err := bus.Resolve[atprotorepo.Repo](ctx, r.c.bus, r.self(req), repo,
+		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: []string{collection}})
+	if err != nil {
+		return false, fmt.Errorf("infra: the repo.write handle of %s to delete %s: %w", repo.String(), stored.URI, err)
+	}
+	if swap, ok := writer.(atprotorepo.SwapDeleter); ok {
+		err = swap.DeleteRecordSwap(ctx, collection, rkey, got.CID)
+	} else {
+		err = writer.DeleteRecord(ctx, collection, rkey)
+	}
+	if errors.Is(err, atprotorepo.ErrSwapMismatch) {
+		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID, "err", err.Error())...)
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
+		return false, fmt.Errorf("infra: deleting %s: %w", stored.URI, err)
+	}
+	r.c.log.Info("infra_record_deleted", attrs...)
+	return true, nil
 }
 
 func (r *reconciler[T]) unbindRecord(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {

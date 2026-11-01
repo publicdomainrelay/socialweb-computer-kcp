@@ -1,0 +1,13 @@
+name: run step
+on:
+  workflow_dispatch:
+    inputs:
+      self-did:
+        required: true
+jobs:
+  evaluate:
+    runs-on: self-hosted
+    outputs:
+      allow: 'true'
+    steps:
+    - run: echo allow=true >> "$GITHUB_OUTPUT"

@@ -55,10 +55,12 @@ type Step struct {
 
 	Delete bool
 
+	RequestedAt string
+
 	Phase v1alpha1.InfraContractPhase
 }
 
-func Plan(state v1alpha1.InfraContractState, cc *v1alpha1.ComputeContract, previous v1alpha1.InfraContractPhase) Step {
+func Plan(state v1alpha1.InfraContractState, requestedAt string, cc *v1alpha1.ComputeContract, previous v1alpha1.InfraContractPhase) Step {
 	state = StateOrStaged(state)
 	if cc == nil {
 		switch state {
@@ -79,11 +81,15 @@ func Plan(state v1alpha1.InfraContractState, cc *v1alpha1.ComputeContract, previ
 	if state == v1alpha1.InfraContractRequested {
 		return Step{Phase: PhaseOf(cc)}
 	}
+	again := requestedAt != "" && cc.Spec.ReleaseRequestedAt != requestedAt
 	if !Finished(cc) {
-		return Step{Release: !cc.Spec.Release, Phase: PhaseOf(cc)}
+		return Step{Release: !cc.Spec.Release || again, RequestedAt: requestedAt, Phase: PhaseOf(cc)}
 	}
 	if state == v1alpha1.InfraContractStaged {
 		return Step{Delete: true, Phase: v1alpha1.InfraContractPhaseStaged}
+	}
+	if again && cc.Status.Phase == v1alpha1.ComputeContractFailed {
+		return Step{Release: true, RequestedAt: requestedAt, Phase: PhaseOf(cc)}
 	}
 	return Step{Phase: PhaseOf(cc)}
 }

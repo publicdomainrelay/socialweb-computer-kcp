@@ -187,12 +187,94 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
     older `<tag>:<port>:<envFile>`) asks for one.
   - The atirc agent (plan 0035): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`) needs
-    `spec.secretsRef`. The requester mints a long atirc token after the RFP (only for spec.agent) and
-    writes `ATIRC_TOKEN` into the bundle entry at envFile; user_data installs `atirc-agent.service`
-    and `/etc/socialweb-guest-agent/agent.json` but never starts the unit. A requester-originated
+    `spec.secretsRef`. The requester mints a long atirc token after the receipt is verified (only for
+    spec.agent), leased to the contract (chat.atirc.mint `lease`: the receipt and the bidder's
+    vm.terminated at-uri, plus the association for the r2 token), and writes `ATIRC_TOKEN` into the
+    bundle entry at envFile; getSecrets and the sealed fallback serve the bundle without that entry
+    until it is minted, and every fresh mint publishes guest.secretsUpdated so the guest fetches
+    again; user_data installs `atirc-agent.service`
+    and `/etc/socialweb-guest-agent/agent.json` but never starts the unit; it enables `atirc-agent-env.path`
+    on the envFile, which runs `systemctl try-restart --no-block atirc-agent.service` (never a start)
+    when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
     linux/amd64 only.
+  - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
+    (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
+    needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association
+    after the accept; with fromGuest, user_data writes `/etc/socialweb-guest-agent/association.json`,
+    the bundle carries `/etc/socialweb-computer/association-request.json` {authority, contract (the
+    accept uri), nonce}. The bundle files are root 0600 and a dev requester refuses root, so
+    socialweb-guest-agent makes the group `socialweb-r2` (user_data does too; the atirc agent user joins
+    it) and `/run/socialweb-r2` (root:socialweb-r2 2770) and mirrors `association-request.json`,
+    `r2-atirc.env` and then `association-ref` (empty until both the ref and the env are written, so the
+    requester sees its parent token when the ref lands) into it 0640 on start, on a bundle change and
+    after a refetch. The requester inside the guest (`run request --association-ref`, bare, as the
+    agent user; it reads `/run/socialweb-r2` when that dir exists, `/etc/socialweb-computer` otherwise),
+    finding the ref missing or empty, writes the request as a market.associationRequest record in its
+    own repo at rkey `requester_associate-<sha256(authority)[:32]>-<accept rkey>`, then its DID to
+    `requester-did` in that dir (`/run/socialweb-guest-agent/requester-did` in the root case);
+    socialweb-guest-agent posts guest.requesterDid (did:plc
+    only, never the requester's own DID; a did:web is refused because its resolution fetches a host the
+    guest names); the requester records the first DID as Pending in `status.contract.guestRequester`
+    before it proves it (a second DID is refused, a give-up turns it Refused); the requester reads that request record by one getRecord in the reported
+    repo and writes nothing unless authority, contract and nonce match exactly; then it writes the
+    record at rkey `requester_associate-<sha256(subject)[:32]>-<accept rkey>` (never over a record of another
+    contract, and release deletes only its own), the ref into the bundle, publishes
+    guest.secretsUpdated, and the guest agent fetches the bundle again (`SECRETS_REFETCH=1
+    setup-secrets.sh`, or the sealed fallback). A failed step retries with a bounded backoff and shows in
+    `status.associationMessage`. chat.atirc.mint never gets the association as `assoc` (atirc wants the
+    standing rkey and the minting account as subject); every token is minted with an explicit exp
+    (at most 24h, the parent token's exp and, for the guest requester, the association expiresAt). The
+    agent token is one token per subhandle (named after the RFP rkey) minted after the receipt. Once a fromGuest association is
+    written, the requester also mints the guest requester its own child token, subhandle
+    `r2-<accept rkey>.<the requester's handle or subhandle>`, into the bundle at
+    `/etc/socialweb-computer/r2-atirc.env` (`ATIRC_TOKEN`, `ATIRC_SUBHANDLE`, `ATIRC_EXP`, mode 0600);
+    `source` it to run `atirc sub` / `atirc pub` as that subhandle in the owner's channel. A requester
+    whose root names `spec.atircParentRef` (a vault secret {token, subhandle, exp}; the guest requester's
+    `run request` writes it from that file) mints its own agents' tokens below that subhandle with the
+    parent token as bearer instead of service auth. Release revokes the agent and the guest requester
+    tokens in the background with a backoff capped at 5 min until each is revoked or expired (24h at
+    most after release, from the release time kept in a marker in the bundle secret), starts only
+    once that marker is written, stops with the requester and resumes after a restart from the marker;
+    every mint is also recorded (path, subhandle, token, exp) under `atircMinted` in the bundle secret,
+    and a minted subhandle counts as revoked only on a 200, a 401 for its own token, or its exp; a 401
+    counts for an unrecorded (rc126) token only for a subhandle read from the env file. The first
+    attempt runs before Released is written, or Failed when no guest can still run (no receipt, an
+    acknowledged release, or the release bound), and its outcome is `status.atircRevokes` (Done only
+    when every token path is revoked that way or never held a token; Pending while retries run;
+    Abandoned after 24 h); only that first write and the retries set it, a later status write never
+    does, and no token is minted once it is set. `run request` and `run request release` share one
+    settle step before they remove an invocation: they wait up to `cloudinit.RequestRevokeWait`
+    (15 min) while it is Pending or unset on a contract that names token paths; on that timeout they
+    exit non-zero and keep the invocation's state, and a rerun of `run request release` starts the kcp
+    so the requester resumes the revokes, from the marker or, with no marker, over every token path
+    again. A refFile, agent envFile or `--secrets` path equal to a token path is refused (CLI and
+    requester admission). Every release request stamps `spec.releaseRequestedAt` (SSA, the release
+    field manager) and the outcome it answers is `status.release.requestedAt`; a denied accept whose
+    receipt never arrives leaves the contract Failed with ReleaseFailed, and a new release request
+    restarts its runner, looks for the receipt and releases again; the CLI waits for an outcome of its
+    own request (with the receipt waits added to its release wait). Every read-modify-write of a
+    contract's bundle holds one lock per contract on the requester. Revoking a subhandle revokes every
+    token below it. `spec.atircParentRef` must name `identity/atirc-parent` in the requester's own
+    vault and mount.
+    `run request --associate <did>|guest` asks for one. Inside such a guest, the agent user starts the
+    guest requester with one command, `socialweb-computer run request --name <name> --guest-requester
+    [--agent --hold]`: it implies `--association-ref` on `/run/socialweb-r2`, `--skip-ssh` and the
+    parent atirc token, which it uses only to mint its own agents' tokens (the guest requester runs no
+    `atirc sub` of its own). The atirc agent run script enables linger for the agent user and runs the agent
+    with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user. With no command in the guest,
+    `run request r2 <name> [--r2-name r2] [--agent] [--hold]` publishes guest.r2Start and the guest agent
+    starts `socialweb-r2.service` as the user `r2`; releasing the parent publishes guest.r2Release first
+    and waits for guest.r2Released after `socialweb-r2-release.service` released the guest requester's
+    contracts. The bounds nest, from the constants in `internal/atproto/cloudinit`: each guest
+    `run request release` gets RequestReleaseWait + RequestRevokeWait + 2 min, the release unit 1 min
+    more, the cascade (GuestRequesterReleaseTimeout) the unit stop plus 1 min more, and the parent's
+    `run request release` waits the cascade plus `--contract-timeout`; the outcome is
+    `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose
+    requester's contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`,
+    at most 24 h after the accept, only from a proof in another repo than the requester's that names
+    the requester as subject and the authority's own accept as contract; each skip is logged).
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own
@@ -200,12 +282,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   Exposure), checks the sha256 and installs to `/usr/local/bin`. The binaries are the release asset
   `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`, which takes wootty from its pinned
   ghcr.io image layer at build time). A guest never fetches from GitHub or GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
+  The one opt-in exception to that asset: a contract whose `spec.guestTools` names `socialweb-computer`
+  (`run request --guest-tools socialweb-computer`) gets the bidder's own running binary
+  (`/proc/self/exe`, hashed once per process, linux/amd64 bidders only; any other bidder refuses at
+  provisioning), served streamed at `/v1/downloads/<sha256>/socialweb-computer-x86_64` and installed by
+  the same unit as `/usr/local/bin/socialweb-computer`. The requester marks it in user_data as
+  `/etc/socialweb-computer/guest-tools/<tool>`.
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
   `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,
-  guest.secretsApplied; never guest.secrets or guest.agentStart) and the bidder signs and
-  publishes them; requester events to the guest (guest.publicKey, guest.signalWebRTC, guest.secrets,
-  guest.agentStart) reach it through the bidder's per-ComputeVM queue
+  guest.secretsApplied, guest.requesterDid; never guest.secrets, guest.agentStart or
+  guest.secretsUpdated) and the bidder signs and publishes them; requester events to the guest
+  (guest.publicKey, guest.signalWebRTC, guest.secrets, guest.agentStart, guest.secretsUpdated) reach it through the bidder's per-ComputeVM queue
   and the XRPC subscription `com.publicdomainrelay.temp.compute.guest.subscribeEvents` (WebSocket,
   `cursor`, JSON text frames, an empty binary keepalive every 25 s). The guest bearer is the
   `Authorization` header only. The bidder routes by NSID prefix and never opens a sealed body.
@@ -294,6 +382,11 @@ Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
   each states what a component must do (actors, inputs, observable outcome), never how it does it.
   Only high-level integration tests are written.
 - Rust tests under `rust/` are outside this rule and stay.
+- The policy engine specification tests are authorized by the owner (2026-10-30) and must pass:
+  `internal/policyengine/spec`, the policy decision tests in `internal/market/bidder` and
+  `internal/market/requester`, and their harness `internal/policyengine/policytest` (real engine, real
+  bundled actions in the pinned deno, a fake PDS, no network). Every case asserts that the selected
+  policy ran for the decision and that its verdict and the decision are right. No skip.
 
 ## Prod deployments
 
@@ -352,6 +445,18 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `spec.policy` is unset (`install bidder` writes `bidder-policy` to config.json); `open` is insecure
   and runs only when set explicitly, never on prod. The acceptance requester alice must be vouched by
   the bidder operators bob and john (`sh.tangled.graph.vouch`, docs/acceptance/0001-auth-modes.md).
+- A market policy always runs, on both sides and in both lanes. No policy named means the default
+  (`requester-tangled-vouch` on a requester, every contract and RFP carries it, owner-session mode
+  included; `bidder-tangled-vouch` on a bidder). The bidder's full lane runs its own workflow and then
+  every policy the RFP attaches, and allows only if all allow; no verdict is cached across decisions,
+  and a stored bid verdict never skips it. The requester gate (scope and full, contract and session)
+  runs the body of the attached policy record, which must be in the requester's own repo and, for a
+  bundled name, equal the bundled workflow; it refuses a contract or session whose policy names
+  another. On the bidder the requester is the subject. A run whose workflow declares `cache-key` gets
+  `runs.CacheKey` (workflow, mode, perspective, every DID, the records, the args), so a memoized
+  verdict never crosses parties. Free winners get the full run too. A missing evaluator, run client
+  or engine, or an `allow` output that is not a strict boolean, denies. `open` runs the open workflow
+  only when named; it never skips.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify
@@ -365,7 +470,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
     `go generate ./...` must leave `api`, `internal/atproto/market` and `deploy` unchanged;
-    `go vet ./...`; `scripts/check-architecture.sh`; `go build` and `go vet` of each Go asset module
+    `go vet ./...`; `scripts/check-architecture.sh`; the policy engine specification tests
+    (`go test ./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/`; they
+    find deno through `SOCIALWEB_POLICYTEST_DENO`, the embedded deno, the build-staged pinned zip in
+    `~/.tmp/socialweb-computer-build/cache/deno-embed`, or PATH, and fail without one); `go build` and `go vet` of each Go asset module
     in `internal/versions/versions.json`; `go build` and `go vet` for darwin/arm64, darwin/amd64,
     windows/amd64, windows/arm64 and linux/arm64, each with a `-tags release` build of
     `cmd/socialweb-computer`; and the `-tags release` build of every release platform.

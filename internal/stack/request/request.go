@@ -29,6 +29,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kcpserver"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -47,6 +48,7 @@ const (
 	NetworkAppFieldManager       = "socialweb.computer/network-app"
 	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
 	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
+	AtircParentPath              = requester.AtircParentPath
 	Poll                         = time.Second
 	RetryMax                     = 5 * time.Second
 	irohScheme                   = "iroh://"
@@ -88,6 +90,8 @@ type ContractSummary struct {
 	ReleaseStatus int             `json:"releaseStatus,omitempty"`
 	Termination   string          `json:"termination,omitempty"`
 	Sandbox       *SandboxSummary `json:"sandbox,omitempty"`
+	R2Release     string          `json:"r2Release,omitempty"`
+	AtircRevokes  string          `json:"atircRevokes,omitempty"`
 }
 
 type SandboxSummary struct {
@@ -188,6 +192,13 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 	if k.Receipt != nil {
 		s.ReceiptUri = k.Receipt.URI
 	}
+	if k.R2Release != nil {
+		s.R2Release = string(k.R2Release.Phase)
+		if k.R2Release.Message != "" {
+			s.R2Release += ": " + k.R2Release.Message
+		}
+	}
+	s.AtircRevokes = string(c.Status.AtircRevokes)
 	if k.Sandbox != nil {
 		s.Sandbox = &SandboxSummary{ExitCode: k.Sandbox.ExitCode, TimedOut: k.Sandbox.TimedOut, Stdout: k.Sandbox.Stdout, Stderr: k.Sandbox.Stderr}
 	}
@@ -363,13 +374,13 @@ func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractS
 	})
 }
 
-func (k *Kcp) Release(ctx context.Context) error {
+func (k *Kcp) Release(ctx context.Context, requestedAt string) error {
 	contracts := k.dyn.Resource(compose.ComputeContractGVR)
 	if _, err := kube.Get[kube.Doc](ctx, contracts, marketrequester.RequesterContract); err != nil {
 		return err
 	}
 	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "ComputeContract",
-		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true}}
+		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true, "releaseRequestedAt": requestedAt}}
 	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: ReleaseFieldManager, Force: true})
 	return err
 }
@@ -456,8 +467,12 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 }
 
 func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (commonv1.SecretRef, error) {
-	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: SecretsPath}
-	what := "writing the secrets bundle into the requester's own OpenBao"
+	return k.PutSecret(ctx, SecretsPath, map[string]any{"bundle": string(bundle)}, "the secrets bundle", timeout)
+}
+
+func (k *Kcp) PutSecret(ctx context.Context, path string, data map[string]any, what string, timeout time.Duration) (commonv1.SecretRef, error) {
+	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: path}
+	what = "writing " + what + " into the requester's own OpenBao"
 	deadline := time.Now().Add(timeout)
 	ri := k.dyn.Resource(compose.OpenBaoServerGVR)
 	server, client := marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient
@@ -476,7 +491,7 @@ func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Durati
 		}
 		defer c.RevokeSelf(context.WithoutCancel(ctx))
 		ref.Mount = refs.KVMount
-		if err := c.PutKV(ctx, refs.KVMount+"/data/"+SecretsPath, map[string]any{"bundle": string(bundle)}); err != nil {
+		if err := c.PutKV(ctx, refs.KVMount+"/data/"+path, data); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -520,6 +535,16 @@ func (k *Kcp) AwaitIdentity(ctx context.Context, name string, each func(*v1alpha
 func (k *Kcp) AwaitContract(ctx context.Context, timeout time.Duration, done func(*v1alpha1.ComputeContract) bool) (*v1alpha1.ComputeContract, error) {
 	return kube.Await(ctx, k.dyn.Resource(compose.ComputeContractGVR), k.ContractName(), timeout,
 		func(c *v1alpha1.ComputeContract) (bool, error) { return c != nil && done(c), nil })
+}
+
+func (k *Kcp) AwaitRecord(ctx context.Context, name string, timeout time.Duration, done func(*v1alpha1.AtprotoRecord) (bool, error)) (*v1alpha1.AtprotoRecord, error) {
+	return kube.Await(ctx, k.dyn.Resource(compose.AtprotoRecordGVR), name, timeout,
+		func(r *v1alpha1.AtprotoRecord) (bool, error) {
+			if r == nil {
+				return false, nil
+			}
+			return done(r)
+		})
 }
 
 func networkClient(kubeconfig string) (kube.Resource, error) {

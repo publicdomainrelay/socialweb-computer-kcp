@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/selfexe"
 )
 
 const (
@@ -26,6 +28,8 @@ const (
 
 	GuestBinaryAtirc = "atirc"
 
+	GuestBinarySocialwebComputer = "socialweb-computer"
+
 	GuestAgentUnit = "socialweb-guest-agent.service"
 
 	GuestSecretsUnit = cloudinit.GuestSecretsUnit
@@ -37,10 +41,14 @@ const (
 	GuestDownloadsRoute = "/v1/downloads"
 
 	guestBinaryAttempts = 60
+
+	guestBinaryGone = 2
 )
 
 var (
 	GuestArches = []string{"x86_64", "aarch64"}
+
+	GuestTools = []string{GuestBinarySocialwebComputer}
 
 	sha256HexRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -65,6 +73,8 @@ type GuestBinaryNeeds struct {
 	Wootty bool
 
 	Atirc bool
+
+	Tools []string
 
 	Secrets bool
 
@@ -93,8 +103,36 @@ func GuestDownloadName(name, arch string) string {
 	return name + "-" + arch
 }
 
+type SelfDownload struct {
+	Name string
+
+	Path string
+
+	selfexe.Pin
+}
+
+func SelfDownloadOf() (SelfDownload, error) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		return SelfDownload{}, fmt.Errorf("guestseed: the bidder runs %s/%s; it serves %s to linux/amd64 guests only", runtime.GOOS, runtime.GOARCH, GuestBinarySocialwebComputer)
+	}
+	pin, err := selfexe.Sum()
+	if err != nil {
+		return SelfDownload{}, err
+	}
+	return SelfDownload{Name: GuestDownloadName(GuestBinarySocialwebComputer, "x86_64"), Path: selfexe.Path, Pin: pin}, nil
+}
+
+func (n GuestBinaryNeeds) ToolsErr() error {
+	for _, tool := range n.Tools {
+		if !slices.Contains(GuestTools, tool) {
+			return fmt.Errorf("guestseed: the guest asks for guest tool %q; a bidder serves only %s", tool, strings.Join(GuestTools, ", "))
+		}
+	}
+	return nil
+}
+
 func (n GuestBinaryNeeds) Any() bool {
-	return n.OpenTunnel || n.Agent || n.Wootty || n.Atirc
+	return n.OpenTunnel || n.Agent || n.Wootty || n.Atirc || len(n.Tools) > 0
 }
 
 func (n GuestBinaryNeeds) Names() []string {
@@ -111,6 +149,11 @@ func (n GuestBinaryNeeds) Names() []string {
 	if n.Agent {
 		out = append(out, GuestBinaryAgent)
 	}
+	for _, tool := range n.Tools {
+		if !slices.Contains(out, tool) {
+			out = append(out, tool)
+		}
+	}
 	return out
 }
 
@@ -118,6 +161,10 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 	const unitDir = "/etc/systemd/system/"
 	out := GuestBinaryNeeds{}
 	for _, p := range cloudinit.WriteFilePaths(userData) {
+		if tool, ok := cloudinit.GuestToolOf(p); ok {
+			out.Tools = append(out.Tools, tool)
+			continue
+		}
 		switch {
 		case p == cloudinit.GuestAgentTunnelsPath:
 			out.Agent = true
@@ -129,6 +176,9 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 			out.Agent = true
 			out.Atirc = true
 			out.Units = append(out.Units, cloudinit.AgentUnit)
+		case p == cloudinit.GuestAgentAssociationPath:
+			out.Agent = true
+			out.Units = append(out.Units, cloudinit.GuestRequesterUnit, cloudinit.GuestRequesterReleaseUnit)
 		case strings.HasPrefix(p, unitDir+"guest-tunnel-") && !strings.HasPrefix(p, unitDir+"guest-tunnel-report-") && strings.HasSuffix(p, ".service"):
 			out.OpenTunnel = true
 			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))
@@ -144,6 +194,8 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		out.Units = append(out.Units, GuestSecretsUnit)
 	}
 	sort.Strings(out.Units)
+	sort.Strings(out.Tools)
+	out.Tools = slices.Compact(out.Tools)
 	return out
 }
 
@@ -187,6 +239,13 @@ func GuestBinariesModule(base string, pins []GuestBinaryPin, units []string) (cl
 		}
 		fmt.Fprintf(&wants, "want %s %s %s\n", pin.Name, pin.Arch, pin.Sha256)
 	}
+	var needs []string
+	for _, pin := range pins {
+		if !slices.Contains(needs, pin.Name) {
+			needs = append(needs, pin.Name)
+			fmt.Fprintf(&wants, "need %s\n", pin.Name)
+		}
+	}
 	for _, unit := range units {
 		if !unitNameRE.MatchString(unit) {
 			return nil, fmt.Errorf("guestseed: %q is not a systemd service name", unit)
@@ -198,18 +257,23 @@ BASE="` + base + `"
 case "$(uname -m)" in
   x86_64|amd64) ARCH=x86_64 ;;
   aarch64|arm64) ARCH=aarch64 ;;
-  *) echo "setup-guest-binaries: the bidder serves no binaries for $(uname -m)"; exit 1 ;;
+  *) echo "setup-guest-binaries: the bidder serves no binaries for $(uname -m); giving up for good"; exit ` + fmt.Sprint(guestBinaryGone) + ` ;;
 esac
 FAIL=0
+GONE=0
+HAVE=" "
 fetch() {
-  local name="$1" sum="$2" dest="` + GuestBinariesDir + `/$1" tmp got
+  local name="$1" sum="$2" dest="` + GuestBinariesDir + `/$1" tmp got code rc all404=1
   if [ -x "${dest}" ] && [ "$(sha256sum "${dest}" | cut -d' ' -f1)" = "${sum}" ]; then
     echo "setup-guest-binaries: installed ${name} sha256 ${sum}"
     return 0
   fi
   tmp="$(mktemp "` + GuestBinariesDir + `/.${name}.XXXXXX")" || return 1
   for attempt in $(seq 1 ` + fmt.Sprint(guestBinaryAttempts) + `); do
-    if curl -q -fsS --noproxy '*' --connect-timeout 10 -m 300 -o "${tmp}" "${BASE}` + GuestDownloadsRoute + `/${sum}/${name}-${ARCH}"; then
+    code="$(curl -q -fsS --noproxy '*' --connect-timeout 10 -m 300 -o "${tmp}" -w '%{http_code}' "${BASE}` + GuestDownloadsRoute + `/${sum}/${name}-${ARCH}")"
+    rc=$?
+    if [ "${rc}" = 0 ]; then
+      all404=0
       got="$(sha256sum "${tmp}" | cut -d' ' -f1)"
       if [ "${got}" = "${sum}" ]; then
         chmod 0755 "${tmp}" && mv -f "${tmp}" "${dest}"
@@ -218,19 +282,37 @@ fetch() {
       fi
       echo "setup-guest-binaries: ${name} from ${BASE} has sha256 ${got}, not ${sum} (attempt ${attempt})"
     else
-      echo "setup-guest-binaries: fetching ${name} from ${BASE} failed (attempt ${attempt})"
+      [ "${code}" = 404 ] || all404=0
+      echo "setup-guest-binaries: fetching ${name} from ${BASE} failed: curl exit ${rc}, http ${code:-none} (attempt ${attempt})"
     fi
     sleep 3
   done
   rm -f "${tmp}"
-  echo "setup-guest-binaries: gave up on ${name}"
+  if [ "${all404}" = 1 ]; then
+    echo "setup-guest-binaries: the bidder no longer serves ${name} sha256 ${sum} (HTTP 404 on every attempt: its download set changed since this guest was provisioned, e.g. a bidder upgrade); giving up for good"
+    return ` + fmt.Sprint(guestBinaryGone) + `
+  fi
+  echo "setup-guest-binaries: gave up on ${name}; the unit retries"
   return 1
 }
 want() {
   [ "$2" = "${ARCH}" ] || return 0
-  fetch "$1" "$3" || FAIL=1
+  HAVE="${HAVE}$1 "
+  fetch "$1" "$3"
+  case "$?" in
+    0) ;;
+    ` + fmt.Sprint(guestBinaryGone) + `) GONE=1 ;;
+    *) FAIL=1 ;;
+  esac
 }
-` + wants.String() + `exit "${FAIL}"
+need() {
+  case "${HAVE}" in *" $1 "*) return 0 ;; esac
+  echo "setup-guest-binaries: the bidder serves no ${1} for ${ARCH}; giving up on it for good"
+  GONE=1
+}
+` + wants.String() + `[ "${FAIL}" = 0 ] || exit 1
+[ "${GONE}" = 0 ] || exit ` + fmt.Sprint(guestBinaryGone) + `
+exit 0
 `
 	unit := []string{
 		"[Unit]",
@@ -251,6 +333,7 @@ want() {
 		"ExecStart="+GuestBinariesScript,
 		"Restart=on-failure",
 		"RestartSec=10",
+		"RestartPreventExitStatus="+fmt.Sprint(guestBinaryGone),
 		"StandardOutput=journal+console",
 		"StandardError=journal+console",
 		"",
@@ -291,13 +374,14 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *W
 	}
 	unit := strings.Join([]string{
 		"[Unit]",
-		"Description=socialweb guest agent: the webrtc tunnels, the sealed secrets fallback and the agent start of the guest",
+		"Description=socialweb guest agent: the webrtc tunnels, the sealed secrets fallback, the agent start and the requester association of the guest",
 		"After=network-online.target " + GuestBinariesUnit,
 		"Wants=network-online.target",
 		"Requires=" + GuestBinariesUnit,
 		"ConditionPathExists=|" + cloudinit.GuestAgentTunnelsPath,
 		"ConditionPathExists=|" + cloudinit.GuestAgentSecretsPath,
 		"ConditionPathExists=|" + cloudinit.GuestAgentAgentPath,
+		"ConditionPathExists=|" + cloudinit.GuestAgentAssociationPath,
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",

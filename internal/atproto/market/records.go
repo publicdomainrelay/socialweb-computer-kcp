@@ -600,6 +600,20 @@ func ReleasePayloadRKey(receiptURI string) string {
 	return SessionRKey("delete", receiptURI)
 }
 
+func RBACRKey(acceptRKey string) string {
+	if acceptRKey == "" {
+		return ""
+	}
+	return "node." + acceptRKey
+}
+
+func RBACRKeyOfAccept(acceptURI string) string {
+	if acceptURI == "" {
+		return ""
+	}
+	return RBACRKey(string(syntax.ATURI(acceptURI).RecordKey()))
+}
+
 func CreateBid(ctx context.Context, w RecordWriter, repo string, opts BidOptions, signer *Signer) (SignedRecord, error) {
 	record, err := BuildBid(opts)
 	if err != nil {

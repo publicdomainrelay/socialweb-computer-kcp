@@ -20,8 +20,6 @@ type Parser struct {
 	Strings func(json.RawMessage) []string
 }
 
-var Lenient = Parser{Bool: lenientBool, Strings: splitStrings}
-
 var Strict = Parser{Bool: strictBool, Strings: singleString}
 
 func Decide(run *policyv1alpha1.PolicyWorkflowRun, parser Parser) Decision {
@@ -51,9 +49,9 @@ func Decide(run *policyv1alpha1.PolicyWorkflowRun, parser Parser) Decision {
 		if len(violations) > 0 {
 			reason += ": " + strings.Join(violations, ", ")
 		}
-		return Decision{Violations: violations, Reason: reason, Run: name}
+		return Decision{Violations: violations, Reason: reason, Run: name, Completed: true}
 	}
-	return Decision{Allow: true, Violations: violations, Run: name}
+	return Decision{Allow: true, Violations: violations, Run: name, Completed: true}
 }
 
 func failure(run *policyv1alpha1.PolicyWorkflowRun) string {
@@ -96,12 +94,8 @@ func outputBool(outputs map[string]json.RawMessage, key string, boolOf func(json
 	found := false
 	allow := true
 	for _, raw := range values {
-		value, ok := boolOf(raw)
-		if !ok {
-			continue
-		}
 		found = true
-		if !value {
+		if value, ok := boolOf(raw); !ok || !value {
 			allow = false
 		}
 	}
@@ -154,31 +148,6 @@ func rejection(outputs map[string]json.RawMessage) string {
 	return executor.RejectionError(verdict)
 }
 
-func lenientBool(raw json.RawMessage) (bool, bool) {
-	var value bool
-	if json.Unmarshal(raw, &value) == nil {
-		return value, true
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		switch strings.ToLower(strings.TrimSpace(text)) {
-		case "true", "1", "yes", "allow", "allowed", "success":
-			return true, true
-		case "false", "0", "no", "deny", "denied", "failure":
-			return false, true
-		default:
-			return false, false
-		}
-	}
-	var object struct {
-		Allow *bool `json:"allow"`
-	}
-	if json.Unmarshal(raw, &object) == nil && object.Allow != nil {
-		return *object.Allow, true
-	}
-	return false, false
-}
-
 func strictBool(raw json.RawMessage) (bool, bool) {
 	var value bool
 	if json.Unmarshal(raw, &value) == nil {
@@ -194,33 +163,6 @@ func strictBool(raw json.RawMessage) (bool, bool) {
 		}
 	}
 	return false, false
-}
-
-func splitStrings(raw json.RawMessage) []string {
-	var list []string
-	if json.Unmarshal(raw, &list) == nil {
-		return list
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return nil
-		}
-		var nested []string
-		if json.Unmarshal([]byte(text), &nested) == nil {
-			return nested
-		}
-		parts := strings.Split(text, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			if trimmed := strings.TrimSpace(part); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	}
-	return nil
 }
 
 func singleString(raw json.RawMessage) []string {

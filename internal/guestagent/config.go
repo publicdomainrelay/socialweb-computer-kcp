@@ -24,6 +24,28 @@ const (
 
 	AgentFile = "agent.json"
 
+	AssociationFile = "association.json"
+
+	RequesterDIDFile = "requester-did"
+
+	AssociationRequestFile = "association-request.json"
+
+	AssociationRefFile = "association-ref"
+
+	RequesterAtircEnvFile = "r2-atirc.env"
+
+	RequesterGroup = "socialweb-r2"
+
+	RequesterDir = "/run/socialweb-r2"
+
+	RequesterStartEnvFile = "r2-start.env"
+
+	RequesterUnit = "socialweb-r2.service"
+
+	RequesterReleaseUnit = "socialweb-r2-release.service"
+
+	DefaultSecretsFetchScript = "/usr/local/bin/setup-secrets.sh"
+
 	SecretsReadyFile = "secrets.ready"
 
 	SecretsRequestFile = "secrets.request"
@@ -39,6 +61,8 @@ const (
 	STUNServer = "stun:stun.cloudflare.com:3478"
 
 	maxTag = 32
+
+	associationRefDir = "/etc/socialweb-computer"
 )
 
 var ErrConfig = errors.New("guestagent: invalid config")
@@ -71,6 +95,10 @@ type Secrets struct {
 	GetSecrets bool `json:"getSecrets"`
 }
 
+type Association struct {
+	RefFile string `json:"refFile"`
+}
+
 type AcceptRef struct {
 	URI string
 
@@ -83,6 +111,8 @@ type Config struct {
 	Secrets *Secrets
 
 	AgentUnit string
+
+	Association *Association
 
 	Bidder Bidder
 
@@ -127,6 +157,17 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		return cfg, fmt.Errorf("%w: %s unit %q is not a systemd service name of [a-z0-9-]", ErrConfig, AgentFile, agent.Unit)
 	}
 	cfg.AgentUnit = agent.Unit
+	var association Association
+	switch err := readOptionalJSON(filepath.Join(configDir, AssociationFile), &association); {
+	case err != nil:
+		return cfg, err
+	case association.RefFile != "":
+		clean := filepath.Clean(association.RefFile)
+		if !strings.HasPrefix(association.RefFile, "/") || clean != association.RefFile || !strings.HasPrefix(clean, associationRefDir+"/") {
+			return cfg, fmt.Errorf("%w: %s refFile %q is not a clean path under %s/", ErrConfig, AssociationFile, association.RefFile, associationRefDir)
+		}
+		cfg.Association = &association
+	}
 	seen := map[string]bool{}
 	for _, t := range tunnels.Tunnels {
 		switch {
@@ -142,8 +183,9 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		seen[t.Tag] = true
 		cfg.Tunnels = append(cfg.Tunnels, t)
 	}
-	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil && cfg.AgentUnit == "" {
-		return cfg, fmt.Errorf("%w: %s names no tunnel, %s asks for no sealed secrets fallback and %s names no unit", ErrConfig, TunnelsFile, SecretsFile, AgentFile)
+	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil && cfg.AgentUnit == "" && cfg.Association == nil {
+		return cfg, fmt.Errorf("%w: %s names no tunnel, %s asks for no sealed secrets fallback, %s names no unit and %s names no ref file", ErrConfig,
+			TunnelsFile, SecretsFile, AgentFile, AssociationFile)
 	}
 	if err := readJSON(filepath.Join(configDir, BidderFile), &cfg.Bidder); err != nil {
 		return cfg, err

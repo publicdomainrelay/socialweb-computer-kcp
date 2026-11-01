@@ -8,12 +8,14 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
@@ -96,6 +98,33 @@ func (c *Composer) ApplyAssociationRecord(ctx context.Context, r Root, ws string
 	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRecordName},
 		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: BadgeBlueKeysNSID, Rkey: AssociationRecordName, Record: record,
 			OnMissingReference: v1alpha1.MissingReferenceDelete}}
+	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
+}
+
+const AssociationRequestRecordName = "association-request"
+
+func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity, service string,
+	req v1alpha1.AssociationRequest) error {
+	authority, err := syntax.ParseDID(strings.TrimSpace(req.Authority))
+	if err != nil || authority.String() != req.Authority {
+		return fmt.Errorf("compose: spec.identity.associationRequest.authority %q is not a DID", req.Authority)
+	}
+	contract, err := syntax.ParseATURI(strings.TrimSpace(req.Contract))
+	if err != nil || contract.Authority().String() != req.Authority || contract.RecordKey() == "" {
+		return fmt.Errorf("compose: spec.identity.associationRequest.contract %q is not a record of %s", req.Contract, req.Authority)
+	}
+	if nonce := strings.TrimSpace(req.Nonce); nonce == "" || len(nonce) > 128 || nonce != req.Nonce {
+		return fmt.Errorf("compose: spec.identity.associationRequest.nonce is not 1 to 128 characters")
+	}
+	created := map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": "metadata.creationTimestamp"}}
+	record, err := json.Marshal(map[string]any{"$type": market.AssociationRequestNSID, "authority": req.Authority, "service": service,
+		"contract": req.Contract, "nonce": req.Nonce, "createdAt": created})
+	if err != nil {
+		return err
+	}
+	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRequestRecordName},
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: market.AssociationRequestNSID, Rkey: market.ContractScopedRKey(service, req.Authority, req.Contract),
+			Record: record}}
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 

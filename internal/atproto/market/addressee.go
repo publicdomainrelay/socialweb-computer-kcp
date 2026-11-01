@@ -40,6 +40,9 @@ func RequesterContractDone(contract v1alpha1.ComputeContract) bool {
 	terminal := phase == v1alpha1.ComputeContractReleased
 	if phase == v1alpha1.ComputeContractFailed {
 		terminal = state == nil || state.Receipt == nil
+		if terminal && contract.Spec.Release && state != nil && state.Accept != nil && state.Accept.URI != "" && state.Winner != nil && state.Winner.DID != "" {
+			terminal = false
+		}
 	}
 	if terminal && state != nil && state.Receipt != nil && state.Termination == nil && state.Winner != nil && state.Winner.DID != "" {
 		terminal = false

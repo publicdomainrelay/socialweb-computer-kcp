@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.r2Released",
+  "description": "The guest reports that its guest requester released its contracts (or holds none) after a compute.events.guest.r2Release; sent as the payload of a market.event. Guest-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["ok", "createdAt"],
+        "properties": {
+          "ok": { "type": "boolean", "description": "Every guest requester contract was released." },
+          "message": { "type": "string", "maxLength": 512 },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.r2Start",
+  "description": "The requester asks the guest agent to start the guest requester (socialweb-r2.service, run request --guest-requester as the r2 user) of a contract with spec.association.fromGuest; sent as the payload of a market.event. Requester-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["name", "createdAt"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 63, "description": "The guest requester's invocation name, a DNS label." },
+          "agent": { "type": "boolean", "description": "The guest requester asks for an atirc agent on its own guest and starts it once held." },
+          "hold": { "type": "boolean", "description": "The guest requester keeps its own contract held." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

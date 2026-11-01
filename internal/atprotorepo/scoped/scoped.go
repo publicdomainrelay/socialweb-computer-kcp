@@ -3,6 +3,7 @@ package scoped
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -36,7 +37,10 @@ type Repo struct {
 	scope []string
 }
 
-var _ atprotorepo.Repo = (*Repo)(nil)
+var (
+	_ atprotorepo.Repo        = (*Repo)(nil)
+	_ atprotorepo.SwapDeleter = (*Repo)(nil)
+)
 
 func New(inner atprotorepo.Repo, scope []string) *Repo {
 	return &Repo{inner: inner, scope: slices.Clone(scope)}
@@ -82,6 +86,17 @@ func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error 
 		return err
 	}
 	return r.inner.DeleteRecord(ctx, collection, rkey)
+}
+
+func (r *Repo) DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error {
+	if err := r.allowed(collection); err != nil {
+		return err
+	}
+	inner, ok := r.inner.(atprotorepo.SwapDeleter)
+	if !ok {
+		return errors.New("scoped: the repo cannot delete a record by its cid")
+	}
+	return inner.DeleteRecordSwap(ctx, collection, rkey, swapCID)
 }
 
 func (r *Repo) Subscribe(ctx context.Context, opts atprotorepo.SubscribeOptions, fn func(atprotorepo.Commit) error) error {

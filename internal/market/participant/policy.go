@@ -43,6 +43,10 @@ type PolicyInput struct {
 
 	Workflow string
 
+	WorkflowBody json.RawMessage
+
+	WorkflowSource string
+
 	SelfDid string
 
 	SubjectDid string

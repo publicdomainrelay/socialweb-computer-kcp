@@ -31,6 +31,7 @@ const (
 
 func (q *Requester) Synced() {
 	q.synced.Store(true)
+	q.startOrphanRevokes()
 }
 
 func (q *Requester) addressees(skip func(v1alpha1.ComputeContract) bool) *market.Addressees {

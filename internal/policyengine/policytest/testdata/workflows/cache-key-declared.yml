@@ -1,0 +1,15 @@
+name: cache-key declared
+on:
+  workflow_dispatch:
+    inputs:
+      self-did:
+        required: true
+      cache-key:
+        required: false
+jobs:
+  evaluate:
+    runs-on: self-hosted
+    outputs:
+      allow: 'true'
+      cache-key: ${{ inputs.cache-key || 'absent' }}
+    steps: []

@@ -43,6 +43,10 @@ type ComputeContractTemplate struct {
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	Agent *ComputeContractAgent `json:"agent,omitempty"`
+
+	Association *ComputeContractAssociation `json:"association,omitempty"`
+
+	GuestTools []string `json:"guestTools,omitempty" apigen:"listType=set,enum=socialweb-computer"`
 }
 
 type ComputeContractSpec struct {
@@ -52,13 +56,13 @@ type ComputeContractSpec struct {
 
 	Release bool `json:"release,omitempty"`
 
+	ReleaseRequestedAt string `json:"releaseRequestedAt,omitempty"`
+
 	OwnerDid string `json:"ownerDid,omitempty"`
 
 	Adopt bool `json:"adopt,omitempty"`
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
-
-	Association *ComputeContractAssociation `json:"association,omitempty"`
 
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }
@@ -141,11 +145,25 @@ type ComputeContractAgent struct {
 	EnvFile string `json:"envFile,omitempty" apigen:"userEndpoint,default=/etc/atirc/atirc.env"`
 }
 
+type AtircRevokesState string
+
+const (
+	AtircRevokesPending AtircRevokesState = "Pending"
+
+	AtircRevokesDone AtircRevokesState = "Done"
+
+	AtircRevokesAbandoned AtircRevokesState = "Abandoned"
+)
+
 type ComputeContractAssociation struct {
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
+
+	FromGuest bool `json:"fromGuest,omitempty"`
 
 	RefFile string `json:"refFile,omitempty" apigen:"userEndpoint,default=/etc/socialweb-computer/association-ref"`
 }
+
+const GuestToolSocialwebComputer = "socialweb-computer"
 
 type ComputeKind string
 
@@ -218,6 +236,8 @@ type ComputeContractRelease struct {
 	Attempts int `json:"attempts,omitempty"`
 
 	LastError string `json:"lastError,omitempty"`
+
+	RequestedAt string `json:"requestedAt,omitempty"`
 }
 
 type ComputeContractEvent struct {
@@ -258,6 +278,10 @@ type ComputeContractStatus struct {
 	PendingEvents []ComputeContractEvent `json:"pendingEvents,omitempty"`
 
 	Association *commonv1.StrongRef `json:"association,omitempty"`
+
+	AssociationMessage string `json:"associationMessage,omitempty"`
+
+	AtircRevokes AtircRevokesState `json:"atircRevokes,omitempty" apigen:"enum=Pending|Done|Abandoned"`
 }
 
 const (
@@ -271,5 +295,9 @@ const (
 
 	ComputeContractConditionReleaseFailed = "ReleaseFailed"
 
+	ComputeContractConditionGuestRequesterReleased = "GuestRequesterReleased"
+
 	ComputeContractConditionTerminated = "Terminated"
+
+	ComputeContractConditionAtircTokenMinted = "AtircTokenMinted"
 )

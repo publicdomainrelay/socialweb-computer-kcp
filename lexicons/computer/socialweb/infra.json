@@ -32,6 +32,7 @@
           "knownValues": ["staged", "requested", "released"],
           "description": "staged: declared, no RFP is sent. requested: the requester runs the RFP flow and holds the guest. released: the guest is released."
         },
+        "releaseRequestedAt": { "type": "string", "format": "datetime", "description": "With state released: the time of the newest release request; a newer one asks a failed release again." },
         "vmName": { "type": "string", "maxLength": 253 },
         "bidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },
         "denyBidderDids": { "type": "array", "items": { "type": "string", "format": "did" } },
@@ -46,7 +47,13 @@
           "items": { "type": "ref", "ref": "#tunnel" },
           "description": "Guest ports the requester reaches over a tunnel transport. Tags are unique within the contract."
         },
-        "agent": { "type": "ref", "ref": "#agent" }
+        "agent": { "type": "ref", "ref": "#agent" },
+        "association": { "type": "ref", "ref": "#association" },
+        "guestTools": {
+          "type": "array",
+          "items": { "type": "string", "knownValues": ["socialweb-computer"] },
+          "description": "Tools the bidder installs on the guest from its own downloads. socialweb-computer is the bidder's own running binary, linux/amd64 bidders only, installed as /usr/local/bin/socialweb-computer."
+        }
       }
     },
     "tunnel": {
@@ -76,6 +83,15 @@
       "description": "An atirc agent on the guest, started on demand; its token arrives through the contract's secrets bundle, never here.",
       "properties": {
         "envFile": { "type": "string", "maxLength": 256, "description": "The guest path of the agent's env file; absent means /etc/atirc/atirc.env." }
+      }
+    },
+    "association": {
+      "type": "object",
+      "description": "A requester the guest runs: after the accept the requester writes a contract-scoped com.publicdomainrelay.temp.market.association naming subject and puts its at-uri#cid into the secrets bundle at refFile.",
+      "properties": {
+        "subject": { "type": "string", "format": "did", "description": "The repo DID of the requester the guest runs, when it is known before the RFP." },
+        "fromGuest": { "type": "boolean", "description": "The subject is the DID the guest reports in a compute.events.guest.requesterDid event; set instead of subject." },
+        "refFile": { "type": "string", "maxLength": 256, "description": "The guest path of the ref file, under /etc/socialweb-computer/; absent means /etc/socialweb-computer/association-ref." }
       }
     },
     "status": {

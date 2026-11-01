@@ -11,10 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 
@@ -24,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/appcli"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
@@ -46,38 +50,43 @@ const (
 	sshConnectionFailed = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
-var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester")
 
 type requestRun struct {
-	a               *app
-	vals            clicfg.Values
-	stateRoot       string
-	inv             request.Invocation
-	hold            bool
-	skipSSH         bool
-	exec            string
-	secrets         string
-	transport       string
-	tag             string
-	target          string
-	root            v1alpha1.MarketRequesterSpec
-	contract        v1alpha1.ComputeContractSpec
-	appOptions      []v1alpha1.ApplicationOption
-	contractTimeout time.Duration
-	networkTimeout  time.Duration
-	summary         request.Summary
-	kcp             *request.Kcp
-	standalone      devinstance.Layout
-	instanceDir     string
-	resuming        bool
-	cleanupOnly     bool
-	identity        *request.IdentityStore
-	identityState   *request.Identity
-	identityObject  *v1alpha1.MarketIdentity
-	expectedPDSURL  string
+	a                 *app
+	vals              clicfg.Values
+	stateRoot         string
+	inv               request.Invocation
+	hold              bool
+	skipSSH           bool
+	exec              string
+	secrets           string
+	associate         string
+	associationRefArg string
+	transport         string
+	tag               string
+	target            string
+	root              v1alpha1.MarketRequesterSpec
+	contract          v1alpha1.ComputeContractSpec
+	appOptions        []v1alpha1.ApplicationOption
+	contractTimeout   time.Duration
+	networkTimeout    time.Duration
+	summary           request.Summary
+	kcp               *request.Kcp
+	standalone        devinstance.Layout
+	instanceDir       string
+	resuming          bool
+	cleanupOnly       bool
+	identity          *request.IdentityStore
+	identityState     *request.Identity
+	identityObject    *v1alpha1.MarketIdentity
+	expectedPDSURL    string
+	awaitRefFile      string
+	guestRequester    bool
+	handshakeStarted  bool
 }
 
 func (r *requestRun) openIdentity(name string) error {
@@ -145,10 +154,11 @@ func (r *requestRun) openIdentity(name string) error {
 			return fail(fmt.Errorf("the identity %s has association %q", idName, id.Association))
 		}
 		r.root.Identity.ApprovedAssociations = append([]string(nil), id.ApprovedAssociations...)
-		if r.root.Identity.Association == v1alpha1.AssociationSkip && r.root.Identity.AssociationRef != nil {
+		if r.root.Identity.Association == v1alpha1.AssociationSkip && (r.root.Identity.AssociationRef != nil || r.awaitRefFile != "") {
 			return fail(fmt.Errorf("the identity %s has association Skip; --association-ref needs a RequireApproval identity", idName))
 		}
-		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 && r.root.Identity.AssociationRef == nil {
+		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 && r.root.Identity.AssociationRef == nil &&
+			r.awaitRefFile == "" {
 			return fail(fmt.Errorf("the identity %s is RequireApproval with no approved operator; pass --association-ref at://<authority>/<collection>/<rkey>#<cid>, or use --skip-qr to create a skip identity", idName))
 		}
 		if id.PLCDirectoryURL != "" && r.root.Network != nil && r.root.Network.PLCDirectoryURL != "" &&
@@ -173,7 +183,7 @@ func (r *requestRun) openIdentity(name string) error {
 			return fail(err)
 		}
 		association := v1alpha1.AssociationSkip
-		if r.root.Identity.AssociationRef != nil {
+		if r.root.Identity.AssociationRef != nil || r.awaitRefFile != "" {
 			association = v1alpha1.AssociationRequireApproval
 		} else if r.root.Identity.Association != v1alpha1.AssociationSkip {
 			return fail(fmt.Errorf("a new identity needs -- --skip-qr or --association-ref at://<authority>/<collection>/<rkey>#<cid>"))
@@ -316,6 +326,9 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 		return nil, fmt.Errorf("tunnel: %w", err)
 	}
 	r.contract.Agent = agentOf(vals.String("agent"))
+	if r.contract.GuestTools, err = guestToolsOf(vals.String("guest-tools")); err != nil {
+		return nil, fmt.Errorf("guest-tools: %w", err)
+	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
 	}
@@ -343,7 +356,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 	r.root = v1alpha1.MarketRequesterSpec{Profile: marketrequester.RequesterProfileDefault,
 		Identity: v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}}
 	var nv v1alpha1.MarketNetworkValue
-	nvSet := false
+	nvSet, expectHandle := false, false
 	for _, p := range parsed {
 		switch p.Name {
 		case "identity", "pds-state-dir", "expected-pds-url":
@@ -354,6 +367,10 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
 		switch {
+		case p.To == compose.MapToOptions && !p.Mapped && slices.Contains(requestCreateOptions, p.Name):
+			return fmt.Errorf("--%s is a run request option; pass it before --", p.Name)
+		case p.To == compose.MapToOptions && !p.Mapped:
+			return fmt.Errorf("--%s is no %s option (%s); run request does not pass unknown options on", p.Name, marketrequester.RequesterApp, compose.OptionMapPath)
 		case p.To == compose.MapToOptions:
 			r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
 		case p.To == compose.MapToCLI:
@@ -376,6 +393,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 		case p.To == "spec.identity.handle":
 			r.root.Identity.Handle = p.Value
+			expectHandle = expectHandle || p.Name == "expect-handle"
 		case p.To == "spec.identity.pdsUrl":
 			r.root.Identity.PdsURL = p.Value
 		case p.To == "spec.identity.association":
@@ -471,6 +489,20 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			r.secrets = p.Value
 		case p.To == "contract.agent":
 			r.contract.Agent = agentOf(p.Value)
+		case p.To == "contract.association":
+			r.associate = p.Value
+		case p.To == "spec.identity.associationRef":
+			r.associationRefArg = p.Value
+		case p.To == "contract.guestTools":
+			tools, err := guestToolsOf(p.Value)
+			if err != nil {
+				return fmt.Errorf("--guest-tools: %w", err)
+			}
+			for _, tool := range tools {
+				if !slices.Contains(r.contract.GuestTools, tool) {
+					r.contract.GuestTools = append(r.contract.GuestTools, tool)
+				}
+			}
 		case p.To == "contract.tunnels":
 			tunnels, err := parseTunnels(p.Value)
 			if err != nil {
@@ -481,9 +513,17 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
 		}
 	}
-	if !network {
-		r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
+	if expectHandle {
+		switch r.root.Identity.Mode {
+		case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated:
+		default:
+			return fmt.Errorf("--expect-handle pins the account of an oauth sign-in; the identity mode %s signs in no existing account, add --atproto-oauth-qr", r.root.Identity.Mode)
+		}
+		if _, err := syntax.ParseHandle(strings.TrimSpace(r.root.Identity.Handle)); err != nil {
+			return fmt.Errorf("--expect-handle %q: %w", r.root.Identity.Handle, err)
+		}
 	}
+	r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
 	if nvSet || !network {
 		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
 		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")
@@ -774,6 +814,9 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 			if err := associationRefRefused(obj); err != nil {
 				return false, err
 			}
+			if err := r.guestHandshake(ctx, obj); err != nil {
+				return false, err
+			}
 			if waitsOnPerson(obj) && deadline.Stop() {
 				r.log("run request: the requester identity waits on a person (a QR scan, a browser sign-in or the operator's association); waiting without a deadline until it is Ready, Ctrl-C stops and keeps the invocation's state",
 					"identity", name, "phase", string(obj.Status.Phase))
@@ -980,15 +1023,58 @@ func (r *requestRun) whileHeld(ctx context.Context) (context.Context, func()) {
 	}
 }
 
+var errRevokesPending = errors.New("the requester did not finish revoking the contract's atirc tokens")
+
+func releaseSettled(requestedAt string) func(*v1alpha1.ComputeContract) bool {
+	return func(c *v1alpha1.ComputeContract) bool {
+		if c.Status.Phase == v1alpha1.ComputeContractReleased {
+			return true
+		}
+		return c.Status.Phase == v1alpha1.ComputeContractFailed && c.Spec.Release && c.Status.Release != nil &&
+			c.Status.Release.RequestedAt == requestedAt
+	}
+}
+
+func revokesPending(c *v1alpha1.ComputeContract) bool {
+	state := c.Status.AtircRevokes
+	return requester.ReleaseRevokesExpected(*c) && state != v1alpha1.AtircRevokesDone && state != v1alpha1.AtircRevokesAbandoned
+}
+
 func (r *requestRun) release(ctx context.Context) (*v1alpha1.ComputeContract, error) {
-	if err := r.kcp.Release(ctx); err != nil {
+	requestedAt := market.FormatTime(time.Now())
+	if err := r.kcp.Release(ctx, requestedAt); err != nil {
 		return nil, fmt.Errorf("setting spec.release: %w", err)
 	}
-	r.log("asked the requester to release the contract (spec.release)")
-	return r.kcp.WaitContract(ctx, r.contractTimeout, func(c *v1alpha1.ComputeContract) bool {
-		return c.Status.Phase == v1alpha1.ComputeContractReleased ||
-			(c.Status.Phase == v1alpha1.ComputeContractFailed && c.Spec.Release && c.Status.Contract != nil && c.Status.Contract.Release != nil)
+	current, err := r.kcp.AwaitContract(ctx, r.contractTimeout, func(*v1alpha1.ComputeContract) bool { return true })
+	if err != nil || current == nil {
+		return nil, fmt.Errorf("reading the contract for its release wait within %s: %v", r.contractTimeout, err)
+	}
+	wait := requester.ReleaseWait(*current, r.contractTimeout)
+	r.log("asked the requester to release the contract (spec.release)", "releaseRequestedAt", requestedAt, "timeout", wait.String())
+	c, err := r.kcp.WaitContract(ctx, wait, releaseSettled(requestedAt), r.progress)
+	if err != nil || c == nil {
+		return c, err
+	}
+	return r.settleRevokes(ctx, c)
+}
+
+func (r *requestRun) settleRevokes(ctx context.Context, c *v1alpha1.ComputeContract) (*v1alpha1.ComputeContract, error) {
+	if c == nil || !revokesPending(c) {
+		return c, nil
+	}
+	r.log("waiting for the requester to revoke the contract's atirc tokens before its kcp stops", "timeout", cloudinit.RequestRevokeWait.String())
+	revoked, err := r.kcp.WaitContract(ctx, cloudinit.RequestRevokeWait, func(c *v1alpha1.ComputeContract) bool {
+		return !revokesPending(c)
 	}, r.progress)
+	if err != nil || revoked == nil {
+		return c, fmt.Errorf("%w (atircRevokes %q): %v", errRevokesPending, c.Status.AtircRevokes, err)
+	}
+	r.log("the atirc token revokes finished", "state", string(revoked.Status.AtircRevokes))
+	return revoked, nil
+}
+
+func (r *requestRun) keptForRevokes(err error) {
+	r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release "+r.inv.Name+"` again to finish the atirc token revokes", "err", err.Error())
 }
 
 func (r *requestRun) carryOn(ctx context.Context) int {
@@ -1043,6 +1129,14 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 			remove = true
 		}
 	}
+	if remove {
+		if settled, err := r.settleRevokes(context.WithoutCancel(ctx), c); err != nil {
+			r.keptForRevokes(err)
+			remove, code = false, exitFailed
+		} else {
+			c = settled
+		}
+	}
 	r.writeSummary(ctx, c)
 	r.stop(context.WithoutCancel(ctx), remove)
 	r.writeSummary(ctx, nil)
@@ -1078,6 +1172,12 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := r.passthrough(pass, network != ""); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
 	}
+	if vals.Bool("guest-requester") {
+		if network != "" {
+			return a.fail(exitRefused, "run request: --guest-requester is for a standalone invocation")
+		}
+		r.guestRequester, r.skipSSH = true, true
+	}
 	if err := r.associationRef(network != ""); err != nil {
 		return a.fail(exitRefused, "run request: --association-ref: %v", err)
 	}
@@ -1093,18 +1193,28 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitRefused, "run request: --secrets: %v", err)
 		}
 	}
+	userPaths, err := bundlePaths(bundle)
+	if err != nil {
+		return a.fail(exitRefused, "run request: --secrets: %v", err)
+	}
 	if r.contract.Agent != nil {
 		if bundle, err = withAgentPlaceholder(bundle, r.contract.Agent.EnvFile); err != nil {
 			return a.fail(exitRefused, "run request: --agent: %v", err)
 		}
 	}
-	if r.contract.Association, err = associateOf(vals.String("associate")); err != nil {
+	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)
+	}
+	if r.contract.Association != nil && r.contract.Association.FromGuest && !slices.Contains(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer) {
+		r.contract.GuestTools = append(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer)
 	}
 	if r.contract.Association != nil {
 		if bundle, err = withPlaceholder(bundle, cloudinit.DefaultAssociationRefFile, ""); err != nil {
 			return a.fail(exitRefused, "run request: --associate: %v", err)
 		}
+	}
+	if err := requester.CheckTokenPaths(v1alpha1.ComputeContract{Spec: r.contract}, userPaths); err != nil {
+		return a.fail(exitRefused, "run request: %v", err)
 	}
 	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC()}
 	if network != "" {
@@ -1280,6 +1390,11 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 			phase = string(c.Status.Phase)
 		}
 		r.a.log.Error("the release did not finish", "err", fmt.Sprint(err), "phase", phase)
+		if errors.Is(err, errRevokesPending) {
+			r.keptForRevokes(err)
+		} else {
+			r.a.log.Error("the invocation's state is kept; run `socialweb-computer run request release " + r.inv.Name + "` again to retry the release")
+		}
 		r.writeSummary(ctx, c)
 		r.stop(context.WithoutCancel(ctx), false)
 		r.writeSummary(ctx, nil)
@@ -1325,8 +1440,15 @@ func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 		if s.Network != "" {
 			where = "network " + s.Network
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t identity=%s did=%s winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
-			cmp.Or(s.Identity, "-"), cmp.Or(s.Did, "-"), cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
+		extra := ""
+		if c.R2Release != "" {
+			extra += " r2Release=" + strconv.Quote(c.R2Release)
+		}
+		if c.AtircRevokes != "" {
+			extra += " atircRevokes=" + c.AtircRevokes
+		}
+		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t identity=%s did=%s winner=%s guest=%s %s%s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
+			cmp.Or(s.Identity, "-"), cmp.Or(s.Did, "-"), cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message, extra)
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "no invocations under", request.Root(root))

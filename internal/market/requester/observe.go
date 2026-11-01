@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -79,6 +80,12 @@ func (q *Requester) observeSync(ctx context.Context, item v1alpha1.StateSync) (t
 }
 
 func (q *Requester) forgetContract(name string) {
+	q.atircRevokesStarted.Range(func(key, _ any) bool {
+		if k, _ := key.(string); strings.HasPrefix(k, name+"/") {
+			q.atircRevokesStarted.Delete(key)
+		}
+		return true
+	})
 	q.mu.Lock()
 	delete(q.finished, name)
 	delete(q.waiting, name)
@@ -124,8 +131,14 @@ func (q *Requester) releaseWait(ctx context.Context, contract v1alpha1.ComputeCo
 	if release != nil {
 		attempts = release.Attempts
 	}
+	answered := ""
+	if release != nil {
+		answered = release.RequestedAt
+	}
 	switch {
 	case contract.Status.Phase == v1alpha1.ComputeContractReleased:
+	case running && answered != "" && answered != contract.Spec.ReleaseRequestedAt:
+		return releaseRetryDelay(max(attempts, 1))
 	case started && left <= 0 && (finished || attempts > 0):
 		q.failAtBound(ctx, contract, deadline)
 	case running:
@@ -155,7 +168,9 @@ func releaseDeadlineOf(release *v1alpha1.ComputeContractRelease) (time.Time, boo
 }
 
 func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeContract, deadline time.Time) {
-	if contract.Status.Phase == v1alpha1.ComputeContractFailed {
+	requested := contract.Spec.ReleaseRequestedAt
+	if contract.Status.Phase == v1alpha1.ComputeContractFailed && contract.Status.Release.RequestedAt == requested {
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	message := fmt.Sprintf("vm.delete was not acknowledged by %s (the contract TTL)", deadline.UTC().Format(time.RFC3339))
@@ -166,9 +181,16 @@ func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeCo
 	status.ObservedGeneration = contract.Generation
 	status.Phase = v1alpha1.ComputeContractFailed
 	status.Message = message
+	release := *contract.Status.Release
+	release.RequestedAt = requested
+	status.Release = &release
 	addContractConditions(&status, contract.Generation, status.Phase, message, q.now(), false)
+	conds.SetStatusAt(&status.Conditions, contract.Generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "ReleaseBound", message, q.now())
 	q.log.Warn("requester_release_bound", "contract", contract.Name, "deadline", deadline.UTC().Format(time.RFC3339), "lastError", contract.Status.Release.LastError)
 	q.mergeStatus(ctx, contract.Name, status)
+	failed := contract
+	failed.Status = status
+	q.resumeReleaseRevokes(failed)
 }
 
 func (q *Requester) runnerFor(name string) *contractRunner {
@@ -195,11 +217,19 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 		runner.Update(contract)
 		return
 	}
+	if finished && releaseRequestedAgain(contract) && q.releaseRetryOnce(contract) {
+		q.log.Info("requester_contract_release_requested_again", "contract", contract.Name, "releaseRequestedAt", contract.Spec.ReleaseRequestedAt)
+		q.mu.Lock()
+		delete(q.finished, contract.Name)
+		q.mu.Unlock()
+		finished = false
+	}
 	if finished {
 		return
 	}
 	if contractTerminal(contract) {
 		q.markFinished(contract.Name)
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	state := contract.Status.Contract
@@ -213,6 +243,7 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 			q.mergeStatus(ctx, contract.Name, status)
 		}
 		q.markFinished(contract.Name)
+		q.resumeReleaseRevokes(contract)
 		return
 	}
 	account := contract.Spec.OwnerDid
@@ -253,6 +284,35 @@ func (q *Requester) reconcileContract(ctx context.Context, contract v1alpha1.Com
 	q.mu.Unlock()
 }
 
+func (q *Requester) releaseRetryOnce(contract v1alpha1.ComputeContract) bool {
+	previous, seen := q.releaseRetried.Swap(contract.Name, contract.Spec.ReleaseRequestedAt)
+	return !seen || previous != contract.Spec.ReleaseRequestedAt
+}
+
+func releaseRequestedAgain(contract v1alpha1.ComputeContract) bool {
+	requested := contract.Spec.ReleaseRequestedAt
+	if !contract.Spec.Release || requested == "" || contract.Status.Phase != v1alpha1.ComputeContractFailed || contractTerminal(contract) {
+		return false
+	}
+	releaseFailed := meta.IsStatusConditionTrue(contract.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed)
+	if !releaseFailed && !guestMayRun(contract.Status.Contract) {
+		return false
+	}
+	return contract.Status.Release == nil || stampNewer(requested, contract.Status.Release.RequestedAt)
+}
+
+func stampNewer(requested, answered string) bool {
+	if answered == "" {
+		return true
+	}
+	next, nerr := time.Parse(time.RFC3339, requested)
+	last, lerr := time.Parse(time.RFC3339, answered)
+	if nerr != nil || lerr != nil {
+		return requested != answered
+	}
+	return next.After(last)
+}
+
 func (q *Requester) markFinished(name string) {
 	q.mu.Lock()
 	q.finished[name] = true
@@ -261,6 +321,7 @@ func (q *Requester) markFinished(name string) {
 
 func (q *Requester) mergeStatus(ctx context.Context, name string, status v1alpha1.ComputeContractStatus) {
 	status.PendingEvents = nil
+	status.AtircRevokes = ""
 	if err := q.deps.Intents.MergeComputeContractStatus(ctx, name, status); err != nil {
 		q.log.Warn("requester_contract_status_failed", "contract", name, "err", err)
 	}

@@ -43,12 +43,14 @@ func (p *Plane) reconcile(ctx context.Context) bool {
 			continue
 		}
 		live[vm.Name] = true
-		key := vm.Name + "\x00" + subject + "\x00" + requester
+		accept := guestidentity.AcceptURIOf(vm)
+		key := vm.Name + "\x00" + subject + "\x00" + requester + "\x00" + accept
 		if prior, known := p.known[vm.Name]; !known || prior != key {
 			if err := p.syncer.Register(ctx, guestidentity.GrantSubject{
 				ComputeVM:    vm.Name,
 				OwnerUID:     string(vm.UID),
 				RequesterDID: requester,
+				AcceptURI:    accept,
 				Subject:      subject,
 			}); err != nil {
 				if ctx.Err() == nil {

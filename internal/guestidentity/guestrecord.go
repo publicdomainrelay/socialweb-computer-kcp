@@ -64,6 +64,18 @@ func Ended(o *v1alpha1.ComputeVM) bool {
 	return o.Status.Phase == v1alpha1.ComputeVMPhaseLost || o.Status.Phase == v1alpha1.ComputeVMPhaseFailed
 }
 
+func AcceptURIOf(o *v1alpha1.ComputeVM) string {
+	switch {
+	case o == nil:
+		return ""
+	case o.Spec.Accept != nil && o.Spec.Accept.URI != "":
+		return o.Spec.Accept.URI
+	case o.Spec.Contract != nil:
+		return o.Spec.Contract.Accept.URI
+	}
+	return ""
+}
+
 func Releasing(o *v1alpha1.ComputeVM) bool {
 	if o == nil {
 		return false
@@ -434,6 +446,55 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		}
 	case market.ComputeEventsGuestSecretsRequestedNSID:
 		r, err := market.ParseComputeEventsGuestSecretsRequested(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestRequesterDIDNSID:
+		r, err := market.ParseComputeEventsGuestRequesterDID(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if err := market.ValidGuestRequesterDID(r.DID, ""); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+	case market.ComputeEventsGuestR2StartNSID:
+		r, err := market.ParseComputeEventsGuestR2Start(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if err := market.ValidGuestRequesterName(r.Name); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+	case market.ComputeEventsGuestR2ReleaseNSID:
+		r, err := market.ParseComputeEventsGuestR2Release(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestR2ReleasedNSID:
+		r, err := market.ParseComputeEventsGuestR2Released(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if len(r.Message) > 512 || !printableASCII(r.Message) && r.Message != "" {
+			return "", fmt.Errorf("%w: message is printable ASCII of at most 512 bytes", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestSecretsUpdatedNSID:
+		r, err := market.ParseComputeEventsGuestSecretsUpdated(record)
 		if err != nil {
 			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
 		}

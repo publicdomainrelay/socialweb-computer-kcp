@@ -591,14 +591,18 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "guest-tools": {
+      "type": "string",
+      "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"
+    },
     "associate": {
       "type": "string",
-      "description": "run request and run request associate: the repo DID of a requester that the rented guest runs (spec.association.subject): after the accept, the requester writes a contract-scoped com.publicdomainrelay.temp.market.association record at rkey requester_associate-<did with : as -> in its own repo (contract = the market.accept, expiresAt = the accept time plus 24h), puts its at-uri#cid into the secrets bundle at /etc/socialweb-computer/association-ref and into status.association, and deletes it on release; run request associate <name> --associate <did> sets it on a running contract and prints the ref"
+      "description": "run request and run request associate: the repo DID of a requester that the rented guest runs (spec.association.subject), or guest (spec.association.fromGuest: the DID the guest reports in a guest.requesterDid event): after the accept, or after that event, the requester writes a contract-scoped com.publicdomainrelay.temp.market.association record at rkey requester_associate-<did with : as -> in its own repo (contract = the market.accept, expiresAt = the accept time plus 24h), puts its at-uri#cid into the secrets bundle at /etc/socialweb-computer/association-ref and into status.association, and deletes it on release; run request associate <name> --associate <did> sets it on a running contract and prints the ref"
     },
     "association-ref": {
       "type": "string",
-      "bare": "/etc/socialweb-computer/association-ref",
-      "description": "run request: --association-ref[=<at-uri>#<cid> or <file>] bootstraps the requester's association from one pinned record (spec.identity.associationRef): a market.association, a badgeBlueKeys claim or a post in the authority's repo that names this requester's DID for requester_associate; the MarketIdentity verifies it by one getRecord (cid, subject, service, expiresAt), mirrors it as the association proof and the invocation waits until it is verified. An absolute path reads the ref from that file (default /etc/socialweb-computer/association-ref, the secrets bundle entry a requester writes for a subject it starts); standalone only"
+      "bare": "true",
+      "description": "run request: --association-ref[=<at-uri>#<cid> or <file>] bootstraps the requester's association from one pinned record (spec.identity.associationRef): a market.association, a badgeBlueKeys claim or a post in the authority's repo that names this requester's DID for requester_associate; the MarketIdentity verifies it by one getRecord (cid, subject, service, expiresAt), mirrors it as the association proof and the invocation waits until it is verified. An absolute path reads the ref from that file; bare, it is /run/socialweb-r2/association-ref when the guest agent shares that dir (group socialweb-r2, which the agent user is in) and /etc/socialweb-computer/association-ref (root only) otherwise. A missing or empty file (the fromGuest case) makes this requester, once it has a DID, write the association request of association-request.json in the same dir (authority, contract, nonce) as a com.publicdomainrelay.temp.market.associationRequest record into its own repo, then its DID to requester-did there (/run/socialweb-guest-agent/requester-did in the root case), wait for the ref to arrive in the ref file and verify it; with r2-atirc.env there, its own agents' atirc tokens are minted below that token; standalone only"
     },
     "tunnel": {
       "type": "string",
@@ -631,6 +635,15 @@
     "exec": {
       "type": "string",
       "description": "run request, resume: run this program over ssh on the guest (StrictHostKeyChecking=yes against the host keys the guest reported) instead of an interactive session"
+    },
+    "r2-name": {
+      "type": "string",
+      "default": "r2",
+      "description": "run request r2: the guest requester's invocation name inside the guest, a DNS label; run request r2 <name> [--agent] [--hold] publishes guest.r2Start on a held spec.association.fromGuest contract, and socialweb-guest-agent starts socialweb-r2.service, which runs run request --name <r2-name> --guest-requester as the r2 user (and run request agent <r2-name> once held, with --agent and --hold)"
+    },
+    "guest-requester": {
+      "type": "boolean",
+      "description": "run request, as the agent user inside a guest of a spec.association.fromGuest contract: run this requester as the guest requester in one command. It implies --association-ref (the shared /run/socialweb-r2 files the guest agent mirrors), --skip-ssh and its parent atirc token from /run/socialweb-r2/r2-atirc.env, (its token is only the parent for minting its own agents' tokens; it does not join the atirc channel itself); standalone only"
     },
     "skip-ssh": {
       "type": "boolean",

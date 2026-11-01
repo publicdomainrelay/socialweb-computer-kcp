@@ -16,11 +16,12 @@ import (
 
 	api "github.com/openbao/openbao/api/v2"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
 var (
-	ErrNotFound = errors.New("openbao: not configured (HTTP 404)")
+	ErrNotFound = vault.ErrNotFound
 
 	ErrUnauthorized = errors.New("openbao: the token is not accepted (HTTP 401)")
 

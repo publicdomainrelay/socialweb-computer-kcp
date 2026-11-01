@@ -55,13 +55,13 @@ func (f GrantStoreFuncs) Delete(ctx context.Context, name string) error {
 }
 
 type RBACSource interface {
-	Records(ctx context.Context, requesterDID string) ([]RBACRecord, error)
+	Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error)
 }
 
-type RBACSourceFunc func(context.Context, string) ([]RBACRecord, error)
+type RBACSourceFunc func(context.Context, string, string) ([]RBACRecord, error)
 
-func (f RBACSourceFunc) Records(ctx context.Context, requesterDID string) ([]RBACRecord, error) {
-	return f(ctx, requesterDID)
+func (f RBACSourceFunc) Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error) {
+	return f(ctx, requesterDID, acceptURI)
 }
 
 type GrantSubject struct {
@@ -70,6 +70,8 @@ type GrantSubject struct {
 	OwnerUID string
 
 	RequesterDID string
+
+	AcceptURI string
 
 	Subject string
 }
@@ -129,7 +131,17 @@ type Syncer struct {
 	mu     sync.Mutex
 	guests map[string]*guestSync
 	closed bool
+
+	rbacWarned map[string]rbacWarning
 }
+
+type rbacWarning struct {
+	at time.Time
+
+	suppressed int
+}
+
+const rbacWarnEvery = 10 * time.Minute
 
 type guestSync struct {
 	subject GrantSubject
@@ -152,7 +164,7 @@ func NewSyncer(ctx context.Context, opts SyncerOptions) (*Syncer, error) {
 	opts.RetryDelay = opt.Positive(opts.RetryDelay, DefaultRetryDelay)
 	opts.MaxRetry = opt.Positive(opts.MaxRetry, DefaultMaxRetry)
 	root, cancel := context.WithCancel(ctx)
-	return &Syncer{opts: opts, ctx: root, cancel: cancel, guests: map[string]*guestSync{}}, nil
+	return &Syncer{opts: opts, ctx: root, cancel: cancel, guests: map[string]*guestSync{}, rbacWarned: map[string]rbacWarning{}}, nil
 }
 
 func (s *Syncer) Register(ctx context.Context, subject GrantSubject) error {
@@ -269,10 +281,16 @@ func (s *Syncer) syncOnce(ctx context.Context, subject GrantSubject) error {
 	if s.opts.Issuer != nil {
 		issuer = s.opts.Issuer()
 	}
-	records, readable, err := s.records(ctx, subject.RequesterDID)
+	records, readable, err := s.records(ctx, subject.RequesterDID, subject.AcceptURI)
 	if err != nil {
-		s.opts.Log.Warn("the requester's RBAC records are unreadable; the grants it already holds stay",
-			"computevm", subject.ComputeVM, "requester", subject.RequesterDID, "err", err.Error())
+		if suppressed, due := s.rbacWarnDue(subject.RequesterDID); due {
+			s.opts.Log.Warn("the requester's RBAC records are unreadable; the grants it already holds stay",
+				"computevm", subject.ComputeVM, "requester", subject.RequesterDID, "err", err.Error(), "suppressed", suppressed)
+		}
+	} else {
+		s.mu.Lock()
+		delete(s.rbacWarned, subject.RequesterDID)
+		s.mu.Unlock()
 	}
 	wishes := Wishes(subject.ComputeVM, records, issuer, subject.Subject)
 	held, err := s.opts.Store.List(ctx)
@@ -313,8 +331,22 @@ func (s *Syncer) syncOnce(ctx context.Context, subject GrantSubject) error {
 	return nil
 }
 
-func (s *Syncer) records(ctx context.Context, requesterDID string) ([]RBACRecord, bool, error) {
-	records, err := s.opts.RBAC.Records(ctx, requesterDID)
+func (s *Syncer) rbacWarnDue(requesterDID string) (int, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	last, seen := s.rbacWarned[requesterDID]
+	if seen && now.Sub(last.at) < rbacWarnEvery {
+		last.suppressed++
+		s.rbacWarned[requesterDID] = last
+		return 0, false
+	}
+	s.rbacWarned[requesterDID] = rbacWarning{at: now}
+	return last.suppressed, true
+}
+
+func (s *Syncer) records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, bool, error) {
+	records, err := s.opts.RBAC.Records(ctx, requesterDID, acceptURI)
 	if err != nil {
 		return nil, false, err
 	}

@@ -29,7 +29,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
@@ -54,6 +53,8 @@ const (
 
 	DefaultReleaseTimeout = 30 * time.Second
 
+	HeldSessionPolicyTimeout = 30 * time.Second
+
 	DefaultReleaseRetryFirst = 5 * time.Second
 
 	DefaultReleaseRetryMax = 5 * time.Minute
@@ -62,7 +63,9 @@ const (
 
 	DefaultHTTPTimeout = 30 * time.Second
 
-	DefaultPolicyWorkflow = "requester-tangled-vouch"
+	DefaultPolicyWorkflow = v1alpha1.RequesterDefaultPolicy
+
+	SessionFullDeniesPerPick = 5
 
 	DefaultVMNamePrefix = "compute-"
 
@@ -83,6 +86,8 @@ const (
 	IdentityWait = 60 * time.Second
 
 	MarketExposureWait = 10 * time.Second
+
+	CallbackWait = 5 * time.Minute
 
 	PDSExposure = "svc-pds-pds-local"
 
@@ -212,8 +217,6 @@ type Requester struct {
 
 	pdsURL string
 
-	marketURL string
-
 	repoKey atcrypto.PrivateKey
 
 	attestationKey atcrypto.PrivateKey
@@ -262,6 +265,20 @@ type Requester struct {
 
 	finished map[string]bool
 
+	releaseRevoking sync.Map
+
+	releaseRetried sync.Map
+
+	bundleLocks sync.Map
+
+	atircIndexMu sync.Mutex
+
+	atircMintRetrying sync.Map
+
+	atircRevokesStarted sync.Map
+
+	orphanSweep sync.Once
+
 	waiting map[string]bool
 
 	settled map[string]bool
@@ -281,8 +298,6 @@ type Requester struct {
 	bidderMu sync.Mutex
 
 	bidders map[string]Bidder
-
-	scopeCache *ttlcache.Cache[string, PolicyDecision]
 
 	secretsMu sync.Mutex
 
@@ -350,7 +365,6 @@ func Configure(spec v1alpha1.RequesterSpec, at Placement) (Config, error) {
 		}
 		cfg.OwnerSessions = owners
 		cfg.DID, cfg.Handle, cfg.RepoDID, cfg.MarketDID = did, handle, did, did
-		cfg.PolicyWorkflow = "open"
 		cfg.PDSURL = session.Service
 		cfg.IdentityMode = IdentityModeCallback
 		cfg.LocalSigner = false
@@ -524,7 +538,6 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		eventSinks:     map[string]chan MarketEvent{},
 		undelivered:    map[string][]MarketEvent{},
 		bidders:        map[string]Bidder{},
-		scopeCache:     ttlcache.New[string, PolicyDecision](ttlcache.Options{TTL: 30 * time.Second}),
 		secrets:        map[string]*secretsState{},
 		heldSessions:   map[string]*heldSession{},
 	}
@@ -547,15 +560,6 @@ func (q *Requester) Start(ctx context.Context) error {
 	if dir := q.cfg.dataDir(); dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("requester: state dir: %w", err)
-		}
-	}
-	if name := q.marketExposure(); name != "" && q.marketURL == "" {
-		if raw := q.deps.Inputs.AwaitAddress(ctx, name, MarketExposureWait, nil); raw != "" {
-			q.marketURL = raw
-		} else if err := ctx.Err(); err != nil {
-			return err
-		} else {
-			q.log.Warn("the requester market URL is not resolved yet", "exposure", name)
 		}
 	}
 	if q.cfg.IdentityMode == IdentityModeOAuth {
@@ -715,11 +719,9 @@ func (q *Requester) marketExposure() string {
 
 func (q *Requester) marketAddress() string {
 	if name := q.marketExposure(); name != "" {
-		if raw := q.deps.Inputs.Address(name); raw != "" {
-			return raw
-		}
+		return q.deps.Inputs.Address(name)
 	}
-	return strings.TrimRight(strings.TrimSpace(q.marketURL), "/")
+	return ""
 }
 
 func (q *Requester) DID() string {
@@ -764,30 +766,49 @@ func (q *Requester) callbackDID() string {
 	return cmp.Or(q.did, q.marketDID)
 }
 
-func (q *Requester) submitBidRef() string {
-	return q.callbackRef(market.DefaultMarketServiceID)
+func (q *Requester) submitBidRef(ctx context.Context) (string, error) {
+	return q.callbackRef(ctx, market.DefaultMarketServiceID)
 }
 
-func (q *Requester) submitEventRef() string {
-	return q.callbackRef(market.DefaultComputeEventServiceID)
+func (q *Requester) submitEventRef(ctx context.Context) (string, error) {
+	return q.callbackRef(ctx, market.DefaultComputeEventServiceID)
 }
 
-func (q *Requester) callbackRef(fragment string) string {
+var errNoCallback = errors.New("requester: the market Exposure has no address, and in XRPC comms mode no bidder could reach a record without it")
+
+func (q *Requester) callbackRef(ctx context.Context, fragment string) (string, error) {
 	if !q.cfg.InboundXRPC() {
-		return ""
+		return "", nil
 	}
 	if address := q.marketAddress(); address != "" {
-		return address
+		return address, nil
 	}
+	xrpcOnly := q.cfg.Spec.Comms != nil && q.cfg.Spec.Comms.Mode == v1alpha1.MarketCommsModeXRPC
 	if name := q.marketExposure(); name != "" {
-		if address := q.deps.Inputs.AwaitAddress(q.runContext(), name, MarketExposureWait, nil); address != "" {
-			return strings.TrimRight(address, "/")
+		deadline := time.Now().Add(CallbackWait)
+		for attempt := 1; ; attempt++ {
+			if address := q.deps.Inputs.AwaitAddress(ctx, name, MarketExposureWait, nil); address != "" {
+				return strings.TrimRight(address, "/"), nil
+			}
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			if !xrpcOnly {
+				break
+			}
+			if !time.Now().Before(deadline) {
+				return "", fmt.Errorf("%w (%s, after %s)", errNoCallback, name, CallbackWait)
+			}
+			q.log.Warn("requester_callback_waits", "exposure", name, "attempt", attempt)
 		}
 	}
 	if q.cfg.IdentityMode == IdentityModeOAuth || q.callbackDID() == "" {
-		return ""
+		if xrpcOnly {
+			return "", errNoCallback
+		}
+		return "", nil
 	}
-	return q.callbackDID() + "#" + fragment
+	return q.callbackDID() + "#" + fragment, nil
 }
 
 func (q *Requester) ingress() tunnel.Service {
@@ -851,4 +872,9 @@ func (q *Requester) guestCAPEM() string {
 
 func (q *Requester) guestKeyDir() string {
 	return q.cfg.stateFile("guest-keys")
+}
+
+func (q *Requester) bundleLock(contract string) *sync.Mutex {
+	lock, _ := q.bundleLocks.LoadOrStore(contract, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }

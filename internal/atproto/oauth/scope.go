@@ -30,12 +30,18 @@ const (
 	CollectionGuestSecretsApplied   = "com.publicdomainrelay.temp.compute.events.guest.secretsApplied"
 	CollectionGuestSecretsRequested = "com.publicdomainrelay.temp.compute.events.guest.secretsRequested"
 	CollectionGuestAgentStart       = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
+	CollectionGuestRequesterDID     = "com.publicdomainrelay.temp.compute.events.guest.requesterDid"
+	CollectionGuestSecretsUpdated   = "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
+	CollectionGuestR2Start          = "com.publicdomainrelay.temp.compute.events.guest.r2Start"
+	CollectionGuestR2Release        = "com.publicdomainrelay.temp.compute.events.guest.r2Release"
+	CollectionGuestR2Released       = "com.publicdomainrelay.temp.compute.events.guest.r2Released"
 	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
 	CollectionFedproxySSHKey        = "com.fedproxy.sshPublicKey"
 	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
+	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
 	CollectionPolicyTypeScript      = "computer.socialweb.temp.policy.typescript"
 	CollectionInfra                 = "computer.socialweb.infra"
@@ -61,10 +67,12 @@ var (
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
-			CollectionGuestAgentStart, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release,
+			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
+		[]string{collectionScope(CollectionAssociationRequest, "create", "update", "delete")},
 		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint},
@@ -77,7 +85,7 @@ var (
 			CollectionConfigWIFSimple, CollectionComputeVM, CollectionRFP, CollectionAccept,
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
 			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
-			CollectionGuestSecretsRequested,
+			CollectionGuestSecretsRequested, CollectionGuestRequesterDID, CollectionGuestR2Released,
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},

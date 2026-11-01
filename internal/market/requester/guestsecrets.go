@@ -57,6 +57,7 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	if !secretsRequestPending(state) {
 		return nil
 	}
+	runnerSecrets := q.runnerSecrets(contract.Name)
 	q.sealMu.Lock()
 	defer q.sealMu.Unlock()
 	key, ok := q.latestGuestSecretsKey(contract)
@@ -78,6 +79,7 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	if err != nil {
 		return err
 	}
+	entries = runnerSecrets.servable(entries)
 	plaintext, err := json.Marshal(entries)
 	if err != nil {
 		return err
@@ -113,6 +115,18 @@ func (q *Requester) sealGuestSecrets(ctx context.Context, contract v1alpha1.Comp
 	q.log.Info("requester_guest_secrets_sealed", "contract", contract.Name, "contractEvent", name, "recipient", key.Name,
 		"request", reply.URI, "files", len(entries), "bytes", len(ciphertext))
 	return nil
+}
+
+func (q *Requester) runnerSecrets(name string) *secretsState {
+	q.mu.Lock()
+	runner := q.runners[name]
+	q.mu.Unlock()
+	if runner == nil {
+		return nil
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.secrets
 }
 
 func (q *Requester) guestSecretsBundle(ctx context.Context, contract v1alpha1.ComputeContract) ([]SecretEntry, error) {

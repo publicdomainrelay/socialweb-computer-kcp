@@ -170,6 +170,21 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 }
 
 func (s *Service) guestDownloads() map[string]string {
+	pins := s.blobPins()
+	self, err := guestseed.SelfDownloadOf()
+	if err != nil {
+		s.log.Warn("the bidder does not serve its own binary; a contract with spec.guestTools socialweb-computer fails to provision", "err", err.Error())
+		return pins
+	}
+	if pins == nil {
+		pins = map[string]string{}
+	}
+	pins[self.Name] = self.Sha256
+	s.log.Info("the bidder serves its own binary to guests that ask for it", "name", self.Name, "sha256", self.Sha256, "bytes", self.Size)
+	return pins
+}
+
+func (s *Service) blobPins() map[string]string {
 	dir := ""
 	if s.spec.Storage != nil {
 		dir = strings.TrimSpace(s.spec.Storage.BlobsDir)
@@ -332,7 +347,7 @@ func (s *Service) policyRuns() *runs.Client {
 		Prefix:      "policy",
 		Args:        s.policyArgs,
 		Timeout:     seconds(s.spec.PolicyTimeoutSeconds),
-		Parser:      runs.Lenient,
+		Parser:      runs.Strict,
 		Association: s.spec.Association,
 	})
 }

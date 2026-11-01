@@ -108,9 +108,10 @@ func optionArgs(app, want string, opts []v1alpha1.ApplicationOption) ([]string, 
 }
 
 type AppArg struct {
-	Name  string
-	Value string
-	To    string
+	Name   string
+	Value  string
+	To     string
+	Mapped bool
 }
 
 func ParseAppArgs(app string, args []string) ([]AppArg, error) {
@@ -148,13 +149,14 @@ func ParseAppArgs(app string, args []string) ([]AppArg, error) {
 			return nil, fmt.Errorf("compose: --%s of %s is longer than %d bytes", name, app, maxOptionValue)
 		}
 		to := MapToOptions
-		if mapping, ok := known[name]; ok {
+		mapping, mapped := known[name]
+		if mapped {
 			to = mapping.To
 		}
 		if to == MapToRemoved {
 			return nil, fmt.Errorf("compose: --%s of %s is removed: %s", name, app, known[name].Reason)
 		}
-		out = append(out, AppArg{Name: name, Value: value, To: to})
+		out = append(out, AppArg{Name: name, Value: value, To: to, Mapped: mapped})
 	}
 	return out, nil
 }

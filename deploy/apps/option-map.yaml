@@ -172,6 +172,7 @@ apps:
       - {name: atproto-oauth, to: spec.identity.mode}
       - {name: atproto-oauth-qr, to: spec.identity.mode}
       - {name: atproto-handle, to: spec.identity.handle}
+      - {name: expect-handle, to: spec.identity.handle}
       - {name: atproto-pds-url, to: spec.identity.pdsUrl}
       - {name: skip-qr, to: spec.identity.association}
       - {name: market-identity-name, to: profile}
@@ -224,6 +225,9 @@ apps:
       - {name: vm-ready-timeout-sec, to: contract.vmReadyTimeoutSec}
       - {name: secrets, to: contract.secretsRef}
       - {name: agent, to: contract.agent}
+      - {name: guest-tools, to: contract.guestTools}
+      - {name: associate, to: contract.association}
+      - {name: association-ref, to: spec.identity.associationRef}
       - {name: secrets-fallback, to: spec.secretsFallback}
       - {name: tunnel, to: contract.tunnels}
       - {name: guest-host-aliases, to: options}

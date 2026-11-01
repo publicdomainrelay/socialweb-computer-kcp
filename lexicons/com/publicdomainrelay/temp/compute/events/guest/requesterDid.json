@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.requesterDid",
+  "description": "The guest reports the repo DID of the requester it runs, so the contract's requester can associate it (spec.association.fromGuest); sent as the payload of a market.event. Guest-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["did", "createdAt"],
+        "properties": {
+          "did": { "type": "string", "format": "did", "description": "The did:plc of the requester the guest runs; a did:web is refused." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

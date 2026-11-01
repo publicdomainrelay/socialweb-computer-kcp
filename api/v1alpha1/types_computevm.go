@@ -47,6 +47,8 @@ type ComputeVMSpec struct {
 
 	Release *ComputeVMRelease `json:"release,omitempty"`
 
+	AssociationExpiresAt string `json:"associationExpiresAt,omitempty"`
+
 	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
 
 	Sandbox *ComputeVMSandbox `json:"sandbox,omitempty"`
@@ -86,6 +88,9 @@ const (
 	BidderOnlyMePolicy       = "bidder-only-me"
 	BidderTangledVouchPolicy = "bidder-tangled-vouch"
 	BidderDefaultPolicy      = BidderTangledVouchPolicy
+
+	RequesterTangledVouchPolicy = "requester-tangled-vouch"
+	RequesterDefaultPolicy      = RequesterTangledVouchPolicy
 
 	HostUDPReasonSpec      = "spec"
 	HostUDPReasonOnlyMe    = "policy only-me"

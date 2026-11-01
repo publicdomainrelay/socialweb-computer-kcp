@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-22.computecontracts.socialweb.computer
+  name: v1alpha1-30.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -94,6 +94,23 @@ spec:
                   envFile:
                     type: string
                     default: /etc/atirc/atirc.env
+              association:
+                type: object
+                properties:
+                  subject:
+                    type: string
+                  fromGuest:
+                    type: boolean
+                  refFile:
+                    type: string
+                    default: /etc/socialweb-computer/association-ref
+              guestTools:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - socialweb-computer
+                x-kubernetes-list-type: set
               secretsRef:
                 type: object
                 properties:
@@ -124,6 +141,8 @@ spec:
                   - path
               release:
                 type: boolean
+              releaseRequestedAt:
+                type: string
               ownerDid:
                 type: string
               adopt:
@@ -181,16 +200,6 @@ spec:
                       - pins
                 required:
                   - clusterRef
-              association:
-                type: object
-                properties:
-                  subject:
-                    type: string
-                  refFile:
-                    type: string
-                    default: /etc/socialweb-computer/association-ref
-                required:
-                  - subject
               ttlSecondsAfterFinished:
                 type: integer
                 format: int32
@@ -561,6 +570,67 @@ spec:
                       - appliedAt
                       - event
                       - payload
+                  guestRequester:
+                    type: object
+                    properties:
+                      did:
+                        type: string
+                      state:
+                        type: string
+                        enum:
+                          - Pending
+                          - Verified
+                          - Refused
+                      message:
+                        type: string
+                      reportedAt:
+                        type: string
+                      event:
+                        type: object
+                        properties:
+                          uri:
+                            type: string
+                          cid:
+                            type: string
+                        required:
+                          - uri
+                          - cid
+                      payload:
+                        type: object
+                        properties:
+                          uri:
+                            type: string
+                          cid:
+                            type: string
+                        required:
+                          - uri
+                          - cid
+                    required:
+                      - did
+                      - state
+                      - reportedAt
+                      - event
+                      - payload
+                  r2Release:
+                    type: object
+                    properties:
+                      phase:
+                        type: string
+                        enum:
+                          - Requested
+                          - Released
+                          - Failed
+                          - TimedOut
+                      ok:
+                        type: boolean
+                      message:
+                        type: string
+                      requestedAt:
+                        type: string
+                      answeredAt:
+                        type: string
+                    required:
+                      - phase
                   outcome:
                     type: string
                     enum:
@@ -685,6 +755,8 @@ spec:
                     type: integer
                   lastError:
                     type: string
+                  requestedAt:
+                    type: string
               pendingEvents:
                 type: array
                 items:
@@ -710,6 +782,14 @@ spec:
                 required:
                   - uri
                   - cid
+              associationMessage:
+                type: string
+              atircRevokes:
+                type: string
+                enum:
+                  - Pending
+                  - Done
+                  - Abandoned
       additionalPrinterColumns:
         - name: Phase
           type: string

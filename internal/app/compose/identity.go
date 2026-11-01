@@ -157,6 +157,9 @@ func (c *Composer) PlanAccount(ctx context.Context, ws string, id v1alpha1.Appli
 		}
 		return plan, nil
 	case v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthDelegated:
+		if mode == v1alpha1.MarketIdentityModeOAuthQr && suffix == "bidder" && strings.TrimSpace(id.Did) == "" && strings.TrimSpace(id.Handle) == "" {
+			return AccountPlan{}, errors.New("compose: a bidder in mode oauthQr needs spec.identity.did or spec.identity.handle naming its account (run bidder --handle); a transferred QR session is checked against it")
+		}
 		plan.ComponentMode = "oauth"
 		plan.Identity = v1alpha1.MarketIdentitySpec{Mode: mode, Handle: id.Handle, Did: id.Did, PdsURL: id.PdsURL,
 			SessionRef: &commonv1.SecretRef{Mount: mount, Path: sessionPath}, Association: association, ApprovedAssociations: approved,

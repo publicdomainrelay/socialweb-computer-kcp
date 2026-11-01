@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
+	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
 
@@ -282,6 +283,8 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Comms:                o.Spec.Comms,
 		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
+		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
+		AtircMintedRef:       &commonv1.SecretRef{Mount: plan.Vault.MountOr(RequesterVaultClient), Path: role.AtircMintedPath},
 		SuspendParticipation: o.Spec.Suspend,
 	}
 	out := []compose.Desired{compose.PolicyEngineDesired()}
@@ -535,6 +538,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if plan.Identity.AssociationRef != nil {
 		if err := c.ApplyAssociationRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate); err != nil {
 			return ctlruntime.Result{}, err
+		}
+	}
+	if req := o.Spec.Identity.AssociationRequest; req != nil {
+		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate, *req); err != nil {
+			return p.fail(err)
 		}
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, RequesterComponent)

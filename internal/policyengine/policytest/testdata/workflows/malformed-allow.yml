@@ -1,0 +1,13 @@
+name: malformed allow output
+on:
+  workflow_dispatch:
+    inputs:
+      self-did:
+        required: true
+jobs:
+  evaluate:
+    runs-on: self-hosted
+    outputs:
+      allow: 'yes'
+      violations: '[]'
+    steps: []

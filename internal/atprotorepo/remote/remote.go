@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/ipfs/go-cid"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -41,6 +42,7 @@ var (
 	_ atprotorepo.RecordReader = (*Repo)(nil)
 	_ atprotorepo.RecordWriter = (*Repo)(nil)
 	_ atprotorepo.Subscriber   = (*Repo)(nil)
+	_ atprotorepo.SwapDeleter  = (*Repo)(nil)
 )
 
 func New(cfg Config) (*Repo, error) {
@@ -165,11 +167,27 @@ func (r *Repo) PutRecord(ctx context.Context, collection, rkey string, value jso
 }
 
 func (r *Repo) DeleteRecord(ctx context.Context, collection, rkey string) error {
+	return r.deleteRecord(ctx, collection, rkey, pdsclient.WriteOptions{})
+}
+
+func (r *Repo) DeleteRecordSwap(ctx context.Context, collection, rkey, swapCID string) error {
+	swap, err := cid.Decode(strings.TrimSpace(swapCID))
+	if err != nil {
+		return fmt.Errorf("remote: the swap cid %q: %w", swapCID, err)
+	}
+	return r.deleteRecord(ctx, collection, rkey, pdsclient.WriteOptions{SwapRecord: &swap})
+}
+
+func (r *Repo) deleteRecord(ctx context.Context, collection, rkey string, opts pdsclient.WriteOptions) error {
 	path, err := r.path("", collection, rkey)
 	if err != nil {
 		return err
 	}
-	if err := r.pds.DeleteRecord(ctx, path, pdsclient.WriteOptions{}); err != nil {
+	if err := r.pds.DeleteRecord(ctx, path, opts); err != nil {
+		var failure *pdsclient.XRPCError
+		if errors.As(err, &failure) && failure.Code == "InvalidSwap" {
+			return fmt.Errorf("%w: %v", atprotorepo.ErrSwapMismatch, err)
+		}
 		return notFound(err)
 	}
 	return nil

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,6 +77,8 @@ func normalize(d Declaration) Declaration {
 		c.SshAuthorizedKeys = nonEmpty(c.SshAuthorizedKeys)
 		c.Tunnels = normalTunnels(c.Tunnels)
 		c.Agent = normalAgent(c.Agent)
+		c.Association = normalAssociation(c.Association)
+		c.GuestTools = normalGuestTools(c.GuestTools)
 		out.Contracts = append(out.Contracts, c)
 	}
 	if out.TTLSeconds != 0 && out.EndWhen == "" {
@@ -127,6 +130,26 @@ func normalAgent(in *v1alpha1.ComputeContractAgent) *v1alpha1.ComputeContractAge
 
 const DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 
+const DefaultAssociationRefFile = "/etc/socialweb-computer/association-ref"
+
+func normalAssociation(in *v1alpha1.ComputeContractAssociation) *v1alpha1.ComputeContractAssociation {
+	if in == nil || (in.Subject == "" && !in.FromGuest) {
+		return nil
+	}
+	out := *in
+	if out.RefFile == "" {
+		out.RefFile = DefaultAssociationRefFile
+	}
+	return &out
+}
+
+func normalGuestTools(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return slices.Compact(slices.Sorted(slices.Values(in)))
+}
+
 func nonEmpty(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -139,7 +162,7 @@ func (d Declaration) Published() Declaration {
 	for _, c := range d.Contracts {
 		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
-				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent}})
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association, GuestTools: c.GuestTools}})
 	}
 	return normalize(out)
 }
@@ -164,6 +187,11 @@ func (d Declaration) Validate() error {
 		case v1alpha1.InfraContractStaged, v1alpha1.InfraContractRequested, v1alpha1.InfraContractReleased:
 		default:
 			return fmt.Errorf("%w: the contract %s has the state %q", ErrInvalidDeclaration, c.Name, c.State)
+		}
+		if c.ReleaseRequestedAt != "" {
+			if _, err := time.Parse(time.RFC3339, c.ReleaseRequestedAt); err != nil {
+				return fmt.Errorf("%w: the contract %s has releaseRequestedAt %q, not an RFC 3339 time", ErrInvalidDeclaration, c.Name, c.ReleaseRequestedAt)
+			}
 		}
 		if err := validTunnels(c); err != nil {
 			return err
