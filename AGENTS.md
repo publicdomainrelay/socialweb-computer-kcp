@@ -71,8 +71,8 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   process in the core, in the component runtime of `internal/component`, and host processes are
   HostProcess units; both are reconciled from those objects. Only the virtual Kubernetes clusters
   project uses kcp in the traditional way.
-- Which kcp, by profile: a prod profile (the gateway, `run bidder`, `run request` without `--network`)
-  runs a strict kcp per application. The market network profile (dev, CI, soak) runs every application
+- Which kcp, by profile: a prod profile (the gateway, `run bidder`, `run request` and `run requester`
+  without `--network`) runs a strict kcp per application. The market network profile (dev, CI, soak) runs every application
   in one kcp, each in its own workspace `root:<app>` (components in `root:<app>:app`), from the same
   manifest set: the applier rebases the set's workspaces under the application's workspace. Either way
   applications talk only over the atproto market protocol; the shared kcp is composition and isolation,
@@ -91,6 +91,26 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   component (`internal/services/requester` over `internal/market/requester`) runs the RFP, the
   accept and the release; `run request list`, `run request release` and `run request resume` manage
   the invocations it recorded.
+- `run requester --name <name>` (plan 0039 A-RUN-REQUESTER, `cmd/socialweb-computer/requester.go`) is the
+  long-lived form: the same MarketRequester root and the same bring-up (standalone: bringUp profile quick,
+  role requester; `--network <market network>`: a child application), state under
+  `<state-dir>/requesters/<name>` (never `requests/`) with the owner flock of `internal/stack/request/owner.go`,
+  no contract of its own. Its options after `--` are the MarketRequesterSpec part of `run request`'s, parsed
+  by one shared function (`parseRequesterSpec`); a contract or CLI option there is refused. Once the root is
+  Ready it writes a workspace kubeconfig (`<dir>/kubeconfig`, 0600) and the ready file (`<dir>/ready.json`,
+  plus `--ready-file` when given; tmp then rename, 0600; `internal/stack/request/ready.go`) {schema 1, name,
+  pid, startedAt, kcpUrl, kubeconfig, workspace, did, handle, identityMode, pdsUrl, ingress {pds, requester},
+  sshPublicKey}: paths and public values only. It prints that as a JSON summary, rewrites the file when a
+  field changes (a watch on the MarketRequester), stays in the foreground (`--fg` is a no-op for the unit
+  form), and on Ctrl-C or SIGTERM removes the ready file and stops its kcp keeping its state (a network
+  child is stopped, not removed). `<dir>/requester.json` records the first start's network, `--identity` and
+  spec; a restart with no options after `--`, or the same ones, reuses it (other options are refused),
+  adopts the units and keeps the DID, the vault and every contract (Held ones stay Held). `kubectl apply`
+  Infra, EphemeralInfra or ComputeContract against the ready file's kubeconfig. Helpers on a running one
+  read its ready file: `run requester env <name>` (KUBECONFIG, the kcp URL, the workspace, the DID, the ssh
+  public key; `--json`) and `run requester ssh <name> --contract <cc> [--transport webrtc] [--exec ...]`
+  (the `run request ssh` code with the requester's own key `<dir>/ssh/id_ed25519`; put its `.pub` in the
+  contract's `sshAuthorizedKeys`); `run requester proxy` is its webrtc ProxyCommand.
 - Comms modes (`spec.comms.mode` of the MarketRequester and its Requester; `run request -- --comms-mode
   XRPC|Firehose|Both`). XRPC takes bids and events on the requester ingress only. Firehose has no
   inbound endpoint. Both (the requester default) is the ingress plus the same streams as Firehose. In

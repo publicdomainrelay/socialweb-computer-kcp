@@ -367,7 +367,11 @@ func ReadAccounts(pdsDir string) ([]Account, error) {
 }
 
 func InstanceStateDir(stateRoot, name string) string {
-	return filepath.Join(Dir(stateRoot, name), "dev", name)
+	return InstanceStateDirIn(Dir(stateRoot, name), name)
+}
+
+func InstanceStateDirIn(dir, name string) string {
+	return filepath.Join(dir, "dev", name)
 }
 
 func LinkIdentityExposure(stateRoot, name, instanceState string) error {

@@ -16,8 +16,8 @@ type Owner struct {
 	f *os.File
 }
 
-func openOwnerLock(stateRoot, name string) (*os.File, error) {
-	path := filepath.Join(Dir(stateRoot, name), OwnerLockFile)
+func openOwnerLock(dir string) (*os.File, error) {
+	path := filepath.Join(dir, OwnerLockFile)
 	info, err := os.Lstat(path)
 	if err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
 		return nil, fmt.Errorf("request: the owner lock %s is not a regular file", path)
@@ -33,7 +33,11 @@ func openOwnerLock(stateRoot, name string) (*os.File, error) {
 }
 
 func TakeOwner(stateRoot, name string) (*Owner, bool, error) {
-	f, err := openOwnerLock(stateRoot, name)
+	return TakeOwnerDir(Dir(stateRoot, name))
+}
+
+func TakeOwnerDir(dir string) (*Owner, bool, error) {
+	f, err := openOwnerLock(dir)
 	if err != nil {
 		return nil, false, err
 	}
@@ -45,7 +49,7 @@ func TakeOwner(stateRoot, name string) (*Owner, bool, error) {
 }
 
 func AwaitOwnerGone(ctx context.Context, stateRoot, name string) error {
-	f, err := openOwnerLock(stateRoot, name)
+	f, err := openOwnerLock(Dir(stateRoot, name))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

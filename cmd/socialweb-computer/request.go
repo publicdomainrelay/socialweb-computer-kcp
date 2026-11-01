@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/syntax"
-
 	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -89,6 +87,14 @@ type requestRun struct {
 	awaitRefFile      string
 	guestRequester    bool
 	handshakeStarted  bool
+	homeDir           string
+	verb              string
+	kubeconfig        string
+	workspace         string
+}
+
+func (r *requestRun) home() string {
+	return cmp.Or(r.homeDir, request.Dir(r.stateRoot, r.inv.Name))
 }
 
 func (r *requestRun) openIdentity(name string) error {
@@ -196,7 +202,7 @@ func (r *requestRun) openIdentity(name string) error {
 	if err := store.EnsureDirs(); err != nil {
 		return fail(err)
 	}
-	r.identityState.LastInvocation = &request.IdentityInvocation{Name: name, StateDir: request.InstanceStateDir(r.stateRoot, name)}
+	r.identityState.LastInvocation = &request.IdentityInvocation{Name: name, StateDir: request.InstanceStateDirIn(r.home(), name)}
 	if err := store.Save(r.identityState); err != nil {
 		return fail(err)
 	}
@@ -217,7 +223,7 @@ func (r *requestRun) linkIdentityExposure() error {
 	if r.identity == nil {
 		return nil
 	}
-	return r.identity.LinkExposure(request.InstanceStateDir(r.stateRoot, r.inv.Name))
+	return r.identity.LinkExposure(request.InstanceStateDirIn(r.home(), r.inv.Name))
 }
 
 func (r *requestRun) saveIdentityDID(obj *v1alpha1.MarketIdentity) {
@@ -282,7 +288,7 @@ func (r *requestRun) finalizeIdentity() error {
 		r.identityState.RotationKeyDID = rot
 	}
 	if r.identityState.LastInvocation == nil {
-		r.identityState.LastInvocation = &request.IdentityInvocation{Name: r.inv.Name, StateDir: request.InstanceStateDir(r.stateRoot, r.inv.Name)}
+		r.identityState.LastInvocation = &request.IdentityInvocation{Name: r.inv.Name, StateDir: request.InstanceStateDirIn(r.home(), r.inv.Name)}
 	}
 	return r.identity.Save(r.identityState)
 }
@@ -351,194 +357,85 @@ func splitList(v string) []string {
 }
 
 func (r *requestRun) passthrough(args []string, network bool) error {
-	parsed, err := compose.ParseAppArgs(marketrequester.RequesterApp, args)
+	root, err := parseRequesterSpec(args, "run request", requestCreateOptions, network, r.contractArg)
 	if err != nil {
 		return err
 	}
-	r.root = v1alpha1.MarketRequesterSpec{Profile: marketrequester.RequesterProfileDefault,
-		Identity: v1alpha1.ApplicationIdentity{Mode: v1alpha1.MarketIdentityModeLocalRepo}}
-	var nv v1alpha1.MarketNetworkValue
-	nvSet, expectHandle := false, false
-	for _, p := range parsed {
-		switch p.Name {
-		case "identity", "pds-state-dir", "expected-pds-url":
-			return fmt.Errorf("--%s is reserved; pass global flags before --", p.Name)
-		}
-		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
-		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
-			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
-		}
-		switch {
-		case p.To == compose.MapToOptions && !p.Mapped && slices.Contains(requestCreateOptions, p.Name):
-			return fmt.Errorf("--%s is a run request option; pass it before --", p.Name)
-		case p.To == compose.MapToOptions && !p.Mapped:
-			return fmt.Errorf("--%s is no %s option (%s); run request does not pass unknown options on", p.Name, marketrequester.RequesterApp, compose.OptionMapPath)
-		case p.To == compose.MapToOptions:
-			r.appOptions = append(r.appOptions, v1alpha1.ApplicationOption{Name: p.Name, Value: p.Value})
-		case p.To == compose.MapToCLI:
-			switch p.Name {
-			case "exec":
-				r.exec = p.Value
-			case "hold", "keep-vm":
-				r.hold = p.Value != "false"
-			case "skip-ssh":
-				r.skipSSH = p.Value != "false"
-			}
-		case p.To == "spec.identity.mode":
-			switch p.Name {
-			case "atproto-oauth":
-				r.root.Identity.Mode = v1alpha1.MarketIdentityModeOAuthBrowser
-			case "atproto-oauth-qr":
-				r.root.Identity.Mode = v1alpha1.MarketIdentityModeOAuthQr
-			default:
-				r.root.Identity.Mode = v1alpha1.MarketIdentityMode(p.Value)
-			}
-		case p.To == "spec.identity.handle":
-			r.root.Identity.Handle = p.Value
-			expectHandle = expectHandle || p.Name == "expect-handle"
-		case p.To == "spec.identity.pdsUrl":
-			r.root.Identity.PdsURL = p.Value
-		case p.To == "spec.identity.association":
-			if p.Value != "false" {
-				r.root.Identity.Association = v1alpha1.AssociationSkip
-			}
-		case p.To == "spec.bidderDids":
-			r.root.BidderDids = append(r.root.BidderDids, splitList(p.Value)...)
-		case strings.HasPrefix(p.To, "spec.requesterIngress"):
-			var applied bool
-			var err error
-			if r.root.RequesterIngress, applied, err = applyIngressOption(r.root.RequesterIngress, p.Name, p.Value); err != nil {
-				return err
-			}
-			if !applied {
-				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
-			}
-		case strings.HasPrefix(p.To, "spec.ingress"):
-			var applied bool
-			var err error
-			if r.root.Ingress, applied, err = applyIngressOption(r.root.Ingress, p.Name, p.Value); err != nil {
-				return err
-			}
-			if !applied {
-				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
-			}
-		case p.To == "spec.secretsFallback":
-			switch fallback := v1alpha1.SecretsFallback(strings.TrimSpace(p.Value)); fallback {
-			case v1alpha1.SecretsFallbackNone, v1alpha1.SecretsFallbackSealed:
-				r.root.SecretsFallback = fallback
-			default:
-				return fmt.Errorf("--secrets-fallback %q: want None or Sealed", p.Value)
-			}
-		case strings.HasPrefix(p.To, "spec.comms"):
-			var applied bool
-			var err error
-			if r.root.Comms, applied, err = applyCommsOption(r.root.Comms, p.Name, p.Value); err != nil {
-				return err
-			}
-			if !applied {
-				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
-			}
-		case strings.HasPrefix(p.To, compose.MapToNetwork):
-			nvSet = true
-			switch p.To {
-			case "network.plcDirectoryUrl":
-				nv.PLCDirectoryURL = p.Value
-			case "network.ingressProxyHost":
-				nv.IngressProxyHost = p.Value
-			case "network.qrOrigin":
-				nv.QrOrigin = p.Value
-			case "network.hosts":
-				for _, h := range splitList(p.Value) {
-					name, addr, ok := strings.Cut(h, "=")
-					if !ok {
-						return fmt.Errorf("--network-hosts %q: want name=address,...", p.Value)
-					}
-					nv.Hosts = append(nv.Hosts, v1alpha1.NetworkHost{Name: name, Address: addr})
-				}
-			}
-		case p.To == "contract.bidderDids":
-			r.contract.BidderDids = append(r.contract.BidderDids, splitList(p.Value)...)
-		case p.To == "contract.denyBidderDids":
-			r.contract.DenyBidderDids = append(r.contract.DenyBidderDids, splitList(p.Value)...)
-		case p.To == "contract.vmName":
-			r.contract.VMName = p.Value
-		case p.To == "contract.computeKind":
-			switch kind := v1alpha1.ComputeKind(strings.TrimSpace(p.Value)); kind {
-			case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
-				r.contract.ComputeKind = kind
-			default:
-				return fmt.Errorf("--compute-kind %q: want vm or deno", p.Value)
-			}
-		case p.To == "contract.userData":
-			b, err := os.ReadFile(p.Value)
-			if err != nil {
-				return fmt.Errorf("--user-data: %w", err)
-			}
-			r.contract.UserData = string(b)
-		case p.To == "contract.sshAuthorizedKeys":
-			r.contract.SshAuthorizedKeys = append(r.contract.SshAuthorizedKeys, splitList(p.Value)...)
-		case p.To == "contract.policy":
-			r.contract.Policy = p.Value
-		case p.To == "contract.policyArgs":
-			r.contract.PolicyArgs = p.Value
-		case p.To == "contract.vmReadyTimeoutSec":
-			n, err := strconv.Atoi(p.Value)
-			if err != nil {
-				return fmt.Errorf("--vm-ready-timeout-sec %q: %w", p.Value, err)
-			}
-			r.contract.VMReadyTimeoutSec = n
-		case p.To == "contract.secretsRef":
-			r.secrets = p.Value
-		case p.To == "contract.agent":
-			r.contract.Agent = agentOf(p.Value)
-		case p.To == "contract.association":
-			r.associate = p.Value
-		case p.To == "spec.identity.associationRef":
-			r.associationRefArg = p.Value
-		case p.To == "contract.guestTools":
-			tools, err := guestToolsOf(p.Value)
-			if err != nil {
-				return fmt.Errorf("--guest-tools: %w", err)
-			}
-			for _, tool := range tools {
-				if !slices.Contains(r.contract.GuestTools, tool) {
-					r.contract.GuestTools = append(r.contract.GuestTools, tool)
-				}
-			}
-		case p.To == "contract.tunnels":
-			tunnels, err := parseTunnels(p.Value)
-			if err != nil {
-				return fmt.Errorf("--tunnel: %w", err)
-			}
-			r.contract.Tunnels = append(r.contract.Tunnels, tunnels...)
-		default:
-			return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
-		}
-	}
-	if expectHandle {
-		switch r.root.Identity.Mode {
-		case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated:
-		default:
-			return fmt.Errorf("--expect-handle pins the account of an oauth sign-in; the identity mode %s signs in no existing account, add --atproto-oauth-qr", r.root.Identity.Mode)
-		}
-		if _, err := syntax.ParseHandle(strings.TrimSpace(r.root.Identity.Handle)); err != nil {
-			return fmt.Errorf("--expect-handle %q: %w", r.root.Identity.Handle, err)
-		}
-	}
+	r.root, r.appOptions = root, root.Options
 	r.contract.Policy = cmp.Or(strings.TrimSpace(r.contract.Policy), requester.DefaultPolicyWorkflow)
-	if nvSet || !network {
-		nv.PLCDirectoryURL = cmp.Or(nv.PLCDirectoryURL, "https://plc.directory")
-		nv.IngressProxyHost = cmp.Or(nv.IngressProxyHost, "xrpc.fedproxy.com")
-		r.root.Network = &nv
-	}
-	if !network && r.root.Ingress == nil {
-		r.root.Ingress = compose.DefaultIngressConfig()
-		if nv.IngressProxyHost != "" {
-			r.root.Ingress.Xrpc.IngressProxyHost = nv.IngressProxyHost
-		}
-	}
-	r.root.Options = r.appOptions
 	return nil
+}
+
+func (r *requestRun) contractArg(p compose.AppArg) (bool, error) {
+	switch {
+	case p.To == compose.MapToCLI:
+		switch p.Name {
+		case "exec":
+			r.exec = p.Value
+		case "hold", "keep-vm":
+			r.hold = p.Value != "false"
+		case "skip-ssh":
+			r.skipSSH = p.Value != "false"
+		}
+	case p.To == "contract.bidderDids":
+		r.contract.BidderDids = append(r.contract.BidderDids, splitList(p.Value)...)
+	case p.To == "contract.denyBidderDids":
+		r.contract.DenyBidderDids = append(r.contract.DenyBidderDids, splitList(p.Value)...)
+	case p.To == "contract.vmName":
+		r.contract.VMName = p.Value
+	case p.To == "contract.computeKind":
+		switch kind := v1alpha1.ComputeKind(strings.TrimSpace(p.Value)); kind {
+		case v1alpha1.ComputeKindVM, v1alpha1.ComputeKindDeno:
+			r.contract.ComputeKind = kind
+		default:
+			return true, fmt.Errorf("--compute-kind %q: want vm or deno", p.Value)
+		}
+	case p.To == "contract.userData":
+		b, err := os.ReadFile(p.Value)
+		if err != nil {
+			return true, fmt.Errorf("--user-data: %w", err)
+		}
+		r.contract.UserData = string(b)
+	case p.To == "contract.sshAuthorizedKeys":
+		r.contract.SshAuthorizedKeys = append(r.contract.SshAuthorizedKeys, splitList(p.Value)...)
+	case p.To == "contract.policy":
+		r.contract.Policy = p.Value
+	case p.To == "contract.policyArgs":
+		r.contract.PolicyArgs = p.Value
+	case p.To == "contract.vmReadyTimeoutSec":
+		n, err := strconv.Atoi(p.Value)
+		if err != nil {
+			return true, fmt.Errorf("--vm-ready-timeout-sec %q: %w", p.Value, err)
+		}
+		r.contract.VMReadyTimeoutSec = n
+	case p.To == "contract.secretsRef":
+		r.secrets = p.Value
+	case p.To == "contract.agent":
+		r.contract.Agent = agentOf(p.Value)
+	case p.To == "contract.association":
+		r.associate = p.Value
+	case p.To == "spec.identity.associationRef":
+		r.associationRefArg = p.Value
+	case p.To == "contract.guestTools":
+		tools, err := guestToolsOf(p.Value)
+		if err != nil {
+			return true, fmt.Errorf("--guest-tools: %w", err)
+		}
+		for _, tool := range tools {
+			if !slices.Contains(r.contract.GuestTools, tool) {
+				r.contract.GuestTools = append(r.contract.GuestTools, tool)
+			}
+		}
+	case p.To == "contract.tunnels":
+		tunnels, err := parseTunnels(p.Value)
+		if err != nil {
+			return true, fmt.Errorf("--tunnel: %w", err)
+		}
+		r.contract.Tunnels = append(r.contract.Tunnels, tunnels...)
+	default:
+		return false, nil
+	}
+	return true, nil
 }
 
 func parseTunnels(value string) ([]v1alpha1.ComputeContractTunnel, error) {
@@ -692,7 +589,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
 	default:
 		vals := r.vals.With("instance", r.inv.Name).With("profile", bootstrap.ProfileQuick).
-			With("state-dir", request.Dir(r.stateRoot, r.inv.Name)).With(appRoleOpt, devinstance.RoleRequester)
+			With("state-dir", r.home()).With(appRoleOpt, devinstance.RoleRequester)
 		up, code := bringUp(ctx, r.a, vals, false)
 		if code != exitOK {
 			return fmt.Errorf("the invocation's kcp did not come up (exit %d)", code)
@@ -705,6 +602,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	if err != nil {
 		return err
 	}
+	r.kubeconfig, r.workspace = kubeconfig, workspace
 	r.kcp = k.ForContract(r.target)
 	if r.inv.Mode == request.ModeStandalone && fresh {
 		if err := k.ApplyRoot(ctx, r.root); err != nil {
@@ -722,7 +620,7 @@ func (r *requestRun) start(ctx context.Context, fresh bool) error {
 	}); err != nil {
 		return err
 	}
-	return request.WriteInvocation(r.inv)
+	return request.WriteInvocationIn(r.home(), r.inv)
 }
 
 func (r *requestRun) stop(ctx context.Context, remove bool) {
@@ -756,7 +654,7 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 	default:
 		l := r.standalone
 		if l.ID == "" {
-			vals := r.vals.With("instance", r.inv.Name).With("state-dir", request.Dir(r.stateRoot, r.inv.Name))
+			vals := r.vals.With("instance", r.inv.Name).With("state-dir", r.home())
 			var err error
 			if l, err = r.a.layoutOf(r.inv.Name, vals); err != nil {
 				r.a.log.Warn("stopping the invocation", "err", err.Error())
@@ -820,7 +718,7 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 				return false, err
 			}
 			if waitsOnPerson(obj) && deadline.Stop() {
-				r.log("run request: the requester identity waits on a person (a QR scan, a browser sign-in or the operator's association); waiting without a deadline until it is Ready, Ctrl-C stops and keeps the invocation's state",
+				r.log(cmp.Or(r.verb, "run request")+": the requester identity waits on a person (a QR scan, a browser sign-in or the operator's association); waiting without a deadline until it is Ready, Ctrl-C stops and keeps the invocation's state",
 					"identity", name, "phase", string(obj.Status.Phase))
 			}
 			return each(obj)
@@ -894,7 +792,7 @@ func (r *requestRun) progress(c *v1alpha1.ComputeContract) {
 }
 
 func (r *requestRun) sshClient(ctx context.Context) (request.SSH, error) {
-	s := request.SSH{Dir: filepath.Join(request.Dir(r.stateRoot, r.inv.Name), request.SSHDir)}
+	s := request.SSH{Dir: filepath.Join(r.home(), request.SSHDir)}
 	if r.transport == transportWebRTC {
 		proxy, err := r.proxyCommand()
 		if err != nil {
@@ -916,7 +814,7 @@ func (r *requestRun) proxyCommand() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving this binary's own path for the ProxyCommand: %w", err)
 	}
-	words := []string{exe, "run", "request", "proxy", r.inv.Name, "--tag", r.tag, "--state-dir", r.stateRoot}
+	words := append(append([]string{exe}, strings.Fields(cmp.Or(r.verb, "run request"))...), "proxy", r.inv.Name, "--tag", r.tag, "--state-dir", r.stateRoot)
 	if level := strings.TrimSpace(r.vals.String("log-level")); level != "" {
 		words = append(words, "--log-level", level)
 	}
@@ -941,7 +839,7 @@ func (r *requestRun) ssh(ctx context.Context, c *v1alpha1.ComputeContract) (int,
 	}
 	how := "its iroh ticket"
 	if r.transport == transportWebRTC {
-		how = "a WebRTC datachannel of tunnel " + r.tag + " (run request proxy)"
+		how = "a WebRTC datachannel of tunnel " + r.tag + " (" + cmp.Or(r.verb, "run request") + " proxy)"
 	}
 	r.log("ssh to the guest over "+how+", StrictHostKeyChecking=yes against its reported host keys", "alias", t.Alias,
 		"hostKeys", strings.Join(request.SummaryOf(c).HostKeys, ", "))
@@ -1309,35 +1207,10 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		}
 		return a.fail(exitFailed, "run request: %v", err)
 	}
-	if r.identity != nil {
-		ids, err := r.kcp.Identities()
-		if err != nil {
-			r.writeSummaryQuiet()
-			r.stop(context.WithoutCancel(ctx), false)
-			return a.fail(exitFailed, "run request: the identity: %v", err)
-		}
-		ictx, cancel := context.WithTimeout(context.Background(), requestSummaryRead)
-		obj, err := ids.GetMarketIdentity(ictx, marketrequester.RequesterIdentity)
-		cancel()
-		if err != nil {
-			r.writeSummaryQuiet()
-			r.stop(context.WithoutCancel(ctx), false)
-			return a.fail(exitFailed, "run request: the identity: %v", err)
-		}
-		r.identityObject = obj
-		expected := r.expectedPDSURL
-		live := strings.TrimSpace(obj.Status.PdsURL)
-		if expected != "" && live != "" && !compose.SamePDSURL(expected, live) {
-			r.writeSummaryQuiet()
-			r.stop(context.WithoutCancel(ctx), false)
-			return a.fail(exitFailed, "run request: the identity PDS public URL is %s, not the recorded %s; refusing to post against a changed DID-document endpoint", live, expected)
-		}
-		if err := r.finalizeIdentity(); err != nil {
-			r.writeSummaryQuiet()
-			r.stop(context.WithoutCancel(ctx), false)
-			return a.fail(exitFailed, "run request: the identity: %v", err)
-		}
-		r.identity.Close()
+	if err := r.checkIdentity(); err != nil {
+		r.writeSummaryQuiet()
+		r.stop(context.WithoutCancel(ctx), false)
+		return a.fail(exitFailed, "run request: %v", err)
 	}
 	if bundle != nil {
 		ref, err := r.kcp.PutSecrets(ctx, bundle, r.networkTimeout)
@@ -1353,6 +1226,33 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitFailed, "run request: %v", err)
 	}
 	return r.carryOn(ctx)
+}
+
+func (r *requestRun) checkIdentity() error {
+	if r.identity == nil {
+		return nil
+	}
+	ids, err := r.kcp.Identities()
+	if err != nil {
+		return fmt.Errorf("the identity: %w", err)
+	}
+	ictx, cancel := context.WithTimeout(context.Background(), requestSummaryRead)
+	obj, err := ids.GetMarketIdentity(ictx, marketrequester.RequesterIdentity)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("the identity: %w", err)
+	}
+	r.identityObject = obj
+	expected := r.expectedPDSURL
+	live := strings.TrimSpace(obj.Status.PdsURL)
+	if expected != "" && live != "" && !compose.SamePDSURL(expected, live) {
+		return fmt.Errorf("the identity PDS public URL is %s, not the recorded %s; refusing to post against a changed DID-document endpoint", live, expected)
+	}
+	if err := r.finalizeIdentity(); err != nil {
+		return fmt.Errorf("the identity: %w", err)
+	}
+	r.identity.Close()
+	return nil
 }
 
 func (r *requestRun) writeSummaryQuiet() {
@@ -1550,7 +1450,7 @@ func (r *requestRun) keepLogs() {
 	if err != nil {
 		return
 	}
-	out := filepath.Join(request.Dir(r.stateRoot, r.inv.Name), "logs")
+	out := filepath.Join(r.home(), "logs")
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		return
 	}
@@ -1581,7 +1481,7 @@ func (r *requestRun) attach(ctx context.Context) error {
 		r.instanceDir = rec.Layout.StateDir
 		kubeconfig, workspace = rec.AdminKubeconfig, rec.BaseWorkspace
 	default:
-		l, err := r.a.layoutOf(r.inv.Name, r.vals.With("instance", r.inv.Name).With("state-dir", request.Dir(r.stateRoot, r.inv.Name)))
+		l, err := r.a.layoutOf(r.inv.Name, r.vals.With("instance", r.inv.Name).With("state-dir", r.home()))
 		if err != nil {
 			return err
 		}
@@ -1653,9 +1553,15 @@ func runRequestSSH(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 }
 
 func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	return proxyRequest(ctx, a, vals, "run request proxy", func(q *app) (*requestRun, bool, int) {
+		return q.openRequest(ctx, vals, rest, "proxy")
+	})
+}
+
+func proxyRequest(ctx context.Context, a *app, vals clicfg.Values, verb string, open func(*app) (*requestRun, bool, int)) int {
 	level, err := logx.ParseLevel(vals.String("log-level"))
 	if err != nil {
-		return a.fail(exitRefused, "run request proxy: --log-level: %v", err)
+		return a.fail(exitRefused, "%s: --log-level: %v", verb, err)
 	}
 	quiet := *a
 	quiet.stdout = a.stderr
@@ -1664,7 +1570,7 @@ func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		handler.ReplaceAttr = dropTime
 	}
 	quiet.log = slog.New(slog.NewTextHandler(a.stderr, handler)).With("service", serviceName)
-	r, started, code := quiet.openRequest(ctx, vals, rest, "proxy")
+	r, started, code := open(&quiet)
 	if r == nil {
 		return code
 	}
@@ -1672,12 +1578,12 @@ func runRequestProxy(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		defer r.stop(context.WithoutCancel(ctx), false)
 	}
 	if r.tag == "" {
-		return a.fail(exitRefused, "run request proxy: --tag names the webrtc tunnel")
+		return a.fail(exitRefused, "%s: --tag names the webrtc tunnel", verb)
 	}
 	log := quiet.log.With("request", r.inv.Name)
 	conn, timings, err := webrtcproxy.Dial(ctx, r.kcp.Signaling(), webrtcproxy.Options{Tag: r.tag, Log: log})
 	if err != nil {
-		return a.fail(exitFailed, "run request proxy: %s", strings.Join(strings.Fields(err.Error()), " "))
+		return a.fail(exitFailed, "%s: %s", verb, strings.Join(strings.Fields(err.Error()), " "))
 	}
 	defer conn.Close()
 	log.Info("the proxy pipes stdin and stdout through the datachannel", "tag", r.tag, "guestSeconds", timings.Guest.Seconds(),
