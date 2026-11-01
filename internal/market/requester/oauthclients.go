@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,16 +17,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/workloadoauth"
 )
 
 const (
 	OAuthRolePrefix = "oauth-"
-
-	OAuthProtectsScope = "com.fedproxy.temp.oauth"
-
-	OAuthExchangeTokenNSID = "com.fedproxy.temp.oauth.exchangeToken"
-
-	OAuthApproveAuthorizationNSID = "com.fedproxy.temp.oauth.approveAuthorization"
 
 	OAuthWIDFile = "/etc/socialweb-computer/oauth-wid.json"
 )
@@ -50,16 +46,34 @@ func OAuthAudience(account, role string) string {
 	return account + "#role/" + role
 }
 
-func PDSServiceDID(pdsURL string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(pdsURL))
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("requester: the PDS URL %q names no host", pdsURL)
+func (q *Requester) pdsServiceDID(ctx context.Context) (string, error) {
+	var out struct {
+		DID string `json:"did"`
 	}
-	did := "did:web:" + url.QueryEscape(u.Host)
-	if _, err := syntax.ParseDID(did); err != nil {
-		return "", fmt.Errorf("requester: the PDS URL %q gives no service DID: %w", pdsURL, err)
+	target := strings.TrimRight(strings.TrimSpace(q.pdsURL), "/") + "/xrpc/com.atproto.server.describeServer"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return "", err
 	}
-	return did, nil
+	client := q.deps.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("requester: reading the PDS service DID: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("requester: the PDS describeServer answered HTTP %d", res.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&out); err != nil {
+		return "", fmt.Errorf("requester: the PDS describeServer: %w", err)
+	}
+	if _, err := syntax.ParseDID(out.DID); err != nil {
+		return "", fmt.Errorf("requester: the PDS describeServer names no service DID: %w", err)
+	}
+	return out.DID, nil
 }
 
 func CheckOAuthClients(clients []v1alpha1.ComputeContractOAuthClient) error {
@@ -110,72 +124,6 @@ func (q *Requester) checkOAuthClients(contract v1alpha1.ComputeContract) error {
 	return CheckOAuthClients(contract.Spec.OAuthClients)
 }
 
-func oauthClientsRecord(role, service, issuer, audience, subject string, clients []v1alpha1.ComputeContractOAuthClient) map[string]any {
-	policies := map[string]any{}
-	names := make([]string, 0, len(clients))
-	for i, client := range clients {
-		name := role
-		if len(clients) > 1 {
-			name = role + "-" + strconv.Itoa(i+1)
-		}
-		names = append(names, name)
-		scopes := make([]any, 0, len(client.Scopes))
-		for _, s := range client.Scopes {
-			scopes = append(scopes, s)
-		}
-		redirect := map[string]any{"type": "string"}
-		if r := strings.TrimSpace(client.RedirectURI); r != "" {
-			redirect = map[string]any{"const": r}
-		}
-		policies[name] = map[string]any{
-			"meta": map[string]any{"policy": name},
-			"schemas": map[string]any{
-				"/xrpc/" + OAuthExchangeTokenNSID: map[string]any{
-					"type":       "object",
-					"required":   []any{"capability"},
-					"properties": map[string]any{"capability": map[string]any{"enum": []any{"create"}}},
-				},
-				"/xrpc/" + OAuthApproveAuthorizationNSID: map[string]any{
-					"type":     "object",
-					"required": []any{"capability", "body"},
-					"properties": map[string]any{
-						"capability": map[string]any{"enum": []any{"create"}},
-						"body": map[string]any{
-							"type":                 "object",
-							"required":             []any{"client_id", "scope"},
-							"additionalProperties": false,
-							"properties": map[string]any{
-								"client_id":    map[string]any{"const": strings.TrimSpace(client.ClientID)},
-								"redirect_uri": redirect,
-								"scope":        map[string]any{"type": "array", "items": map[string]any{"enum": scopes}},
-							},
-						},
-					},
-				},
-			},
-		}
-	}
-	policyNames := make([]any, 0, len(names))
-	for _, n := range names {
-		policyNames = append(policyNames, n)
-	}
-	return map[string]any{
-		"$type":    FedproxyRBACNSID,
-		"protects": map[string]any{role: map[string]any{"service": service, "scope": OAuthProtectsScope}},
-		"roles": map[string]any{role: map[string]any{
-			"role_name": role,
-			"definition": map[string]any{
-				"iss":      issuer,
-				"aud":      audience,
-				"sub":      subject,
-				"policies": policyNames,
-			},
-		}},
-		"policies":  policies,
-		"createdAt": time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
 func (r *contractRunner) prepareOAuthClients(ctx context.Context, state *v1alpha1.NodeClaimContract, winner *BidRecord) error {
 	contract := r.snapshot()
 	clients := contract.Spec.OAuthClients
@@ -204,13 +152,20 @@ func (r *contractRunner) prepareOAuthClients(ctx context.Context, state *v1alpha
 	if err != nil {
 		return err
 	}
-	service, err := PDSServiceDID(q.pdsURL)
+	service, err := q.pdsServiceDID(ctx)
 	if err != nil {
 		return err
 	}
 	account := q.repoDID
 	audience := OAuthAudience(account, role)
-	record := oauthClientsRecord(role, service, cfg.IssuerURI, audience, subject, clients)
+	spec := workloadoauth.Role{Name: role, Account: account, Service: service, Issuer: cfg.IssuerURI, Subject: subject}
+	for _, c := range clients {
+		spec.Clients = append(spec.Clients, workloadoauth.Client{ID: strings.TrimSpace(c.ClientID), RedirectURI: strings.TrimSpace(c.RedirectURI), Scopes: c.Scopes})
+	}
+	record, err := workloadoauth.Record(spec, q.now())
+	if err != nil {
+		return fmt.Errorf("requester: the OAuth clients record: %w", err)
+	}
 	ref, err := q.repo.PutRecord(ctx, account, FedproxyRBACNSID, role, record)
 	if err != nil {
 		return fmt.Errorf("requester: writing the OAuth clients record %s: %w", role, err)

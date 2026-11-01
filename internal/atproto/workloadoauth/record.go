@@ -106,16 +106,19 @@ func Record(role Role, now time.Time) (map[string]any, error) {
 		for _, s := range client.Scopes {
 			scopes = append(scopes, s)
 		}
-		body := map[string]any{
-			"type":     "object",
-			"required": []any{"client_id", "scope"},
-			"properties": map[string]any{
-				"client_id": map[string]any{"const": client.ID},
-				"scope":     map[string]any{"type": "array", "items": map[string]any{"enum": scopes}},
-			},
-		}
+		redirect := map[string]any{"type": "string"}
 		if client.RedirectURI != "" {
-			body["properties"].(map[string]any)["redirect_uri"] = map[string]any{"const": client.RedirectURI}
+			redirect = map[string]any{"const": client.RedirectURI}
+		}
+		body := map[string]any{
+			"type":                 "object",
+			"required":             []any{"client_id", "scope"},
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"client_id":    map[string]any{"const": client.ID},
+				"redirect_uri": redirect,
+				"scope":        map[string]any{"type": "array", "items": map[string]any{"enum": scopes}},
+			},
 		}
 		clientSchemas := map[string]any{
 			oauth.PathApproveAuthorization: map[string]any{
