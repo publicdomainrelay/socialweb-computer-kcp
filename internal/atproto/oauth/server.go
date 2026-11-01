@@ -191,7 +191,7 @@ func (s *Server) AuthorizationServerMetadata() AuthorizationServerMetadata {
 	issuer := s.issuer
 	scopes := s.config.Scopes
 	if len(scopes) == 0 {
-		scopes = []string{ScopeAtproto}
+		scopes = []string{ScopeAtproto, ScopeTransitionGeneric}
 	}
 	return AuthorizationServerMetadata{
 		Issuer:                                     issuer,

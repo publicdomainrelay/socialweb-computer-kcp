@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -62,8 +63,23 @@ func (r Role) Check() error {
 	return nil
 }
 
+func (c Client) idSchema() map[string]any {
+	if !strings.Contains(c.ID, "*") {
+		return map[string]any{"const": c.ID}
+	}
+	parts := strings.Split(c.ID, "*")
+	for i, part := range parts {
+		parts[i] = regexp.QuoteMeta(part)
+	}
+	return map[string]any{"type": "string", "pattern": "^" + strings.Join(parts, "[^?#*]*") + "$"}
+}
+
 func (c Client) Check() error {
-	u, err := url.Parse(c.ID)
+	prefix, _, _ := strings.Cut(c.ID, "*")
+	if strings.Contains(c.ID, "*") && strings.Count(strings.TrimPrefix(prefix, "https://"), "/") == 0 {
+		return fmt.Errorf("workloadoauth: client %q must name its host and a path before any *", c.ID)
+	}
+	u, err := url.Parse(prefix)
 	if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "localhost")) {
 		return fmt.Errorf("workloadoauth: client %q is not an https client_id", c.ID)
 	}
@@ -115,7 +131,7 @@ func Record(role Role, now time.Time) (map[string]any, error) {
 			"required":             []any{"client_id", "scope"},
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"client_id":    map[string]any{"const": client.ID},
+				"client_id":    client.idSchema(),
 				"redirect_uri": redirect,
 				"scope":        map[string]any{"type": "array", "items": map[string]any{"enum": scopes}},
 			},
