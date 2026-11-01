@@ -39,15 +39,23 @@ const (
 	PolicySandboxProviderDeno = "deno"
 
 	PolicySandboxProviderBrowser = "browser"
+
+	PolicySandboxProviderEmbedded = "embedded"
 )
 
 type PolicySandboxConfig struct {
-	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser"`
+	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser|embedded"`
 
 	Browser *PolicyBrowserSandboxConfig `json:"browser,omitempty"`
+
+	Embedded *PolicyEmbeddedSandboxConfig `json:"embedded,omitempty"`
 }
 
 type PolicyBrowserSandboxConfig struct {
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
+}
+
+type PolicyEmbeddedSandboxConfig struct {
 	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"default=120,minimum=1"`
 }
 

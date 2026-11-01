@@ -41,6 +41,68 @@ decisions:
     sandbox needs an iOS provider on PolicyEngine spec.sandbox (the plan 0037 pattern: a contract runner
     with a Prober, Fenced only after the probe passes); until it exists the requester fails closed and
     Request VM shows why.
+  policy_sandbox_api: >
+    PolicySandboxConfig.Provider gains "embedded" with Embedded *PolicyEmbeddedSandboxConfig
+    {TimeoutSeconds default 120, minimum 1}; the root PolicyEngineSandboxSettings gain the same value
+    and Embedded {TimeoutSeconds}. "embedded" names what socialweb sees: a JavaScript sandbox the app
+    that embeds the requester provides through pkg/embedded. The JS engine is the app's choice and the
+    probe proves it; the API does not name it. On ios pkg/embedded always selects provider embedded
+    for the requester's PolicyEngine; other platforms keep deno unless the app passes a host.
+  policy_sandbox_host: >
+    pkg/embedded.PolicySandbox (alias of internal/sandbox/embedded.Host), set on Config.PolicySandbox,
+    gomobile types only: Run(requestJSON []byte) ([]byte, error); Kill(runID string);
+    PlantProbe(marker string) ([]byte, error); ClearProbe(marker string) error. gomobile binds one
+    package, so the app's bridge package (contrib/wasm/ios/atircgo) declares the same method set and
+    passes its value to Config.PolicySandbox. Go calls every method from a Go thread and Run blocks
+    until the program ends: the app must never block its main thread on it. Go runs one program at a
+    time; Kill may arrive while Run is blocked and must make that Run return. Run request JSON is
+    {id, source, env, timeoutMs}, the answer {exitCode, stdout, stderr, timedOut}, the page bridge's
+    shapes. Run returns an error only when the host could not run the program; a failing program is
+    an answer with a nonzero exitCode. The host ends a run at timeoutMs with timedOut true and
+    exitCode -1; Go waits 5 s more, then calls Kill and reports timedOut itself. stdout and stderr are
+    capped at 64 KiB each (Go caps again).
+  policy_sandbox_program: >
+    source is one ES module with deno semantics, as the page bootstrap of scripts/browser/
+    policy_sandbox.js (kcp-wasm) gives it: static imports of node:buffer, node:crypto and
+    node:dns/promises resolve to that file's shims, top-level await, and the module's end exits 0.
+    Globals: the dedicated Worker set (fetch, AbortController, setTimeout, TextEncoder, TextDecoder,
+    atob, URL, crypto.getRandomValues and crypto.randomUUID), console.log/info/debug to stdout and
+    warn/error/trace to stderr, and Deno {env from the request env, exit(code), stdout.writeSync,
+    stderr.writeSync, inspect, errors.NotCapable, readTextFile(Sync) and writeTextFile(Sync) that
+    reject with NotCapable}. An uncaught error or rejection writes "error: ..." to stderr and exits 1.
+    Every run gets a fresh global scope and storage: nothing a run leaves behind is visible to the
+    next. The program source is never exposed as a global.
+  policy_sandbox_fence: >
+    The fence denies policy code the app's authority: the Keychain, the app container files (and
+    every file:// URL), UserDefaults, the app's HTTP cookies and credential storage, the Go runtime
+    and the kcp it runs (no native bridge object of any name in the JS global scope), any DOM, and
+    state across runs. Network is allowed, as --allow-net on Linux: fetch of https with no cookies or
+    stored credentials (an ephemeral session). Recommended host: a WKWebView with
+    WKWebsiteDataStore.nonPersistent() that runs the policy_sandbox.js frame unchanged (opaque-origin
+    srcdoc iframe, one module Worker per run, Worker.terminate at the deadline), driven by
+    callAsyncJavaScript in a private WKContentWorld, with no WKScriptMessageHandler or
+    WKURLSchemeHandler in the page world; the page sandbox already passed plan 0037 W0 on iPhone
+    Safari. A bare JavaScriptCore JSContext must add fetch, timers, modules and the Worker globals
+    itself and has no public API to stop an endless loop, so it fails the timeout fact unless every
+    run gets its own killable context.
+  policy_sandbox_probe: >
+    The Go Prober decides; the app only plants. Go makes a random marker and calls PlantProbe(marker);
+    the app stores the marker as a Keychain generic password (service socialweb-fence-probe), a
+    UserDefaults key socialweb-fence-probe, an HTTPCookieStorage.shared cookie socialweb-fence-probe
+    (domain socialweb-fence-probe.invalid) and a file socialweb-fence-probe.js in its container whose
+    exact content is: export default "<marker>"; and answers {engine, fileURL (the file:// URL of
+    that file), planted {keychain, file, defaults, cookies: "yes" or why not}}. Go then runs four
+    programs through Run: (1) the fence program, which must see Deno.env.get("SOCIALWEB_FENCE_ENV")
+    equal to the env it was given, import node:buffer, have fetch, see no document, window, parent,
+    top, localStorage or sessionStorage, see none of webkit, require, process, Bun,
+    __socialwebSandbox, AtircGo, Atircgo, Go; fail to read the planted file by fetch,
+    XMLHttpRequest and import(), and file:/// by fetch; find the marker in no string reachable from globalThis (own
+    properties, depth 4); and stash a second token in globalThis, IndexedDB and Cache Storage where
+    they exist; (2) for (;;) {} with timeoutMs 1000, which the host must end itself with timedOut
+    true; (3) a rerun that must see none of the stash, print to stdout and stderr and exit 3 through
+    Deno.exit; (4) a top-level throw that must exit 1. Then ClearProbe(marker) removes all four
+    plants. Fenced=True only when every plant is "yes" and every fact holds; the facts are the
+    Fenced condition message. A plant, run or answer error is Fenced=False, Ready=False, Deny.
 state_rules:
   - "No contract is created while the requester policy cannot run; Fenced=False means Deny."
   - "The app never holds a long atirc token for agents; agent tokens are leased and die with the contract."
@@ -69,7 +131,7 @@ items:
   - id: I6-POLICY-SANDBOX
     title: "iOS policy sandbox provider (JavaScriptCore runner + Prober, Fenced condition) so requester-tangled-vouch runs in the app; decision recorded as an ADR"
     owner: linux-kcp
-    status: todo
+    status: doing
   - id: I7-AGENTS
     title: "Agents section: launch an agent VM through the market request flow (EphemeralInfra, ComputeContract with spec.agent), leased token row, Release, revoke; release finished in background time or on next launch"
     owner: atirc-ios-client-dev

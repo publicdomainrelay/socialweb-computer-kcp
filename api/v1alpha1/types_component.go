@@ -275,12 +275,18 @@ type PolicyEngineSettings struct {
 }
 
 type PolicyEngineSandboxSettings struct {
-	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser"`
+	Provider string `json:"provider,omitempty" apigen:"enum=deno|browser|embedded"`
 
 	Browser *PolicyEngineBrowserSandboxSettings `json:"browser,omitempty"`
+
+	Embedded *PolicyEngineEmbeddedSandboxSettings `json:"embedded,omitempty"`
 }
 
 type PolicyEngineBrowserSandboxSettings struct {
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"minimum=1"`
+}
+
+type PolicyEngineEmbeddedSandboxSettings struct {
 	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" apigen:"minimum=1"`
 }
 
