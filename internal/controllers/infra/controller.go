@@ -35,6 +35,10 @@ const (
 
 	RepoExport = "applications"
 
+	LinkExport = "exposures"
+
+	repoBindQueue = 64
+
 	CollectionKind = "InfraCollection"
 
 	EphemeralCollectionKind = "EphemeralInfraCollection"
@@ -111,6 +115,8 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
 			return c.repoUsers(kind, src.Workspace, obj.Name)
 		}),
+		RepoLinkWatch(func(workspace, name string) []ctlruntime.Request { return c.repoUsers(kind, workspace, name) }),
+		ctlruntime.Events(RepoBindEvents(c.bus, func(workspace, name string) []ctlruntime.Request { return c.repoUsers(kind, workspace, name) })),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) { c.forget(kind, req) })}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -119,6 +125,32 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		return fmt.Errorf("infra: registering the %s controller: %w", kind, err)
 	}
 	return nil
+}
+
+func RepoBindEvents(b *bus.Bus, users func(workspace, name string) []ctlruntime.Request) <-chan ctlruntime.Request {
+	ch := make(chan ctlruntime.Request, repoBindQueue)
+	b.Subscribe(func(key bus.Key) {
+		if key.Kind != RepoKind {
+			return
+		}
+		for _, req := range users(key.Workspace, key.Name) {
+			select {
+			case ch <- req:
+			default:
+			}
+		}
+	})
+	return ch
+}
+
+func RepoLinkWatch(users func(workspace, name string) []ctlruntime.Request) ctlruntime.Option {
+	return ctlruntime.WatchesIn(LinkExport, func(_ context.Context, src ctlruntime.Request, obj *exposurev1alpha1.ComponentLink) []ctlruntime.Request {
+		to := obj.Spec.To
+		if !strings.EqualFold(strings.TrimSpace(to.Kind), RepoKind) {
+			return nil
+		}
+		return users(to.InWorkspace(src.Workspace), to.Name)
+	})
 }
 
 func labelled(obj metav1.Object, kind string) []ctlruntime.Request {

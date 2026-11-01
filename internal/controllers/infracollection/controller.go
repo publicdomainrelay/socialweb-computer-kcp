@@ -97,6 +97,8 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		}}, func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRepo) []ctlruntime.Request {
 			return c.repoUsers(ops.kind, src.Workspace, obj.Name)
 		}),
+		infractl.RepoLinkWatch(func(workspace, name string) []ctlruntime.Request { return c.repoUsers(ops.kind, workspace, name) }),
+		ctlruntime.Events(infractl.RepoBindEvents(c.bus, func(workspace, name string) []ctlruntime.Request { return c.repoUsers(ops.kind, workspace, name) })),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
 			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 		})}
