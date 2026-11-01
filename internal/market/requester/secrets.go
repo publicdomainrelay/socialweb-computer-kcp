@@ -223,11 +223,11 @@ func (q *Requester) readSecretsBundle(ctx context.Context, ref commonv1.SecretRe
 	}
 	kv, err := q.deps.Vault(ctx, ref)
 	if err != nil {
-		return nil, err
+		return nil, retryable(err)
 	}
 	data, err := kv.Read(ctx, ref.Mount, ref.Path, 0)
 	if err != nil {
-		return nil, fmt.Errorf("requester: reading the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err)
+		return nil, retryable(fmt.Errorf("requester: reading the secrets bundle %s/%s: %w", ref.Mount, ref.Path, err))
 	}
 	text, _ := data["bundle"].(string)
 	if text == "" {
@@ -275,7 +275,7 @@ func (q *Requester) ingressExposureURL(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return "", fmt.Errorf("requester: the %s exposure reports no url", name)
+	return "", retryable(fmt.Errorf("requester: the %s exposure reports no url", name))
 }
 
 func (q *Requester) issuerVerifier(issuer string) TokenVerifier {

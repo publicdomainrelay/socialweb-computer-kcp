@@ -134,6 +134,13 @@ func (q *Requester) authenticateOwnerSession(ctx context.Context) error {
 	return nil
 }
 
+func (q *Requester) watchBinds() (<-chan struct{}, func()) {
+	if q.deps.WatchBinds == nil {
+		return nil, func() {}
+	}
+	return q.deps.WatchBinds()
+}
+
 func (q *Requester) bindSignerKeyAfterBinds(ctx context.Context) error {
 	if q.deps.WatchBinds == nil {
 		return q.bindSignerKey(ctx)
