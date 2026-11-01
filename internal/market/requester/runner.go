@@ -1319,11 +1319,18 @@ func (r *contractRunner) applyReleaseBacklog(ctx context.Context, state *v1alpha
 		return
 	}
 	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
-	defer closeEvents()
+	var skipped []MarketEvent
+	defer func() {
+		closeEvents()
+		for _, event := range skipped {
+			r.q.dispatchEvent(receiptURI, event)
+		}
+	}()
 	apply := func(event MarketEvent) {
 		switch market.NSIDFromURI(event.Payload.URI) {
 		case market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsVMTerminatedNSID:
 		default:
+			skipped = append(skipped, event)
 			return
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
