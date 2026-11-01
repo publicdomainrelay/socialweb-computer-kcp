@@ -1,0 +1,15 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: EphemeralInfra
+metadata:
+  name: quickstart-deno
+spec:
+  description: quickstart one deno sandbox program
+  ttlSeconds: 600
+  endWhen: Complete
+  contracts:
+  - name: sbx1
+    state: Requested
+    computeKind: deno
+    userData: |
+      const n = [1, 2, 3, 4].reduce((a, b) => a + b, 0);
+      console.log(`quickstart-deno-ok sum=${n} on ${Deno.build.os}/${Deno.build.arch}`);

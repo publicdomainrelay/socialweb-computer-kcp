@@ -1,0 +1,18 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: operator-vouch-requester
+  labels:
+    apps.socialweb.computer/record-repo: operator
+spec:
+  repoRef:
+    group: socialweb.computer
+    kind: AtprotoRepo
+    name: operator
+  collection: sh.tangled.graph.vouch
+  rkey: REPLACE-REQUESTER-DID
+  deletionPolicy: Delete
+  record:
+    $type: sh.tangled.graph.vouch
+    subject: REPLACE-REQUESTER-DID
+    createdAt: "2026-11-01T00:00:00Z"
