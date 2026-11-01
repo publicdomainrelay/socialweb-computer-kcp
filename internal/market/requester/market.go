@@ -526,9 +526,9 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 		if message := stringOf(reply["message"]); message != "" {
 			detail = strings.TrimSpace(detail + ": " + message)
 		}
-		err := fmt.Errorf("requester: submitRfp to %s answered HTTP %d", bidder.Endpoint, status)
+		err := fmt.Errorf("requester: submitRfp to %s (aud %s) answered HTTP %d", bidder.Endpoint, bidder.Audience, status)
 		if detail != "" {
-			err = fmt.Errorf("requester: submitRfp to %s answered HTTP %d: %s", bidder.Endpoint, status, detail)
+			err = fmt.Errorf("requester: submitRfp to %s (aud %s) answered HTTP %d: %s", bidder.Endpoint, bidder.Audience, status, detail)
 		}
 		if stringOf(reply["error"]) == bidderSuspendedError {
 			return nil, err
