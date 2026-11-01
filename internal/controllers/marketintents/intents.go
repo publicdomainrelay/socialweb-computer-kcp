@@ -35,8 +35,6 @@ const (
 
 	FieldManagerStateSyncFinalizer = ctlruntime.FieldManagerPrefix + "statesync/finalizer"
 
-	FieldManagerContractRelease = ctlruntime.FieldManagerPrefix + "requester-release"
-
 	ownerCacheTTL = time.Minute
 )
 
@@ -348,16 +346,33 @@ func (h *handle) CreateComputeContract(ctx context.Context, contract v1alpha1.Co
 }
 
 func (h *handle) ReleaseComputeContract(ctx context.Context, name string) error {
-	found, err := h.exists(ctx, market.KindComputeContract, name)
+	cl, err := h.client()
 	if err != nil {
 		return err
 	}
-	if !found {
+	live, err := kube.GetWith(ctx, cl, kindOf(market.KindComputeContract), types.NamespacedName{Name: name})
+	if apierrors.IsNotFound(err) {
 		return fmt.Errorf("%w: %s %s", market.ErrNotFound, market.KindComputeContract, name)
 	}
+	if err != nil {
+		return fmt.Errorf("marketintents: reading %s %s: %w", market.KindComputeContract, name, err)
+	}
+	spec, _ := kruntime.DeepCopyJSONValue(live["spec"]).(map[string]any)
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	spec["release"] = true
+	spec["releaseRequestedAt"] = atmarket.FormatTime(time.Now())
 	doc := skeleton(market.KindComputeContract, name)
-	doc["spec"] = map[string]any{"release": true, "releaseRequestedAt": atmarket.FormatTime(time.Now())}
-	return h.apply(ctx, market.KindComputeContract, name, doc, FieldManagerContractRelease)
+	composed := metadataOf(doc)
+	liveMeta, _ := live["metadata"].(map[string]any)
+	for _, field := range []string{"labels", "ownerReferences"} {
+		if value, ok := liveMeta[field]; ok {
+			composed[field] = kruntime.DeepCopyJSONValue(value)
+		}
+	}
+	doc["spec"] = spec
+	return h.apply(ctx, market.KindComputeContract, name, doc, h.manager)
 }
 
 func (h *handle) DeleteComputeContract(ctx context.Context, name string) error {
