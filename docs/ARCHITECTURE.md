@@ -4522,6 +4522,25 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
+  retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app
+  launches stalled with `Workspace [app] in root for Ready after 1m0s (last error: Workspace app
+  not Ready)`, CPU idle, requester never started. kcp's apibinder initializer creates a
+  workspace type's default APIBindings as the workspace owner (kcpapply stamps the applying
+  identity), records any create error other than a missing APIExport on the LogicalCluster
+  (`WorkspaceAPIBindingsInitialized=False`, `WorkspaceInitializedAPIBindingErrors`) and returns
+  nil, and its LogicalCluster informer has no update handler, so one transient error (the owner's
+  RBAC not yet visible at boot) leaves the workspace Initializing for good. Upstream kcp v0.33 with
+  a system:masters base: 0 of 14 harness boots stalled (8 after /readyz, 6 racing Start from
+  "Serving securely"). A forced stall (non-masters base, so the impersonated identity is scoped)
+  now reads `Workspace socialweb-provider phase Initializing initializers [system:apibindings];
+  APIBindingsInitialized=False APIBindingErrors: encountered errors: apibindings.apis.kcp.io is
+  forbidden: User "system:kcp:admin" cannot create resource "apibindings" ... access denied`.
+  Decided: no system:masters owner and no dropped impersonation (least privilege). The fix is
+  the kcp fork's requeue on a failed default APIBinding create (kcp-wasm 7258b169d, rc135 kcp
+  batch), and kcpapply's Workspace wait timeout now carries the Workspace phase, its initializers
+  and every False LogicalCluster condition, so a remaining stall says why.
+
 - **A bidder bids only inside an RFP's bid window, and never twice on one RFP (2026-10-25).**
   Before (rc117 on hat-7): right after its core restarted, the bob bidder published a bid on each RFP
   of the gateway requester from the previous 29 h (39 in the first minute, each on a different RFP,
