@@ -1322,7 +1322,6 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 		return exitFailed
 	}
 	r.writeSummary(ctx, c)
-	r.stopGuestRequesterAtirc(ctx)
 	r.stop(context.WithoutCancel(ctx), true)
 	if r.standalone.StateDir != "" {
 		if _, err := os.Stat(r.standalone.StateDir); err == nil {

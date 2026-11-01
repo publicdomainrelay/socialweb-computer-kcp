@@ -7,11 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/fsnotify/fsnotify"
@@ -213,9 +210,6 @@ func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Wa
 			return false
 		}
 		r.log("the association ref arrived in the secrets bundle; the identity verifies it", "uri", ref.URI, "cid", ref.CID)
-		if r.guestRequester {
-			r.joinGuestRequesterAtirc(ctx, did)
-		}
 		return true
 	}
 	if try() {
@@ -372,66 +366,4 @@ func guestPaths() guestRequesterPaths {
 	}
 	return guestRequesterPaths{request: cloudinit.DefaultAssociationRequestFile, did: cloudinit.GuestRequesterDIDPath,
 		ref: cloudinit.DefaultAssociationRefFile, atirc: cloudinit.GuestRequesterAtircEnvFile}
-}
-
-func guestRequesterAtircUnit(name string) string {
-	return "socialweb-r2-atirc-" + name + ".service"
-}
-
-func readAtircEnv(path string) (map[string]string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	values := map[string]string{}
-	for line := range strings.Lines(string(raw)) {
-		if name, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
-			values[name] = strings.TrimSpace(value)
-		}
-	}
-	return values, nil
-}
-
-func (r *requestRun) joinGuestRequesterAtirc(ctx context.Context, did string) {
-	file := guestPaths().atirc
-	values, err := readAtircEnv(file)
-	if err != nil {
-		r.a.log.Warn("the guest requester has no atirc token; it does not join the channel", "file", file, "err", err.Error())
-		return
-	}
-	token, subhandle := values[requester.AtircTokenEnv], values[requester.AtircSubhandleEnv]
-	exp, err := strconv.ParseInt(values[requester.AtircExpEnv], 10, 64)
-	life := time.Until(time.Unix(exp, 0))
-	if token == "" || subhandle == "" || err != nil || life <= 0 {
-		r.a.log.Warn("the guest requester's atirc token is incomplete or expired; it does not join the channel", "file", file)
-		return
-	}
-	pub := exec.CommandContext(ctx, cloudinit.AtircBinary, "pub", subhandle+": online, guest requester "+did+" ("+r.inv.Name+")")
-	pub.Env = append(os.Environ(), requester.AtircTokenEnv+"="+token)
-	if out, err := pub.CombinedOutput(); err != nil {
-		r.a.log.Warn("atirc pub as the guest requester failed", "err", err.Error(), "output", strings.TrimSpace(string(out)))
-	}
-	unit := guestRequesterAtircUnit(r.inv.Name)
-	sub := exec.CommandContext(ctx, "systemd-run", "--user", "--unit="+unit, "--collect",
-		"--property=Restart=always", "--property=RestartSec=2", fmt.Sprintf("--property=RuntimeMaxSec=%d", int(life.Seconds())),
-		"--setenv="+requester.AtircTokenEnv+"="+token, cloudinit.AtircBinary, "sub")
-	if out, err := sub.CombinedOutput(); err != nil {
-		r.a.log.Warn("starting atirc sub as the guest requester failed", "unit", unit, "err", err.Error(), "output", strings.TrimSpace(string(out)))
-		return
-	}
-	r.log("the guest requester is in the atirc channel", "subhandle", subhandle, "unit", unit, "until", time.Unix(exp, 0).UTC().Format(time.RFC3339))
-}
-
-func (r *requestRun) stopGuestRequesterAtirc(ctx context.Context) {
-	if _, err := os.Stat(cloudinit.GuestRequesterDir); err != nil {
-		return
-	}
-	unit := guestRequesterAtircUnit(r.inv.Name)
-	out, err := exec.CommandContext(ctx, "systemctl", "--user", "stop", unit).CombinedOutput()
-	switch {
-	case err == nil:
-		r.log("the guest requester left the atirc channel", "unit", unit)
-	case !strings.Contains(string(out), "not loaded"):
-		r.a.log.Warn("stopping the guest requester's atirc sub", "unit", unit, "err", err.Error(), "output", strings.TrimSpace(string(out)))
-	}
 }
