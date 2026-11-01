@@ -41,7 +41,7 @@ var APIResources = []APIResource{
 		{Name: "Message", Type: "string", JSONPath: ".status.message"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeVM", Plural: "computevms", Revision: 16, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeVM", Plural: "computevms", Revision: 17, Export: "computevms", Object: ComputeVM{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Backend", Type: "string", JSONPath: ".spec.backendRef.kind"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.addresses.guest"},
@@ -131,7 +131,7 @@ var APIResources = []APIResource{
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ContractEvent", Plural: "contractevents", Revision: 4, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ContractEvent", Plural: "contractevents", Revision: 5, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
 		{Name: "Contract", Type: "string", JSONPath: ".spec.contractRef.name"},
 		{Name: "Direction", Type: "string", JSONPath: ".spec.direction"},
 		{Name: "NSID", Type: "string", JSONPath: ".spec.nsid"},

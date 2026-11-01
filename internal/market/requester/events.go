@@ -38,6 +38,10 @@ type GuestEvent struct {
 
 	RequesterDID string
 
+	R2Released *bool
+
+	R2Message string
+
 	HostKeys []v1alpha1.ComputeVMHostKey
 
 	Termination *v1alpha1.ContractTermination
@@ -63,7 +67,7 @@ func isGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID,
 		market.ComputeEventsVMSandboxNSID, market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
-		market.ComputeEventsGuestRequesterDIDNSID:
+		market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsGuestR2ReleasedNSID:
 		return true
 	}
 	return isContractEventNSID(nsid)
@@ -171,6 +175,13 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
 		}
 		out.ObservedAt = record.CreatedAt
+	case market.ComputeEventsGuestR2ReleasedNSID:
+		record, err := market.ParseComputeEventsGuestR2Released(event.Payload.Value)
+		if err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		ok := record.Ok
+		out.R2Released, out.R2Message, out.ObservedAt = &ok, record.Message, record.CreatedAt
 	case market.ComputeEventsGuestRequesterDIDNSID:
 		record, err := market.ParseComputeEventsGuestRequesterDID(event.Payload.Value)
 		if err != nil {

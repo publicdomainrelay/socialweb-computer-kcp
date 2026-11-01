@@ -240,7 +240,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     [--agent --hold]`: it implies `--association-ref` on `/run/socialweb-r2`, `--skip-ssh` and the
     parent atirc token, which it uses only to mint its own agents' tokens (the guest requester runs no
     `atirc sub` of its own). The atirc agent run script enables linger for the agent user and runs the agent
-    with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user.
+    with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user. With no command in the guest,
+    `run request r2 <name> [--r2-name r2] [--agent] [--hold]` publishes guest.r2Start and the guest agent
+    starts `socialweb-r2.service` as the user `r2`; releasing the parent publishes guest.r2Release first
+    and waits (12 min at most) for guest.r2Released after `socialweb-r2-release.service` released the
+    guest requester's contracts; a bidder releases a VM whose requester's contract-scoped association
+    expired 10 min ago (ComputeVM `spec.associationExpiresAt`).
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own

@@ -113,7 +113,10 @@ items:
     status: done
   - id: A7
     title: "zero-command guest requester: a requester-originated guest.r2Start event makes socialweb-guest-agent start socialweb-r2.service (run request --guest-requester as the agent user), started from the page or run request"
-    status: planned
+    status: done
+  - id: A8
+    title: "parent release cascades to the guest requester (guest.r2Release/r2Released), bidder backstop at the association expiresAt, bounded denied-accept release"
+    status: done
   - id: P1
     title: "page: associate-agent-DID action + Associated display (wasm)"
     status: done

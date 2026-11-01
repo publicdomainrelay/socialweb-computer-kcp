@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 )
 
@@ -105,6 +106,46 @@ func runRequestAgent(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		return a.fail(exitFailed, "run request agent: %v", err)
 	default:
 		return a.fail(exitFailed, "run request agent: the agentStart ContractEvent %s is not published", name)
+	}
+	return exitOK
+}
+
+func runRequestR2(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
+	start := v1alpha1.ContractEventR2Start{Name: strings.TrimSpace(vals.String("r2-name")), Agent: agentOf(vals.String("agent")) != nil, Hold: vals.Bool("hold")}
+	if err := market.ValidGuestRequesterName(start.Name); err != nil {
+		return a.fail(exitRefused, "run request r2: --r2-name: %v", err)
+	}
+	r, started, code := a.openRequest(ctx, vals, rest, "r2")
+	if r == nil {
+		return code
+	}
+	if started {
+		defer r.stop(context.WithoutCancel(ctx), false)
+	}
+	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
+	if err != nil {
+		return a.fail(exitFailed, "run request r2: %v", err)
+	}
+	if c.Status.Phase != v1alpha1.ComputeContractHeld {
+		return a.fail(exitFailed, "run request r2: the contract is %s, not Held: %s", c.Status.Phase, c.Status.Message)
+	}
+	if c.Spec.Association == nil || !c.Spec.Association.FromGuest {
+		return a.fail(exitRefused, "run request r2: the contract %s has no spec.association.fromGuest; ask for one with run request --associate guest", c.Name)
+	}
+	name, err := r.kcp.Signaling().PublishR2Start(ctx, start)
+	if err != nil {
+		return a.fail(exitFailed, "run request r2: creating the r2Start ContractEvent: %v", err)
+	}
+	e, err := r.kcp.WaitContractEvent(ctx, name, r.contractTimeout, agentStartSettled)
+	switch {
+	case e != nil && e.Status.Phase == v1alpha1.ContractEventFailed:
+		return a.fail(exitFailed, "run request r2: the requester refused r2Start: %s", e.Status.Message)
+	case e != nil && (e.Status.Phase == v1alpha1.ContractEventSubmitted || e.Status.Phase == v1alpha1.ContractEventPublished):
+		r.log("r2Start is out; the guest agent starts socialweb-r2.service", "contractEvent", name, "r2", start.Name, "agent", start.Agent, "hold", start.Hold)
+	case err != nil:
+		return a.fail(exitFailed, "run request r2: %v", err)
+	default:
+		return a.fail(exitFailed, "run request r2: the r2Start ContractEvent %s is not published", name)
 	}
 	return exitOK
 }

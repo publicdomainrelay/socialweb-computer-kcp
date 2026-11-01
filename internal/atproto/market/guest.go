@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -49,7 +50,8 @@ func IsGuestEventNSID(nsid string) bool {
 func IsRequesterGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID,
-		ComputeEventsGuestAgentStartNSID, ComputeEventsGuestSecretsUpdatedNSID:
+		ComputeEventsGuestAgentStartNSID, ComputeEventsGuestSecretsUpdatedNSID, ComputeEventsGuestR2StartNSID,
+		ComputeEventsGuestR2ReleaseNSID:
 		return true
 	}
 	return false
@@ -58,7 +60,7 @@ func IsRequesterGuestEventNSID(nsid string) bool {
 func IsGuestOriginatedEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
-		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID:
+		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID, ComputeEventsGuestR2ReleasedNSID:
 		return true
 	}
 	return false
@@ -80,4 +82,13 @@ func ValidGuestRequesterDID(did, authority string) error {
 func ContractScopedRKey(service, did, acceptURI string) string {
 	sum := sha256.Sum256([]byte(did))
 	return service + "-" + hex.EncodeToString(sum[:])[:32] + "-" + acceptURI[strings.LastIndex(acceptURI, "/")+1:]
+}
+
+var guestRequesterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func ValidGuestRequesterName(name string) error {
+	if !guestRequesterNameRE.MatchString(name) {
+		return fmt.Errorf("market: the guest requester name %q is not a DNS label", name)
+	}
+	return nil
 }

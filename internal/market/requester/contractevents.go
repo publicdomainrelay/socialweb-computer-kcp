@@ -67,7 +67,8 @@ func validateGuestFields(nsid, kind, tag, key, ciphertext string) error {
 		}
 		return nil
 	}
-	if nsid == market.ComputeEventsGuestAgentStartNSID || nsid == market.ComputeEventsGuestSecretsUpdatedNSID {
+	if nsid == market.ComputeEventsGuestAgentStartNSID || nsid == market.ComputeEventsGuestSecretsUpdatedNSID ||
+		nsid == market.ComputeEventsGuestR2StartNSID || nsid == market.ComputeEventsGuestR2ReleaseNSID {
 		if kind != "" || tag != "" || key != "" || ciphertext != "" {
 			return errors.New("an agentStart or secretsUpdated event carries no kind, tag, key or ciphertext")
 		}
@@ -270,6 +271,17 @@ func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1al
 	if spec.NSID == market.ComputeEventsGuestSecretsUpdatedNSID && contract.Spec.SecretsRef == nil {
 		return fail("the ComputeContract " + name + " has no spec.secretsRef; a secretsUpdated updates nothing")
 	}
+	if (spec.NSID == market.ComputeEventsGuestR2StartNSID || spec.NSID == market.ComputeEventsGuestR2ReleaseNSID) && !fromGuest(*contract) {
+		return fail("the ComputeContract " + name + " has no spec.association.fromGuest; it runs no guest requester")
+	}
+	if spec.NSID == market.ComputeEventsGuestR2StartNSID {
+		if spec.R2Start == nil {
+			return fail("an r2Start event names no spec.r2Start")
+		}
+		if err := market.ValidGuestRequesterName(spec.R2Start.Name); err != nil {
+			return fail(err.Error())
+		}
+	}
 	state := contract.Status.Contract
 	switch contract.Status.Phase {
 	case v1alpha1.ComputeContractReleased, v1alpha1.ComputeContractFailed:
@@ -377,6 +389,13 @@ func (q *Requester) contractEventRecord(event v1alpha1.ContractEvent) (map[strin
 		return market.EncodeRecord(market.ComputeEventsGuestAgentStart{CreatedAt: q.nowISO()})
 	case market.ComputeEventsGuestSecretsUpdatedNSID:
 		return market.EncodeRecord(market.ComputeEventsGuestSecretsUpdated{CreatedAt: q.nowISO()})
+	case market.ComputeEventsGuestR2StartNSID:
+		if spec.R2Start == nil {
+			return nil, errors.New("an r2Start event names no spec.r2Start")
+		}
+		return market.EncodeRecord(market.ComputeEventsGuestR2Start{Name: spec.R2Start.Name, Agent: spec.R2Start.Agent, Hold: spec.R2Start.Hold, CreatedAt: q.nowISO()})
+	case market.ComputeEventsGuestR2ReleaseNSID:
+		return market.EncodeRecord(market.ComputeEventsGuestR2Release{CreatedAt: q.nowISO()})
 	}
 	return nil, fmt.Errorf("nsid %q is not a guest event", spec.NSID)
 }

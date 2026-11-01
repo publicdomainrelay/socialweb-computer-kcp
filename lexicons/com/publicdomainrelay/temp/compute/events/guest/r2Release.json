@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.r2Release",
+  "description": "The requester, releasing its contract, asks the guest agent to release every contract the guest requester holds before the guest goes away; the guest answers with compute.events.guest.r2Released. Sent as the payload of a market.event. Requester-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

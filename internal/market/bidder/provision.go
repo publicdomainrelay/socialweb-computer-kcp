@@ -201,6 +201,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID)
 	created := true
 	if err := b.intents.CreateComputeVM(ctx, *vm); err != nil {
 		if !errors.Is(err, contract.ErrExists) {

@@ -636,6 +636,11 @@
       "type": "string",
       "description": "run request, resume: run this program over ssh on the guest (StrictHostKeyChecking=yes against the host keys the guest reported) instead of an interactive session"
     },
+    "r2-name": {
+      "type": "string",
+      "default": "r2",
+      "description": "run request r2: the guest requester's invocation name inside the guest, a DNS label; run request r2 <name> [--agent] [--hold] publishes guest.r2Start on a held spec.association.fromGuest contract, and socialweb-guest-agent starts socialweb-r2.service, which runs run request --name <r2-name> --guest-requester as the r2 user (and run request agent <r2-name> once held, with --agent and --hold)"
+    },
     "guest-requester": {
       "type": "boolean",
       "description": "run request, as the agent user inside a guest of a spec.association.fromGuest contract: run this requester as the guest requester in one command. It implies --association-ref (the shared /run/socialweb-r2 files the guest agent mirrors), --skip-ssh and its parent atirc token from /run/socialweb-r2/r2-atirc.env, (its token is only the parent for minting its own agents' tokens; it does not join the atirc channel itself); standalone only"

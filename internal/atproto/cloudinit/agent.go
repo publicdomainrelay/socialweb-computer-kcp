@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,22 @@ const (
 	GuestRequesterGroup = "socialweb-r2"
 
 	GuestRequesterDir = "/run/socialweb-r2"
+
+	GuestRequesterUser = "r2"
+
+	GuestRequesterUnit = "socialweb-r2.service"
+
+	GuestRequesterReleaseUnit = "socialweb-r2-release.service"
+
+	GuestRequesterRunPath = "/usr/local/bin/socialweb-r2-run.sh"
+
+	GuestRequesterReleasePath = "/usr/local/bin/socialweb-r2-release.sh"
+
+	GuestRequesterStartEnv = GuestRequesterDir + "/r2-start.env"
+
+	GuestRequesterReleaseEachSec = 120
+
+	GuestRequesterReleaseTimeoutSec = 600
 
 	GuestAgentAssociationPath = GuestAgentConfigDir + "/association.json"
 
@@ -162,8 +179,54 @@ func AssociationModule(refFile string) UserDataModule {
 		if err != nil {
 			return UserDataPatch{}, fmt.Errorf("cloudinit association: encoding %s: %w", GuestAgentAssociationPath, err)
 		}
+		after := []string{"After=network-online.target " + GuestBinariesUnit + " " + strings.Join(SecretsReadyUnits, " "),
+			"Wants=network-online.target " + GuestBinariesUnit + " " + GuestSecretsUnit}
 		return UserDataPatch{WriteFiles: []WriteFileEntry{
 			{Path: GuestAgentAssociationPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
-		}, RuncmdPrepend: []any{"groupadd -f " + GuestRequesterGroup}}, nil
+			{Path: GuestRequesterRunPath, Owner: "root:root", Permissions: "0755", Content: guestRequesterRunScript},
+			{Path: GuestRequesterReleasePath, Owner: "root:root", Permissions: "0755", Content: guestRequesterReleaseScript},
+			{Path: "/etc/systemd/system/" + GuestRequesterUnit, Owner: "root:root", Permissions: "0644", Content: unitFile(
+				append([]string{"Description=the guest requester (plan 0036 A7), started by guest.r2Start"}, after...),
+				[]string{"Type=exec", "User=" + GuestRequesterUser, "ExecStart=" + GuestRequesterRunPath, "StandardOutput=journal", "StandardError=journal"})},
+			{Path: "/etc/systemd/system/" + GuestRequesterReleaseUnit, Owner: "root:root", Permissions: "0644", Content: unitFile(
+				append([]string{"Description=release every contract of the guest requester (plan 0036 A8), started by guest.r2Release"}, after...),
+				[]string{"Type=oneshot", "User=" + GuestRequesterUser, "ExecStart=" + GuestRequesterReleasePath,
+					"TimeoutStartSec=" + strconv.Itoa(GuestRequesterReleaseTimeoutSec), "StandardOutput=journal", "StandardError=journal"})},
+		}, RuncmdPrepend: []any{
+			"groupadd -f " + GuestRequesterGroup,
+			"id " + GuestRequesterUser + " >/dev/null 2>&1 || useradd -m -s /bin/bash -G " + GuestRequesterGroup + " " + GuestRequesterUser,
+			"loginctl enable-linger " + GuestRequesterUser,
+			"systemctl daemon-reload",
+		}}, nil
 	}
 }
+
+const guestRequesterEnv = `uid="$(id -u)"
+export XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"
+for _ in $(seq 1 30); do
+  [ -S "${XDG_RUNTIME_DIR}/bus" ] && break
+  sleep 1
+done
+`
+
+const guestRequesterRunScript = `#!/usr/bin/env bash
+set -euo pipefail
+. ` + GuestRequesterStartEnv + `
+` + guestRequesterEnv + `args=(run request --name "${R2_NAME}" --guest-requester)
+[ "${R2_AGENT:-}" = 1 ] && args+=(--agent)
+[ "${R2_HOLD:-}" = 1 ] && args+=(--hold)
+socialweb-computer "${args[@]}"
+if [ "${R2_AGENT:-}" = 1 ] && [ "${R2_HOLD:-}" = 1 ]; then
+  exec socialweb-computer run request agent "${R2_NAME}"
+fi
+`
+
+var guestRequesterReleaseScript = `#!/usr/bin/env bash
+set -uo pipefail
+command -v socialweb-computer >/dev/null || exit 0
+` + guestRequesterEnv + `fail=0
+for name in $(socialweb-computer run request list --json | jq -r '.[] | select(.phase != "Released") | .name'); do
+  timeout ` + strconv.Itoa(GuestRequesterReleaseEachSec) + ` socialweb-computer run request release "${name}" || fail=1
+done
+exit "${fail}"
+`

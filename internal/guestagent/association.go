@@ -2,6 +2,7 @@ package guestagent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"os/user"
@@ -245,5 +246,90 @@ func (a *Agent) refetchSecrets(seq int64) {
 	a.mu.Unlock()
 	if shared {
 		a.mirrorShared(gid)
+	}
+}
+
+var requesterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+type r2StartRecord struct {
+	Name string `json:"name"`
+
+	Agent bool `json:"agent"`
+
+	Hold bool `json:"hold"`
+}
+
+type r2ReleasedRecord struct {
+	Type string `json:"$type"`
+
+	Ok bool `json:"ok"`
+
+	Message string `json:"message,omitempty"`
+
+	CreatedAt string `json:"createdAt"`
+}
+
+func flag(on bool) string {
+	if on {
+		return "1"
+	}
+	return "0"
+}
+
+func (a *Agent) startGuestRequester(seq int64, raw []byte) {
+	a.mu.Lock()
+	gid, shared := a.sharedGID, a.shared
+	a.mu.Unlock()
+	var start r2StartRecord
+	switch {
+	case a.cfg.Association == nil || !shared:
+		a.log.Warn("guest_r2_start", "seq", seq, "err", "this guest runs no guest requester")
+		return
+	case json.Unmarshal(raw, &start) != nil || !requesterNameRE.MatchString(start.Name):
+		a.log.Warn("guest_r2_start", "seq", seq, "err", "the r2Start names no DNS label")
+		return
+	}
+	env := "R2_NAME=" + start.Name + "\nR2_AGENT=" + flag(start.Agent) + "\nR2_HOLD=" + flag(start.Hold) + "\n"
+	path := filepath.Join(RequesterDir, RequesterStartEnvFile)
+	part := path + ".part"
+	if err := os.WriteFile(part, []byte(env), 0o640); err != nil {
+		a.log.Warn("guest_r2_start", "seq", seq, "err", err.Error())
+		return
+	}
+	if err := os.Chown(part, 0, gid); err != nil {
+		_ = os.Remove(part)
+		a.log.Warn("guest_r2_start", "seq", seq, "err", err.Error())
+		return
+	}
+	if err := os.Rename(part, path); err != nil {
+		a.log.Warn("guest_r2_start", "seq", seq, "err", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, agentStartTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", "start", "--no-block", RequesterUnit).CombinedOutput()
+	if err != nil {
+		a.log.Warn("guest_r2_start", "seq", seq, "unit", RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
+		return
+	}
+	a.log.Info("guest_r2_start", "seq", seq, "unit", RequesterUnit, "name", start.Name, "agent", start.Agent, "hold", start.Hold)
+}
+
+func (a *Agent) releaseGuestRequester(seq int64) {
+	if a.cfg.Association == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, refetchTimeout+time.Minute)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "systemctl", "stop", RequesterUnit).CombinedOutput(); err != nil {
+		a.log.Warn("guest_r2_release", "seq", seq, "step", "stop "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
+	}
+	record := r2ReleasedRecord{Type: R2ReleasedNSID, Ok: true, CreatedAt: createdAt()}
+	if out, err := exec.CommandContext(ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
+		record.Ok, record.Message = false, tail("releasing the guest requester's contracts: "+err.Error()+": "+string(out), 500)
+	}
+	a.log.Info("guest_r2_release", "seq", seq, "ok", record.Ok, "message", record.Message)
+	if err := a.poster.Post(a.ctx, record.Type, "", record); err != nil {
+		a.log.Warn("guest_r2_release", "seq", seq, "step", "post r2Released", "err", err.Error())
 	}
 }

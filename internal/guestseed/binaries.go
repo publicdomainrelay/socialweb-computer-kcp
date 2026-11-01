@@ -178,6 +178,7 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 			out.Units = append(out.Units, cloudinit.AgentUnit)
 		case p == cloudinit.GuestAgentAssociationPath:
 			out.Agent = true
+			out.Units = append(out.Units, cloudinit.GuestRequesterUnit, cloudinit.GuestRequesterReleaseUnit)
 		case strings.HasPrefix(p, unitDir+"guest-tunnel-") && !strings.HasPrefix(p, unitDir+"guest-tunnel-report-") && strings.HasSuffix(p, ".service"):
 			out.OpenTunnel = true
 			out.Units = append(out.Units, strings.TrimPrefix(p, unitDir))

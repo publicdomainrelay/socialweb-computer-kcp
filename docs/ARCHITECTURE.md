@@ -4093,6 +4093,41 @@ closed so far was found by reading the code against this document, or by running
 reading the document. The practice worth keeping: the artefact was run and each guard was watched to
 fail, rather than the code read against this document alone.
 
+- **Opened 2026-10-30 (plan 0036 A7): R2-START, the guest requester started with no command in the guest.**
+  A contract with `spec.association.fromGuest` gets, in user_data, the user `r2` (group `socialweb-r2`,
+  linger on), `socialweb-r2.service` (User=r2, not started at boot, `EnvironmentFile`-style
+  `/run/socialweb-r2/r2-start.env` read by `/usr/local/bin/socialweb-r2-run.sh`, which runs `run request
+  --name <name> --guest-requester [--agent] [--hold]` and, with both, `run request agent <name>`) and
+  `socialweb-r2-release.service` (oneshot, User=r2, releases every guest requester invocation that is not
+  Released, 120 s each, 600 s in all). `run request r2 <name> [--r2-name <n>] [--agent] [--hold]` (or the
+  page) creates an outbound ContractEvent with NSID `com.publicdomainrelay.temp.compute.events.guest.r2Start`
+  and `spec.r2Start {name, agent, hold}`; the requester publishes it (`fromGuest` only), the bidder
+  queues it, socialweb-guest-agent writes the env file (root:socialweb-r2 0640) and starts the unit.
+  `run request --associate guest` adds `guestTools: [socialweb-computer]`. New requester scope token:
+  `repo:com.publicdomainrelay.temp.compute.events.guest.r2Start?action=create&action=update`. Open:
+  the page's r2Start button (wasm), and a live run of the unit.
+- **Opened 2026-10-30 (plan 0036 A8): R2-CASCADE, a parent release releases the guest requester's
+  contracts.** (1) The requester, releasing a fromGuest contract whose guest requester is Verified,
+  first publishes `guest.r2Release` (outbound ContractEvent `r2-release-<contract>`); the guest agent
+  stops `socialweb-r2.service`, runs `socialweb-r2-release.service` and posts `guest.r2Released {ok,
+  message}`; the requester waits for it at most 12 min (`GuestRequesterReleaseTimeout`, status step
+  `releasingGuestRequester`), then sends vm.delete as before. New scope tokens: requester
+  `repo:...guest.r2Release?action=create&action=update`, bidder `repo:...guest.r2Released?action=create`.
+  (2) Bidder backstop, the smallest safe mechanism: at provisioning the bidder reads the requester's
+  association mirror and its proof (one getRecord each); for a contract-scoped association it writes
+  the record's expiresAt into the ComputeVM `spec.associationExpiresAt`, and its ComputeVM observer
+  requeues to expiresAt plus 10 min (`AssociationExpiryGrace`) and then releases the VM. A guest
+  requester's VM therefore cannot outlive its association by more than the grace, even when the
+  cascade did not run (a destroyed parent guest, a lost event); a parent released earlier is caught by
+  the cascade, not by the backstop, which bounds the worst case at expiresAt (24 h at most). (3) A
+  denied accept with no receipt: `releaseDeniedAccept` waits for the receipt up to 4 times
+  (`DeniedAcceptReceiptAttempts`, `ReceiptTimeout` each), each attempt in `status.release.lastError`
+  and the `ReleaseFailed` condition; when it gives up the message names the manual path, `run request
+  release <name>` (spec.release), which a Failed contract with an accept and a winner but no receipt now
+  takes again (`RequesterContractDone` is false for it), finding the receipt at its stable rkey. Release
+  revokes (A6) now run their first attempt before Released is written, the guest requester's token
+  first, because a CLI requester stops its kcp right after Released (the rc126 V1 run lost the R2
+  revoke this way). Open: live runs of all three.
 - **Opened 2026-10-30 (plan 0036 V1): GUEST-SELF-BINARY, the socialweb-computer binary in a guest.** R2
   (`socialweb-computer run request` inside a guest) needs the CLI there; the release binary (~560 MB of
   embedded assets) is too big for `socialweb-guest-downloads`. Decision: `spec.guestTools: [socialweb-computer]`

@@ -174,6 +174,10 @@ func (a *Agent) receive(frame eventFrame) {
 		a.startAgent(frame.Seq)
 	case record.Type == SecretsUpdatedNSID:
 		a.wg.Go(func() { a.refetchSecrets(frame.Seq) })
+	case record.Type == R2StartNSID:
+		a.wg.Go(func() { a.startGuestRequester(frame.Seq, frame.Record) })
+	case record.Type == R2ReleaseNSID:
+		a.wg.Go(func() { a.releaseGuestRequester(frame.Seq) })
 	case record.Type != SignalWebRTCNSID:
 		a.log.Debug("a guest event of another collection", "seq", frame.Seq, "collection", record.Type)
 	case !known:

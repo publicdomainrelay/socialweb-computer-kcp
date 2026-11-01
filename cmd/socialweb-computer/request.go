@@ -1136,6 +1136,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)
 	}
+	if r.contract.Association != nil && r.contract.Association.FromGuest && !slices.Contains(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer) {
+		r.contract.GuestTools = append(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer)
+	}
 	if r.contract.Association != nil {
 		if bundle, err = withPlaceholder(bundle, cloudinit.DefaultAssociationRefFile, ""); err != nil {
 			return a.fail(exitRefused, "run request: --associate: %v", err)

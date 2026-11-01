@@ -242,6 +242,12 @@ func (r *contractRunner) Run(ctx context.Context) {
 			}
 			return
 		}
+		if acceptedWithoutReceipt(state) {
+			if err := r.releaseDeniedAccept(ctx, state, winnerDID(state)); err != nil && !r.q.stopping() {
+				r.recordFailure(ctx, r.stateCopy(), err, 1)
+			}
+			return
+		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		return
 	}
@@ -672,15 +678,40 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 	return r.acceptReceipt(ctx, state, accept.Value, acceptRef.URI, receipt)
 }
 
+const DeniedAcceptReceiptAttempts = 4
+
+func acceptedWithoutReceipt(state *v1alpha1.NodeClaimContract) bool {
+	return state != nil && state.Receipt == nil && state.Accept != nil && state.Accept.URI != "" && winnerDID(state) != ""
+}
+
 func (r *contractRunner) releaseDeniedAccept(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
-	if !r.recoverReceipt(ctx, state) {
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, state.Error+"; waiting for the bidder's receipt to release its guest", state, r.currentBids(), r.currentChosen(), "releasing", 1)
+	reason := cmp.Or(state.Error, "the contract is released")
+	for attempt := 1; !r.recoverReceipt(ctx, state); attempt++ {
+		if attempt > DeniedAcceptReceiptAttempts {
+			release := r.releaseStatus()
+			if release == nil {
+				release = &v1alpha1.ComputeContractRelease{}
+			}
+			release.LastError = fmt.Sprintf("no receipt arrived for the accept %s after %d waits of %s; the guest the bidder may have provisioned stays until a release finds the receipt: run `socialweb-computer run request release %s` (spec.release) again, or the bidder ends it at its own TTL",
+				state.Accept.URI, DeniedAcceptReceiptAttempts, r.q.cfg.ReceiptTimeout, r.name)
+			r.setRelease(release)
+			r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, reason+"; "+release.LastError, state, r.currentBids(), r.currentChosen(), "releaseFailed", int32(attempt-1))
+			return errors.New(release.LastError)
+		}
+		release := r.releaseStatus()
+		if release == nil {
+			release = &v1alpha1.ComputeContractRelease{}
+		}
+		release.Attempts = attempt
+		release.LastError = fmt.Sprintf("waiting for the bidder's receipt of the accept to release its guest (attempt %d of %d)", attempt, DeniedAcceptReceiptAttempts)
+		r.setRelease(release)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, reason+"; "+release.LastError, state, r.currentBids(), r.currentChosen(), "releasing", int32(attempt))
 		receipt, err := r.q.waitReceiptWithin(ctx, bidderDID, state.Accept.URI, r.q.cfg.ReceiptTimeout)
 		if err != nil {
 			return err
 		}
-		if receipt == nil || !r.recoverReceipt(ctx, state) {
-			return errors.New("no receipt arrived for the recorded accept; its records stay so a later run can release the guest")
+		if receipt != nil && r.recoverReceipt(ctx, state) {
+			break
 		}
 	}
 	return r.releaseContract(ctx, state, bidderDID)
@@ -1273,6 +1304,7 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	r.log().Info("requester_release", "receipt", receiptURIOf(state), "bidder", bidderDID, "deadline", release.Deadline, "attempts", release.Attempts)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "destroying the guest", state, r.currentBids(), r.currentChosen(), "releasing", int32(release.Attempts))
 
+	r.releaseGuestRequester(ctx, state)
 	eventRef, eventRecord, err := r.releaseEnvelope(ctx, state)
 	for err != nil {
 		release.Attempts++
@@ -1501,12 +1533,12 @@ func (r *contractRunner) writeStatus(ctx context.Context, phase v1alpha1.Compute
 		status.Release = &preserved
 	}
 	r.applyConditions(&status, contract.Generation, phase, message, state)
+	if phase == v1alpha1.ComputeContractReleased {
+		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
+	}
 	err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status)
 	if err != nil && !notFound(err) {
 		r.log().Warn("requester_contract_status_failed", "err", err)
-	}
-	if phase == v1alpha1.ComputeContractReleased {
-		r.atircRevoke.Do(func() { r.revokeAtircToken(ctx) })
 	}
 	return err
 }

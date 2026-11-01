@@ -9,6 +9,8 @@ import (
 
 const GuestToolsDir = AssociationRefDir + "/guest-tools"
 
+const GuestToolSocialwebComputer = "socialweb-computer"
+
 var guestToolNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 func GuestToolPath(name string) string {

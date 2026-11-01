@@ -11,7 +11,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: contractevents
-      schema: v1alpha1-4.contractevents.socialweb.computer
+      schema: v1alpha1-5.contractevents.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

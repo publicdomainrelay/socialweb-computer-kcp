@@ -486,7 +486,11 @@ func (b *Bidder) observeVM(ctx context.Context, name string) (time.Duration, err
 			related = append(related, bid.Name)
 		}
 	}
-	return b.reconcileBids(ctx, related)
+	wait, err := b.reconcileBids(ctx, related)
+	if live {
+		wait = earliest(wait, b.releaseAtAssociationExpiry(ctx, &vm))
+	}
+	return wait, err
 }
 
 func (b *Bidder) bidServes(bid *v1alpha1.Bid, vm *v1alpha1.ComputeVM) bool {

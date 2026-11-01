@@ -273,7 +273,7 @@ func releaseTokenPaths(contract v1alpha1.ComputeContract) []string {
 		paths = append(paths, envFile)
 	}
 	if fromGuest(contract) {
-		paths = append(paths, cloudinit.GuestRequesterAtircEnvFile)
+		paths = append([]string{cloudinit.GuestRequesterAtircEnvFile}, paths...)
 	}
 	return paths
 }
@@ -297,7 +297,27 @@ func (r *contractRunner) revokeAtircToken(ctx context.Context) {
 	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil || len(paths) == 0 {
 		return
 	}
-	r.q.startReleaseRevokes(r, contract, &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}, true)
+	marker := &atircReleaseMarker{Paths: paths, StartedAt: r.q.now().Unix()}
+	first, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*atircCallTimeout)
+	defer cancel()
+	if err := r.setReleaseMarker(first, contract, marker); err != nil {
+		r.log().Warn("requester_atirc_release_marker_failed", "err", err.Error())
+		r.q.startReleaseRevokes(r, contract, marker, true)
+		return
+	}
+	var left []string
+	for _, path := range paths {
+		if !r.revokeEnvToken(first, contract, path) {
+			left = append(left, path)
+		}
+	}
+	r.log().Info("requester_atirc_release_revoke", "attempt", 0, "left", len(left))
+	if len(left) == 0 {
+		if err := r.setReleaseMarker(first, contract, nil); err == nil {
+			return
+		}
+	}
+	r.q.startReleaseRevokes(r, contract, marker, false)
 }
 
 func (r *contractRunner) setReleaseMarker(ctx context.Context, contract v1alpha1.ComputeContract, marker *atircReleaseMarker) error {

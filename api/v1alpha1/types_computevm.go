@@ -47,6 +47,8 @@ type ComputeVMSpec struct {
 
 	Release *ComputeVMRelease `json:"release,omitempty"`
 
+	AssociationExpiresAt string `json:"associationExpiresAt,omitempty"`
+
 	HostPorts []int32 `json:"hostPorts,omitempty" apigen:"listType=set"`
 
 	Sandbox *ComputeVMSandbox `json:"sandbox,omitempty"`

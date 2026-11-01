@@ -59,6 +59,7 @@ internal/market/requester	observe.go:Requester.releaseWait	origin	status.release
 internal/market/requester	contractevents.go:Requester.submitContractEvent	origin	ContractEventSubmitRetry 2s doubling to ContractEventSubmitRetryCap 1m after a failed submitEvent POST (ContractEventSubmitTimeout 10s), until ContractEventSubmitWindow 10m after the Published condition; none once Submitted or Failed	the durable submitEvent of an outbound ContractEvent to the bidder; the bidder offers no watch of what it received
 internal/controllers/atprotosession	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
 internal/controllers/marketpresence	controller.go:New	origin	DefaultRefresh 1m	period of the requeue line of this package
+internal/market/bidder	association.go:Bidder.releaseAtAssociationExpiry	origin	ComputeVM spec.associationExpiresAt plus AssociationExpiryGrace 10m; 1m after a failed release write	the guest requester's contract-scoped association has no watch on the bidder; its expiresAt is the deadline (plan 0036 A8)
 internal/controllers/pdsaccount	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
 internal/controllers/plcidentity	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package
 internal/controllers/relaystatus	controller.go:New	origin	DefaultRefresh 30s	period of the requeue line of this package

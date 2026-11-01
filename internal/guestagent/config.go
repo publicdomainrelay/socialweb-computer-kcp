@@ -38,6 +38,12 @@ const (
 
 	RequesterDir = "/run/socialweb-r2"
 
+	RequesterStartEnvFile = "r2-start.env"
+
+	RequesterUnit = "socialweb-r2.service"
+
+	RequesterReleaseUnit = "socialweb-r2-release.service"
+
 	DefaultSecretsFetchScript = "/usr/local/bin/setup-secrets.sh"
 
 	SecretsReadyFile = "secrets.ready"

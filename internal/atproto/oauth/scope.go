@@ -32,6 +32,9 @@ const (
 	CollectionGuestAgentStart       = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
 	CollectionGuestRequesterDID     = "com.publicdomainrelay.temp.compute.events.guest.requesterDid"
 	CollectionGuestSecretsUpdated   = "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
+	CollectionGuestR2Start          = "com.publicdomainrelay.temp.compute.events.guest.r2Start"
+	CollectionGuestR2Release        = "com.publicdomainrelay.temp.compute.events.guest.r2Release"
+	CollectionGuestR2Released       = "com.publicdomainrelay.temp.compute.events.guest.r2Released"
 	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
@@ -64,7 +67,8 @@ var (
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
-			CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release,
+			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
@@ -81,7 +85,7 @@ var (
 			CollectionConfigWIFSimple, CollectionComputeVM, CollectionRFP, CollectionAccept,
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
 			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
-			CollectionGuestSecretsRequested, CollectionGuestRequesterDID,
+			CollectionGuestSecretsRequested, CollectionGuestRequesterDID, CollectionGuestR2Released,
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
