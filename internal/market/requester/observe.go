@@ -124,8 +124,14 @@ func (q *Requester) releaseWait(ctx context.Context, contract v1alpha1.ComputeCo
 	if release != nil {
 		attempts = release.Attempts
 	}
+	answered := ""
+	if release != nil {
+		answered = release.RequestedAt
+	}
 	switch {
 	case contract.Status.Phase == v1alpha1.ComputeContractReleased:
+	case running && answered != "" && answered != contract.Spec.ReleaseRequestedAt:
+		return releaseRetryDelay(max(attempts, 1))
 	case started && left <= 0 && (finished || attempts > 0):
 		q.failAtBound(ctx, contract, deadline)
 	case running:
@@ -172,6 +178,7 @@ func (q *Requester) failAtBound(ctx context.Context, contract v1alpha1.ComputeCo
 	release.RequestedAt = requested
 	status.Release = &release
 	addContractConditions(&status, contract.Generation, status.Phase, message, q.now(), false)
+	conds.SetStatusAt(&status.Conditions, contract.Generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionTrue, "ReleaseBound", message, q.now())
 	q.log.Warn("requester_release_bound", "contract", contract.Name, "deadline", deadline.UTC().Format(time.RFC3339), "lastError", contract.Status.Release.LastError)
 	q.mergeStatus(ctx, contract.Name, status)
 	failed := contract
