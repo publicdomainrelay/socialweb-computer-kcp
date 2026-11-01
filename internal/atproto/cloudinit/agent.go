@@ -15,6 +15,14 @@ const (
 
 	DefaultAssociationRefFile = AssociationRefDir + "/association-ref"
 
+	GuestAgentAssociationPath = GuestAgentConfigDir + "/association.json"
+
+	GuestRequesterDIDPath = GuestAgentStateDir + "/requester-did"
+
+	SecretsFetchScriptPath = "/usr/local/bin/setup-secrets.sh"
+
+	SecretsRefetchEnv = "SECRETS_REFETCH"
+
 	AgentUnit = "atirc-agent.service"
 
 	AgentRunPath = "/usr/local/bin/atirc-agent-run.sh"
@@ -123,4 +131,24 @@ func AssociationRefPath(raw string) (string, error) {
 		return "", fmt.Errorf("cloudinit association: refFile %q is not an absolute path under %s/ without a .. segment", raw, AssociationRefDir)
 	}
 	return clean, nil
+}
+
+type GuestAgentAssociation struct {
+	RefFile string `json:"refFile"`
+}
+
+func AssociationModule(refFile string) UserDataModule {
+	return func(Context) (UserDataPatch, error) {
+		clean, err := AssociationRefPath(refFile)
+		if err != nil {
+			return UserDataPatch{}, err
+		}
+		raw, err := json.Marshal(GuestAgentAssociation{RefFile: clean})
+		if err != nil {
+			return UserDataPatch{}, fmt.Errorf("cloudinit association: encoding %s: %w", GuestAgentAssociationPath, err)
+		}
+		return UserDataPatch{WriteFiles: []WriteFileEntry{
+			{Path: GuestAgentAssociationPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
+		}}, nil
+	}
 }

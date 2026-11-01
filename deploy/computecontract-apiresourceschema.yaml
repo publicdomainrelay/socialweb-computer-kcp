@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-22.computecontracts.socialweb.computer
+  name: v1alpha1-23.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -99,11 +99,11 @@ spec:
                 properties:
                   subject:
                     type: string
+                  fromGuest:
+                    type: boolean
                   refFile:
                     type: string
                     default: /etc/socialweb-computer/association-ref
-                required:
-                  - subject
               secretsRef:
                 type: object
                 properties:
@@ -559,6 +559,38 @@ spec:
                           - cid
                     required:
                       - appliedAt
+                      - event
+                      - payload
+                  guestRequester:
+                    type: object
+                    properties:
+                      did:
+                        type: string
+                      reportedAt:
+                        type: string
+                      event:
+                        type: object
+                        properties:
+                          uri:
+                            type: string
+                          cid:
+                            type: string
+                        required:
+                          - uri
+                          - cid
+                      payload:
+                        type: object
+                        properties:
+                          uri:
+                            type: string
+                          cid:
+                            type: string
+                        required:
+                          - uri
+                          - cid
+                    required:
+                      - did
+                      - reportedAt
                       - event
                       - payload
                   outcome:

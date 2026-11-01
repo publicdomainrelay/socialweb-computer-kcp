@@ -75,6 +75,8 @@ type contractRunner struct {
 	associationMu sync.Mutex
 
 	associating atomic.Bool
+
+	atircAssoc commonv1.StrongRef
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
@@ -974,6 +976,13 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 				return false
 			}
 			r.log().Info("requester_guest_secrets", "event", payloadKind(parsed.Kind), "via", parsed.SecretsVia)
+		case market.ComputeEventsGuestRequesterDIDNSID:
+			if !r.acceptGuestRequester(ctx, state, parsed) {
+				return false
+			}
+			r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
+			r.ensureAssociation(ctx, state.Accept, state)
+			return false
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
 		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID {
@@ -1041,7 +1050,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		nsid := market.NSIDFromURI(event.Payload.URI)
 		switch nsid {
 		case market.ComputeEventsVMTerminatedNSID, market.ComputeEventsVMOnNetworkNSID,
-			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
+			market.ComputeEventsGuestRequesterDIDNSID:
 		default:
 			return false
 		}
@@ -1056,6 +1066,13 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if parsed.Tag != "" && recordNetwork(state, parsed) {
 				r.log().Info("requester_guest_network", "tag", parsed.Tag, "address", parsed.Address)
 				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
+			}
+			return false
+		}
+		if parsed.Kind == market.ComputeEventsGuestRequesterDIDNSID {
+			if r.acceptGuestRequester(ctx, state, parsed) {
+				r.writeStatus(ctx, v1alpha1.ComputeContractHeld, "held: the guest is on the network; set spec.release to release it", state, r.currentBids(), r.currentChosen(), "held", 1)
+				r.ensureAssociation(ctx, state.Accept, state)
 			}
 			return false
 		}
@@ -1533,6 +1550,8 @@ func payloadKind(nsid string) string {
 		return "secretsRequested"
 	case market.ComputeEventsGuestSecretsAppliedNSID:
 		return "secretsApplied"
+	case market.ComputeEventsGuestRequesterDIDNSID:
+		return "requesterDid"
 	default:
 		return nsid
 	}

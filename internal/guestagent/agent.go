@@ -54,6 +54,8 @@ type Agent struct {
 	requested bool
 
 	applied map[string]bool
+
+	reportedDID string
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {
@@ -146,13 +148,16 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	for _, t := range a.cfg.Tunnels {
 		tags = append(tags, t.Tag)
 	}
-	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "agentUnit", a.cfg.AgentUnit, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
+	a.log.Info("the guest agent starts", "tags", tags, "sealedSecrets", a.cfg.Secrets != nil, "agentUnit", a.cfg.AgentUnit, "association", a.cfg.Association != nil, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
 		"forwardedUDPPort", a.mux != nil)
 	for _, t := range a.cfg.Tunnels {
 		a.wg.Go(func() { a.announce(ctx, t.Tag) })
 	}
 	if a.cfg.Secrets != nil {
 		a.wg.Go(func() { a.runSecrets(ctx) })
+	}
+	if a.cfg.Association != nil {
+		a.wg.Go(func() { a.runAssociation(ctx) })
 	}
 	if ready != nil {
 		ready()

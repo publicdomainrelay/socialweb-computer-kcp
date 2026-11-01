@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -25,11 +26,26 @@ type contractAssociation struct {
 	ref commonv1.StrongRef
 }
 
-func associationSubject(contract v1alpha1.ComputeContract) string {
-	if contract.Spec.Association == nil {
+func associationSubject(contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) string {
+	a := contract.Spec.Association
+	if a == nil {
 		return ""
 	}
-	return strings.TrimSpace(contract.Spec.Association.Subject)
+	subject := strings.TrimSpace(a.Subject)
+	switch {
+	case a.FromGuest && subject != "":
+		return ""
+	case subject != "":
+		return subject
+	case a.FromGuest && state != nil && state.GuestRequester != nil:
+		return strings.TrimSpace(state.GuestRequester.Did)
+	}
+	return ""
+}
+
+func fromGuest(contract v1alpha1.ComputeContract) bool {
+	a := contract.Spec.Association
+	return a != nil && a.FromGuest && strings.TrimSpace(a.Subject) == ""
 }
 
 func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
@@ -46,8 +62,8 @@ func (r *contractRunner) associationWritten(subject string) bool {
 }
 
 func (r *contractRunner) associationPending(contract v1alpha1.ComputeContract) bool {
-	subject := associationSubject(contract)
 	state := contract.Status.Contract
+	subject := associationSubject(contract, state)
 	return subject != "" && state != nil && state.Accept != nil && state.Accept.URI != "" && !contract.Spec.Release &&
 		contract.DeletionTimestamp == nil && !r.associationWritten(subject)
 }
@@ -77,7 +93,10 @@ func associationTimes(contract v1alpha1.ComputeContract, state *v1alpha1.NodeCla
 func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1.StrongRef, state *v1alpha1.NodeClaimContract) {
 	q := r.q
 	contract := r.snapshot()
-	subject := associationSubject(contract)
+	if state == nil {
+		state = r.stateCopy()
+	}
+	subject := associationSubject(contract, state)
 	if subject == "" || accept == nil || accept.URI == "" || accept.CID == "" || r.associationWritten(subject) {
 		return
 	}
@@ -148,6 +167,13 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	if previous != nil && previous.subject != subject {
 		r.deleteAssociationRecord(ctx, previous.subject)
 	}
+	r.bindAtircToken(ctx, contract, ref, expiresAt)
+	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
+		(state != nil && state.SecretsApplied != nil)) {
+		if err := r.notifySecretsUpdated(ctx, contract, ref); err != nil {
+			fail("notify the guest", err)
+		}
+	}
 	r.log().Info("requester_association_written", "subject", subject, "uri", ref.URI, "cid", ref.CID, "expiresAt", market.FormatTime(expiresAt))
 }
 
@@ -198,7 +224,7 @@ func (r *contractRunner) addSecretEntries(entries ...SecretEntry) {
 
 func (r *contractRunner) deleteAssociation(ctx context.Context) {
 	subjects := map[string]bool{}
-	if subject := associationSubject(r.snapshot()); subject != "" {
+	if subject := associationSubject(r.snapshot(), r.stateCopy()); subject != "" {
 		subjects[subject] = true
 	}
 	r.mu.Lock()
@@ -237,4 +263,62 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, subject st
 func (r *contractRunner) deleteContractRecords(ctx context.Context) {
 	r.deleteRBAC(ctx)
 	r.deleteAssociation(ctx)
+}
+
+func SecretsUpdatedEventName(contract string, ref commonv1.StrongRef) string {
+	return "secrets-updated-" + market.SessionRKey("secretsUpdated", contract, ref.URI, ref.CID)
+}
+
+func (r *contractRunner) notifySecretsUpdated(ctx context.Context, contract v1alpha1.ComputeContract, ref commonv1.StrongRef) error {
+	q := r.q
+	if q.deps.ContractEvents == nil {
+		return errors.New("the requester has no ContractEvents handle")
+	}
+	if contract.UID == "" {
+		return errors.New("the contract has no uid yet")
+	}
+	name := SecretsUpdatedEventName(contract.Name, ref)
+	if _, known := q.contractEvents.Get(name); known {
+		return nil
+	}
+	event := v1alpha1.ContractEvent{
+		ObjectMeta: metav1.ObjectMeta{Name: name, OwnerReferences: []metav1.OwnerReference{contractOwnerReference(contract)}},
+		Spec: v1alpha1.ContractEventSpec{
+			ContractRef: commonv1.LocalObjectRef{Name: contract.Name},
+			Direction:   v1alpha1.ContractEventOutbound,
+			NSID:        market.ComputeEventsGuestSecretsUpdatedNSID,
+		},
+	}
+	if err := q.deps.ContractEvents.ApplyContractEvent(ctx, event); err != nil {
+		return err
+	}
+	q.contractEvents.Put(name, event)
+	r.log().Info("requester_secrets_updated_sent", "contractEvent", name, "association", ref.URI)
+	return nil
+}
+
+func (r *contractRunner) acceptGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bool {
+	contract := r.snapshot()
+	refuse := func(reason string) bool {
+		r.log().Warn("requester_guest_requester_refused", "did", parsed.RequesterDID, "event", parsed.Event.URI, "reason", reason)
+		return false
+	}
+	switch {
+	case !fromGuest(contract):
+		return refuse("the contract has no spec.association.fromGuest")
+	case contract.Spec.Release || contract.DeletionTimestamp != nil:
+		return refuse("the contract is releasing")
+	case state.GuestRequester != nil && state.GuestRequester.Did == parsed.RequesterDID:
+		return false
+	case state.GuestRequester != nil:
+		return refuse("the guest already reported " + state.GuestRequester.Did)
+	}
+	if err := market.ValidGuestRequesterDID(parsed.RequesterDID, r.q.repoDID); err != nil {
+		return refuse(err.Error())
+	}
+	state.GuestRequester = &v1alpha1.ContractGuestRequester{Did: parsed.RequesterDID, ReportedAt: parsed.ObservedAt,
+		Event:   commonv1.StrongRef{URI: parsed.Event.URI, CID: parsed.Event.CID},
+		Payload: commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID}}
+	r.log().Info("requester_guest_requester", "did", parsed.RequesterDID)
+	return true
 }

@@ -570,6 +570,48 @@ func (v *ComputeEventsGuestPublicKey) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsGuestRequesterDID struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	DID        string                     `json:"did"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestRequesterDID) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.requesterDid"
+}
+
+func ParseComputeEventsGuestRequesterDID(value map[string]any) (*ComputeEventsGuestRequesterDID, error) {
+	var out ComputeEventsGuestRequesterDID
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.requesterDid", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestRequesterDID) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestRequesterDID
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.requesterDid"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestRequesterDID) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestRequesterDID
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestRequesterDID(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsGuestSecrets struct {
 	Type       string                     `json:"$type"`
 	Ciphertext string                     `json:"ciphertext"`
@@ -691,6 +733,47 @@ func (v *ComputeEventsGuestSecretsRequested) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ComputeEventsGuestSecretsRequested(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type ComputeEventsGuestSecretsUpdated struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestSecretsUpdated) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
+}
+
+func ParseComputeEventsGuestSecretsUpdated(value map[string]any) (*ComputeEventsGuestSecretsUpdated, error) {
+	var out ComputeEventsGuestSecretsUpdated
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestSecretsUpdated) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestSecretsUpdated
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestSecretsUpdated) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestSecretsUpdated
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestSecretsUpdated(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil

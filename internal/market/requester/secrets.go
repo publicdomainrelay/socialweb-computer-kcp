@@ -445,6 +445,19 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 	if envFile != "" {
 		modules = append(modules, cloudinit.AgentModule(cloudinit.AgentOptions{EnvFile: envFile}))
 	}
+	if a := contract.Spec.Association; a != nil && a.FromGuest && strings.TrimSpace(a.Subject) != "" {
+		return "", errors.New("spec.association takes a subject or fromGuest, not both")
+	}
+	if fromGuest(contract) {
+		if contract.Spec.SecretsRef == nil {
+			return "", errors.New("spec.association.fromGuest needs spec.secretsRef: the association ref reaches the guest in the secrets bundle")
+		}
+		refFile, err := associationRefFile(contract)
+		if err != nil {
+			return "", err
+		}
+		modules = append(modules, cloudinit.AssociationModule(refFile))
+	}
 	if r.secrets != nil {
 		inbound := r.q.cfg.InboundXRPC()
 		if inbound {

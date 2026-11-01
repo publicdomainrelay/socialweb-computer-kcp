@@ -36,6 +36,8 @@ type GuestEvent struct {
 
 	SecretsCount *int64
 
+	RequesterDID string
+
 	HostKeys []v1alpha1.ComputeVMHostKey
 
 	Termination *v1alpha1.ContractTermination
@@ -60,7 +62,8 @@ func ValidateTicket(address string) (string, error) {
 func isGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID,
-		market.ComputeEventsVMSandboxNSID, market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID:
+		market.ComputeEventsVMSandboxNSID, market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
+		market.ComputeEventsGuestRequesterDIDNSID:
 		return true
 	}
 	return isContractEventNSID(nsid)
@@ -167,6 +170,16 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 		if err != nil {
 			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
 		}
+		out.ObservedAt = record.CreatedAt
+	case market.ComputeEventsGuestRequesterDIDNSID:
+		record, err := market.ParseComputeEventsGuestRequesterDID(event.Payload.Value)
+		if err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		if err := market.ValidGuestRequesterDID(record.DID, q.repoDID); err != nil {
+			return nil, fmt.Errorf("requester: payload %s: %w", event.Payload.URI, err)
+		}
+		out.RequesterDID = record.DID
 		out.ObservedAt = record.CreatedAt
 	case market.ComputeEventsGuestSecretsAppliedNSID:
 		record, err := market.ParseComputeEventsGuestSecretsApplied(event.Payload.Value)
@@ -334,6 +347,10 @@ func seedGuestEventSeen(seen map[string]bool, state *v1alpha1.NodeClaimContract)
 		rememberGuestEvent(seen, state.SecretsApplied.Event.URI)
 		rememberGuestEvent(seen, state.SecretsApplied.Payload.URI)
 	}
+	if state.GuestRequester != nil {
+		rememberGuestEvent(seen, state.GuestRequester.Event.URI)
+		rememberGuestEvent(seen, state.GuestRequester.Payload.URI)
+	}
 }
 
 func guestEventSeen(seen map[string]bool, event MarketEvent) bool {
@@ -376,6 +393,8 @@ func guestEventApplied(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bo
 		return state.SecretsRequested != nil && guestEventRecorded(state.SecretsRequested.Event, state.SecretsRequested.Payload, parsed)
 	case market.ComputeEventsGuestSecretsAppliedNSID:
 		return state.SecretsApplied != nil && guestEventRecorded(state.SecretsApplied.Event, state.SecretsApplied.Payload, parsed)
+	case market.ComputeEventsGuestRequesterDIDNSID:
+		return state.GuestRequester != nil && guestEventRecorded(state.GuestRequester.Event, state.GuestRequester.Payload, parsed)
 	}
 	return false
 }

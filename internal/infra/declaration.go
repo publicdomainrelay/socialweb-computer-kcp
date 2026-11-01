@@ -131,7 +131,7 @@ const DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 const DefaultAssociationRefFile = "/etc/socialweb-computer/association-ref"
 
 func normalAssociation(in *v1alpha1.ComputeContractAssociation) *v1alpha1.ComputeContractAssociation {
-	if in == nil || in.Subject == "" {
+	if in == nil || (in.Subject == "" && !in.FromGuest) {
 		return nil
 	}
 	out := *in

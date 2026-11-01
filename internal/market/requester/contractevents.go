@@ -67,9 +67,9 @@ func validateGuestFields(nsid, kind, tag, key, ciphertext string) error {
 		}
 		return nil
 	}
-	if nsid == market.ComputeEventsGuestAgentStartNSID {
+	if nsid == market.ComputeEventsGuestAgentStartNSID || nsid == market.ComputeEventsGuestSecretsUpdatedNSID {
 		if kind != "" || tag != "" || key != "" || ciphertext != "" {
-			return errors.New("an agentStart event carries no kind, tag, key or ciphertext")
+			return errors.New("an agentStart or secretsUpdated event carries no kind, tag, key or ciphertext")
 		}
 		return nil
 	}
@@ -267,6 +267,9 @@ func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1al
 	if spec.NSID == market.ComputeEventsGuestAgentStartNSID && contract.Spec.Agent == nil {
 		return fail("the ComputeContract " + name + " has no spec.agent; an agentStart starts nothing")
 	}
+	if spec.NSID == market.ComputeEventsGuestSecretsUpdatedNSID && contract.Spec.SecretsRef == nil {
+		return fail("the ComputeContract " + name + " has no spec.secretsRef; a secretsUpdated updates nothing")
+	}
 	state := contract.Status.Contract
 	switch contract.Status.Phase {
 	case v1alpha1.ComputeContractReleased, v1alpha1.ComputeContractFailed:
@@ -372,6 +375,8 @@ func (q *Requester) contractEventRecord(event v1alpha1.ContractEvent) (map[strin
 		return market.EncodeRecord(market.ComputeEventsGuestSecrets{Ciphertext: spec.Ciphertext, CreatedAt: q.nowISO()})
 	case market.ComputeEventsGuestAgentStartNSID:
 		return market.EncodeRecord(market.ComputeEventsGuestAgentStart{CreatedAt: q.nowISO()})
+	case market.ComputeEventsGuestSecretsUpdatedNSID:
+		return market.EncodeRecord(market.ComputeEventsGuestSecretsUpdated{CreatedAt: q.nowISO()})
 	}
 	return nil, fmt.Errorf("nsid %q is not a guest event", spec.NSID)
 }

@@ -237,10 +237,11 @@ func (v *InfraAgent) UnmarshalJSON(b []byte) error {
 }
 
 type InfraAssociation struct {
-	RefFile string                     `json:"refFile,omitempty"`
-	Subject string                     `json:"subject"`
-	Extra   map[string]json.RawMessage `json:"-"`
-	absent  map[string]json.RawMessage
+	FromGuest bool                       `json:"fromGuest,omitempty"`
+	RefFile   string                     `json:"refFile,omitempty"`
+	Subject   string                     `json:"subject,omitempty"`
+	Extra     map[string]json.RawMessage `json:"-"`
+	absent    map[string]json.RawMessage
 }
 
 func (v InfraAssociation) MarshalJSON() ([]byte, error) {

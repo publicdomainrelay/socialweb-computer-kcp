@@ -30,6 +30,8 @@ const (
 	CollectionGuestSecretsApplied   = "com.publicdomainrelay.temp.compute.events.guest.secretsApplied"
 	CollectionGuestSecretsRequested = "com.publicdomainrelay.temp.compute.events.guest.secretsRequested"
 	CollectionGuestAgentStart       = "com.publicdomainrelay.temp.compute.events.guest.agentStart"
+	CollectionGuestRequesterDID     = "com.publicdomainrelay.temp.compute.events.guest.requesterDid"
+	CollectionGuestSecretsUpdated   = "com.publicdomainrelay.temp.compute.events.guest.secretsUpdated"
 	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
@@ -61,7 +63,7 @@ var (
 		collectionScopes([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
-			CollectionGuestAgentStart, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+			CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
@@ -77,7 +79,7 @@ var (
 			CollectionConfigWIFSimple, CollectionComputeVM, CollectionRFP, CollectionAccept,
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
 			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
-			CollectionGuestSecretsRequested,
+			CollectionGuestSecretsRequested, CollectionGuestRequesterDID,
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},

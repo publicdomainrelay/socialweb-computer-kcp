@@ -16,7 +16,7 @@ var secretsModule UserDataModule = func(ctx Context) (UserDataPatch, error) {
 		Packages: []string{"jq", "curl"},
 		WriteFiles: []WriteFileEntry{
 			{
-				Path:        "/usr/local/bin/setup-secrets.sh",
+				Path:        SecretsFetchScriptPath,
 				Owner:       "root:root",
 				Permissions: "0700",
 				Content: `#!/usr/bin/env bash
@@ -51,7 +51,7 @@ late() {
   [ -n "${FALLBACK}" ] && [ "${SECONDS}" -ge "${DEADLINE}" ]
 }
 
-if [ -f "${STAMP}" ]; then
+if [ -f "${STAMP}" ] && [ -z "${` + SecretsRefetchEnv + `:-}" ]; then
   mark_ready "$(cat "${STAMP}" 2>/dev/null || echo 0)"
   exit 0
 fi
@@ -123,7 +123,7 @@ mark_ready "${COUNT}"
 					"Type=oneshot",
 					"RemainAfterExit=yes",
 					"User=root",
-					"ExecStart=/usr/local/bin/setup-secrets.sh",
+					"ExecStart=" + SecretsFetchScriptPath,
 					"StandardOutput=journal",
 					"StandardError=journal",
 					"",

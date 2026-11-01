@@ -1,6 +1,11 @@
 package market
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/bluesky-social/indigo/atproto/syntax"
+)
 
 const (
 	OnNetworkKindIroh   = "iroh"
@@ -42,7 +47,7 @@ func IsGuestEventNSID(nsid string) bool {
 func IsRequesterGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsNSID,
-		ComputeEventsGuestAgentStartNSID:
+		ComputeEventsGuestAgentStartNSID, ComputeEventsGuestSecretsUpdatedNSID:
 		return true
 	}
 	return false
@@ -51,8 +56,21 @@ func IsRequesterGuestEventNSID(nsid string) bool {
 func IsGuestOriginatedEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
-		ComputeEventsGuestSecretsRequestedNSID:
+		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID:
 		return true
 	}
 	return false
+}
+
+func ValidGuestRequesterDID(did, authority string) error {
+	parsed, err := syntax.ParseDID(strings.TrimSpace(did))
+	switch {
+	case err != nil || parsed.String() != did:
+		return fmt.Errorf("market: the guest requester DID %q is not a DID", did)
+	case parsed.Method() != "plc" && parsed.Method() != "web":
+		return fmt.Errorf("market: the guest requester DID %s is not a did:plc or did:web", did)
+	case did == authority:
+		return fmt.Errorf("market: the guest requester DID %s is the authority's own DID", did)
+	}
+	return nil
 }

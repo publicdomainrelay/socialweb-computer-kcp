@@ -52,32 +52,34 @@ var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
 
 type requestRun struct {
-	a               *app
-	vals            clicfg.Values
-	stateRoot       string
-	inv             request.Invocation
-	hold            bool
-	skipSSH         bool
-	exec            string
-	secrets         string
-	transport       string
-	tag             string
-	target          string
-	root            v1alpha1.MarketRequesterSpec
-	contract        v1alpha1.ComputeContractSpec
-	appOptions      []v1alpha1.ApplicationOption
-	contractTimeout time.Duration
-	networkTimeout  time.Duration
-	summary         request.Summary
-	kcp             *request.Kcp
-	standalone      devinstance.Layout
-	instanceDir     string
-	resuming        bool
-	cleanupOnly     bool
-	identity        *request.IdentityStore
-	identityState   *request.Identity
-	identityObject  *v1alpha1.MarketIdentity
-	expectedPDSURL  string
+	a                *app
+	vals             clicfg.Values
+	stateRoot        string
+	inv              request.Invocation
+	hold             bool
+	skipSSH          bool
+	exec             string
+	secrets          string
+	transport        string
+	tag              string
+	target           string
+	root             v1alpha1.MarketRequesterSpec
+	contract         v1alpha1.ComputeContractSpec
+	appOptions       []v1alpha1.ApplicationOption
+	contractTimeout  time.Duration
+	networkTimeout   time.Duration
+	summary          request.Summary
+	kcp              *request.Kcp
+	standalone       devinstance.Layout
+	instanceDir      string
+	resuming         bool
+	cleanupOnly      bool
+	identity         *request.IdentityStore
+	identityState    *request.Identity
+	identityObject   *v1alpha1.MarketIdentity
+	expectedPDSURL   string
+	awaitRefFile     string
+	handshakeStarted bool
 }
 
 func (r *requestRun) openIdentity(name string) error {
@@ -145,10 +147,11 @@ func (r *requestRun) openIdentity(name string) error {
 			return fail(fmt.Errorf("the identity %s has association %q", idName, id.Association))
 		}
 		r.root.Identity.ApprovedAssociations = append([]string(nil), id.ApprovedAssociations...)
-		if r.root.Identity.Association == v1alpha1.AssociationSkip && r.root.Identity.AssociationRef != nil {
+		if r.root.Identity.Association == v1alpha1.AssociationSkip && (r.root.Identity.AssociationRef != nil || r.awaitRefFile != "") {
 			return fail(fmt.Errorf("the identity %s has association Skip; --association-ref needs a RequireApproval identity", idName))
 		}
-		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 && r.root.Identity.AssociationRef == nil {
+		if r.root.Identity.Association == v1alpha1.AssociationRequireApproval && len(r.root.Identity.ApprovedAssociations) == 0 && r.root.Identity.AssociationRef == nil &&
+			r.awaitRefFile == "" {
 			return fail(fmt.Errorf("the identity %s is RequireApproval with no approved operator; pass --association-ref at://<authority>/<collection>/<rkey>#<cid>, or use --skip-qr to create a skip identity", idName))
 		}
 		if id.PLCDirectoryURL != "" && r.root.Network != nil && r.root.Network.PLCDirectoryURL != "" &&
@@ -173,7 +176,7 @@ func (r *requestRun) openIdentity(name string) error {
 			return fail(err)
 		}
 		association := v1alpha1.AssociationSkip
-		if r.root.Identity.AssociationRef != nil {
+		if r.root.Identity.AssociationRef != nil || r.awaitRefFile != "" {
 			association = v1alpha1.AssociationRequireApproval
 		} else if r.root.Identity.Association != v1alpha1.AssociationSkip {
 			return fail(fmt.Errorf("a new identity needs -- --skip-qr or --association-ref at://<authority>/<collection>/<rkey>#<cid>"))
@@ -770,6 +773,9 @@ func (r *requestRun) signIn(ctx context.Context, untilAssociated bool) error {
 				return true, nil
 			}
 			if err := associationRefRefused(obj); err != nil {
+				return false, err
+			}
+			if err := r.guestHandshake(ctx, obj); err != nil {
 				return false, err
 			}
 			if waitsOnPerson(obj) && deadline.Stop() {

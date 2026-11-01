@@ -142,7 +142,9 @@ type ComputeContractAgent struct {
 }
 
 type ComputeContractAssociation struct {
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
+
+	FromGuest bool `json:"fromGuest,omitempty"`
 
 	RefFile string `json:"refFile,omitempty" apigen:"userEndpoint,default=/etc/socialweb-computer/association-ref"`
 }

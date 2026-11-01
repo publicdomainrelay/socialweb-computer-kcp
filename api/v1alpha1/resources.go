@@ -15,7 +15,7 @@ type APIResource = apiresource.APIResource
 var APIResources = []APIResource{
 	{Kind: "Cluster", Plural: "clusters", Revision: 5, Export: "clusters", Object: Cluster{}},
 	{Kind: "Node", Plural: "nodes", Revision: 2, Export: "clusters", Object: Node{}},
-	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 13, Export: "clusters", Object: NodeClaim{}},
+	{Kind: "NodeClaim", Plural: "nodeclaims", Revision: 14, Export: "clusters", Object: NodeClaim{}},
 	{Kind: "ClusterLink", Plural: "clusterlinks", Revision: 2, Export: "clusters", Object: ClusterLink{}},
 	{Kind: "ClusterClientCertificate", Plural: "clusterclientcertificates", Revision: 2, Export: "clusters", Object: ClusterClientCertificate{}, PrinterColumns: []PrinterColumn{
 		{Name: "Cluster", Type: "string", JSONPath: ".spec.clusterRef.name"},
@@ -125,13 +125,13 @@ var APIResources = []APIResource{
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 22, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 23, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Contract", Type: "string", JSONPath: ".status.contract.phase"},
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ContractEvent", Plural: "contractevents", Revision: 3, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ContractEvent", Plural: "contractevents", Revision: 4, Export: "computecontracts", Object: ContractEvent{}, PrinterColumns: []PrinterColumn{
 		{Name: "Contract", Type: "string", JSONPath: ".spec.contractRef.name"},
 		{Name: "Direction", Type: "string", JSONPath: ".spec.direction"},
 		{Name: "NSID", Type: "string", JSONPath: ".spec.nsid"},
@@ -139,8 +139,8 @@ var APIResources = []APIResource{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Infra", Plural: "infras", Revision: 8, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
-	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 8, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Infra", Plural: "infras", Revision: 9, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
+	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 9, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Record", Type: "string", JSONPath: ".status.record.uri"},
 		{Name: "Sync", Type: "string", JSONPath: ".status.record.direction"},
