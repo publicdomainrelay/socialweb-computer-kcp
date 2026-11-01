@@ -17,6 +17,9 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 )
 
 const (
@@ -25,6 +28,10 @@ const (
 	DefaultInfraRetentionDays = 7
 
 	DefaultRetentionMode = v1alpha1.RetentionModeDryRun
+
+	RetentionMaxDays = 3650
+
+	RetentionMaxDelaySeconds = 86400
 
 	RetentionInterval = 24 * time.Hour
 
@@ -37,6 +44,8 @@ const (
 	RetentionDeclaredSelfRKey = "self"
 
 	RetentionListCap = 20000
+
+	RetentionReadCap = 5000
 
 	RetentionDeleteCap = 2000
 
@@ -53,6 +62,8 @@ const (
 	retentionCallTimeout = 30 * time.Second
 
 	retentionSample = 20
+
+	infraKindEphemeral = contractmarket.KindEphemeralInfra
 )
 
 var retentionPayloadNSIDs = []string{
@@ -72,6 +83,42 @@ func RetentionCollections() []string {
 	return append(out, infra.EphemeralInfraNSID)
 }
 
+type infraBinding struct {
+	kind string
+
+	name string
+
+	uris []string
+
+	unbound bool
+}
+
+func (q *Requester) observeInfra(change contractmarket.Change) {
+	key := change.Kind + "/" + change.Name
+	var spec *v1alpha1.InfraRecordBinding
+	var status *v1alpha1.InfraRecordStatus
+	switch {
+	case change.Gone:
+		q.infras.Remove(key)
+		return
+	case change.Infra != nil:
+		spec, status = change.Infra.Spec.Record, change.Infra.Status.Record
+	case change.EphemeralInfra != nil:
+		spec, status = change.EphemeralInfra.Spec.Record, change.EphemeralInfra.Status.Record
+	default:
+		q.infras.Remove(key)
+		return
+	}
+	b := infraBinding{kind: change.Kind, name: change.Name, unbound: spec == nil || strings.TrimSpace(spec.URI) == ""}
+	if spec != nil && strings.TrimSpace(spec.URI) != "" {
+		b.uris = append(b.uris, strings.TrimSpace(spec.URI))
+	}
+	if status != nil && strings.TrimSpace(status.URI) != "" {
+		b.uris = append(b.uris, strings.TrimSpace(status.URI))
+	}
+	q.infras.Put(key, b)
+}
+
 type retentionConfig struct {
 	mode v1alpha1.RetentionMode
 
@@ -84,28 +131,60 @@ type retentionConfig struct {
 	delaySet bool
 
 	keep []string
+
+	rejected []string
+}
+
+func retentionDays(value *int32, fallback int32) time.Duration {
+	days := min(max(ptr.Deref(value, fallback), 0), RetentionMaxDays)
+	return time.Duration(days) * 24 * time.Hour
 }
 
 func (c Config) retention() retentionConfig {
 	spec := ptr.Deref(c.Spec.Retention, v1alpha1.RequesterRetention{})
 	out := retentionConfig{
 		mode:     spec.Mode,
-		age:      time.Duration(ptr.Deref(spec.Days, DefaultRetentionDays)) * 24 * time.Hour,
-		infraAge: time.Duration(ptr.Deref(spec.InfraDays, DefaultInfraRetentionDays)) * 24 * time.Hour,
+		age:      retentionDays(spec.Days, DefaultRetentionDays),
+		infraAge: retentionDays(spec.InfraDays, DefaultInfraRetentionDays),
 		delay:    RetentionStartDelay,
 	}
 	if spec.DelaySeconds != nil {
-		out.delay, out.delaySet = time.Duration(*spec.DelaySeconds)*time.Second, true
+		out.delay, out.delaySet = time.Duration(min(max(*spec.DelaySeconds, 0), RetentionMaxDelaySeconds))*time.Second, true
 	}
 	if out.mode != v1alpha1.RetentionModeDelete {
 		out.mode = DefaultRetentionMode
 	}
 	for _, k := range spec.Keep {
-		if k = strings.TrimSpace(k); k != "" {
-			out.keep = append(out.keep, k)
+		if k = strings.TrimSpace(k); k == "" {
+			continue
 		}
+		normalized, ok := normalizeKeep(k)
+		if !ok {
+			out.rejected = append(out.rejected, k)
+			continue
+		}
+		out.keep = append(out.keep, normalized)
 	}
 	return out
+}
+
+func normalizeKeep(k string) (string, bool) {
+	rest, isURI := strings.CutPrefix(k, "at://")
+	if !isURI {
+		return strings.TrimSuffix(k, "/"), !strings.Contains(k, "://")
+	}
+	authority, _, _ := strings.Cut(rest, "/")
+	if _, err := syntax.ParseDID(authority); err != nil {
+		return "", false
+	}
+	if prefix, ok := strings.CutSuffix(k, "*"); ok {
+		return prefix + "*", true
+	}
+	uri, err := syntax.ParseATURI(strings.TrimSuffix(k, "/"))
+	if err != nil {
+		return "", false
+	}
+	return uri.String(), true
 }
 
 func (r retentionConfig) kept(rec *retainedRecord) bool {
@@ -135,6 +214,8 @@ type retainedRecord struct {
 
 	at time.Time
 
+	ageReason string
+
 	tidKeyed bool
 
 	rfp string
@@ -150,6 +231,16 @@ type retainedRecord struct {
 	infra *infra.EphemeralInfra
 }
 
+type retentionLive struct {
+	uris map[string]bool
+
+	receipts map[string]bool
+
+	infraURIs map[string]bool
+
+	infraNames map[string]bool
+}
+
 type retentionRun struct {
 	q *Requester
 
@@ -163,11 +254,7 @@ type retentionRun struct {
 
 	byURI map[string]*retainedRecord
 
-	protected map[string]bool
-
-	liveReceipts map[string]bool
-
-	liveInfra map[string]bool
+	live retentionLive
 
 	verdicts map[string]string
 
@@ -178,10 +265,17 @@ type retentionRun struct {
 	keptFor map[string]int
 
 	reads int
+
+	failures []string
+
+	capped bool
 }
 
 func (q *Requester) startRetention() {
 	cfg := q.cfg.retention()
+	if len(cfg.rejected) > 0 {
+		q.log.Warn("requester_retention_keep_rejected", "entries", cfg.rejected, "reason", "a keep at-uri must name a DID repo")
+	}
 	if cfg.age <= 0 && cfg.infraAge <= 0 {
 		q.log.Info("requester_retention_off")
 		return
@@ -194,7 +288,7 @@ func (q *Requester) startRetention() {
 func (q *Requester) runRetention(cfg retentionConfig) {
 	stop := q.runContext()
 	delay := cfg.delay
-	if !cfg.delaySet {
+	if !cfg.delaySet && cfg.mode == v1alpha1.RetentionModeDelete {
 		delay = q.retentionDelay(delay)
 	}
 	q.log.Info("requester_retention_scheduled", "mode", cfg.mode, "in", delay.Round(time.Second).String(), "every", RetentionInterval.String())
@@ -238,10 +332,9 @@ func (q *Requester) markRetention() {
 
 func (q *Requester) sweepRetention(stop context.Context, cfg retentionConfig) {
 	run := &retentionRun{q: q, cfg: cfg, stop: stop, now: q.now(), listed: map[string][]*retainedRecord{}, byURI: map[string]*retainedRecord{},
-		protected: map[string]bool{}, liveReceipts: map[string]bool{}, liveInfra: map[string]bool{}, verdicts: map[string]string{},
-		plannedURIs: map[string]bool{}, keptFor: map[string]int{}}
+		verdicts: map[string]string{}, plannedURIs: map[string]bool{}, keptFor: map[string]int{}}
 	started := time.Now()
-	run.protect()
+	run.live = q.retentionLive()
 	listedCount, complete, err := run.list()
 	if err != nil || !complete {
 		q.log.Warn("requester_retention_skipped", "mode", cfg.mode, "listed", listedCount, "cap", RetentionListCap,
@@ -249,11 +342,13 @@ func (q *Requester) sweepRetention(stop context.Context, cfg retentionConfig) {
 		return
 	}
 	run.plan()
-	would, deleted, failed, noScope := run.apply()
+	would, deleted, noScope, dropped := run.apply()
 	if stop.Err() != nil {
 		return
 	}
-	q.markRetention()
+	if cfg.mode == v1alpha1.RetentionModeDelete {
+		q.markRetention()
+	}
 	sample := []string{}
 	for _, group := range run.groups {
 		for _, rec := range group {
@@ -263,8 +358,13 @@ func (q *Requester) sweepRetention(stop context.Context, cfg retentionConfig) {
 		}
 	}
 	q.log.Info("requester_retention_run", "mode", cfg.mode, "days", int(cfg.age/(24*time.Hour)), "infraDays", int(cfg.infraAge/(24*time.Hour)),
-		"listed", run.counts(), "would", would, "deleted", deleted, "failed", failed, "noDeleteScope", noScope, "kept", run.keptFor,
-		"reads", run.reads, "seconds", int(time.Since(started).Seconds()), "sample", sample)
+		"listed", run.counts(), "would", would, "deleted", deleted, "failed", len(run.failures), "failedSample", sampleOf(run.failures),
+		"noDeleteScope", noScope, "liveAtDelete", dropped, "capped", run.capped, "kept", run.keptFor, "reads", run.reads,
+		"seconds", int(time.Since(started).Seconds()), "sample", sample)
+}
+
+func sampleOf(values []string) []string {
+	return values[:min(len(values), retentionSample)]
 }
 
 func (run *retentionRun) counts() map[string]int {
@@ -291,6 +391,10 @@ func retentionFinished(c v1alpha1.ComputeContract) bool {
 	if c.Status.Phase != v1alpha1.ComputeContractReleased && c.Status.Phase != v1alpha1.ComputeContractFailed {
 		return false
 	}
+	if state := c.Status.Contract; state != nil && state.Receipt != nil && state.Receipt.URI != "" &&
+		state.Termination == nil && (state.Release == nil || !state.Release.OK) {
+		return false
+	}
 	switch c.Status.AtircRevokes {
 	case v1alpha1.AtircRevokesDone, v1alpha1.AtircRevokesAbandoned:
 		return true
@@ -300,40 +404,46 @@ func retentionFinished(c v1alpha1.ComputeContract) bool {
 	return c.Spec.Agent == nil && c.Spec.Association == nil
 }
 
-func (run *retentionRun) protect() {
-	for _, c := range run.q.contracts.List() {
+func (q *Requester) retentionLive() retentionLive {
+	live := retentionLive{uris: map[string]bool{}, receipts: map[string]bool{}, infraURIs: map[string]bool{}, infraNames: map[string]bool{}}
+	for _, b := range q.infras.List() {
+		for _, uri := range b.uris {
+			live.infraURIs[uri] = true
+		}
+		live.infraNames[b.name] = true
+	}
+	for _, c := range q.contracts.List() {
 		if kind, name := c.Labels[v1alpha1.InfraKindLabel], c.Labels[v1alpha1.InfraNameLabel]; name != "" && kind == infraKindEphemeral {
-			run.liveInfra[name] = true
+			live.infraNames[name] = true
 		}
 		for _, owner := range c.OwnerReferences {
 			if owner.Kind == infraKindEphemeral {
-				run.liveInfra[owner.Name] = true
+				live.infraNames[owner.Name] = true
 			}
 		}
 		if retentionFinished(c) {
 			continue
 		}
-		run.protectValue(c.Status)
+		live.protect(c.Status)
 		if state := c.Status.Contract; state != nil && state.Receipt != nil && state.Receipt.URI != "" {
-			run.liveReceipts[state.Receipt.URI] = true
+			live.receipts[state.Receipt.URI] = true
 		}
 	}
-	run.q.mu.Lock()
-	runners := slices.Collect(maps.Values(run.q.runners))
-	run.q.mu.Unlock()
+	q.mu.Lock()
+	runners := slices.Collect(maps.Values(q.runners))
+	q.mu.Unlock()
 	for _, runner := range runners {
 		if state := runner.stateCopy(); state != nil {
-			run.protectValue(state)
+			live.protect(state)
 			if state.Receipt != nil && state.Receipt.URI != "" {
-				run.liveReceipts[state.Receipt.URI] = true
+				live.receipts[state.Receipt.URI] = true
 			}
 		}
 	}
+	return live
 }
 
-const infraKindEphemeral = "EphemeralInfra"
-
-func (run *retentionRun) protectValue(v any) {
+func (l retentionLive) protect(v any) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -342,7 +452,17 @@ func (run *retentionRun) protectValue(v any) {
 	if json.Unmarshal(raw, &decoded) != nil {
 		return
 	}
-	collectATURIs(decoded, run.protected)
+	collectATURIs(decoded, l.uris)
+}
+
+func (l retentionLive) holds(rec *retainedRecord) bool {
+	if l.uris[rec.uri] || (rec.receipt != "" && l.receipts[rec.receipt]) {
+		return true
+	}
+	if rec.collection == infra.EphemeralInfraNSID {
+		return l.infraURIs[rec.uri] || l.infraNames[rec.rkey]
+	}
+	return false
 }
 
 func collectATURIs(v any, out map[string]bool) {
@@ -378,13 +498,19 @@ func (run *retentionRun) list() (int, bool, error) {
 			}
 			for _, rec := range page.Records {
 				total++
-				if parsed := retainedOf(collection, rec); parsed != nil {
-					run.listed[collection] = append(run.listed[collection], parsed)
-					run.byURI[parsed.uri] = parsed
+				parsed := run.retainedOf(collection, rec)
+				if parsed == nil {
+					run.keepReason("unparsed")
+					continue
 				}
+				run.listed[collection] = append(run.listed[collection], parsed)
+				run.byURI[parsed.uri] = parsed
 			}
-			if page.Cursor == "" || page.Cursor == cursor || len(page.Records) == 0 {
+			if page.Cursor == "" || len(page.Records) == 0 {
 				break
+			}
+			if page.Cursor == cursor {
+				return total, false, fmt.Errorf("list %s: the PDS repeated the cursor %q", collection, cursor)
 			}
 			cursor = page.Cursor
 		}
@@ -392,29 +518,44 @@ func (run *retentionRun) list() (int, bool, error) {
 	return total, true, nil
 }
 
-func retainedOf(collection string, rec market.ListedRecord) *retainedRecord {
+func (run *retentionRun) retainedOf(collection string, rec market.ListedRecord) *retainedRecord {
 	uri, err := syntax.ParseATURI(rec.URI)
-	if err != nil {
+	if err != nil || uri.Authority().String() != run.q.repoDID || uri.Collection().String() != collection || rec.CID == "" {
 		return nil
 	}
 	out := &retainedRecord{uri: rec.URI, cid: rec.CID, collection: collection, rkey: uri.RecordKey().String()}
-	created, _ := rec.Value["createdAt"].(string)
-	createdAt, createdErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(created))
 	tid, tidErr := syntax.ParseTID(out.rkey)
+	raw, present := rec.Value["createdAt"]
+	created, _ := raw.(string)
 	switch {
-	case createdErr == nil:
-		out.at = createdAt
-		if tidErr == nil {
-			skew := tid.Time().Sub(createdAt)
-			out.tidKeyed = skew < retentionTIDSkew && skew > -retentionTIDSkew
+	case present && strings.TrimSpace(created) != "":
+		createdAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(created))
+		switch {
+		case err != nil:
+			out.ageReason = "badCreatedAt"
+		case createdAt.After(run.now):
+			out.ageReason = "futureCreatedAt"
+		default:
+			out.at = createdAt
+			if tidErr == nil {
+				skew := tid.Time().Sub(createdAt)
+				out.tidKeyed = skew < retentionTIDSkew && skew > -retentionTIDSkew
+			}
 		}
-	case tidErr == nil:
+	case present:
+		out.ageReason = "badCreatedAt"
+	case tidErr == nil && !tid.Time().After(run.now):
 		out.at = tid.Time()
 		out.tidKeyed = true
+	default:
+		out.ageReason = "noAge"
 	}
 	switch collection {
 	case market.AcceptNSID:
 		out.rfp, out.bid, out.payload = refURI(rec.Value, "rfp"), refURI(rec.Value, "bid"), refURI(rec.Value, "payload")
+		if bidder := market.ATURIAuthority(out.bid); strings.HasPrefix(bidder, "did:") && bidder != run.q.repoDID {
+			out.receipt = "at://" + bidder + "/" + market.ReceiptNSID + "/" + market.ReceiptRKey(out.uri, out.cid)
+		}
 	case market.EventNSID:
 		out.receipt, out.payload = refURI(rec.Value, "receipt"), refURI(rec.Value, "payload")
 	case market.RFPNSID:
@@ -444,8 +585,12 @@ func refURI(value map[string]any, key string) string {
 	return strings.TrimSpace(u)
 }
 
-func (run *retentionRun) keep(reason string) bool {
+func (run *retentionRun) keepReason(reason string) {
 	run.keptFor[reason]++
+}
+
+func (run *retentionRun) keep(reason string) bool {
+	run.keepReason(reason)
 	return false
 }
 
@@ -455,11 +600,11 @@ func (run *retentionRun) eligible(rec *retainedRecord, age time.Duration) bool {
 		return false
 	case run.plannedURIs[rec.uri]:
 		return true
-	case rec.at.IsZero():
-		return run.keep("noAge")
+	case rec.ageReason != "":
+		return run.keep(rec.ageReason)
 	case run.now.Sub(rec.at) < age:
 		return run.keep("young")
-	case run.protected[rec.uri]:
+	case run.live.holds(rec):
 		return run.keep("liveContract")
 	case run.cfg.kept(rec):
 		return run.keep("declared")
@@ -484,8 +629,7 @@ func (run *retentionRun) add(group ...*retainedRecord) {
 func (run *retentionRun) plan() {
 	if run.cfg.age > 0 {
 		run.planEvents()
-		finished := run.planAccepts()
-		run.planRFPs(finished)
+		run.planRFPs(run.finishedAccepts())
 	}
 	if run.cfg.infraAge > 0 {
 		run.planInfra()
@@ -497,7 +641,7 @@ func (run *retentionRun) planEvents() {
 	for _, event := range run.listed[market.EventNSID] {
 		if event.receipt == "" || market.ATURIAuthority(event.receipt) == self || market.ATURIAuthority(event.payload) != self ||
 			!slices.Contains(retentionPayloadNSIDs, market.NSIDFromURI(event.payload)) {
-			run.keep("notRequesterEvent")
+			run.keepReason("notRequesterEvent")
 			continue
 		}
 		if !run.eligible(event, run.cfg.age) {
@@ -507,36 +651,26 @@ func (run *retentionRun) planEvents() {
 		if payload != nil && !run.eligible(payload, run.cfg.age) {
 			continue
 		}
-		if run.liveReceipts[event.receipt] {
-			run.keep("liveContract")
-			continue
-		}
 		if reason := run.terminated(event.receipt); reason != "" {
-			run.keep(reason)
+			run.keepReason(reason)
 			continue
 		}
 		run.add(payload, event)
 	}
 }
 
-func (run *retentionRun) planAccepts() map[string]bool {
+func (run *retentionRun) finishedAccepts() map[string]bool {
 	finished := map[string]bool{}
 	for _, accept := range run.listed[market.AcceptNSID] {
 		if !run.eligible(accept, run.cfg.age) {
 			continue
 		}
-		bidder := market.ATURIAuthority(accept.bid)
-		if !strings.HasPrefix(bidder, "did:") || bidder == run.q.repoDID {
-			run.keep("noBidder")
+		if accept.receipt == "" {
+			run.keepReason("noBidder")
 			continue
 		}
-		receipt := "at://" + bidder + "/" + market.ReceiptNSID + "/" + market.ReceiptRKey(accept.uri, accept.cid)
-		if run.liveReceipts[receipt] {
-			run.keep("liveContract")
-			continue
-		}
-		if reason := run.acceptVerdict(receipt, accept.bid); reason != "" {
-			run.keep(reason)
+		if reason := run.acceptVerdict(accept.receipt, accept.bid); reason != "" {
+			run.keepReason(reason)
 			continue
 		}
 		finished[accept.uri] = true
@@ -548,6 +682,9 @@ func (run *retentionRun) planRFPs(finishedAccepts map[string]bool) {
 	acceptsOf := map[string][]*retainedRecord{}
 	for _, accept := range run.listed[market.AcceptNSID] {
 		acceptsOf[accept.rfp] = append(acceptsOf[accept.rfp], accept)
+		if run.byURI[accept.rfp] == nil {
+			run.keepReason("orphanAccept")
+		}
 	}
 	rfpsOf := map[string][]*retainedRecord{}
 	for _, rfp := range run.listed[market.RFPNSID] {
@@ -561,17 +698,22 @@ func (run *retentionRun) planRFPs(finishedAccepts map[string]bool) {
 			continue
 		}
 		if !rfp.tidKeyed {
-			run.keep("reusableRKey")
+			run.keepReason("reusableRKey")
+			continue
+		}
+		accepts := acceptsOf[rfp.uri]
+		if len(accepts) == 0 && run.now.Sub(rfp.at) < market.RFPBidWindow+RetentionTokenBound {
+			run.keepReason("rfpWindowOpen")
 			continue
 		}
 		open := false
-		for _, accept := range acceptsOf[rfp.uri] {
+		for _, accept := range accepts {
 			if !finishedAccepts[accept.uri] {
 				open = true
 			}
 		}
 		if open {
-			run.keep("openAccept")
+			run.keepReason("openAccept")
 			continue
 		}
 		finishedRFP[rfp.uri] = true
@@ -580,17 +722,10 @@ func (run *retentionRun) planRFPs(finishedAccepts map[string]bool) {
 		if !finishedRFP[rfp.uri] {
 			continue
 		}
-		group := []*retainedRecord{}
+		group, held := []*retainedRecord{}, false
 		for _, ref := range append([]string{rfp.payload}, rfp.policies...) {
 			dep := run.byURI[ref]
 			if dep == nil || market.ATURIAuthority(ref) != run.q.repoDID || run.plannedURIs[ref] {
-				continue
-			}
-			if !run.eligible(dep, run.cfg.age) {
-				continue
-			}
-			if !dep.tidKeyed {
-				run.keep("reusableRKey")
 				continue
 			}
 			shared := false
@@ -599,21 +734,26 @@ func (run *retentionRun) planRFPs(finishedAccepts map[string]bool) {
 					shared = true
 				}
 			}
-			if shared {
-				run.keep("sharedWithOpenRFP")
+			switch {
+			case shared:
+				run.keepReason("sharedWithOpenRFP")
+				continue
+			case run.cfg.kept(dep) || run.live.holds(dep):
+				held = true
+			case !run.eligible(dep, run.cfg.age):
+				continue
+			case !dep.tidKeyed:
+				run.keepReason("reusableRKey")
 				continue
 			}
 			group = append(group, dep)
 		}
-		for _, accept := range acceptsOf[rfp.uri] {
-			group = append(group, accept)
+		if held {
+			run.keepReason("declaredGroup")
+			continue
 		}
+		group = append(group, acceptsOf[rfp.uri]...)
 		run.add(append(group, rfp)...)
-	}
-	for _, accept := range run.listed[market.AcceptNSID] {
-		if finishedAccepts[accept.uri] {
-			run.add(accept)
-		}
 	}
 }
 
@@ -622,12 +762,8 @@ func (run *retentionRun) planInfra() {
 		if !run.eligible(rec, run.cfg.infraAge) {
 			continue
 		}
-		if run.liveInfra[rec.rkey] {
-			run.keep("liveInfra")
-			continue
-		}
 		if reason := run.infraVerdict(rec); reason != "" {
-			run.keep(reason)
+			run.keepReason(reason)
 			continue
 		}
 		run.add(rec)
@@ -644,24 +780,47 @@ func (run *retentionRun) infraVerdict(rec *retainedRecord) string {
 		end, _ = time.Parse(time.RFC3339Nano, ei.Status.ExpiresAt)
 	}
 	if end.IsZero() && ei.TtlSeconds > 0 {
-		end = rec.at.Add(time.Duration(ei.TtlSeconds) * time.Second)
+		end = rec.at.Add(time.Duration(min(ei.TtlSeconds, int64(RetentionMaxDays)*86400)) * time.Second)
 	}
 	if end.IsZero() || run.now.Sub(end) < RetentionTokenBound {
 		return "infraNotEnded"
 	}
 	status := map[string]infra.InfraContractStatus{}
+	names := []string{}
 	if ei.Status != nil {
 		for _, s := range ei.Status.Contracts {
 			status[s.Name] = s
+			names = append(names, s.Name)
 		}
 	}
+	spec := map[string]infra.InfraContract{}
 	for _, c := range ei.Contracts {
-		s := status[c.Name]
-		if s.Receipt != "" && run.liveReceipts[s.Receipt] {
+		spec[c.Name] = c
+		if _, ok := status[c.Name]; !ok {
+			return "infraContractNoStatus"
+		}
+	}
+	for _, name := range names {
+		s := status[name]
+		if s.Receipt != "" && run.live.receipts[s.Receipt] {
 			return "liveContract"
 		}
-		if s.Phase == string(v1alpha1.InfraContractPhaseReleased) || s.Receipt == "" {
+		switch v1alpha1.InfraContractPhase(s.Phase) {
+		case v1alpha1.InfraContractPhaseReleased:
 			continue
+		case v1alpha1.InfraContractPhaseStaged:
+			if c, ok := spec[name]; ok && c.State == "staged" && s.Receipt == "" {
+				continue
+			}
+			return "infraContractOpen"
+		case v1alpha1.InfraContractPhaseFailed:
+			if s.Receipt == "" {
+				continue
+			}
+		default:
+			if s.Receipt == "" {
+				return "infraContractOpen"
+			}
 		}
 		if reason := run.terminated(s.Receipt); reason != "" {
 			return reason
@@ -671,6 +830,9 @@ func (run *retentionRun) infraVerdict(rec *retainedRecord) string {
 }
 
 func (run *retentionRun) read(repo, collection, rkey string) (market.ResolvedRecord, error) {
+	if run.reads >= RetentionReadCap {
+		return market.ResolvedRecord{}, errRetentionReadCap
+	}
 	if err := sleepCtx(run.stop, RetentionReadGap); err != nil {
 		return market.ResolvedRecord{}, err
 	}
@@ -680,12 +842,21 @@ func (run *retentionRun) read(repo, collection, rkey string) (market.ResolvedRec
 	return run.q.repo.GetRecord(ctx, repo, collection, rkey)
 }
 
+var errRetentionReadCap = errors.New("requester: the retention read cap is reached")
+
 func recordAbsent(err error) bool {
-	if !errors.Is(err, market.ErrNotFound) {
-		return false
+	if errors.Is(err, atprotorepo.ErrNotFound) {
+		return true
 	}
-	text := err.Error()
-	return strings.Contains(text, "HTTP 400") || strings.Contains(text, "HTTP 404") || strings.Contains(text, "no record value")
+	failure, ok := errors.AsType[*xrpc.Error](err)
+	return ok && failure.Status == 400 && failure.Name == "RecordNotFound"
+}
+
+func unreadable(err error) string {
+	if errors.Is(err, errRetentionReadCap) {
+		return "readCap"
+	}
+	return "unreadable"
 }
 
 func (run *retentionRun) terminated(receipt string) string {
@@ -694,7 +865,9 @@ func (run *retentionRun) terminated(receipt string) string {
 		return reason
 	}
 	reason := run.readTermination(receipt)
-	run.verdicts[key] = reason
+	if reason != "readCap" {
+		run.verdicts[key] = reason
+	}
 	return reason
 }
 
@@ -710,7 +883,7 @@ func (run *retentionRun) readTermination(receipt string) string {
 	case recordAbsent(err):
 		return "noTermination"
 	default:
-		return "unreadable"
+		return unreadable(err)
 	}
 	at := time.Time{}
 	for _, key := range []string{"observedAt", "createdAt"} {
@@ -720,7 +893,7 @@ func (run *retentionRun) readTermination(receipt string) string {
 			}
 		}
 	}
-	if at.IsZero() || run.now.Sub(at) < RetentionTokenBound {
+	if at.IsZero() || at.After(run.now) || run.now.Sub(at) < RetentionTokenBound {
 		return "terminatedRecently"
 	}
 	return ""
@@ -736,7 +909,9 @@ func (run *retentionRun) acceptVerdict(receipt, bid string) string {
 		return cached
 	}
 	verdict := run.readReceiptAbsence(receipt, bid)
-	run.verdicts[key] = verdict
+	if verdict != "readCap" {
+		run.verdicts[key] = verdict
+	}
 	return verdict
 }
 
@@ -749,7 +924,7 @@ func (run *retentionRun) readReceiptAbsence(receipt, bid string) string {
 	if _, err := run.read(bidder, market.ReceiptNSID, aturi.RecordKey().String()); err == nil {
 		return "noTermination"
 	} else if !recordAbsent(err) {
-		return "unreadable"
+		return unreadable(err)
 	}
 	bidURI, err := syntax.ParseATURI(bid)
 	if err != nil || bidURI.Authority().String() != bidder {
@@ -776,9 +951,9 @@ func (run *retentionRun) deletable(collection string, cache map[string]bool) boo
 	return allowed
 }
 
-func (run *retentionRun) apply() (map[string]int, map[string]int, int, map[string]int) {
+func (run *retentionRun) apply() (map[string]int, map[string]int, map[string]int, int) {
 	would, deleted, noScope := map[string]int{}, map[string]int{}, map[string]int{}
-	failed, attempts := 0, 0
+	dropped, attempts := 0, 0
 	scopes := map[string]bool{}
 	allowed := make([]bool, len(run.groups))
 	for i, group := range run.groups {
@@ -796,32 +971,38 @@ func (run *retentionRun) apply() (map[string]int, map[string]int, int, map[strin
 		}
 	}
 	if run.cfg.mode != v1alpha1.RetentionModeDelete {
-		return would, deleted, failed, noScope
+		return would, deleted, noScope, dropped
 	}
 groups:
 	for i, group := range run.groups {
 		if !allowed[i] {
 			continue
 		}
+		live := run.q.retentionLive()
+		for _, rec := range group {
+			if live.holds(rec) {
+				dropped++
+				continue groups
+			}
+		}
 		for _, rec := range group {
 			if attempts >= RetentionDeleteCap {
-				run.q.log.Info("requester_retention_cap", "cap", RetentionDeleteCap, "reason", "the next run deletes the rest")
-				return would, deleted, failed, noScope
+				run.capped = true
+				return would, deleted, noScope, dropped
 			}
 			if err := sleepCtx(run.stop, RetentionDeleteGap); err != nil {
-				return would, deleted, failed, noScope
+				return would, deleted, noScope, dropped
 			}
 			attempts++
 			ctx, cancel := context.WithTimeout(run.stop, retentionCallTimeout)
-			err := run.q.repo.DeleteRecord(ctx, run.q.repoDID, rec.collection, rec.rkey)
+			err := run.q.repo.DeleteRecordSwap(ctx, run.q.repoDID, rec.collection, rec.rkey, rec.cid)
 			cancel()
-			if err != nil && !errors.Is(err, market.ErrNotFound) {
-				failed++
-				run.q.log.Warn("requester_retention_delete_failed", "uri", rec.uri, "err", err.Error())
+			if err != nil {
+				run.failures = append(run.failures, rec.uri+": "+err.Error())
 				continue groups
 			}
 			deleted[shortNSID(rec.collection)]++
 		}
 	}
-	return would, deleted, failed, noScope
+	return would, deleted, noScope, dropped
 }

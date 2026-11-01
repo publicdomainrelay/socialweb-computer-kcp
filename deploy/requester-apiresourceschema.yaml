@@ -690,14 +690,17 @@ spec:
                     type: integer
                     format: int32
                     minimum: 0
+                    maximum: 3650
                   infraDays:
                     type: integer
                     format: int32
                     minimum: 0
+                    maximum: 3650
                   delaySeconds:
                     type: integer
                     format: int32
                     minimum: 0
+                    maximum: 86400
                   keep:
                     type: array
                     items:

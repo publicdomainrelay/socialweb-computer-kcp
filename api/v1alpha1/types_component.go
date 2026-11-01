@@ -478,11 +478,11 @@ const (
 type RequesterRetention struct {
 	Mode RetentionMode `json:"mode,omitempty" apigen:"enum=DryRun|Delete"`
 
-	Days *int32 `json:"days,omitempty" apigen:"minimum=0"`
+	Days *int32 `json:"days,omitempty" apigen:"minimum=0,maximum=3650"`
 
-	InfraDays *int32 `json:"infraDays,omitempty" apigen:"minimum=0"`
+	InfraDays *int32 `json:"infraDays,omitempty" apigen:"minimum=0,maximum=3650"`
 
-	DelaySeconds *int32 `json:"delaySeconds,omitempty" apigen:"minimum=0"`
+	DelaySeconds *int32 `json:"delaySeconds,omitempty" apigen:"minimum=0,maximum=86400"`
 
 	Keep []string `json:"keep,omitempty"`
 }

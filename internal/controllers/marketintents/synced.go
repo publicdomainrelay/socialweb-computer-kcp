@@ -24,6 +24,8 @@ var kindGVKs = map[string]schema.GroupVersionKind{
 	market.KindComputeContract: v1alpha1.GroupVersion.WithKind(market.KindComputeContract),
 	market.KindExposure:        exposurev1alpha1.GroupVersion.WithKind(market.KindExposure),
 	market.KindMarketIdentity:  v1alpha1.GroupVersion.WithKind(market.KindMarketIdentity),
+	market.KindInfra:           v1alpha1.GroupVersion.WithKind(market.KindInfra),
+	market.KindEphemeralInfra:  v1alpha1.GroupVersion.WithKind(market.KindEphemeralInfra),
 }
 
 func (s *subscriber) matches(workspace, kind string) bool {

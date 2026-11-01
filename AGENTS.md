@@ -159,14 +159,18 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
 - Record retention (`internal/market/requester/retention.go`, `docs/ARCHITECTURE.md` section 15,
   rc137): every requester sweeps its own repo 5 min after its controllers are synced and then every
   24 h. Requester (and MarketRequester) `spec.retention {mode: DryRun|Delete, days: 30, infraDays: 7,
-  delaySeconds: 300, keep}` (`run request -- --retention-mode Delete`, `--retention-delay-seconds 0`, ...); the default mode is DryRun on every host, so it only logs `requester_retention_run`
-  until a spec says Delete. It is an allowlist: market.accept, market.event, market.rfp,
-  compute.vm, vm.delete, the requester's guest.* payloads, policy.ghalite and ephemeralInfra;
-  never badgeBlueKeys, associations, bids, receipts or any other collection, never an rkey `self`
-  or `fixture-*`. A record goes only when it is older than the retention, no unfinished
-  ComputeContract of this kcp names it, and the bidder's vm.terminated for its receipt is over
-  48 h old (or the bidder never wrote a receipt). The listRecords of the sweep is the one allowed
-  enumeration: paged, once per run, capped, and a cut listing deletes nothing.
+  delaySeconds: 300, keep}`, days at most 3650 (`run request -- --retention-mode Delete
+  --retention-delay-seconds 0 ...`). The gateway and the CLI default to DryRun (only the
+  `requester_retention_run` line); pkg/embedded and the page compose `days: 0, infraDays: 0` (off)
+  unless their config opts in; only a spec that says Delete deletes. It is an allowlist:
+  market.accept, market.event, market.rfp, compute.vm, vm.delete, the requester's guest.* payloads,
+  policy.ghalite and ephemeralInfra; never badgeBlueKeys, associations, bids, receipts or any other
+  collection, never an rkey `self` or `fixture-*`. A record goes only when its `createdAt` is older
+  than the retention (a bad or future one keeps it), no unfinished ComputeContract and no Infra or
+  EphemeralInfra object of this kcp names it (read again before each group), and the bidder's
+  vm.terminated for its receipt is over 48 h old (or the bidder never wrote a receipt); deletes
+  carry swapRecord. The listRecords of the sweep is the one allowed enumeration: paged, once per
+  run, capped, and a cut listing deletes nothing.
 - The bidder's requester streams (any comms mode, `internal/app/compose/requesterstreams.go`): requester
   events reach the bidder through submitEvent first; as a record-only fallback, while the bidder has
   live ComputeVMs (not deleted, not Lost or Failed), it composes EventStreams with the bidder's market NSIDs

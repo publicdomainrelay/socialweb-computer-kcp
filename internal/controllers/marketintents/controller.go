@@ -146,6 +146,9 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		forward(m, c, opts.Scope, market.KindExposure, ExportExposures, "", 1, func(ch *market.Change, o *exposurev1alpha1.Exposure) { ch.Exposure = o }),
 		forward(m, c, opts.Scope, market.KindMarketIdentity, ExportMarketIdentities, "", 1,
 			func(ch *market.Change, o *v1alpha1.MarketIdentity) { ch.MarketIdentity = o }),
+		forward(m, c, opts.Scope, market.KindInfra, ExportComputeContracts, "", 1, func(ch *market.Change, o *v1alpha1.Infra) { ch.Infra = o }),
+		forward(m, c, opts.Scope, market.KindEphemeralInfra, ExportComputeContracts, "", 1,
+			func(ch *market.Change, o *v1alpha1.EphemeralInfra) { ch.EphemeralInfra = o }),
 	)
 	if err != nil {
 		return nil, err

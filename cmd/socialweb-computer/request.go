@@ -1620,10 +1620,10 @@ func applyRetentionOption(cur *v1alpha1.RequesterRetention, name, value string) 
 		out = cur.DeepCopy()
 	}
 	value = strings.TrimSpace(value)
-	number := func() (*int32, error) {
+	number := func(most int64) (*int32, error) {
 		n, err := strconv.ParseInt(value, 10, 32)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("--%s %q: want a whole number, 0 or more", name, value)
+		if err != nil || n < 0 || n > most {
+			return nil, fmt.Errorf("--%s %q: want a whole number from 0 to %d", name, value, most)
 		}
 		return ptr.To(int32(n)), nil
 	}
@@ -1637,11 +1637,11 @@ func applyRetentionOption(cur *v1alpha1.RequesterRetention, name, value string) 
 			return nil, fmt.Errorf("--retention-mode %q: want DryRun or Delete", value)
 		}
 	case "retention-days":
-		out.Days, err = number()
+		out.Days, err = number(requester.RetentionMaxDays)
 	case "retention-infra-days":
-		out.InfraDays, err = number()
+		out.InfraDays, err = number(requester.RetentionMaxDays)
 	case "retention-delay-seconds":
-		out.DelaySeconds, err = number()
+		out.DelaySeconds, err = number(requester.RetentionMaxDelaySeconds)
 	case "retention-keep":
 		out.Keep = append(out.Keep, splitList(value)...)
 	default:
