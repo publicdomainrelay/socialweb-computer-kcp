@@ -275,6 +275,8 @@ type Requester struct {
 
 	atircMintRetrying sync.Map
 
+	atircLeaseFallback atomic.Bool
+
 	atircRevokesStarted sync.Map
 
 	orphanSweep sync.Once

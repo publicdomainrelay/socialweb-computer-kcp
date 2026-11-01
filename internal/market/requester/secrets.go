@@ -62,6 +62,80 @@ type secretsState struct {
 	fetched chan struct{}
 
 	once sync.Once
+
+	unminted map[string]bool
+
+	mintTried bool
+
+	servedUnminted bool
+}
+
+func (s *secretsState) withholdUnminted(paths ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, path := range paths {
+		if s.unminted == nil {
+			s.unminted = map[string]bool{}
+		}
+		s.unminted[path] = true
+	}
+}
+
+func (s *secretsState) mintHeld() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.unminted) > 0 && !s.mintTried
+}
+
+func (s *secretsState) mintAttempted() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := len(s.unminted) > 0 && !s.mintTried
+	s.mintTried = true
+	return held
+}
+
+func (s *secretsState) minted(path string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unminted[path] {
+		return false
+	}
+	delete(s.unminted, path)
+	return s.servedUnminted
+}
+
+func (s *secretsState) servable(entries []SecretEntry) []SecretEntry {
+	if s == nil {
+		return entries
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.servableLocked(entries)
+}
+
+func (s *secretsState) servableLocked(entries []SecretEntry) []SecretEntry {
+	if len(s.unminted) == 0 {
+		return entries
+	}
+	out := make([]SecretEntry, 0, len(entries))
+	for _, entry := range entries {
+		if s.unminted[entry.Path] {
+			s.servedUnminted = true
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func newSecretsState(name string, log *slog.Logger) *secretsState {
@@ -116,8 +190,8 @@ func (s *secretsState) markFetched(now string) bool {
 func (s *secretsState) fetch(ctx context.Context, authorization string) ([]SecretEntry, error) {
 	s.mu.Lock()
 	issuer, audience, subject, verifier := s.issuer, s.audience, s.subject, s.verifier
-	entries := append([]SecretEntry(nil), s.entries...)
 	already := s.fetchedAt
+	held := len(s.unminted) > 0 && !s.mintTried
 	s.mu.Unlock()
 	if verifier == nil || issuer == "" || audience == "" || subject == "" {
 		s.log.Warn("the secrets server is not ready", "contract", s.name)
@@ -137,6 +211,13 @@ func (s *secretsState) fetch(ctx context.Context, authorization string) ([]Secre
 		s.log.Warn("the guest's secrets token names another subject", "contract", s.name, "subject", subject)
 		return nil, &RequestError{Status: http.StatusUnauthorized, Code: "InvalidToken"}
 	}
+	if held {
+		s.log.Info("the guest's secrets wait for the atirc token mint after the receipt", "contract", s.name)
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "TokenPending"}
+	}
+	s.mu.Lock()
+	entries := s.servableLocked(append([]SecretEntry(nil), s.entries...))
+	s.mu.Unlock()
 	if already == "" {
 		s.markFetched(time.Now().UTC().Format(time.RFC3339Nano))
 	}
@@ -392,6 +473,9 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	}
 	state := newSecretsState(r.name, r.q.log)
 	state.addEntries(entries...)
+	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" && !liveAtircEntry(entries, envFile, r.q.now()) {
+		state.withholdUnminted(envFile)
+	}
 	url := ""
 	if inbound {
 		if url, err = r.q.ingressExposureURL(ctx); err != nil {

@@ -233,7 +233,7 @@ func (r *contractRunner) finishAssociation(ctx context.Context, contract v1alpha
 		return "", nil
 	}
 	if state != nil && state.Accept != nil {
-		if err := r.ensureGuestRequesterToken(ctx, contract, *state.Accept, current.expiresAt); err != nil {
+		if err := r.ensureGuestRequesterToken(ctx, contract, state, current.ref, current.expiresAt); err != nil {
 			return "mint the guest requester's atirc token", err
 		}
 	}

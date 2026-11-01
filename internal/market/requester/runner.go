@@ -237,9 +237,6 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 	}
 	state = r.stateCopy()
-	if state != nil && state.RFPURI != "" {
-		r.ensureAtircToken(ctx, contract, state.RFPURI)
-	}
 	if state != nil && state.Receipt != nil {
 		if err := r.resumeReceipt(ctx, state); err != nil && !r.q.stopping() {
 			r.recordFailure(ctx, r.stateCopy(), err, 1)
@@ -433,7 +430,6 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		rfpURI, rfpCID = rfp.URI, rfp.CID
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; collecting bids", state, nil, nil, "collectingBids", 1)
-	r.ensureAtircToken(ctx, contract, rfpURI)
 
 	if state.Accept != nil && state.Accept.URI != "" {
 		return r.resumeAccepted(ctx, state)
@@ -811,6 +807,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Termination != nil {
 		return nil
 	}
+	r.ensureAtircToken(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receipt.URI, winnerDID(state))
 }
 
@@ -859,6 +856,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Timestamps.Receipt == "" {
 		state.Timestamps.Receipt = r.q.nowISO()
 	}
+	r.ensureAtircToken(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receiptRef.URI, bidderDID)
 }
 
