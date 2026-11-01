@@ -19,7 +19,7 @@ const (
 
 	PolicyRecordType = participant.PolicyRecordType
 
-	DefaultPolicyAllowTTL = 24 * time.Hour
+	PolicyAllowTTL = 5 * time.Minute
 
 	PolicyAllowMaxEntries = 4096
 )
@@ -36,7 +36,7 @@ type policyEvaluator struct {
 
 func newPolicyEvaluator(client *runs.Client, scope string, records *market.RepoStore, ttl time.Duration) *policyEvaluator {
 	return &policyEvaluator{runs: client, scope: scope, records: records,
-		allowed: ttlcache.New[string, participant.PolicyDecision](ttlcache.Options{TTL: cmp.Or(ttl, DefaultPolicyAllowTTL), MaxEntries: PolicyAllowMaxEntries})}
+		allowed: ttlcache.New[string, participant.PolicyDecision](ttlcache.Options{TTL: min(cmp.Or(ttl, PolicyAllowTTL), PolicyAllowTTL), MaxEntries: PolicyAllowMaxEntries})}
 }
 
 func (e *policyEvaluator) workflow() string {
