@@ -65,7 +65,7 @@ func (s *RepoStore) local(repo string) bool {
 
 func mapError(err error) error {
 	if errors.Is(err, atprotorepo.ErrNotFound) {
-		return fmt.Errorf("%w: %w", ErrNotFound, err)
+		return fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
 	return err
 }
@@ -135,18 +135,6 @@ func (s *RepoStore) DeleteRecord(ctx context.Context, repoDID, collection, rkey 
 		return err
 	}
 	return mapError(repo.DeleteRecord(ctx, collection, rkey))
-}
-
-func (s *RepoStore) DeleteRecordSwap(ctx context.Context, repoDID, collection, rkey, swapCID string) error {
-	repo, err := s.repo(ctx, repoDID)
-	if err != nil {
-		return err
-	}
-	swap, ok := repo.(atprotorepo.SwapDeleter)
-	if !ok {
-		return fmt.Errorf("market: the repo of %s offers no swap delete", s.did)
-	}
-	return mapError(swap.DeleteRecordSwap(ctx, collection, rkey, swapCID))
 }
 
 func (s *RepoStore) GetRecord(ctx context.Context, repoDID, collection, rkey string) (ResolvedRecord, error) {

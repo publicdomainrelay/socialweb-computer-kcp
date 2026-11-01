@@ -95,6 +95,3 @@ runtimeOwned:
   - {collection: com.publicdomainrelay.temp.badgeBlueKeys, rkeys: 32-character base58 BadgeBlueKeysRkey, writer: "internal/market/requester identity.go (one key claim per page, iOS or CLI requester key)"}
   - {collection: com.publicdomainrelay.temp.market.association, rkeys: contract-scoped, writer: "internal/market/requester association.go (written after an accept, deleted at release)"}
   - {collection: computer.socialweb.infra, rkeys: per Infra, writer: internal/controllers/infra}
-retentionKeep:
-  collections: [app.bsky.*, sh.tangled.*, org.tangled.*, town.delve.*, com.fedfork.irc.agentOperator, bot.did.registration, com.publicdomainrelay.temp.auth.allowlist.rbacDid, com.publicdomainrelay.temp.badgeBlueKeys, com.publicdomainrelay.temp.market.offering, com.publicdomainrelay.temp.market.heartbeat, com.publicdomainrelay.temp.market.association, computer.socialweb.infra]
-  rkeyPrefix: fixture-

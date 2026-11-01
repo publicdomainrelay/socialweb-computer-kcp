@@ -25,10 +25,6 @@ const (
 	KindExposure = "Exposure"
 
 	KindMarketIdentity = "MarketIdentity"
-
-	KindInfra = "Infra"
-
-	KindEphemeralInfra = "EphemeralInfra"
 )
 
 var (
@@ -57,10 +53,6 @@ type Change struct {
 	Exposure *exposurev1alpha1.Exposure
 
 	MarketIdentity *v1alpha1.MarketIdentity
-
-	Infra *v1alpha1.Infra
-
-	EphemeralInfra *v1alpha1.EphemeralInfra
 }
 
 type Observer interface {

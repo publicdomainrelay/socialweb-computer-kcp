@@ -68,6 +68,3 @@ runtimeOwned:
   - {collection: com.publicdomainrelay.temp.market.offering, rkeys: 3msbt7akfhk2m, writer: "internal/market/bidder offering.go (refreshes refreshedAt)"}
   - {collection: com.publicdomainrelay.temp.market.heartbeat, rkeys: self, writer: "internal/market/bidder offering.go and internal/controllers/marketpresence (rewrites createdAt)"}
   - {collection: com.publicdomainrelay.temp.badgeBlueKeys, rkeys: 32-character base58 BadgeBlueKeysRkey, writer: "internal/market/bidder offering.go (the bidder key claim)"}
-retentionKeep:
-  collections: [app.bsky.*, sh.tangled.*, org.tangled.*, town.delve.*, com.fedfork.irc.agentOperator, bot.did.registration, com.publicdomainrelay.temp.auth.allowlist.rbacDid, com.publicdomainrelay.temp.badgeBlueKeys, com.publicdomainrelay.temp.market.offering, com.publicdomainrelay.temp.market.heartbeat]
-  rkeyPrefix: fixture-
