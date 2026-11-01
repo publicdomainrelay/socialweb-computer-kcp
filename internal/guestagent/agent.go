@@ -56,6 +56,10 @@ type Agent struct {
 	applied map[string]bool
 
 	reportedDID string
+
+	sharedGID int
+
+	shared bool
 }
 
 func New(cfg Config, log *slog.Logger) (*Agent, error) {

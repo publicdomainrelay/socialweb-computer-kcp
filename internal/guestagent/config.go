@@ -28,6 +28,16 @@ const (
 
 	RequesterDIDFile = "requester-did"
 
+	AssociationRequestFile = "association-request.json"
+
+	AssociationRefFile = "association-ref"
+
+	RequesterAtircEnvFile = "r2-atirc.env"
+
+	RequesterGroup = "socialweb-r2"
+
+	RequesterDir = "/run/socialweb-r2"
+
 	DefaultSecretsFetchScript = "/usr/local/bin/setup-secrets.sh"
 
 	SecretsReadyFile = "secrets.ready"

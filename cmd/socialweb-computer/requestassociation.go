@@ -58,13 +58,16 @@ func associationRefOf(value string) (*commonv1.StrongRef, string, error) {
 	case "", "false":
 		return nil, "", nil
 	case "true":
-		value = cloudinit.DefaultAssociationRefFile
+		value = guestPaths().ref
 	}
 	if !strings.HasPrefix(value, "/") {
 		ref, err := parseAssociationRef(value)
 		return ref, "", err
 	}
 	content, err := readAssociationRefFile(value)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, value, nil
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -90,7 +93,7 @@ func (r *requestRun) associationRef(network bool) error {
 	if wait != "" {
 		r.awaitRefFile = wait
 		r.log("the association ref file is empty; this requester reports its DID to the guest agent and waits for the ref", "file", wait,
-			"didFile", cloudinit.GuestRequesterDIDPath)
+			"didFile", guestPaths().did)
 		return nil
 	}
 	r.root.Identity.AssociationRef = ref
@@ -126,11 +129,12 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 	if err := market.ValidGuestRequesterDID(did, ""); err != nil {
 		return err
 	}
-	dir := filepath.Dir(cloudinit.GuestRequesterDIDPath)
+	paths := guestPaths()
+	dir := filepath.Dir(paths.did)
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("the guest agent state dir %s is missing; --association-ref with an empty ref file needs a guest of a contract with spec.association.fromGuest", dir)
 	}
-	request, err := readAssociationRequest(cloudinit.DefaultAssociationRequestFile)
+	request, err := readAssociationRequest(paths.request)
 	if err != nil {
 		return err
 	}
@@ -169,12 +173,13 @@ func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Wa
 		r.a.log.Error("the association request record is not in this requester's repo; the DID is not reported", "err", err.Error())
 		return
 	}
-	part := cloudinit.GuestRequesterDIDPath + ".part"
+	didFile := guestPaths().did
+	part := didFile + ".part"
 	if err := os.WriteFile(part, []byte(did+"\n"), 0o600); err != nil {
 		r.a.log.Error("handing the requester DID to the guest agent", "err", err.Error())
 		return
 	}
-	if err := os.Rename(part, cloudinit.GuestRequesterDIDPath); err != nil {
+	if err := os.Rename(part, didFile); err != nil {
 		r.a.log.Error("handing the requester DID to the guest agent", "err", err.Error())
 		return
 	}
@@ -192,7 +197,7 @@ func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Wa
 		next := root
 		next.Identity.AssociationRef = ref
 		if parent, err := r.atircParent(ctx); err != nil {
-			r.a.log.Warn("the guest requester's atirc token is not usable for its own agents", "file", cloudinit.GuestRequesterAtircEnvFile, "err", err.Error())
+			r.a.log.Warn("the guest requester's atirc token is not usable for its own agents", "file", guestPaths().atirc, "err", err.Error())
 		} else if parent != nil {
 			next.AtircParentRef = parent
 		}
@@ -317,7 +322,8 @@ func runRequestAssociate(ctx context.Context, a *app, vals clicfg.Values, rest [
 }
 
 func (r *requestRun) atircParent(ctx context.Context) (*commonv1.SecretRef, error) {
-	raw, err := os.ReadFile(cloudinit.GuestRequesterAtircEnvFile)
+	atircFile := guestPaths().atirc
+	raw, err := os.ReadFile(atircFile)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -332,13 +338,28 @@ func (r *requestRun) atircParent(ctx context.Context) (*commonv1.SecretRef, erro
 	}
 	token, subhandle, exp := values[requester.AtircTokenEnv], values[requester.AtircSubhandleEnv], values[requester.AtircExpEnv]
 	if token == "" || subhandle == "" || exp == "" {
-		return nil, fmt.Errorf("%s names no %s, %s and %s", cloudinit.GuestRequesterAtircEnvFile, requester.AtircTokenEnv, requester.AtircSubhandleEnv, requester.AtircExpEnv)
+		return nil, fmt.Errorf("%s names no %s, %s and %s", atircFile, requester.AtircTokenEnv, requester.AtircSubhandleEnv, requester.AtircExpEnv)
 	}
 	ref, err := r.kcp.PutSecret(ctx, request.AtircParentPath, map[string]any{"token": token, "subhandle": subhandle, "exp": exp},
 		"the guest requester's atirc token", r.networkTimeout)
 	if err != nil {
 		return nil, err
 	}
-	r.log("this requester mints its own agents' atirc tokens below its token", "subhandle", subhandle, "file", cloudinit.GuestRequesterAtircEnvFile)
+	r.log("this requester mints its own agents' atirc tokens below its token", "subhandle", subhandle, "file", atircFile)
 	return &ref, nil
+}
+
+type guestRequesterPaths struct {
+	request, did, ref, atirc string
+}
+
+func guestPaths() guestRequesterPaths {
+	if fi, err := os.Stat(cloudinit.GuestRequesterDir); err == nil && fi.IsDir() {
+		dir := cloudinit.GuestRequesterDir
+		return guestRequesterPaths{request: filepath.Join(dir, filepath.Base(cloudinit.DefaultAssociationRequestFile)),
+			did: filepath.Join(dir, filepath.Base(cloudinit.GuestRequesterDIDPath)), ref: filepath.Join(dir, filepath.Base(cloudinit.DefaultAssociationRefFile)),
+			atirc: filepath.Join(dir, filepath.Base(cloudinit.GuestRequesterAtircEnvFile))}
+	}
+	return guestRequesterPaths{request: cloudinit.DefaultAssociationRequestFile, did: cloudinit.GuestRequesterDIDPath,
+		ref: cloudinit.DefaultAssociationRefFile, atirc: cloudinit.GuestRequesterAtircEnvFile}
 }

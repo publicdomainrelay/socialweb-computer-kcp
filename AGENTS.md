@@ -198,10 +198,17 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association
     after the accept; with fromGuest, user_data writes `/etc/socialweb-guest-agent/association.json`,
     the bundle carries `/etc/socialweb-computer/association-request.json` {authority, contract (the
-    accept uri), nonce}; the requester inside the guest (`run request --association-ref`, run as root,
-    finding the ref file empty) writes that as a market.associationRequest record in its own repo at
-    rkey `requester_associate-<sha256(authority)[:32]>-<accept rkey>`, then its DID to
-    `/run/socialweb-guest-agent/requester-did`; socialweb-guest-agent posts guest.requesterDid (did:plc
+    accept uri), nonce}. The bundle files are root 0600 and a dev requester refuses root, so
+    socialweb-guest-agent makes the group `socialweb-r2` (user_data does too; the atirc agent user joins
+    it) and `/run/socialweb-r2` (root:socialweb-r2 2770) and mirrors `association-request.json`,
+    `r2-atirc.env` and then `association-ref` (empty until both the ref and the env are written, so the
+    requester sees its parent token when the ref lands) into it 0640 on start, on a bundle change and
+    after a refetch. The requester inside the guest (`run request --association-ref`, bare, as the
+    agent user; it reads `/run/socialweb-r2` when that dir exists, `/etc/socialweb-computer` otherwise),
+    finding the ref missing or empty, writes the request as a market.associationRequest record in its
+    own repo at rkey `requester_associate-<sha256(authority)[:32]>-<accept rkey>`, then its DID to
+    `requester-did` in that dir (`/run/socialweb-guest-agent/requester-did` in the root case);
+    socialweb-guest-agent posts guest.requesterDid (did:plc
     only, never the requester's own DID; a did:web is refused because its resolution fetches a host the
     guest names); the requester records the first DID as Pending in `status.contract.guestRequester`
     before it proves it (a second DID is refused, a give-up turns it Refused); the requester reads that request record by one getRecord in the reported

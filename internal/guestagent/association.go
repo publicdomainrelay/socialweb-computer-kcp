@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,91 @@ type requesterDIDRecord struct {
 
 func (a *Agent) requesterDIDPath() string { return filepath.Join(a.cfg.StateDir, RequesterDIDFile) }
 
+func (a *Agent) bundleDir() string { return filepath.Dir(a.cfg.Association.RefFile) }
+
+type sharedFile struct {
+	src, name string
+}
+
+func (a *Agent) sharedFiles() []sharedFile {
+	dir := a.bundleDir()
+	return []sharedFile{
+		{src: filepath.Join(dir, AssociationRequestFile), name: AssociationRequestFile},
+		{src: filepath.Join(dir, RequesterAtircEnvFile), name: RequesterAtircEnvFile},
+		{src: a.cfg.Association.RefFile, name: AssociationRefFile},
+	}
+}
+
+func (a *Agent) prepareSharedDir() (int, bool) {
+	if out, err := exec.Command("groupadd", "-f", RequesterGroup).CombinedOutput(); err != nil {
+		a.log.Warn("the guest requester group cannot be made", "group", RequesterGroup, "err", err.Error(), "output", tail(string(out), 256))
+	}
+	group, err := user.LookupGroup(RequesterGroup)
+	if err != nil {
+		a.log.Warn("the guest requester group is missing; only a root requester can hand over its DID", "group", RequesterGroup, "err", err.Error())
+		return 0, false
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err == nil {
+		err = os.MkdirAll(RequesterDir, 0o770)
+	}
+	if err == nil {
+		err = os.Chown(RequesterDir, 0, gid)
+	}
+	if err == nil {
+		err = os.Chmod(RequesterDir, 0o770|os.ModeSetgid)
+	}
+	if err != nil {
+		a.log.Warn("the guest requester dir cannot be made", "dir", RequesterDir, "err", err.Error())
+		return 0, false
+	}
+	return gid, true
+}
+
+func (a *Agent) mirrorShared(gid int) {
+	envReady := false
+	for _, f := range a.sharedFiles() {
+		raw, err := os.ReadFile(f.src)
+		switch {
+		case f.name == RequesterAtircEnvFile:
+			envReady = err == nil && len(raw) > 0
+			if !envReady {
+				continue
+			}
+		case f.name == AssociationRefFile:
+			if err != nil || !envReady {
+				raw = nil
+			}
+		case err != nil:
+			continue
+		}
+		dst := filepath.Join(RequesterDir, f.name)
+		if current, err := os.ReadFile(dst); err == nil && string(current) == string(raw) {
+			continue
+		}
+		if f.name == AssociationRefFile && len(raw) == 0 {
+			if _, err := os.Stat(dst); err == nil {
+				continue
+			}
+		}
+		part := dst + ".part"
+		if err := os.WriteFile(part, raw, 0o640); err != nil {
+			a.log.Warn("mirroring a guest requester file failed", "file", dst, "err", err.Error())
+			continue
+		}
+		if err := os.Chown(part, 0, gid); err != nil {
+			a.log.Warn("mirroring a guest requester file failed", "file", dst, "err", err.Error())
+			_ = os.Remove(part)
+			continue
+		}
+		if err := os.Rename(part, dst); err != nil {
+			a.log.Warn("mirroring a guest requester file failed", "file", dst, "err", err.Error())
+			continue
+		}
+		a.log.Info("guest_requester_file_mirrored", "file", dst, "bytes", len(raw))
+	}
+}
+
 func (a *Agent) runAssociation(ctx context.Context) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -43,8 +130,31 @@ func (a *Agent) runAssociation(ctx context.Context) {
 		a.log.Error("the requester DID watcher cannot watch the state dir", "dir", a.cfg.StateDir, "err", err.Error())
 		return
 	}
-	a.log.Info("the guest reports the DID of the requester it runs", "file", a.requesterDIDPath(), "refFile", a.cfg.Association.RefFile)
-	a.reportRequesterDID(ctx)
+	gid, shared := a.prepareSharedDir()
+	if shared {
+		if err := os.MkdirAll(a.bundleDir(), 0o700); err != nil {
+			a.log.Warn("the bundle dir cannot be made", "dir", a.bundleDir(), "err", err.Error())
+		}
+		for _, dir := range []string{RequesterDir, a.bundleDir()} {
+			if err := watcher.Add(dir); err != nil {
+				a.log.Warn("the guest requester watcher cannot watch a dir", "dir", dir, "err", err.Error())
+			}
+		}
+		a.mirrorShared(gid)
+	}
+	a.mu.Lock()
+	a.sharedGID, a.shared = gid, shared
+	a.mu.Unlock()
+	a.log.Info("the guest reports the DID of the requester it runs", "files", []string{a.requesterDIDPath(), filepath.Join(RequesterDir, RequesterDIDFile)},
+		"refFile", a.cfg.Association.RefFile, "shared", shared)
+	a.reportRequesterDID(ctx, a.requesterDIDPath())
+	if shared {
+		a.reportRequesterDID(ctx, filepath.Join(RequesterDir, RequesterDIDFile))
+	}
+	sources := map[string]bool{}
+	for _, f := range a.sharedFiles() {
+		sources[filepath.Clean(f.src)] = true
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -58,21 +168,28 @@ func (a *Agent) runAssociation(ctx context.Context) {
 			if !open {
 				return
 			}
-			if (ev.Has(fsnotify.Create) || ev.Has(fsnotify.Write)) && filepath.Base(ev.Name) == RequesterDIDFile {
-				a.reportRequesterDID(ctx)
+			if !ev.Has(fsnotify.Create) && !ev.Has(fsnotify.Write) {
+				continue
+			}
+			name := filepath.Clean(ev.Name)
+			switch {
+			case filepath.Base(name) == RequesterDIDFile && (filepath.Dir(name) == filepath.Clean(a.cfg.StateDir) || (shared && filepath.Dir(name) == RequesterDir)):
+				a.reportRequesterDID(ctx, name)
+			case shared && sources[name]:
+				a.mirrorShared(gid)
 			}
 		}
 	}
 }
 
-func (a *Agent) reportRequesterDID(ctx context.Context) {
-	raw, err := os.ReadFile(a.requesterDIDPath())
+func (a *Agent) reportRequesterDID(ctx context.Context, path string) {
+	raw, err := os.ReadFile(path)
 	if err != nil || len(raw) > maxRequesterDID {
 		return
 	}
 	did := strings.TrimSpace(string(raw))
 	if !requesterDIDRE.MatchString(did) {
-		a.log.Warn("the requester DID file holds no did:plc; not reported", "file", a.requesterDIDPath())
+		a.log.Warn("the requester DID file holds no did:plc; not reported", "file", path)
 		return
 	}
 	a.mu.Lock()
@@ -123,4 +240,10 @@ func (a *Agent) refetchSecrets(seq int64) {
 		return
 	}
 	a.log.Info("guest_secrets_refetch", "seq", seq, "output", tail(string(out), 256))
+	a.mu.Lock()
+	gid, shared := a.sharedGID, a.shared
+	a.mu.Unlock()
+	if shared {
+		a.mirrorShared(gid)
+	}
 }

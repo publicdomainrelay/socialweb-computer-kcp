@@ -19,6 +19,10 @@ const (
 
 	GuestRequesterAtircEnvFile = AssociationRefDir + "/r2-atirc.env"
 
+	GuestRequesterGroup = "socialweb-r2"
+
+	GuestRequesterDir = "/run/socialweb-r2"
+
 	GuestAgentAssociationPath = GuestAgentConfigDir + "/association.json"
 
 	GuestRequesterDIDPath = GuestAgentStateDir + "/requester-did"
@@ -122,6 +126,7 @@ mkdir -p /etc/sudoers.d
 printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
 id "${nick}" >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash "${nick}"
+if getent group ` + GuestRequesterGroup + ` >/dev/null; then usermod -aG ` + GuestRequesterGroup + ` "${nick}"; fi
 exec runuser -u "${nick}" -- ` + AtircBinary + ` agent run
 `
 
@@ -153,6 +158,6 @@ func AssociationModule(refFile string) UserDataModule {
 		}
 		return UserDataPatch{WriteFiles: []WriteFileEntry{
 			{Path: GuestAgentAssociationPath, Owner: "root:root", Permissions: "0644", Content: string(raw) + "\n"},
-		}}, nil
+		}, RuncmdPrepend: []any{"groupadd -f " + GuestRequesterGroup}}, nil
 	}
 }
