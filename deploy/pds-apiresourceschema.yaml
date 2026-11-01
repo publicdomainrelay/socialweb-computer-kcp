@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-12.pds.socialweb.computer
+  name: v1alpha1-13.pds.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -168,6 +168,8 @@ spec:
                             required:
                               - kind
                               - name
+                          ephemeralKey:
+                            type: boolean
                       opentunnel:
                         type: object
                         properties:
@@ -392,6 +394,8 @@ spec:
                     type: array
                     items:
                       type: string
+              ephemeral:
+                type: boolean
           status:
             type: object
             properties:

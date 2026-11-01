@@ -274,6 +274,8 @@ type IngressXrpcConfig struct {
 	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
 
 	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
+
+	EphemeralKey bool `json:"ephemeralKey,omitempty"`
 }
 
 type FirecrackerProvider struct {

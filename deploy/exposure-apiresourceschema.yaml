@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-5.exposures.exposure.socialweb.computer
+  name: v1alpha1-6.exposures.exposure.socialweb.computer
 spec:
   group: exposure.socialweb.computer
   names:
@@ -69,6 +69,11 @@ spec:
                 type: string
               publicHost:
                 type: string
+              ingressKey:
+                type: string
+                enum:
+                  - Persistent
+                  - Ephemeral
               suspend:
                 type: boolean
             required:
