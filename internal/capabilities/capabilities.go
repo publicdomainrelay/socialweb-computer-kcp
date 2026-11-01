@@ -91,6 +91,8 @@ func Tree() []Verb {
 		{Path: "run request ssh", Summary: "run request ssh <name>: ssh to the held guest (--transport iroh|webrtc, --tag), StrictHostKeyChecking=yes against its reported host keys; the contract stays held", Needs: []Need{NeedProc}},
 		{Path: "run request proxy", Summary: "run request proxy <name> --tag <tag>: pipe stdin and stdout through one WebRTC datachannel to the guest's tunnel port (an ssh ProxyCommand)", Needs: []Need{NeedProc}},
 		{Path: "run request agent", Summary: "run request agent <name>: send guest.agentStart to the held guest of a run request --agent contract; its guest agent starts atirc-agent.service", Needs: []Need{NeedProc}},
+		{Path: "run request associate", Summary: "run request associate <name> --associate <did>: set spec.association on the held contract; the requester writes the contract-scoped market.association record", Needs: []Need{NeedProc}},
+		{Path: "run request r2", Summary: "run request r2 <name> [--r2-name r2] [--agent] [--hold]: send guest.r2Start to the held guest of a run request --associate guest contract; its guest agent starts socialweb-r2.service as the user r2", Needs: []Need{NeedProc}},
 		{Path: "vault apply-root", Summary: "generate the root vault PKI root and write its KV entries as its client gateway (the OpenBaoServer root-vault declares the rest)"},
 		{Path: "migrate", Summary: "apply the clusterprovider migrations"},
 		{Path: "apply", Summary: "server-side apply manifest sets into kcp workspaces (--set a,b --values file --dry-run; --instance or --kcp-kubeconfig)"},
