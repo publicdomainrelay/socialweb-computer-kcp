@@ -282,6 +282,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Comms:                o.Spec.Comms,
 		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
+		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
 		SuspendParticipation: o.Spec.Suspend,
 	}
 	out := []compose.Desired{compose.PolicyEngineDesired()}

@@ -663,6 +663,8 @@ type RequesterSpec struct {
 
 	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
+	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
+
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 }
 

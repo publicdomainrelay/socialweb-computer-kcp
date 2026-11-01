@@ -37,8 +37,6 @@ const (
 
 var errAssociationRefused = errors.New("requester: the association is refused")
 
-const stepBindAtirc = "bind the atirc token to the association"
-
 type contractAssociation struct {
 	subject string
 
@@ -119,7 +117,7 @@ func (r *contractRunner) associationPending(contract v1alpha1.ComputeContract) b
 		return true
 	}
 	subject := associationSubject(contract, state)
-	return (subject != "" && !r.associationFinished(subject)) || r.revokePending()
+	return subject != "" && !r.associationFinished(subject)
 }
 
 func (r *contractRunner) associateLater(contract v1alpha1.ComputeContract) {
@@ -190,13 +188,6 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 	if state == nil {
 		state = r.stateCopy()
 	}
-	r.mu.Lock()
-	checkRevoke := !r.revokeChecked || r.revokeOutstanding
-	r.revokeChecked = true
-	r.mu.Unlock()
-	if checkRevoke {
-		r.retryPendingRevoke(ctx)
-	}
 	if accept == nil || accept.URI == "" || accept.CID == "" || contract.Spec.Association == nil {
 		return
 	}
@@ -226,9 +217,7 @@ func (r *contractRunner) ensureAssociation(ctx context.Context, accept *commonv1
 		}
 	}
 	if step, err := r.finishAssociation(ctx, contract, state); err != nil {
-		if r.associationFailed(ctx, step, err) && step == stepBindAtirc && fromGuest(contract) {
-			r.abandonUnboundToken(ctx, contract)
-		}
+		r.associationFailed(ctx, step, err)
 		return
 	}
 	r.mu.Lock()
@@ -243,8 +232,10 @@ func (r *contractRunner) finishAssociation(ctx context.Context, contract v1alpha
 	if current == nil {
 		return "", nil
 	}
-	if err := r.bindAtircToken(ctx, contract, current.ref, current.expiresAt); err != nil {
-		return stepBindAtirc, err
+	if state != nil && state.Accept != nil {
+		if err := r.ensureGuestRequesterToken(ctx, contract, *state.Accept, current.expiresAt); err != nil {
+			return "mint the guest requester's atirc token", err
+		}
 	}
 	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
 		(state != nil && state.SecretsApplied != nil)) {

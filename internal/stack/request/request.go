@@ -47,6 +47,7 @@ const (
 	NetworkAppFieldManager       = "socialweb.computer/network-app"
 	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
 	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
+	AtircParentPath              = "identity/atirc-parent"
 	Poll                         = time.Second
 	RetryMax                     = 5 * time.Second
 	irohScheme                   = "iroh://"
@@ -456,8 +457,12 @@ func requesterFailure(st v1alpha1.ApplicationStatus) string {
 }
 
 func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Duration) (commonv1.SecretRef, error) {
-	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: SecretsPath}
-	what := "writing the secrets bundle into the requester's own OpenBao"
+	return k.PutSecret(ctx, SecretsPath, map[string]any{"bundle": string(bundle)}, "the secrets bundle", timeout)
+}
+
+func (k *Kcp) PutSecret(ctx context.Context, path string, data map[string]any, what string, timeout time.Duration) (commonv1.SecretRef, error) {
+	ref := commonv1.SecretRef{Mount: marketrequester.RequesterVaultClient, Path: path}
+	what = "writing " + what + " into the requester's own OpenBao"
 	deadline := time.Now().Add(timeout)
 	ri := k.dyn.Resource(compose.OpenBaoServerGVR)
 	server, client := marketrequester.RequesterVaultServer, marketrequester.RequesterVaultClient
@@ -476,7 +481,7 @@ func (k *Kcp) PutSecrets(ctx context.Context, bundle []byte, timeout time.Durati
 		}
 		defer c.RevokeSelf(context.WithoutCancel(ctx))
 		ref.Mount = refs.KVMount
-		if err := c.PutKV(ctx, refs.KVMount+"/data/"+SecretsPath, map[string]any{"bundle": string(bundle)}); err != nil {
+		if err := c.PutKV(ctx, refs.KVMount+"/data/"+path, data); err != nil {
 			return false, err
 		}
 		return true, nil

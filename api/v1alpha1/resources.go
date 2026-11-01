@@ -119,13 +119,13 @@ var APIResources = []APIResource{
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 35, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 36, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 25, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
+	{Kind: "ComputeContract", Plural: "computecontracts", Revision: 26, Export: "computecontracts", Object: ComputeContract{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Contract", Type: "string", JSONPath: ".status.contract.phase"},
 		{Name: "Winner", Type: "string", JSONPath: ".status.contract.winner.did"},
@@ -162,7 +162,7 @@ var APIResources = []APIResource{
 	{Kind: "Bidder", Plural: "bidders", Revision: 24, Export: "applications", Object: Bidder{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GuestControlPlane", Plural: "guestcontrolplanes", Revision: 11, Export: "applications", Object: GuestControlPlane{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Pds", Plural: "pds", Revision: 12, Export: "applications", Object: Pds{}, PrinterColumns: componentPrinterColumns},
-	{Kind: "Requester", Plural: "requesters", Revision: 25, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
+	{Kind: "Requester", Plural: "requesters", Revision: 26, Export: "applications", Object: Requester{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "GatewayAPI", Plural: "gatewayapis", Revision: 16, Export: "applications", Object: GatewayAPI{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "SshServer", Plural: "sshservers", Revision: 12, Export: "applications", Object: SshServer{}, PrinterColumns: componentPrinterColumns},
 	{Kind: "Plc", Plural: "plcs", Revision: 11, Export: "applications", Object: Plc{}, PrinterColumns: componentPrinterColumns},

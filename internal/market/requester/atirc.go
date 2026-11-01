@@ -16,6 +16,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 )
 
@@ -31,8 +32,6 @@ const (
 	AtircTokenEnv = "ATIRC_TOKEN"
 
 	AtircSubhandleEnv = "ATIRC_SUBHANDLE"
-
-	AtircAssocEnv = "ATIRC_ASSOC"
 
 	AtircExpEnv = "ATIRC_EXP"
 
@@ -57,82 +56,115 @@ func (e *atircError) Error() string {
 }
 
 type atircMintInput struct {
-	Subhandle string              `json:"subhandle"`
-	Exp       int64               `json:"exp"`
-	Assoc     *commonv1.StrongRef `json:"assoc,omitempty"`
+	Subhandle string `json:"subhandle"`
+	Exp       int64  `json:"exp"`
 }
 
 type atircRevokeInput struct {
 	Subhandle string `json:"subhandle"`
 }
 
-const atircRevokeKey = "atircRevoke"
+type atircIssuer struct {
+	bearer string
 
-type atircPendingRevoke struct {
-	Subhandle string `json:"subhandle"`
+	base string
 
-	Token string `json:"token"`
+	label string
 
-	Exp int64 `json:"exp"`
+	exp time.Time
+}
+
+func (r *contractRunner) atircIssuer(ctx context.Context) (atircIssuer, error) {
+	q := r.q
+	if ref := q.cfg.Spec.AtircParentRef; ref != nil {
+		if q.deps.Vault == nil {
+			return atircIssuer{}, errors.New("the requester names an atirc parent token and no vault")
+		}
+		kv, err := q.deps.Vault(ctx, *ref)
+		if err != nil {
+			return atircIssuer{}, err
+		}
+		data, err := kv.Read(ctx, ref.Mount, ref.Path, 0)
+		if err != nil {
+			return atircIssuer{}, fmt.Errorf("reading the atirc parent token: %w", err)
+		}
+		token, _ := data["token"].(string)
+		subhandle, _ := data["subhandle"].(string)
+		token, subhandle = strings.TrimSpace(token), strings.ToLower(strings.TrimSpace(subhandle))
+		if token == "" || subhandle == "" || strings.ContainsAny(token, " \t\r\n") {
+			return atircIssuer{}, errors.New("the atirc parent token secret holds no token and subhandle")
+		}
+		exp, ok := atircTokenExp(token, "")
+		if !ok {
+			if raw, _ := data["exp"].(string); raw != "" {
+				if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
+					exp, ok = time.Unix(unix, 0), true
+				}
+			}
+		}
+		if !ok {
+			return atircIssuer{}, errors.New("the atirc parent token has no known expiry")
+		}
+		return atircIssuer{bearer: token, base: subhandle, label: "vm", exp: exp}, nil
+	}
+	handle := strings.ToLower(strings.TrimSpace(q.handle))
+	switch {
+	case handle == "":
+		return atircIssuer{}, errors.New("the requester identity has no handle")
+	case q.serviceAuth == nil:
+		return atircIssuer{}, errors.New("the requester identity signs no service auth")
+	}
+	ctx, cancel := context.WithTimeout(ctx, atircCallTimeout)
+	defer cancel()
+	bearer, err := q.serviceAuth.ServiceAuth(ctx, AtircServiceAudience, AtircMintNSID)
+	if err != nil {
+		return atircIssuer{}, fmt.Errorf("service auth for %s: %w", AtircServiceAudience, err)
+	}
+	label, _, _ := strings.Cut(handle, ".")
+	if len(label) > maxAtircLabel {
+		label = label[:maxAtircLabel]
+	}
+	return atircIssuer{bearer: bearer, base: handle, label: strings.TrimRight(label, "-")}, nil
+}
+
+func atircChild(label, rkey, base string) string {
+	label, rkey = strings.TrimRight(label, "-"), strings.ToLower(rkey)
+	if label == "" || rkey == "" || base == "" {
+		return ""
+	}
+	return label + "-" + rkey + "." + base
+}
+
+func uriRKey(uri string) string {
+	return uri[strings.LastIndex(uri, "/")+1:]
 }
 
 func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, rfpURI string) {
-	if contract.Spec.Association != nil && !fromGuest(contract) {
-		if envFile, err := agentEnvFile(contract); err == nil && envFile != "" {
-			r.log().Info("requester_atirc_mint_skipped", "reason", "the token is minted bound to the contract's association record")
-		}
-		return
-	}
-	if err := r.writeAtircToken(ctx, contract, rfpURI, nil, time.Time{}); err != nil {
-		r.log().Warn("requester_atirc_mint_failed", "err", err.Error())
-	}
-}
-
-func (r *contractRunner) bindAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, assoc commonv1.StrongRef, expiresAt time.Time) error {
-	if envFile, err := agentEnvFile(contract); err != nil || envFile == "" {
-		return err
-	}
-	state := r.stateCopy()
-	if state == nil || state.RFPURI == "" {
-		return errors.New("the contract has no RFP yet")
-	}
-	r.mu.Lock()
-	bound := r.atircAssoc
-	r.mu.Unlock()
-	if bound == assoc {
-		return nil
-	}
-	if err := r.writeAtircToken(ctx, contract, state.RFPURI, &assoc, expiresAt); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.atircAssoc = assoc
-	r.mu.Unlock()
-	return nil
-}
-
-func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, rfpURI string, assoc *commonv1.StrongRef, deadline time.Time) error {
-	q := r.q
 	envFile, err := agentEnvFile(contract)
 	if err != nil || envFile == "" {
-		return err
+		return
 	}
+	if err := r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}); err != nil {
+		r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "err", err.Error())
+	}
+}
+
+func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef, deadline time.Time) error {
+	if !fromGuest(contract) {
+		return nil
+	}
+	return r.writeAtircToken(ctx, contract, cloudinit.GuestRequesterAtircEnvFile, "r2", accept.URI, deadline)
+}
+
+func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, path, label, uri string, deadline time.Time) error {
+	q := r.q
 	switch {
-	case strings.TrimSpace(q.handle) == "":
-		return errors.New("the requester identity has no handle")
-	case q.serviceAuth == nil:
-		return errors.New("the requester identity signs no service auth")
 	case q.deps.VaultWrite == nil:
 		return errors.New("the requester has no vault write handle")
-	case rfpURI == "":
-		return errors.New("the contract has no RFP yet")
-	}
-	subhandle := atircSubhandle(q.handle, rfpURI)
-	if assoc != nil && fromGuest(contract) {
-		subhandle = atircBoundSubhandle(q.handle, rfpURI)
-	}
-	if subhandle == "" {
-		return fmt.Errorf("handle %q and RFP %q make no subhandle", q.handle, rfpURI)
+	case contract.Spec.SecretsRef == nil:
+		return errors.New("the contract has no secrets bundle")
+	case uri == "":
+		return errors.New("the contract has no record to name the subhandle after yet")
 	}
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
@@ -141,56 +173,51 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err != nil {
 		return fmt.Errorf("read the bundle: %w", err)
 	}
-	current := SecretEntry{Path: envFile, Mode: "0600"}
+	current := SecretEntry{Path: path, Mode: "0600"}
 	at := -1
 	for i, e := range entries {
-		if e.Path == envFile {
+		if e.Path == path {
 			current, at = e, i
 		}
 	}
-	previousToken, previousSubhandle := atircToken(current.Value), atircEnvSubhandle(current.Value)
-	if previousToken != "" && previousSubhandle == "" {
-		previousSubhandle = atircSubhandle(q.handle, rfpURI)
+	if token := atircToken(current.Value); token != "" {
+		if exp, ok := atircTokenExp(token, current.Value); ok && q.now().Before(exp) {
+			return nil
+		}
 	}
-	if assoc == nil && previousToken != "" {
-		return nil
+	issuer, err := r.atircIssuer(ctx)
+	if err != nil {
+		return err
 	}
-	if previousToken != "" && previousSubhandle == subhandle && atircEnvValue(current.Value, AtircAssocEnv) == assocValue(assoc) {
-		return nil
+	if label == "" {
+		label = issuer.label
+	}
+	subhandle := atircChild(label, uriRKey(uri), issuer.base)
+	if subhandle == "" {
+		return fmt.Errorf("%q and %q make no subhandle", issuer.base, uri)
 	}
 	exp := q.now().Add(AtircTokenLifetime)
-	if !deadline.IsZero() && deadline.Before(exp) {
-		exp = deadline
+	for _, bound := range []time.Time{deadline, issuer.exp} {
+		if !bound.IsZero() && bound.Before(exp) {
+			exp = bound
+		}
 	}
 	if !exp.After(q.now()) {
-		return fmt.Errorf("the association expires at %s", exp.UTC().Format(time.RFC3339))
+		return fmt.Errorf("the token of %s would expire at %s", subhandle, exp.UTC().Format(time.RFC3339))
 	}
-	next := make(map[string]any, len(data)+2)
-	for k, v := range data {
-		next[k] = v
+	mintCtx, cancel := context.WithTimeout(ctx, atircCallTimeout)
+	defer cancel()
+	var out struct {
+		Token string `json:"token"`
 	}
-	revoke := previousToken != "" && previousSubhandle != subhandle
-	if revoke {
-		previousExp, ok := atircTokenExp(previousToken, current.Value)
-		if !ok {
-			return fmt.Errorf("the expiry of the token of %s is unknown; its revoke cannot be bounded", previousSubhandle)
-		}
-		pending, err := json.Marshal(atircPendingRevoke{Subhandle: previousSubhandle, Token: previousToken, Exp: previousExp.Unix()})
-		if err != nil {
-			return err
-		}
-		next[atircRevokeKey] = string(pending)
+	if err := r.postAtirc(mintCtx, AtircMintNSID, issuer.bearer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix()}, &out); err != nil {
+		return fmt.Errorf("mint %s: %w", subhandle, err)
 	}
-	token, err := r.mintAtircToken(ctx, subhandle, exp, assoc)
-	if err != nil {
-		return fmt.Errorf("mint: %w", err)
+	token := strings.TrimSpace(out.Token)
+	if token == "" || strings.ContainsAny(token, " \t\r\n") {
+		return errors.New(r.atircBase() + " answered no token")
 	}
-	if revoke {
-		if err := q.deps.Intents.MergeComputeContractStatus(ctx, r.name, v1alpha1.ComputeContractStatus{AtircRevoke: "pending " + previousSubhandle}); err != nil && !notFound(err) {
-			return fmt.Errorf("record the pending revoke of %s: %w", previousSubhandle, err)
-		}
-	}
-	current.Value = withAtircToken(current.Value, token, subhandle, assocValue(assoc), exp)
+	current.Value = withAtircToken(current.Value, token, subhandle, exp)
 	current.Mode = "0600"
 	if at < 0 {
 		entries = append(entries, current)
@@ -201,26 +228,17 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err != nil {
 		return err
 	}
+	next := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		next[k] = v
+	}
 	next["bundle"] = string(raw)
 	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
 		return fmt.Errorf("write the bundle: %w", err)
 	}
 	r.addSecretEntries(current)
-	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "envFile", envFile, "exp", exp.UTC().Format(time.RFC3339), "assoc", assocValue(assoc))
-	if revoke {
-		r.mu.Lock()
-		r.revokeOutstanding = true
-		r.mu.Unlock()
-		r.kickAssociation()
-	}
+	r.log().Info("requester_atirc_minted", "subhandle", subhandle, "path", path, "exp", exp.UTC().Format(time.RFC3339))
 	return nil
-}
-
-func assocValue(assoc *commonv1.StrongRef) string {
-	if assoc == nil {
-		return ""
-	}
-	return assoc.URI + "#" + assoc.CID
 }
 
 func atircTokenExp(token, env string) (time.Time, bool) {
@@ -241,193 +259,47 @@ func atircTokenExp(token, env string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (r *contractRunner) revokePending() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.revokeOutstanding
-}
-
-func (r *contractRunner) retryPendingRevoke(ctx context.Context) {
-	if !r.revokePendingOnce(ctx) {
-		r.scheduleRevokeRetry()
-	}
-}
-
-func (r *contractRunner) revokePendingOnce(ctx context.Context) bool {
-	contract := r.snapshot()
-	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil {
-		return true
-	}
-	if envFile, err := agentEnvFile(contract); err != nil || envFile == "" {
-		return true
-	}
-	r.bundleMu.Lock()
-	defer r.bundleMu.Unlock()
-	ref := *contract.Spec.SecretsRef
-	kv, data, _, err := r.readAtircBundle(ctx, ref)
-	if err != nil {
-		r.log().Warn("requester_atirc_revoke_failed", "step", "read the bundle", "err", err.Error())
-		return false
-	}
-	text, _ := data[atircRevokeKey].(string)
-	if text == "" {
-		r.mu.Lock()
-		r.revokeOutstanding = false
-		r.mu.Unlock()
-		return true
-	}
-	var pending atircPendingRevoke
-	_ = json.Unmarshal([]byte(text), &pending)
-	outcome := ""
-	switch {
-	case pending.Subhandle == "" || pending.Token == "":
-		outcome = "dropped an unreadable pending revoke"
-	case !r.q.now().Before(time.Unix(pending.Exp, 0)):
-		outcome = "expired " + pending.Subhandle
-	case r.revokeAtircSubhandle(ctx, pending.Token, pending.Subhandle) == nil:
-		outcome = "revoked " + pending.Subhandle
-	default:
-		r.mu.Lock()
-		r.revokeOutstanding = true
-		r.mu.Unlock()
-		return false
-	}
-	next := make(map[string]any, len(data))
-	for k, v := range data {
-		if k != atircRevokeKey {
-			next[k] = v
-		}
-	}
-	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
-		r.log().Warn("requester_atirc_revoke_failed", "step", "clear the pending revoke", "err", err.Error())
-		return false
-	}
-	r.mu.Lock()
-	r.revokeOutstanding, r.revokeAttempts = false, 0
-	r.mu.Unlock()
-	if err := r.q.deps.Intents.MergeComputeContractStatus(ctx, r.name, v1alpha1.ComputeContractStatus{AtircRevoke: outcome}); err != nil && !notFound(err) {
-		r.log().Warn("requester_atirc_revoke_status_failed", "err", err.Error())
-	}
-	return true
-}
-
-func (r *contractRunner) scheduleRevokeRetry() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delay := min(associationRetryFirst<<min(r.revokeAttempts, 10), associationRetryMax)
-	r.revokeAttempts++
-	if r.revokeRetry != nil {
-		r.revokeRetry.Stop()
-	}
-	r.revokeRetry = time.AfterFunc(delay, r.kickAssociation)
-}
-
-func (r *contractRunner) abandonUnboundToken(ctx context.Context, contract v1alpha1.ComputeContract) {
-	q := r.q
-	envFile, err := agentEnvFile(contract)
-	state := r.stateCopy()
-	if err != nil || envFile == "" || state == nil || state.RFPURI == "" || q.deps.VaultWrite == nil {
-		return
-	}
-	fail := func(step string, err error) {
-		r.log().Error("requester_atirc_abandon_failed", "step", step, "err", err.Error())
-	}
-	bound := atircBoundSubhandle(q.handle, state.RFPURI)
-	r.bundleMu.Lock()
-	ref := *contract.Spec.SecretsRef
-	kv, data, entries, err := r.readAtircBundle(ctx, ref)
-	if err != nil {
-		r.bundleMu.Unlock()
-		fail("read the bundle", err)
-		return
-	}
-	at, token, subhandle := -1, "", ""
-	for i, e := range entries {
-		if e.Path == envFile {
-			at, token, subhandle = i, atircToken(e.Value), atircEnvSubhandle(e.Value)
-		}
-	}
-	if subhandle == "" {
-		subhandle = atircSubhandle(q.handle, state.RFPURI)
-	}
-	if at < 0 || token == "" || subhandle == bound {
-		r.bundleMu.Unlock()
-		return
-	}
-	exp, ok := atircTokenExp(token, entries[at].Value)
-	if !ok {
-		exp = q.now().Add(AtircTokenLifetime)
-	}
-	pending, err := json.Marshal(atircPendingRevoke{Subhandle: subhandle, Token: token, Exp: exp.Unix()})
-	if err != nil {
-		r.bundleMu.Unlock()
-		fail("encode the pending revoke", err)
-		return
-	}
-	entries[at].Value = withoutAtircToken(entries[at].Value)
-	raw, err := json.Marshal(entries)
-	if err != nil {
-		r.bundleMu.Unlock()
-		fail("encode the bundle", err)
-		return
-	}
-	next := make(map[string]any, len(data)+1)
-	for k, v := range data {
-		next[k] = v
-	}
-	next["bundle"], next[atircRevokeKey] = string(raw), string(pending)
-	if err := kv.Write(ctx, ref.Mount, ref.Path, next); err != nil {
-		r.bundleMu.Unlock()
-		fail("write the bundle", err)
-		return
-	}
-	r.addSecretEntries(entries[at])
-	r.mu.Lock()
-	r.revokeOutstanding = true
-	r.mu.Unlock()
-	r.bundleMu.Unlock()
-	if err := q.deps.Intents.MergeComputeContractStatus(ctx, r.name, v1alpha1.ComputeContractStatus{AtircRevoke: "pending " + subhandle + " (no bound token could be minted)"}); err != nil && !notFound(err) {
-		r.log().Warn("requester_atirc_revoke_status_failed", "err", err.Error())
-	}
-	r.log().Warn("requester_atirc_unbound_abandoned", "subhandle", subhandle)
-	r.retryPendingRevoke(ctx)
-}
-
 func (r *contractRunner) revokeAtircToken(ctx context.Context) {
 	contract := r.snapshot()
-	state := r.stateCopy()
-	if envFile, err := agentEnvFile(contract); err != nil || envFile == "" || state == nil || state.RFPURI == "" || r.q.deps.VaultWrite == nil {
+	if contract.Spec.SecretsRef == nil || r.q.deps.VaultWrite == nil {
 		return
 	}
-	go r.releaseRevokes(contract, state.RFPURI)
+	var paths []string
+	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" {
+		paths = append(paths, envFile)
+	}
+	if fromGuest(contract) {
+		paths = append(paths, cloudinit.GuestRequesterAtircEnvFile)
+	}
+	if len(paths) > 0 {
+		go r.releaseRevokes(contract, paths)
+	}
 }
 
-func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, rfpURI string) {
-	pendingDone, currentDone := false, false
+func (r *contractRunner) releaseRevokes(contract v1alpha1.ComputeContract, paths []string) {
+	done := map[string]bool{}
 	for attempt := 1; attempt <= associationRetryAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), atircCallTimeout)
-		if !pendingDone {
-			pendingDone = r.revokePendingOnce(ctx)
-		}
-		if !currentDone {
-			currentDone = r.revokeCurrentToken(ctx, contract, rfpURI)
+		left := 0
+		for _, path := range paths {
+			if !done[path] {
+				done[path] = r.revokeEnvToken(ctx, contract, path)
+			}
+			if !done[path] {
+				left++
+			}
 		}
 		cancel()
-		r.q.log.Info("requester_atirc_release_revoke", "contract", r.name, "attempt", attempt, "pendingDone", pendingDone, "currentDone", currentDone)
-		if pendingDone && currentDone {
+		r.q.log.Info("requester_atirc_release_revoke", "contract", r.name, "attempt", attempt, "left", left)
+		if left == 0 {
 			return
 		}
 		time.Sleep(min(associationRetryFirst<<min(attempt-1, 10), associationRetryMax))
 	}
-	r.q.log.Warn("requester_atirc_release_revoke_gave_up", "contract", r.name, "pendingDone", pendingDone, "currentDone", currentDone)
+	r.q.log.Warn("requester_atirc_release_revoke_gave_up", "contract", r.name, "paths", paths)
 }
 
-func (r *contractRunner) revokeCurrentToken(ctx context.Context, contract v1alpha1.ComputeContract, rfpURI string) bool {
-	q := r.q
-	envFile, err := agentEnvFile(contract)
-	if err != nil || envFile == "" {
-		return true
-	}
+func (r *contractRunner) revokeEnvToken(ctx context.Context, contract v1alpha1.ComputeContract, path string) bool {
 	r.bundleMu.Lock()
 	_, _, entries, err := r.readAtircBundle(ctx, *contract.Spec.SecretsRef)
 	r.bundleMu.Unlock()
@@ -437,17 +309,14 @@ func (r *contractRunner) revokeCurrentToken(ctx context.Context, contract v1alph
 	}
 	token, subhandle, env := "", "", ""
 	for _, e := range entries {
-		if e.Path == envFile {
+		if e.Path == path {
 			token, subhandle, env = atircToken(e.Value), atircEnvSubhandle(e.Value), e.Value
 		}
-	}
-	if subhandle == "" {
-		subhandle = atircSubhandle(q.handle, rfpURI)
 	}
 	if token == "" || subhandle == "" {
 		return true
 	}
-	if exp, ok := atircTokenExp(token, env); ok && !q.now().Before(exp) {
+	if exp, ok := atircTokenExp(token, env); ok && !r.q.now().Before(exp) {
 		return true
 	}
 	return r.revokeAtircSubhandle(ctx, token, subhandle) == nil
@@ -490,27 +359,6 @@ func (r *contractRunner) readAtircBundle(ctx context.Context, ref commonv1.Secre
 		}
 	}
 	return kv, data, entries, nil
-}
-
-func (r *contractRunner) mintAtircToken(ctx context.Context, subhandle string, exp time.Time, assoc *commonv1.StrongRef) (string, error) {
-	q := r.q
-	ctx, cancel := context.WithTimeout(ctx, atircCallTimeout)
-	defer cancel()
-	bearer, err := q.serviceAuth.ServiceAuth(ctx, AtircServiceAudience, AtircMintNSID)
-	if err != nil {
-		return "", fmt.Errorf("service auth for %s: %w", AtircServiceAudience, err)
-	}
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := r.postAtirc(ctx, AtircMintNSID, bearer, atircMintInput{Subhandle: subhandle, Exp: exp.Unix(), Assoc: assoc}, &out); err != nil {
-		return "", err
-	}
-	token := strings.TrimSpace(out.Token)
-	if token == "" || strings.ContainsAny(token, " \t\r\n") {
-		return "", errors.New(r.atircBase() + " answered no token")
-	}
-	return token, nil
 }
 
 func (r *contractRunner) atircBase() string {
@@ -556,29 +404,6 @@ func (r *contractRunner) postAtirc(ctx context.Context, nsid, bearer string, in,
 	return nil
 }
 
-func atircSubhandle(handle, rfpURI string) string {
-	handle = strings.ToLower(strings.TrimSpace(handle))
-	rkey := rfpURI[strings.LastIndex(rfpURI, "/")+1:]
-	label, _, _ := strings.Cut(handle, ".")
-	if len(label) > maxAtircLabel {
-		label = label[:maxAtircLabel]
-	}
-	label = strings.TrimRight(label, "-")
-	if label == "" || rkey == "" || handle == "" {
-		return ""
-	}
-	return label + "-" + strings.ToLower(rkey) + "." + handle
-}
-
-func atircBoundSubhandle(handle, rfpURI string) string {
-	subhandle := atircSubhandle(handle, rfpURI)
-	label, rest, ok := strings.Cut(subhandle, ".")
-	if !ok || label == "" {
-		return ""
-	}
-	return label + "-a." + rest
-}
-
 func atircEnvValue(env, name string) string {
 	for line := range strings.Lines(env) {
 		value, ok := strings.CutPrefix(strings.TrimSpace(line), name+"=")
@@ -601,8 +426,7 @@ func withoutAtircToken(env string) string {
 	var b strings.Builder
 	for line := range strings.Lines(env) {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, AtircTokenEnv+"=") || strings.HasPrefix(trimmed, AtircSubhandleEnv+"=") ||
-			strings.HasPrefix(trimmed, AtircAssocEnv+"=") || strings.HasPrefix(trimmed, AtircExpEnv+"=") {
+		if strings.HasPrefix(trimmed, AtircTokenEnv+"=") || strings.HasPrefix(trimmed, AtircSubhandleEnv+"=") || strings.HasPrefix(trimmed, AtircExpEnv+"=") {
 			continue
 		}
 		b.WriteString(line)
@@ -613,14 +437,11 @@ func withoutAtircToken(env string) string {
 	return b.String()
 }
 
-func withAtircToken(env, token, subhandle, assoc string, exp time.Time) string {
+func withAtircToken(env, token, subhandle string, exp time.Time) string {
 	var b strings.Builder
 	b.WriteString(withoutAtircToken(env))
 	b.WriteString(AtircExpEnv + "=" + strconv.FormatInt(exp.Unix(), 10) + "\n")
 	b.WriteString(AtircTokenEnv + "=" + token + "\n")
 	b.WriteString(AtircSubhandleEnv + "=" + subhandle + "\n")
-	if assoc != "" {
-		b.WriteString(AtircAssocEnv + "=" + assoc + "\n")
-	}
 	return b.String()
 }

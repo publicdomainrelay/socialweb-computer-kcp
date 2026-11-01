@@ -210,14 +210,19 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     contract, and release deletes only its own), the ref into the bundle, publishes
     guest.secretsUpdated, and the guest agent fetches the bundle again (`SECRETS_REFETCH=1
     setup-secrets.sh`, or the sealed fallback). A failed step retries with a bounded backoff and shows in
-    `status.associationMessage`. The atirc token is minted with the record as its `assoc` (a fromGuest
-    contract first gets an unbound token for the agent, replaced by one for the subhandle
-    `<label>-<rkey>-a`; the unbound subhandle is recorded as a pending revoke in the bundle secret and
-    `status.atircRevoke` before the bundle write and revoked with a bounded backoff until it succeeds or
-    the token expires, and on release, where the pending and the current token are revoked in the
-    background with the same bounded backoff). A failed bound mint fails the association step and
-    retries; when it gives up, the unbound token leaves the bundle and its subhandle is revoked the same
-    way. The env file carries `ATIRC_EXP`, the token's expiry, which bounds every revoke.
+    `status.associationMessage`. chat.atirc.mint never gets the association as `assoc` (atirc wants the
+    standing rkey and the minting account as subject); every token is minted with an explicit exp
+    (at most 24h, the parent token's exp and, for the guest requester, the association expiresAt). The
+    agent token is one token per subhandle minted after the RFP. Once a fromGuest association is
+    written, the requester also mints the guest requester its own child token, subhandle
+    `r2-<accept rkey>.<the requester's handle or subhandle>`, into the bundle at
+    `/etc/socialweb-computer/r2-atirc.env` (`ATIRC_TOKEN`, `ATIRC_SUBHANDLE`, `ATIRC_EXP`, mode 0600);
+    `source` it to run `atirc sub` / `atirc pub` as that subhandle in the owner's channel. A requester
+    whose root names `spec.atircParentRef` (a vault secret {token, subhandle, exp}; the guest requester's
+    `run request` writes it from that file) mints its own agents' tokens below that subhandle with the
+    parent token as bearer instead of service auth. Release revokes the agent and the guest requester
+    tokens in the background with a bounded backoff until revoked or expired; revoking a subhandle
+    revokes every token below it.
     `run request --associate <did>|guest` asks for one.
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`

@@ -17,6 +17,8 @@ const (
 
 	DefaultAssociationRequestFile = AssociationRefDir + "/association-request.json"
 
+	GuestRequesterAtircEnvFile = AssociationRefDir + "/r2-atirc.env"
+
 	GuestAgentAssociationPath = GuestAgentConfigDir + "/association.json"
 
 	GuestRequesterDIDPath = GuestAgentStateDir + "/requester-did"

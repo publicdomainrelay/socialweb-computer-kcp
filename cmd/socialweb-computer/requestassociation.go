@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
 const maxAssociationRefFile = 4 << 10
@@ -189,6 +190,11 @@ func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Wa
 		}
 		next := root
 		next.Identity.AssociationRef = ref
+		if parent, err := r.atircParent(ctx); err != nil {
+			r.a.log.Warn("the guest requester's atirc token is not usable for its own agents", "file", cloudinit.GuestRequesterAtircEnvFile, "err", err.Error())
+		} else if parent != nil {
+			next.AtircParentRef = parent
+		}
 		if err := r.kcp.ApplyRoot(ctx, next); err != nil {
 			r.a.log.Warn("applying the association ref to the MarketRequester", "err", err.Error())
 			return false
@@ -307,4 +313,31 @@ func runRequestAssociate(ctx context.Context, a *app, vals clicfg.Values, rest [
 	}
 	fmt.Fprintln(a.stdout, c.Status.Association.URI+"#"+c.Status.Association.CID)
 	return exitOK
+}
+
+func (r *requestRun) atircParent(ctx context.Context) (*commonv1.SecretRef, error) {
+	raw, err := os.ReadFile(cloudinit.GuestRequesterAtircEnvFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]string{}
+	for line := range strings.Lines(string(raw)) {
+		if name, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			values[name] = strings.TrimSpace(value)
+		}
+	}
+	token, subhandle, exp := values[requester.AtircTokenEnv], values[requester.AtircSubhandleEnv], values[requester.AtircExpEnv]
+	if token == "" || subhandle == "" || exp == "" {
+		return nil, fmt.Errorf("%s names no %s, %s and %s", cloudinit.GuestRequesterAtircEnvFile, requester.AtircTokenEnv, requester.AtircSubhandleEnv, requester.AtircExpEnv)
+	}
+	ref, err := r.kcp.PutSecret(ctx, request.AtircParentPath, map[string]any{"token": token, "subhandle": subhandle, "exp": exp},
+		"the guest requester's atirc token", r.networkTimeout)
+	if err != nil {
+		return nil, err
+	}
+	r.log("this requester mints its own agents' atirc tokens below its token", "subhandle", subhandle, "file", cloudinit.GuestRequesterAtircEnvFile)
+	return &ref, nil
 }

@@ -6521,6 +6521,11 @@ func (in *MarketRequesterSpec) DeepCopyInto(out *MarketRequesterSpec) {
 		*out = new(MarketComms)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.AtircParentRef != nil {
+		in, out := &in.AtircParentRef, &out.AtircParentRef
+		*out = new(commonv1alpha1.SecretRef)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.Ingress != nil {
 		in, out := &in.Ingress, &out.Ingress
 		*out = new(IngressConfig)
@@ -9490,6 +9495,11 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 	if in.Ingress != nil {
 		in, out := &in.Ingress, &out.Ingress
 		*out = new(IngressConfig)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.AtircParentRef != nil {
+		in, out := &in.AtircParentRef, &out.AtircParentRef
+		*out = new(commonv1alpha1.SecretRef)
 		(*in).DeepCopyInto(*out)
 	}
 	return

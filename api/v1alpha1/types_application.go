@@ -697,6 +697,8 @@ type MarketRequesterSpec struct {
 
 	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
+	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
+
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`

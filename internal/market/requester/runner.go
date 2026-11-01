@@ -74,8 +74,6 @@ type contractRunner struct {
 
 	associationKick chan struct{}
 
-	atircAssoc commonv1.StrongRef
-
 	bundleMu sync.Mutex
 
 	associationRecords map[string]string
@@ -83,14 +81,6 @@ type contractRunner struct {
 	associationAttempts int
 
 	associationRetry *time.Timer
-
-	revokeOutstanding bool
-
-	revokeChecked bool
-
-	revokeAttempts int
-
-	revokeRetry *time.Timer
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
