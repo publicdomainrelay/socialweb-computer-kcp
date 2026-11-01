@@ -18,7 +18,8 @@ release everything you rent.
 | [0009](0009-browser-page.md) | wasm browser page | A1-A7: suite, boot + sign-in, VM lifecycle, Held-reload restore, upgrade load, compat smoke, `/chat` | browser, bidders | ~5 min / test | page-rc141 vs rc153, 2026-11-01 |
 | [0010](0010-ios-app.md) | iOS app, embedded kcp | A1-A6: market sign-in + persistence, launch / agentStart / join, revoke before terminated, cross-restart release, presence, perf | simulator / device, bidders | ~5 min / test | simulator, 2026-10-31 |
 | [0011](0011-atirc.md) | atirc | repo + deploy gates, token lifecycle gates for every path, pipes, `/chat`, lease death | irc.fedfork.com | ~10 min | 2026-11-01 (atirc side of compat smoke) |
-| [0012](0012-infra-quickstart.md) | Infra quickstart | kubectl apply of every `examples/infra` file: VM ssh, tenant k8s node + pod, Deno sandbox stdout, agent VM up to the mint (join on prod), release | own market network (+ prod for the agent join) | ~15 min | 2026-11-01 local qs1 (VM, k8s, Deno; agent to the mint); prod agent join CLI alice + page-rc142 hat |
+| [0012](0012-infra-quickstart.md) | Infra quickstart | kubectl apply of every `examples/infra` file: VM ssh, tenant k8s node + pod, Deno sandbox stdout, agent VM refused before its RFP locally (`.local` handle; join on prod, 0013), release | own market network (+ prod for the agent join) | ~15 min | 2026-11-01 local qs1 (VM, k8s, Deno; agent to the mint); prod agent join CLI alice + page-rc142 hat |
+| [0013](0013-mixed-prod.md) | Mixed prod on a user-configured bidder | `run requester` / `install requester` with a real account, `mixed-prod.yaml` pinned to one bidder under the default policies and both vouches: VM ssh, Deno stdout, agent join, restart keeps Held, delete revokes before `vm.terminated`; the gateway part waits on plan 0039 C | a user-configured bidder, irc.fedfork.com | ~20 min | not yet run on prod; dry-run passes, restart step fails on main 6497fe61 (local readings) |
 
 0011 is a copy; the source is the atirc repo (`git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`,
 `docs/acceptance/0001-atirc.md` @ `ec0d088`).
@@ -44,5 +45,6 @@ release everything you rent.
 | association / guest requester | 0005 |
 | page build | 0009 A1-A6 on dev, then A3 + A6 on prod |
 | Infra / EphemeralInfra, examples, quickstart-local / quickstart-prod | 0012 |
+| run requester / install requester, agent identity, bidder compute kinds or operator sign-in | 0013 |
 | iOS app / pkg/embedded | 0010 |
 | OAuth role scope | re-sign every OAuth identity first (0001 section 9 note, 0006), then 0003 hat-7 |

@@ -102,6 +102,10 @@ EOF
 k root get marketnetworks.socialweb.computer network -o json | jq -r '.status.apps[] | select(.name=="qs") | "\(.phase) \(.did)"'
 ```
 
+Or `$SWC run requester --name qs --network $I --state-dir "$ST"` in its own terminal: the same child application, plus
+a ready file and a kubeconfig of the workspace `root:qs` (`$ST/requesters/qs/`; [quickstart-prod.md](quickstart-prod.md)
+section 7). A restart must repeat `--network $I`.
+
 What it composes in `root:qs` (read them, do not write them):
 
 | object | what to read |
@@ -350,6 +354,5 @@ Each one is an item of plan [0039](plans/0039-long-lived-requester.yaml):
 
 | gap | plan 0039 item |
 |---|---|
-| an atirc agent join from a local network requester (its DID is on the network PLC and its handle is `.local`; a local PDS on plc.directory with a public handle and ingress mints: [quickstart-prod.md](quickstart-prod.md) section 5) | D-AGENT-IDENTITY (the lead's prod run) |
+| an atirc agent join from a local network requester (its DID is on the network PLC and its handle is `.local`; a local PDS on plc.directory with a public handle and ingress mints: [quickstart-prod.md](quickstart-prod.md) section 5) | D-AGENT-IDENTITY is on main; the join is a prod step: [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) |
 | creating a tenant cluster by writing an object: the gateway composes the cluster's Infra from NodeClaims; a Cluster you apply needs the gateway in your own requester kcp | C-GATEWAY-COMPOSE |
-| applying an Infra against prod bidders from the CLI (no long-lived requester root outside the page and the iOS app) | A-RUN-REQUESTER ([quickstart-prod.md](quickstart-prod.md) section 6) |
