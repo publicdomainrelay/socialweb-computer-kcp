@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -22,6 +23,19 @@ func agentOf(value string) *v1alpha1.ComputeContractAgent {
 	default:
 		return &v1alpha1.ComputeContractAgent{EnvFile: envFile}
 	}
+}
+
+func guestToolsOf(value string) ([]string, error) {
+	var out []string
+	for _, tool := range splitList(value) {
+		if tool != v1alpha1.GuestToolSocialwebComputer {
+			return nil, fmt.Errorf("%q: want %s", tool, v1alpha1.GuestToolSocialwebComputer)
+		}
+		if !slices.Contains(out, tool) {
+			out = append(out, tool)
+		}
+	}
+	return out, nil
 }
 
 func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {

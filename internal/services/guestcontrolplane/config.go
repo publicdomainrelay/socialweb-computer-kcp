@@ -14,6 +14,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/pinneddownloads"
 )
 
@@ -73,6 +74,14 @@ func New(spec v1alpha1.GuestControlPlaneSpec, deps Deps) (*Service, error) {
 			return nil, fmt.Errorf("guestcontrolplane: the downloads dir: %w", err)
 		}
 		s.downloads = set
+	}
+	self, err := guestseed.SelfDownloadOf()
+	if err != nil {
+		s.log.Warn("the GuestControlPlane does not serve its own binary to guests", "err", err.Error())
+		return s, nil
+	}
+	if s.downloads, err = s.downloads.WithFile(self.Name, self.Sha256, self.Path, self.Size); err != nil {
+		return nil, fmt.Errorf("guestcontrolplane: serving its own binary: %w", err)
 	}
 	return s, nil
 }

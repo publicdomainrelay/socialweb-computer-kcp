@@ -236,6 +236,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
   Exposure), checks the sha256 and installs to `/usr/local/bin`. The binaries are the release asset
   `socialweb-guest-downloads` (`scripts/build-guest-downloads.sh`, which takes wootty from its pinned
   ghcr.io image layer at build time). A guest never fetches from GitHub or GHCR. The did:key ingress cannot carry binaries (JSON string bodies, a frame cap).
+  The one opt-in exception to that asset: a contract whose `spec.guestTools` names `socialweb-computer`
+  (`run request --guest-tools socialweb-computer`) gets the bidder's own running binary
+  (`/proc/self/exe`, hashed once per process, linux/amd64 bidders only; any other bidder refuses at
+  provisioning), served streamed at `/v1/downloads/<sha256>/socialweb-computer-x86_64` and installed by
+  the same unit as `/usr/local/bin/socialweb-computer`. The requester marks it in user_data as
+  `/etc/socialweb-computer/guest-tools/<tool>`.
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
   `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,

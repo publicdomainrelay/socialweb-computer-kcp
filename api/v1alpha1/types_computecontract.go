@@ -60,6 +60,8 @@ type ComputeContractSpec struct {
 
 	NodeJoin *ComputeContractNodeJoin `json:"nodeJoin,omitempty"`
 
+	GuestTools []string `json:"guestTools,omitempty" apigen:"listType=set,enum=socialweb-computer"`
+
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty" apigen:"default=691200,minimum=0"`
 }
 
@@ -148,6 +150,8 @@ type ComputeContractAssociation struct {
 
 	RefFile string `json:"refFile,omitempty" apigen:"userEndpoint,default=/etc/socialweb-computer/association-ref"`
 }
+
+const GuestToolSocialwebComputer = "socialweb-computer"
 
 type ComputeKind string
 

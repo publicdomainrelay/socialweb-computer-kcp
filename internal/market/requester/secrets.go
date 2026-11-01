@@ -458,6 +458,9 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 		}
 		modules = append(modules, cloudinit.AssociationModule(refFile))
 	}
+	if len(contract.Spec.GuestTools) > 0 {
+		modules = append(modules, cloudinit.GuestToolsModule(contract.Spec.GuestTools))
+	}
 	if r.secrets != nil {
 		inbound := r.q.cfg.InboundXRPC()
 		if inbound {

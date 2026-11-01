@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/selfexe"
 )
 
 const (
@@ -25,6 +27,8 @@ const (
 	GuestBinaryWootty = "wootty"
 
 	GuestBinaryAtirc = "atirc"
+
+	GuestBinarySocialwebComputer = "socialweb-computer"
 
 	GuestAgentUnit = "socialweb-guest-agent.service"
 
@@ -66,6 +70,8 @@ type GuestBinaryNeeds struct {
 
 	Atirc bool
 
+	Tools []string
+
 	Secrets bool
 
 	WebRTC bool
@@ -93,8 +99,27 @@ func GuestDownloadName(name, arch string) string {
 	return name + "-" + arch
 }
 
+type SelfDownload struct {
+	Name string
+
+	Path string
+
+	selfexe.Pin
+}
+
+func SelfDownloadOf() (SelfDownload, error) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		return SelfDownload{}, fmt.Errorf("guestseed: the bidder runs %s/%s; it serves %s to linux/amd64 guests only", runtime.GOOS, runtime.GOARCH, GuestBinarySocialwebComputer)
+	}
+	pin, err := selfexe.Sum()
+	if err != nil {
+		return SelfDownload{}, err
+	}
+	return SelfDownload{Name: GuestDownloadName(GuestBinarySocialwebComputer, "x86_64"), Path: selfexe.Path, Pin: pin}, nil
+}
+
 func (n GuestBinaryNeeds) Any() bool {
-	return n.OpenTunnel || n.Agent || n.Wootty || n.Atirc
+	return n.OpenTunnel || n.Agent || n.Wootty || n.Atirc || len(n.Tools) > 0
 }
 
 func (n GuestBinaryNeeds) Names() []string {
@@ -111,6 +136,11 @@ func (n GuestBinaryNeeds) Names() []string {
 	if n.Agent {
 		out = append(out, GuestBinaryAgent)
 	}
+	for _, tool := range n.Tools {
+		if !slices.Contains(out, tool) {
+			out = append(out, tool)
+		}
+	}
 	return out
 }
 
@@ -118,6 +148,10 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 	const unitDir = "/etc/systemd/system/"
 	out := GuestBinaryNeeds{}
 	for _, p := range cloudinit.WriteFilePaths(userData) {
+		if tool, ok := cloudinit.GuestToolOf(p); ok {
+			out.Tools = append(out.Tools, tool)
+			continue
+		}
 		switch {
 		case p == cloudinit.GuestAgentTunnelsPath:
 			out.Agent = true
@@ -146,6 +180,8 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		out.Units = append(out.Units, GuestSecretsUnit)
 	}
 	sort.Strings(out.Units)
+	sort.Strings(out.Tools)
+	out.Tools = slices.Compact(out.Tools)
 	return out
 }
 

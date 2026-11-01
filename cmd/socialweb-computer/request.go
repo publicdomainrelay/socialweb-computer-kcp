@@ -46,7 +46,7 @@ const (
 	sshConnectionFailed = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate")
@@ -319,6 +319,9 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 		return nil, fmt.Errorf("tunnel: %w", err)
 	}
 	r.contract.Agent = agentOf(vals.String("agent"))
+	if r.contract.GuestTools, err = guestToolsOf(vals.String("guest-tools")); err != nil {
+		return nil, fmt.Errorf("guest-tools: %w", err)
+	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
 	}

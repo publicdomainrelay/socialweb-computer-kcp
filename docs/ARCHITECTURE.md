@@ -4093,6 +4093,22 @@ closed so far was found by reading the code against this document, or by running
 reading the document. The practice worth keeping: the artefact was run and each guard was watched to
 fail, rather than the code read against this document alone.
 
+- **Opened 2026-10-30 (plan 0036 V1): GUEST-SELF-BINARY, the socialweb-computer binary in a guest.** R2
+  (`socialweb-computer run request` inside a guest) needs the CLI there; the release binary (~560 MB of
+  embedded assets) is too big for `socialweb-guest-downloads`. Decision: `spec.guestTools: [socialweb-computer]`
+  on ComputeContractSpec (not the template: InfraContract mirrors the template in the
+  `computer.socialweb.infra#contract` lexicon), opt-in per contract and fixed at request time, because
+  user_data is fixed at provisioning while `spec.association` is set later by `run request associate`,
+  and tying it to `spec.agent` would put 560 MB on every agent VM. The requester writes the marker
+  `/etc/socialweb-computer/guest-tools/socialweb-computer` into user_data; the bidder's
+  `GuestBinariesNeeded` turns each marker into a pin; the bidder and its GuestControlPlane pin and serve
+  `/proc/self/exe` (one sha256 per process, `internal/kit/selfexe`; the open fd stays the running inode
+  across an upgrade's rename) as `socialweb-computer-x86_64`, streamed by `http.ServeContent`, never held
+  in memory. `setup-guest-binaries.service` fetches, checks the sha256 and installs it like every other
+  guest binary. linux/amd64 bidders only; any other bidder has no pin and the provisioning fails with
+  "serves no socialweb-computer download". Open: no live run yet (instrument: a V1 guest that runs
+  `socialweb-computer version`); the bid is not refused up front on a bidder that cannot serve it; a guest
+  disk needs about 600 MB free; a non-release (dev) binary in a guest lacks its embedded assets.
 - **Opened 2026-10-25 (plan 0034 follow-ups; the text and closing instrument of each is in `NEXT.yaml`).**
   RELAY-SSH-ROUTE: fedproxy's atprp-ssh-relay lets a dead `-R` session take the Caddy route of a live
   one and deletes the live route when the dead one is reaped; fix on branch fix/ssh-session-drop.
