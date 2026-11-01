@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/gatewayhttp"
@@ -11,7 +12,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
-const vaultObjectKind = "Vault"
+const (
+	vaultObjectKind = "Vault"
+
+	signInRetryAttempts = 6
+
+	signInRetryMax = 30 * time.Second
+)
 
 var oauthRoutes = []string{"GET /oauth-client-metadata.json", "POST /oauth/start", "GET " + gatewayhttp.WebOAuthCallbackPath, "GET /session", "DELETE /session"}
 
@@ -85,30 +92,43 @@ func (s *Service) followVault(ctx context.Context) func() {
 			case <-ctx.Done():
 				return
 			case <-wake:
-				s.refreshSignIn(ctx)
+			}
+			for attempt := 1; !s.refreshSignIn(ctx) && attempt < signInRetryAttempts; attempt++ {
+				select {
+				case <-ctx.Done():
+					return
+				case <-wake:
+				case <-time.After(signInRetryDelay(attempt)):
+				}
 			}
 		}
 	}()
 	return cancel
 }
 
-func (s *Service) refreshSignIn(ctx context.Context) {
+func signInRetryDelay(attempt int) time.Duration {
+	return min(time.Second<<(attempt-1), signInRetryMax)
+}
+
+func (s *Service) refreshSignIn(ctx context.Context) bool {
 	next, err := s.openSignIn(ctx)
-	if err != nil || next == nil {
-		if err != nil {
-			s.log.Warn("sshserver_sign_in_refresh_failed", "err", err.Error())
-		}
-		return
+	if err != nil {
+		s.log.Warn("sshserver_sign_in_refresh_failed", "err", err.Error())
+		return false
+	}
+	if next == nil {
+		return true
 	}
 	s.mu.Lock()
 	old := s.web
 	if sameEndpoint(old, next) {
 		s.mu.Unlock()
 		next.close()
-		return
+		return true
 	}
 	s.web = next
 	s.mu.Unlock()
 	old.close()
 	s.log.Info("sshserver_sign_in_follows_vault", "address", next.endpoint.Address)
+	return true
 }

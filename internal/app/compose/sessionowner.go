@@ -238,3 +238,21 @@ func (c *Composer) sessionOwnerPDSes(ctx context.Context, ws, selector string) (
 	}
 	return out, nil
 }
+
+func (c *Composer) SessionOwnerAppliedPdsURL(ctx context.Context, ws, did string) (string, error) {
+	repo, err := Get[v1alpha1.RemoteRepo](ctx, c, ws, v1alpha1.RemoteRepoGVR, RepoRefIn(did, ws).Name)
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil || repo == nil || strings.TrimSpace(repo.Spec.PdsRef.Name) == "" {
+		return "", err
+	}
+	pds, err := Get[pdsv1alpha1.RemotePDS](ctx, c, ws, RemotePDSGVR, strings.TrimSpace(repo.Spec.PdsRef.Name))
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil || pds == nil {
+		return "", err
+	}
+	return strings.TrimRight(strings.TrimSpace(pds.Spec.URL), "/"), nil
+}

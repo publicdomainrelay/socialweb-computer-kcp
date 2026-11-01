@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -11,6 +12,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 )
+
+var ErrWorkloadDeleting = errors.New("compose: a set workload is being deleted; the set is applied once it is gone")
 
 type Workload struct {
 	Kind string
@@ -89,7 +92,7 @@ func (c *Composer) workloadsIntact(ctx context.Context, r Root, list []Workload)
 				return false, "", err
 			}
 			if hp.DeletionTimestamp != nil {
-				return false, "HostProcess " + w.Name + " is being deleted", nil
+				return false, "", fmt.Errorf("%w: HostProcess %s", ErrWorkloadDeleting, w.Name)
 			}
 			if hp.Status.Phase == v1alpha1.HostProcessPhaseLost && replaceableLost[hp.Status.LostReason] {
 				if err := ri.Delete(ctx, w.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {

@@ -247,9 +247,15 @@ func (c *Controller) wakeOnVault(b *bus.Bus) {
 		if key.Kind != VaultObjectKind {
 			return
 		}
-		for _, r := range c.users(binding.Key(key.Workspace, VaultKind)) {
-			c.enqueue(r)
+		reqs := c.users(binding.Key(key.Workspace, VaultKind))
+		if len(reqs) == 0 {
+			return
 		}
+		go func() {
+			for _, r := range reqs {
+				c.events <- r
+			}
+		}()
 	})
 }
 

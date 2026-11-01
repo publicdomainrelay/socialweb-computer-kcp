@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -67,31 +69,57 @@ func (b *backend) sessionRead(ctx context.Context, req *logical.Request, d *fram
 	}}, nil
 }
 
-var clientSideRefreshCodes = []string{"invalid_client", "invalid_client_metadata", "unauthorized_client", "invalid_dpop_proof", "use_dpop_nonce"}
+var keepActiveRefreshCodes = []string{"invalid_client", "invalid_client_metadata", "unauthorized_client", "use_dpop_nonce",
+	"server_error", "temporarily_unavailable"}
 
-func clientSideRefreshError(code string) bool {
-	for _, c := range clientSideRefreshCodes {
-		if code == c {
-			return true
-		}
+func keepsSessionActive(oe *oauthError) bool {
+	if oe.Code == "" {
+		return oe.Status == http.StatusTooManyRequests || oe.Status >= http.StatusInternalServerError
 	}
-	return false
+	return slices.Contains(keepActiveRefreshCodes, oe.Code)
 }
 
-func expiredByClientSide(s *sessionEntry) bool {
+func expiredForKeptReason(s *sessionEntry) bool {
 	if s.Status != statusExpired {
 		return false
 	}
-	for _, c := range clientSideRefreshCodes {
-		if strings.Contains(s.StatusReason, " "+c) || strings.HasSuffix(s.StatusReason, c) {
+	for _, c := range keepActiveRefreshCodes {
+		if strings.Contains(s.StatusReason, " "+c) {
 			return true
 		}
 	}
 	return false
 }
 
+const reviveEvery = time.Minute
+
+type reviveLimit struct {
+	mu sync.Mutex
+
+	last map[string]time.Time
+}
+
+func newReviveLimit() *reviveLimit {
+	return &reviveLimit{last: map[string]time.Time{}}
+}
+
+func (l *reviveLimit) allow(did string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key, at := range l.last {
+		if now.Sub(at) >= reviveEvery {
+			delete(l.last, key)
+		}
+	}
+	if at, ok := l.last[did]; ok && now.Sub(at) < reviveEvery {
+		return false
+	}
+	l.last[did] = now
+	return true
+}
+
 func (b *backend) revive(ctx context.Context, st logical.Storage, s *sessionEntry) {
-	if !expiredByClientSide(s) {
+	if !expiredForKeptReason(s) || !b.revives.allow(s.DID, time.Now()) {
 		return
 	}
 	cfg, bad, err := requireConfig(ctx, st)
@@ -127,7 +155,7 @@ func (b *backend) refreshSession(ctx context.Context, st logical.Storage, cfg *c
 					return nil
 				}
 			}
-			if !clientSideRefreshError(oe.Code) {
+			if !keepsSessionActive(oe) {
 				s.Status, s.StatusReason = statusExpired, err.Error()
 				if perr := putSession(sctx, st, s); perr != nil {
 					return perr

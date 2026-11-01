@@ -16,10 +16,11 @@ type backend struct {
 	lock     sync.Mutex
 	sessions *sessionLocks
 	nonces   *nonceCache
+	revives  *reviveLimit
 }
 
 func factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
-	b := &backend{sessions: newSessionLocks(), nonces: newNonceCache()}
+	b := &backend{sessions: newSessionLocks(), nonces: newNonceCache(), revives: newReviveLimit()}
 	b.Backend = &framework.Backend{
 		Help:        "Signs users in with atproto OAuth as a confidential client and keeps their sessions: the DPoP key and the tokens never leave this mount.",
 		BackendType: logical.TypeCredential,

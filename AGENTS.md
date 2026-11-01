@@ -248,20 +248,27 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     addressee index and the ingress like any contract. The iroh dialer socket lives in the SshServer
     state dir, or in the instance runtime dir when that path is over 107 bytes; `run gateway ssh`
     refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root. A restart
-    keeps the path whole: every app root (gateway, bidder, requester, network, ssh gateway) renders its
-    set's HostProcesses and OpenBaoServers each pass (compose.SetWorkloads, CheckWorkloads); a
-    missing one, or a HostProcess Lost for a replaceable reason (unit gone, host rebooted, manager or
-    devsup restarted, identity mismatch), which the root deletes, voids the applied-set shortcut and
-    the set is applied again. A per-DID account requester stays composed while its session owner is
-    Pending (it is dropped only when the session expired, the owner signed out or the cap is reached),
-    and in per-user mode the SshServer has no requesterRef and the shared requester no links. The
-    SshServer's web sign-in follows its vault: a rebound Vault (bus NotifyBound from the vault
-    provider) rebuilds the custody sign-in on the new address; MarketIdentity reconciles on the same
-    signal. The atproto plugin marks a session expired only on invalid_grant; a refresh refused for a
-    client-side reason (invalid_client, invalid_client_metadata, unauthorized_client, a DPoP error)
-    leaves it active, and a session expired by one of those before is refreshed again on the next
-    read or proof. A release whose destroy record or submitEvent keeps failing settles as Released
-    when the bidder's vm.terminated appears.
+    keeps the path whole: every app root (gateway, bidder, requester, network, ssh gateway), when it
+    is not suspended, renders its set's HostProcesses and OpenBaoServers each pass
+    (compose.SetWorkloads, CheckWorkloads). A missing one, or a HostProcess Lost because its unit is
+    gone, the host rebooted, its manager or devsup restarted or its identity mismatched (the
+    supervisor already stopped a mismatched unit, and a unit name runs once), which the root deletes,
+    voids the applied-set shortcut and the set is applied again; one that is being deleted holds the
+    pass until it is gone. A per-DID account requester stays composed, with the repo and RemotePDS
+    links of its last applied PDS URL, while its session owner is Pending or unresolved; it is
+    dropped only when the session expired for a reason that is not one the plugin keeps active, the
+    owner signed out or the cap is reached. In per-user mode the SshServer has no requesterRef and
+    the shared requester no links. The SshServer's web sign-in follows its vault: a rebound Vault
+    (bus NotifyBound from the vault provider) rebuilds the custody sign-in on the new address, with
+    at most 6 attempts at 1 s doubling to 30 s when the open fails; the MarketIdentity controller
+    reconciles on the same signal and never drops it. The atproto plugin keeps a session active when
+    a refresh is refused with invalid_client, invalid_client_metadata, unauthorized_client,
+    use_dpop_nonce, server_error, temporarily_unavailable, or HTTP 429 or 5xx without a code, and
+    when the refresh never reaches the server; every other answer (invalid_grant after the rotated
+    token check, invalid_dpop_proof, invalid_request, any other code) expires it. A session an older
+    plugin expired for one of the kept codes is refreshed again on a read or a proof, at most once a
+    minute per DID. A release whose destroy record or submitEvent keeps failing settles as Released
+    once the bidder's vm.terminated for that receipt appears, whatever its reason.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

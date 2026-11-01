@@ -582,7 +582,7 @@ func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []
 		if err != nil && !apierrors.IsNotFound(err) {
 			return nil, nil, err
 		}
-		if id != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseSessionExpired {
+		if expiredForGood(id) {
 			c.Log().Info("the ssh gateway forgets an account whose session expired", "root", r.Owner(), "did", did)
 			continue
 		}
@@ -604,6 +604,11 @@ func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []
 			return nil, nil, err
 		}
 		pdsURL := knownPdsURL(id, did)
+		if pdsURL == "" {
+			if pdsURL, err = c.SessionOwnerAppliedPdsURL(ctx, ws, did); err != nil {
+				return nil, nil, err
+			}
+		}
 		links = append(links, compose.SessionOwnerLinks(r, ws, ws, owner, pdsURL)...)
 		if err := c.ApplySessionOwner(ctx, r, ws, owner, pdsURL); err != nil {
 			return nil, nil, err
@@ -618,6 +623,20 @@ func (p *pass) sessionOwnerAccounts(ctx context.Context) ([]accountRequester, []
 				contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did), ws), identityRef, did)}})
 	}
 	return out, links, nil
+}
+
+var keptSessionReasons = []string{"invalid_client", "unauthorized_client", "use_dpop_nonce", "server_error", "temporarily_unavailable"}
+
+func expiredForGood(id *v1alpha1.MarketIdentity) bool {
+	if id == nil || id.Status.Phase != v1alpha1.MarketIdentityPhaseSessionExpired {
+		return false
+	}
+	for _, reason := range keptSessionReasons {
+		if strings.Contains(id.Status.Message, reason) {
+			return false
+		}
+	}
+	return true
 }
 
 func knownPdsURL(id *v1alpha1.MarketIdentity, did string) string {

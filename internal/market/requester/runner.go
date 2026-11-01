@@ -1516,7 +1516,7 @@ func (r *contractRunner) settleTerminated(ctx context.Context, state *v1alpha1.N
 		release.LastError = ""
 		r.setRelease(release)
 	}
-	r.log().Info("requester_release_settled_by_termination", "receipt", receiptURIOf(state))
+	r.log().Info("requester_release_settled_by_termination", "receipt", receiptURIOf(state), "bidder", winnerDID(state), "reason", state.Termination.Reason)
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 	r.deleteContractRecords(ctx)
 	return true
