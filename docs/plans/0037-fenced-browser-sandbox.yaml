@@ -1,6 +1,6 @@
 plan: "0037"
 title: "Fenced browser policy sandbox: a browser provider on PolicyEngine spec.sandbox, a Fenced condition from a sandbox.Prober, and the page's opaque-origin iframe + per-run Worker runner, wired like the WebRTC ingress"
-status: doing
+status: done
 source: >
   2026-10-30 atirc, owner-approved plan rev 2 (atirc seq 836): the full design is the kcp-wasm plan
   docs/plans/0037-fenced-browser-sandbox.md on branch kcp-wasm-memory-storage-1 (commit cca1013e9) of
