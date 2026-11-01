@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-32.marketnetworks.socialweb.computer
+  name: v1alpha1-33.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -410,9 +410,6 @@ spec:
                               type: string
                             role:
                               type: string
-                            grantSyncSeconds:
-                              type: integer
-                              format: int32
                             issuerRetrySeconds:
                               type: integer
                               format: int32
@@ -1039,9 +1036,6 @@ spec:
                                     type: string
                                   role:
                                     type: string
-                                  grantSyncSeconds:
-                                    type: integer
-                                    format: int32
                                   issuerRetrySeconds:
                                     type: integer
                                     format: int32

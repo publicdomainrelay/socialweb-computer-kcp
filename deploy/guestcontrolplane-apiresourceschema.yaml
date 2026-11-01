@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-11.guestcontrolplanes.socialweb.computer
+  name: v1alpha1-12.guestcontrolplanes.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -356,11 +356,6 @@ spec:
               role:
                 type: string
                 default: kcp
-              grantSyncSeconds:
-                type: integer
-                format: int32
-                default: 30
-                minimum: 1
               issuerRetrySeconds:
                 type: integer
                 format: int32

@@ -89,7 +89,6 @@ type GuestIntents interface {
 	ApplyComputeVMRelease(ctx context.Context, name string, release v1alpha1.ComputeVMRelease) error
 
 	ApplyComputeVMPublished(ctx context.Context, name string, published v1alpha1.ComputeVMPublished) error
-
 }
 
 type StateSyncIntents interface {

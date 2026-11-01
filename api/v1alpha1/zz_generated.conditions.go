@@ -78,14 +78,6 @@ func (in *Bid) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
-func (in *GuestIdentityGrant) GetConditions() []metav1.Condition {
-	return in.Status.Conditions
-}
-
-func (in *GuestIdentityGrant) SetConditions(conditions []metav1.Condition) {
-	in.Status.Conditions = conditions
-}
-
 func (in *HostProcess) GetConditions() []metav1.Condition {
 	return in.Status.Conditions
 }
