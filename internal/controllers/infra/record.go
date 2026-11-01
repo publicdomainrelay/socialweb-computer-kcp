@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/netretry"
 )
 
 const RepoKind = "AtprotoRepo"
@@ -50,6 +51,26 @@ func Unresolved(err error) (string, bool) {
 		return u.reason, true
 	}
 	return "", false
+}
+
+type readRetrying struct {
+	err error
+}
+
+func (e readRetrying) Error() string { return e.err.Error() }
+
+func (e readRetrying) Unwrap() error { return e.err }
+
+func ReadFailed(err error) error {
+	if netretry.Transient(err) {
+		return readRetrying{err: err}
+	}
+	return err
+}
+
+func ReadRetrying(err error) bool {
+	var r readRetrying
+	return errors.As(err, &r)
 }
 
 type recordSync struct {
@@ -184,7 +205,7 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	got, err := reader.GetRecord(ctx, did, nsid, rkey)
 	present := err == nil
 	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
-		return nil, fmt.Errorf("infra: reading %s: %w", out.uri, err)
+		return nil, ReadFailed(fmt.Errorf("infra: reading %s: %w", out.uri, err))
 	}
 	observed := infra.Record{Present: present, CID: got.CID}
 	if present {
@@ -387,7 +408,7 @@ func (r *reconciler[T]) recordAbsent(ctx context.Context, req ctlruntime.Request
 	case errors.Is(err, atprotorepo.ErrNotFound):
 		return true, nil
 	case err != nil:
-		return false, fmt.Errorf("infra: confirming %s is deleted: %w", stored.URI, err)
+		return false, ReadFailed(fmt.Errorf("infra: confirming %s is deleted: %w", stored.URI, err))
 	}
 	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI, "cid", got.CID}
 	if want := strings.TrimSpace(stored.CID); want == "" || got.CID != want {
@@ -552,6 +573,7 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	k := indexKey{kind: kind, cluster: req.Cluster, name: req.Name}
 	c.dropLocked(k)
 	delete(c.pulls, k)
+	c.retries.Reset(k)
 }
 
 func (c *Controller) bindRepo(kind string, req ctlruntime.Request, repo commonv1.ObjectRef) {

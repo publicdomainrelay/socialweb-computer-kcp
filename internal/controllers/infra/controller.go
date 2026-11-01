@@ -23,6 +23,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/netretry"
 )
 
 const (
@@ -69,6 +70,8 @@ type Controller struct {
 	pulls map[indexKey]pullNote
 
 	repos map[string]*binding.Table[struct{}]
+
+	retries *netretry.Tracker[indexKey]
 }
 
 func New(opts Options) *Controller {
@@ -77,7 +80,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
-		pulls: map[indexKey]pullNote{}, repos: map[string]*binding.Table[struct{}]{
+		pulls: map[indexKey]pullNote{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
 			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
 }
 
@@ -254,21 +257,26 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	var rec *recordSync
 	var recordErr error
 	backoff := false
+	var retry time.Duration
 	if v.spec.Record != nil {
 		rec, err = r.syncRecord(ctx, req, v, now)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
+		retry = r.readRetry(req, v, err)
 		if err != nil {
-			syncedReason := "RecordUnavailable"
+			syncedReason, message := "RecordUnavailable", err.Error()
 			if errors.Is(err, ErrRepoNoDID) {
 				syncedReason = "RepoPending"
 			}
 			if isUnresolved {
 				syncedReason = reason
 			}
-			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, syncedReason, err.Error())
+			if retry > 0 {
+				syncedReason, message = v1alpha1.InfraReasonRecordReadRetrying, v1alpha1.InfraMessageRecordReadRetrying
+			}
+			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, syncedReason, message)
 			recordErr = err
-			if errors.Is(err, ErrRepoNoDID) || isUnresolved {
+			if errors.Is(err, ErrRepoNoDID) || isUnresolved || retry > 0 {
 				recordErr = nil
 			}
 			backoff = isUnresolved
@@ -278,8 +286,8 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 				if err := r.releaseDeclared(ctx, req, v, contracts); err != nil {
 					return ctlruntime.Result{}, errors.Join(recordErr, err)
 				}
-				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, err.Error()
-				return requeueAt(v, end, backoff), errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)))
+				status.Phase, status.Contracts, status.Message = v.status.Phase, v.status.Contracts, message
+				return requeueAt(v, end, backoff, retry), errors.Join(recordErr, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)))
 			}
 		}
 	}
@@ -349,16 +357,34 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			r.c.log.Info("infra_ephemeral_ended", "workspace", req.Workspace, "name", req.Name, "reason", end.Reason)
 			return ctlruntime.Result{}, req.Delete(ctx, obj)
 		}
-		return ctlruntime.Result{Backoff: backoff}, nil
+		return requeueAt(v, end, backoff, retry), nil
 	}
-	return requeueAt(v, end, backoff), nil
+	return requeueAt(v, end, backoff, retry), nil
 }
 
-func requeueAt(v view, end infra.End, backoff bool) ctlruntime.Result {
-	if v.ephemeral == nil {
-		return ctlruntime.Result{Backoff: backoff}
+func requeueAt(v view, end infra.End, backoff bool, retry time.Duration) ctlruntime.Result {
+	after := retry
+	if v.ephemeral != nil && !end.Ended {
+		if deadline := max(time.Until(end.ExpiresAt), time.Second); after <= 0 || deadline < after {
+			after = deadline
+		}
 	}
-	return ctlruntime.Result{RequeueAfter: max(time.Until(end.ExpiresAt), time.Second), Backoff: backoff}
+	return ctlruntime.Result{RequeueAfter: after, Backoff: backoff}
+}
+
+func (r *reconciler[T]) readRetry(req ctlruntime.Request, v view, err error) time.Duration {
+	return ReadRetry(r.c.log, r.c.retries, indexKey{kind: string(v.kind), cluster: req.Cluster, name: req.Name}, err,
+		"kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+}
+
+func ReadRetry[K comparable](log *slog.Logger, retries *netretry.Tracker[K], key K, err error, attrs ...any) time.Duration {
+	if !ReadRetrying(err) {
+		retries.Reset(key)
+		return 0
+	}
+	attempt, delay := retries.Fail(key)
+	log.Info("infra_record_read_retrying", append(attrs, "attempt", attempt, "retryIn", delay.String(), "err", err.Error())...)
+	return delay
 }
 
 func (r *reconciler[T]) noteUnresolved(req ctlruntime.Request, v view, status *v1alpha1.InfraStatus, isUnresolved bool, reason string, err error) {
@@ -422,10 +448,12 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		Record: v.status.Record, Conditions: slices.Clone(v.status.Conditions),
 		Message: fmt.Sprintf("%d ComputeContract(s) releasing", left)}
 	backoff := false
+	var retry time.Duration
 	if left == 0 && v.spec.Record != nil {
 		gone, err := r.deleteRecord(ctx, req, v)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
+		retry = r.readRetry(req, v, err)
 		orphaned := RecordOrphaned(err)
 		switch {
 		case err != nil && (orphaned || time.Since(v.object.GetDeletionTimestamp().Time) > atprotorepo.RecordDeleteGiveUp):
@@ -438,6 +466,9 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		case isUnresolved || errors.Is(err, ErrRepoNoDID):
 			status.Message = "the record delete waits: " + err.Error()
 			left, backoff = 1, true
+		case retry > 0:
+			status.Message = "the record delete waits: " + v1alpha1.InfraMessageRecordReadRetrying
+			left = 1
 		case err != nil:
 			return ctlruntime.Result{Waiting: true}, err
 		case !gone:
@@ -449,7 +480,7 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		return ctlruntime.Result{Waiting: true}, err
 	}
 	if left > 0 {
-		return ctlruntime.Result{Waiting: true, Backoff: backoff}, nil
+		return ctlruntime.Result{Waiting: true, Backoff: backoff, RequeueAfter: retry}, nil
 	}
 	r.c.forget(string(v.kind), req)
 	r.c.log.Info("infra_released", "kind", v.kind, "workspace", req.Workspace, "name", req.Name)
