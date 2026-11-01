@@ -3,15 +3,13 @@ package bidder
 import (
 	"cmp"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-
-	"gopkg.in/yaml.v3"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
 )
@@ -19,7 +17,11 @@ import (
 const (
 	PerspectiveBidder = "bidder"
 
-	PolicyRecordType = "computer.socialweb.temp.policy.ghalite"
+	PolicyRecordType = participant.PolicyRecordType
+
+	DefaultPolicyAllowTTL = 24 * time.Hour
+
+	PolicyAllowMaxEntries = 4096
 )
 
 type policyEvaluator struct {
@@ -28,6 +30,13 @@ type policyEvaluator struct {
 	scope string
 
 	records *market.RepoStore
+
+	allowed *ttlcache.Cache[string, participant.PolicyDecision]
+}
+
+func newPolicyEvaluator(client *runs.Client, scope string, records *market.RepoStore, ttl time.Duration) *policyEvaluator {
+	return &policyEvaluator{runs: client, scope: scope, records: records,
+		allowed: ttlcache.New[string, participant.PolicyDecision](ttlcache.Options{TTL: cmp.Or(ttl, DefaultPolicyAllowTTL), MaxEntries: PolicyAllowMaxEntries})}
 }
 
 func (e *policyEvaluator) workflow() string {
@@ -40,7 +49,11 @@ func (e *policyEvaluator) workflow() string {
 func (e *policyEvaluator) Scope(ctx context.Context, input participant.PolicyInput) participant.PolicyDecision {
 	input.Perspective = PerspectiveBidder
 	input.Mode = participant.PolicyModeScope
-	return e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input)
+	key := policyKey(input, e.workflow())
+	input.RFP = nil
+	return e.cached(key, func() participant.PolicyDecision {
+		return e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input)
+	})
 }
 
 func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.StrongRef, input participant.PolicyInput) participant.PolicyDecision {
@@ -50,6 +63,16 @@ func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 	if input.Mode == "" {
 		input.Mode = participant.PolicyModeFull
 	}
+	set := []string{e.workflow()}
+	for _, entry := range refs {
+		set = append(set, entry.URI+"#"+entry.CID)
+	}
+	return e.cached(policyKey(input, set...), func() participant.PolicyDecision {
+		return e.evaluate(ctx, refs, input)
+	})
+}
+
+func (e *policyEvaluator) evaluate(ctx context.Context, refs []market.StrongRef, input participant.PolicyInput) participant.PolicyDecision {
 	if own := e.run(ctx, runs.Request{WorkflowRef: e.workflow()}, input); !own.Allow {
 		return own
 	}
@@ -67,7 +90,7 @@ func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 		if err != nil {
 			return participant.PolicyDecision{Reason: fmt.Sprintf("failed to resolve policy ref %s: %v", entry.URI, err)}
 		}
-		workflow, err := workflowOfRecord(record.Value)
+		workflow, err := participant.PolicyRecordWorkflow(record.Value)
 		if err != nil {
 			return participant.PolicyDecision{Reason: fmt.Sprintf("policy ref %s: %v", entry.URI, err)}
 		}
@@ -78,29 +101,27 @@ func (e *policyEvaluator) EvaluatePolicies(ctx context.Context, refs []market.St
 	return participant.PolicyDecision{Allow: true}
 }
 
-func workflowOfRecord(value map[string]any) (json.RawMessage, error) {
-	if kind, _ := value["$type"].(string); kind != PolicyRecordType {
-		return nil, fmt.Errorf("the policy record type %q is not gha-lite and is denied", kind)
+func (e *policyEvaluator) cached(key string, run func() participant.PolicyDecision) participant.PolicyDecision {
+	if e == nil || e.allowed == nil {
+		return run()
 	}
-	raw, ok := value["workflow"]
-	if !ok || raw == nil {
-		return nil, errors.New("the policy record names no workflow")
+	if decision, ok := e.allowed.Get(key); ok && decision.Allow {
+		return decision
 	}
-	switch v := raw.(type) {
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return nil, errors.New("the policy record names an empty workflow")
-		}
-		var parsed map[string]any
-		if err := yaml.Unmarshal([]byte(v), &parsed); err != nil || parsed == nil {
-			return nil, errors.New("the policy record's workflow is not a gha-lite workflow mapping")
-		}
-		return json.Marshal(parsed)
-	case map[string]any:
-		return json.Marshal(v)
-	default:
-		return nil, errors.New("the policy record's workflow is not a string or object")
+	decision := run()
+	if decision.Allow {
+		e.allowed.Set(key, decision)
 	}
+	return decision
+}
+
+func policyKey(input participant.PolicyInput, workflows ...string) string {
+	rfp := ""
+	if input.RFP != nil {
+		rfp = input.RFP.URI + "#" + input.RFP.CID
+	}
+	return strings.Join(append([]string{input.Mode, input.Perspective, input.SelfDid, input.SubjectDid, input.CounterpartyDid,
+		input.RootRequesterDid, rfp}, workflows...), "|")
 }
 
 func (e *policyEvaluator) run(ctx context.Context, req runs.Request, input participant.PolicyInput) participant.PolicyDecision {

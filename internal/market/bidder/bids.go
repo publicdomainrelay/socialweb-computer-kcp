@@ -244,7 +244,8 @@ func (b *Bidder) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Ti
 		b.failBid(ctx, bid, "InvalidSignature", err.Error(), now)
 		return nil, nil
 	}
-	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: bid.Spec.Requester}); !scope.Allow {
+	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: bid.Spec.Requester,
+		RFP: &participant.PolicyRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID}}); !scope.Allow {
 		b.failBid(ctx, bid, "ScopeDenied", scope.Reason, now)
 		return nil, nil
 	}
@@ -260,7 +261,7 @@ func (b *Bidder) fullInput(requester, rfpURI, rfpCID string) participant.PolicyI
 	return participant.PolicyInput{
 		Perspective:      PerspectiveBidder,
 		SelfDid:          b.cfg.DID,
-		SubjectDid:       b.cfg.DID,
+		SubjectDid:       requester,
 		CounterpartyDid:  requester,
 		RootRequesterDid: requester,
 		RFP:              &participant.PolicyRef{URI: rfpURI, CID: rfpCID},

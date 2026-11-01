@@ -375,7 +375,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
 		directory:   deps.Directory,
-		policy:      &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
+		policy:      newPolicyEvaluator(deps.Policy, cfg.ScopePolicy, deps.Records, cfg.BidTTL),
 		log:         log,
 		now:         now,
 		bids:        participant.NewIndex[v1alpha1.Bid](),

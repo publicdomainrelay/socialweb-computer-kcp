@@ -461,7 +461,8 @@ func (b *Bidder) applyProvision(ctx context.Context, request participant.OutboxR
 	if err := b.verifier.VerifyRecord(ctx, acceptResolved); err != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: the accept is not signed by its author: %w", err)
 	}
-	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: payload.RequesterDID}); !scope.Allow {
+	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: payload.RequesterDID,
+		RFP: &participant.PolicyRef{URI: accept.RFP.URI, CID: accept.RFP.CID}}); !scope.Allow {
 		b.log.Info("the scope policy declined the accept", "accept", payload.Accept.URI, "reason", scope.Reason)
 		return participant.Observation{}, errors.New("bidder: the scope policy declined the accept: " + scope.Reason)
 	}
