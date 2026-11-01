@@ -145,6 +145,10 @@ type Requester struct {
 
 	wake chan struct{}
 
+	ready chan struct{}
+
+	readyOnce sync.Once
+
 	cancel context.CancelFunc
 
 	done chan struct{}
@@ -198,7 +202,7 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedded: manager: %w", err)
 	}
-	r := &Requester{manager: mgr, bus: b, cancel: cancel, done: make(chan struct{})}
+	r := &Requester{manager: mgr, bus: b, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{})}
 	if err := r.register(ctx, cfg, composer, log); err != nil {
 		return nil, err
 	}
@@ -259,6 +263,9 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 		return err
 	}
 	r.identity = identityCtl
+	if err := r.registerReady(); err != nil {
+		return err
+	}
 	callbacks.Register(IdentityName, func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
 		return identityCtl.CompleteBrowserAuthorization(ctx, RootWorkspace, IdentityName, req)
 	})
