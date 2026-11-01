@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -170,6 +171,11 @@ func (c *Controller) fail(ctx context.Context, req ctlruntime.Request, object *p
 }
 
 func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, object *pdsv1alpha1.RemotePDS, status pdsv1alpha1.RemotePDSStatus) error {
+	unchecked := status
+	unchecked.LastCheckedAt = object.Status.LastCheckedAt
+	if object.Status.LastCheckedAt != nil && apiequality.Semantic.DeepEqual(unchecked, object.Status) {
+		return nil
+	}
 	next := object.DeepCopy()
 	next.Status = status
 	return req.ApplyStatus(ctx, next)
