@@ -65,7 +65,8 @@ func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) err
 	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	opts = append(opts, compose.ComputeVMWatch(c, compose.ExportComputeVMs, Kind),
-		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
+		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind),
+		compose.OperatorRecordWatch(c, compose.ExportMarketIdentities, Kind))
 	if err := ctlruntime.For[*v1alpha1.MarketBidder](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketbidder: registering the MarketBidder controller: %w", err)
 	}

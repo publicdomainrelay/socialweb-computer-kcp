@@ -496,7 +496,7 @@
     },
     "bidder-policy": {
       "type": "string",
-      "description": "run bidder: the policy that gates which RFPs the bidder answers (MarketBidder spec.policy), for an installed bidder whose unit passes no hono-bidder options; a --policy after -- wins. Unset: bidder-tangled-vouch; open runs only when set explicitly. install bidder writes it to config.json (bidder-tangled-vouch unless this flag names another)",
+      "description": "run bidder: the policy that gates which RFPs the bidder answers (MarketBidder spec.policy), for an installed bidder whose unit passes no hono-bidder options; a --policy after -- wins. Unset: bidder-tangled-vouch; open runs only when set explicitly. install bidder writes it to config.json (bidder-tangled-vouch unless this flag names another). dev up --profile market-network: the spec.policy of every network bidder (unset: bidder-tangled-vouch, the network composes the vouches its own requesters need)",
       "env": "SOCIALWEB_BIDDER_POLICY"
     },
     "bidder-policy-args": {

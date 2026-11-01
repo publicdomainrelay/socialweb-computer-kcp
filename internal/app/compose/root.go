@@ -175,6 +175,20 @@ func DrainWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlru
 	})
 }
 
+func OperatorRecordWatch(c *Composer, export, rootKind string) ctlruntime.Option {
+	filter := ctlruntime.WatchFilter[*v1alpha1.AtprotoRecord]{Changed: specChanged[*v1alpha1.AtprotoRecord]}
+	return ctlruntime.WatchesFiltered(export, filter, func(_ context.Context, src ctlruntime.Request, rec *v1alpha1.AtprotoRecord) []ctlruntime.Request {
+		if rec.GetLabels()[OperatorRecordLabel] != OperatorRepoName {
+			return nil
+		}
+		var out []ctlruntime.Request
+		for _, name := range c.rootsIn(src.Cluster, rootKind) {
+			out = append(out, ctlruntime.Request{Cluster: src.Cluster, Name: name})
+		}
+		return c.unparked(rootKind, out, src)
+	})
+}
+
 func TeardownWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlruntime.Option {
 	return ctlruntime.WatchesIn(export, func(_ context.Context, _ ctlruntime.Request, _ C) []ctlruntime.Request {
 		return c.deletingOf(rootKind)

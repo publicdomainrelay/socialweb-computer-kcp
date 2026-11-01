@@ -704,6 +704,75 @@ func WaitNetworkApp(ctx context.Context, kubeconfig, name string, timeout time.D
 	return cur, failed
 }
 
+func workspaceClient(kubeconfig, ws string, gvr schema.GroupVersionResource) (kube.Resource, error) {
+	cfg, err := kcpserver.FrontRestConfig(kubeconfig)
+	if err != nil {
+		return kube.Resource{}, err
+	}
+	cfg.Host = strings.TrimSuffix(cfg.Host, "/") + "/clusters/" + ws
+	dc, err := kube.New(cfg)
+	if err != nil {
+		return kube.Resource{}, err
+	}
+	return dc.Resource(gvr), nil
+}
+
+func WaitNetworkVouches(ctx context.Context, kubeconfig, name string, timeout time.Duration, progress func(ws, record string)) error {
+	ri, err := networkClient(kubeconfig)
+	if err != nil {
+		return err
+	}
+	var own, did string
+	o, err := kube.Await(ctx, ri, marketnetwork.NetworkName, timeout, func(o *v1alpha1.MarketNetwork) (bool, error) {
+		if o == nil {
+			return false, nil
+		}
+		i := slices.IndexFunc(o.Status.Apps, func(a v1alpha1.NetworkAppStatus) bool { return a.Name == name })
+		if i < 0 {
+			return false, nil
+		}
+		own, did = o.Status.Apps[i].Workspace, strings.TrimSpace(o.Status.Apps[i].Did)
+		return own != "" && did != "", nil
+	})
+	if errors.Is(err, kube.ErrAwaitTimeout) {
+		return fmt.Errorf("request: the market network reports no workspace and DID for %s after %s", name, timeout)
+	}
+	if err != nil {
+		return err
+	}
+	type want struct{ ws, record string }
+	var wants []want
+	for _, a := range o.Status.Apps {
+		if a.Kind == v1alpha1.ApplicationKindMarketBidder && a.Workspace != "" && a.Did != "" && a.Phase == v1alpha1.ApplicationPhaseReady {
+			wants = append(wants, want{ws: a.Workspace, record: marketnetwork.RequesterVouchName(did)}, want{record: marketnetwork.BidderVouchName(a.Name)})
+		}
+	}
+	for _, w := range wants {
+		ws := cmp.Or(w.ws, own)
+		rr, err := workspaceClient(kubeconfig, ws, compose.AtprotoRecordGVR)
+		if err != nil {
+			return err
+		}
+		if progress != nil {
+			progress(ws, w.record)
+		}
+		last, err := kube.Await(ctx, rr, w.record, timeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
+			return rec != nil && rec.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied, nil
+		})
+		if errors.Is(err, kube.ErrAwaitTimeout) {
+			msg := "not composed"
+			if last != nil {
+				msg = cmp.Or(last.Status.Message, string(last.Status.Phase))
+			}
+			return fmt.Errorf("request: the network's vouch %s in %s is not Applied after %s: %s", w.record, ws, timeout, msg)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func WaitNetworkGone(ctx context.Context, kubeconfig, name string, timeout time.Duration) error {
 	ri, err := networkClient(kubeconfig)
 	if err != nil {

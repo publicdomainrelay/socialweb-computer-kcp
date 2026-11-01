@@ -490,8 +490,23 @@ controller writes the record and its status (Applied with the uri). The other
 direction is declared too: in each bidder's workspace `root:<bidder app>` one
 AtprotoRecord `operator-vouch-<gateway app>` (the bidder operator's vouch for the
 gateway operator), written the same way through the bidder's AtprotoRepo
-`operator`, so a bidder under `bidder-tangled-vouch` (`dev up --app-values` with
-`bidder: {policy: bidder-tangled-vouch}`) bids on the gateway's RFPs.
+`operator`, so a bidder under `bidder-tangled-vouch` (the default of every network
+bidder) bids on the gateway's RFPs.
+
+Every MarketRequester app (one added to `spec.apps`, and each `run request
+--network` invocation) gets the same two directions once it and the bidders have
+DIDs: in each bidder's workspace one AtprotoRecord
+`operator-vouch-requester-<stamp of the requester DID>` (the bidder operator's
+vouch for the requester DID, through the bidder's AtprotoRepo `operator`; the
+MarketBidder reconciles on every AtprotoRecord labelled
+`apps.socialweb.computer/record-repo: operator`), and in the requester's
+workspace one AtprotoRecord `network-vouch-<bidder app>` per bidder (the
+requester's vouch for the bidder DID, `deletionPolicy: Retain`, written to its
+own AtprotoRepo through the ComponentLink `link-network-vouches-<workspace>` from
+AtprotoRecords labelled `apps.socialweb.computer/network-vouch`). `run request
+--network` waits until both are Applied before it posts its contract, so its RFP
+meets `bidder-tangled-vouch` and the attached `requester-tangled-vouch` with the
+vouches in place. No network app runs `open` unless its spec names it.
 
 ### Point an installed bidder account at the network
 
@@ -553,7 +568,7 @@ types are in `api/v1alpha1/types_application.go`.
 | `name` | the child's name (`bidder-1`, `gateway`, an ssh gateway's name), a DNS label |
 | `kind` | `MarketBidder`, `MarketRequester`, `Gateway` or `SshGateway` |
 | `profile` | the child's profile |
-| `policy` | the bidder policy; `dev up` sets `open` explicitly for its dev bidders, and unset means `bidder-tangled-vouch` |
+| `policy` | the bidder policy; unset means `bidder-tangled-vouch` (the `dev up` default); `open` only when `dev up --bidder-policy open` or app-values name it |
 | `firecracker` | the FirecrackerProvider for a bidder |
 | `kcp` | the KcpProvider for a bidder (handle, vmHostBackend, guestImageSource, stopGraceSeconds) |
 | `options` | application options passed through to the root object |
