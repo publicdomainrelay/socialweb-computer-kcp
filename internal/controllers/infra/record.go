@@ -221,7 +221,7 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	if present {
 		decoded, derr = infra.Decode(v.kind, got.Value)
 	}
-	fresh := stored == nil || strings.TrimSpace(stored.URI) == ""
+	fresh := stored == nil || strings.TrimSpace(stored.URI) == "" || stored.Direction == v1alpha1.InfraSyncRetained
 	if present && !follow && fresh && rkey == name && (decoded.Over(v.kind, now) || errors.Is(derr, infra.ErrReserved)) {
 		r.c.log.Info("infra_record_successor", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "ended", out.uri,
 			"endedAt", decoded.EndedAt, "successor", successor)
@@ -253,6 +253,18 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 	r.c.index(string(v.kind), req, out.uri, got.CID)
 	specHash := render.Hash()
 	out.action = infra.Decide(infra.SyncInput{Follow: follow, Publish: publish, Stored: stored, URI: out.uri, SpecHash: specHash, Record: observed})
+	endHeld := stored != nil && stored.URI == out.uri && stored.Direction != v1alpha1.InfraSyncRetained &&
+		meta.IsStatusConditionTrue(v.status.Conditions, v1alpha1.InfraConditionRecordEnded)
+	endLost := false
+	switch out.action {
+	case infra.ActionEnded, infra.ActionDelete, infra.ActionReserved:
+	default:
+		if endHeld {
+			r.c.log.Warn("infra_record_end_lost", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", out.uri, "cid", got.CID,
+				"action", out.action)
+			out.action, endLost = infra.ActionEnded, true
+		}
+	}
 	keep := v1alpha1.InfraRecordStatus{URI: out.uri}
 	if stored != nil && stored.URI == out.uri {
 		keep = *stored
@@ -317,6 +329,12 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 		if direction == "" || direction == v1alpha1.InfraSyncRetained {
 			direction = v1alpha1.InfraSyncInSync
 		}
+		if endLost {
+			out.status = &keep
+			out.conditions = []metav1.Condition{conds.New(v1alpha1.InfraConditionSynced, false, "EndLost",
+				"the record no longer shows the end this object recorded; the object stays ended and writes nothing", gen)}
+			break
+		}
 		out.status = synced(direction)
 		message := fmt.Sprintf("the record ended at %s (%s); it is kept and never written again", decoded.EndedAt, strings.ToLower(string(decoded.EndReason)))
 		out.conditions = []metav1.Condition{
@@ -369,9 +387,6 @@ func (r *reconciler[T]) settled(ctx context.Context, req ctlruntime.Request, v v
 		return false
 	}
 	if changed, err := r.watchedChange(ctx, req, v, stored); err != nil || changed {
-		return false
-	}
-	if err := r.retainSettled(ctx, req, v); err != nil {
 		return false
 	}
 	r.c.index(string(v.kind), req, stored.URI, stored.CID)
@@ -458,19 +473,19 @@ func RecordOrphaned(err error) bool {
 	return ok && (reason == "RepoNotFound" || reason == "RepoBackendGone")
 }
 
-func (r *reconciler[T]) recordRepo(ctx context.Context, req ctlruntime.Request, v view) (commonv1.ObjectRef, atprotorepo.RecordReader, error) {
-	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
-	if err != nil {
-		return commonv1.ObjectRef{}, nil, err
-	}
-	r.c.bindRepo(string(v.kind), req, repo)
-	_, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
-	return repo, reader, err
-}
-
 func (r *reconciler[T]) finalObserved(v view) infra.Observed {
 	at := v.object.GetDeletionTimestamp()
-	out := infra.Observed{Phase: v1alpha1.InfraPhaseEnded, Contracts: v.status.Contracts, EndReason: v1alpha1.EphemeralInfraEndDeleted}
+	out := infra.Observed{Phase: v1alpha1.InfraPhaseEnded, EndReason: v1alpha1.EphemeralInfraEndDeleted}
+	for _, c := range v.status.Contracts {
+		switch c.Phase {
+		case v1alpha1.InfraContractPhaseStaged, v1alpha1.InfraContractPhaseReleased, v1alpha1.InfraContractPhaseFailed:
+		default:
+			if v.object.GetDeletionTimestamp() != nil {
+				c.Phase = v1alpha1.InfraContractPhaseReleased
+			}
+		}
+		out.Contracts = append(out.Contracts, c)
+	}
 	if at != nil {
 		out.EndedAt = at.UTC().Format(time.RFC3339)
 	}
@@ -489,6 +504,36 @@ func (r *reconciler[T]) finalObserved(v view) infra.Observed {
 	return out
 }
 
+func (r *reconciler[T]) owns(v view, rkey string) bool {
+	if v.spec.Record != nil && strings.TrimSpace(v.spec.Record.URI) != "" {
+		return false
+	}
+	for _, o := range v.object.GetOwnerReferences() {
+		if o.Controller != nil && *o.Controller && (o.Kind == CollectionKind || o.Kind == EphemeralCollectionKind) {
+			return false
+		}
+	}
+	name := v.object.GetName()
+	return rkey == name || rkey == infra.SuccessorRkey(name, string(v.object.GetUID()))
+}
+
+func arInSync(ar *v1alpha1.AtprotoRecord) bool {
+	c := meta.FindStatusCondition(ar.Status.Conditions, v1alpha1.ConditionRecordInSync)
+	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == ar.Generation && ar.Status.ObservedGeneration == ar.Generation
+}
+
+func pendingEnd(ar *v1alpha1.AtprotoRecord) string {
+	var value struct {
+		Status struct {
+			EndedAt string `json:"endedAt"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(ar.Spec.Record, &value) != nil {
+		return ""
+	}
+	return strings.TrimSpace(value.Status.EndedAt)
+}
+
 func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, v view) (bool, error) {
 	stored := v.status.Record
 	if stored == nil || stored.Direction == v1alpha1.InfraSyncRetained || strings.TrimSpace(stored.URI) == "" {
@@ -502,11 +547,41 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 	if v.kind == infra.KindInfra && rkey == infra.ReservedRkey {
 		return true, nil
 	}
-	repo, reader, err := r.recordRepo(ctx, req, v)
+	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI}
+	if !r.owns(v, rkey) {
+		r.c.log.Info("infra_record_not_owned", attrs...)
+		return true, nil
+	}
+	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return false, err
 	}
-	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI}
+	ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, dyn.Resource(v1alpha1.AtprotoRecordGVR), infra.ChildName(v.kind, v.object.GetName()))
+	switch {
+	case apierrors.IsNotFound(err):
+		ar = nil
+	case err != nil:
+		return false, err
+	}
+	var ref commonv1.ObjectRef
+	switch {
+	case v.spec.Record != nil:
+		ref = v.spec.Record.RepoRef
+	case ar != nil && ar.Spec.RepoRef != nil:
+		ref = *ar.Spec.RepoRef
+	default:
+		r.c.log.Info("infra_record_end_skipped", append(attrs, "reason", "no repoRef")...)
+		return true, nil
+	}
+	repo, err := RepoRef(req.Workspace, ref)
+	if err != nil {
+		return false, err
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	_, reader, err := Repo(ctx, r.c.bus, r.c.dynamic, r.self(req), repo, v.kind.NSID())
+	if err != nil {
+		return false, err
+	}
 	got, err := reader.GetRecord(ctx, uri.Authority().String(), uri.Collection().String(), rkey)
 	switch {
 	case errors.Is(err, atprotorepo.ErrNotFound):
@@ -525,16 +600,23 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 		return true, nil
 	}
 	own := []string{strings.TrimSpace(stored.CID)}
-	if dyn, err := r.c.dynamic(req.Workspace); err == nil {
-		if ar, err := kube.Get[v1alpha1.AtprotoRecord](ctx, dyn.Resource(v1alpha1.AtprotoRecordGVR), infra.ChildName(v.kind, v.object.GetName())); err == nil {
-			own = append(own, strings.TrimSpace(ar.Status.Cid))
-		}
+	if ar != nil && arInSync(ar) {
+		own = append(own, strings.TrimSpace(ar.Status.Cid))
 	}
 	if !slices.Contains(own, got.CID) {
 		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID)...)
 		return true, nil
 	}
-	value, err := infra.Final(v.kind, got.Value, r.finalObserved(v))
+	observed := r.finalObserved(v)
+	if ar != nil {
+		if at := pendingEnd(ar); at != "" {
+			observed.EndedAt = at
+			if ar.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && ar.Status.ObservedGeneration == ar.Generation {
+				return false, fmt.Errorf("infra: the final status write of %s failed: %s", stored.URI, ar.Status.Message)
+			}
+		}
+	}
+	value, err := infra.Final(v.kind, got.Value, observed)
 	if err != nil {
 		return false, err
 	}
@@ -584,7 +666,7 @@ func (r *reconciler[T]) retain(ctx context.Context, records kube.Resource, ar *v
 	return nil
 }
 
-func (r *reconciler[T]) retainSettled(ctx context.Context, req ctlruntime.Request, v view) error {
+func (r *reconciler[T]) retainChild(ctx context.Context, req ctlruntime.Request, v view) error {
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return err
@@ -600,6 +682,26 @@ func (r *reconciler[T]) retainSettled(ctx context.Context, req ctlruntime.Reques
 		return nil
 	}
 	return r.retain(ctx, records, ar)
+}
+
+func (r *reconciler[T]) retainOnce(ctx context.Context, req ctlruntime.Request, v view) error {
+	if v.spec.Record == nil && (v.status.Record == nil || v.status.Record.Direction == v1alpha1.InfraSyncRetained) {
+		return nil
+	}
+	k := keyOf(req, v)
+	r.c.mu.Lock()
+	done := r.c.retained[k]
+	r.c.mu.Unlock()
+	if done {
+		return nil
+	}
+	if err := r.retainChild(ctx, req, v); err != nil {
+		return err
+	}
+	r.c.mu.Lock()
+	r.c.retained[k] = true
+	r.c.mu.Unlock()
+	return nil
 }
 
 func (r *reconciler[T]) dropWatch(ctx context.Context, dyn *kube.Client, name string) error {
@@ -713,6 +815,7 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	delete(c.pulls, k)
 	delete(c.moved, k)
 	delete(c.unwritten, k)
+	delete(c.retained, k)
 	c.retries.Reset(k)
 }
 

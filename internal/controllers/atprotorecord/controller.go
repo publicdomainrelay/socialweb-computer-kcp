@@ -14,6 +14,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	infrarecord "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
@@ -248,8 +249,9 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 	if strings.TrimSpace(object.Status.URI) == "" && strings.TrimSpace(object.Status.Cid) == "" {
 		return release("", nil)
 	}
-	if object.Spec.DeletionPolicy == v1alpha1.RecordDeletionRetain {
-		c.log.Info("atprotorecord_retained", "workspace", req.Workspace, "name", object.Name, "uri", object.Status.URI)
+	if object.Spec.DeletionPolicy == v1alpha1.RecordDeletionRetain || keptCollection(object.Spec.Collection) {
+		c.log.Info("atprotorecord_retained", "workspace", req.Workspace, "name", object.Name, "uri", object.Status.URI,
+			"policy", object.Spec.DeletionPolicy)
 		return release("", nil)
 	}
 	ref, err := repoRef(req.Workspace, object.Spec)
@@ -278,6 +280,12 @@ func (c *Controller) finalize(ctx context.Context, req ctlruntime.Request, objec
 		return false, err
 	}
 	return release("", nil)
+}
+
+var keptCollections = map[string]bool{infrarecord.InfraNSID: true, infrarecord.EphemeralInfraNSID: true}
+
+func keptCollection(collection string) bool {
+	return keptCollections[strings.TrimSpace(collection)]
 }
 
 func (c *Controller) repoGone(ctx context.Context, workspace string, ref commonv1.ObjectRef) bool {

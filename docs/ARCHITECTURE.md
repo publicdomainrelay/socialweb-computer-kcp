@@ -11851,30 +11851,45 @@ the whole collection.
 
 Now:
 
-- Nothing deletes an infra record. Every AtprotoRecord an infra applies is `deletionPolicy: Retain`
-  (a settled infra sets it on its existing child once per process), and the finalizer, once every
-  contract is released, reads the record by one getRecord and writes its final status once:
+- Nothing deletes an infra record. Every AtprotoRecord an infra applies is `deletionPolicy: Retain`,
+  every bound infra sets it on an existing child once per process whatever its sync action, and the
+  AtprotoRecord finalizer keeps any record of `computer.socialweb.infra` or
+  `computer.socialweb.ephemeralInfra` whatever its policy, so `compose.ReleaseRecords`, a force delete
+  or a workspace delete cannot delete one either. The finalizer, once every contract is released,
+  reads the record by one getRecord and writes its final status once:
   `status.phase: ended`, `status.endedAt` (the EphemeralInfra's own end time, else the deletion time),
   `status.endReason` (`complete` or `deadline` for an EphemeralInfra that ended, `deleted` for any object
   deleted before its end) and the final `status.contracts`, through the AtprotoRecord with the read
   cid as `swapCid`. It holds its finalizer until a getRecord shows `endedAt` (`infra_record_ending`,
   then `infra_record_ended`), then releases the AtprotoRecord (Retain) and drops the finalizer. A
   record that is gone (`infra_record_absent_at_end`), already ended, or at a cid that is neither
-  `status.record.cid` nor the AtprotoRecord's own (`infra_record_replaced`) is not written and never
-  created again. A repo that cannot be resolved (RepoNotFound, RepoBackendGone) or 24 h without a
+  `status.record.cid` nor the cid of an AtprotoRecord that is InSync at its generation (a SwapMismatch
+  holds the other writer's cid; `infra_record_replaced`) is not written and never created again.
+  Only the owner writes the end: an object bound by its own name or successor rkey, never one bound
+  by `spec.record.uri` or owned by a collection (`infra_record_not_owned`), so ending a follower never
+  ends another kcp's live session. Removing `spec.record` from an owner (the gateway does it when a
+  Cluster is deleting) writes the end the same way before the record is Retained, with the
+  AtprotoRecord's repoRef, so a Cluster created again binds a successor instead of pushing over the
+  old record's history. A repo that cannot be resolved (RepoNotFound, RepoBackendGone) or 24 h without a
   confirmed write (`FinalWriteGaveUp`) keeps the record with its last status (RecordOrphaned). A
   live pass never writes `endedAt`; the finalizer is the one writer of the end.
 - G1: the EphemeralInfra end rule takes the earlier of the record's `createdAt` and the object's, and
   the record's `status.endedAt`/`endReason` as the sticky end when the object has none. The end is
   computed again after the record read, so an object created for an ended or expired record is ended
-  from its first pass and requests nothing.
+  from its first pass and requests nothing. The record's `createdAt` is not used while any owned
+  ComputeContract is not Released or Failed, so a live tab whose record is older than its kcp object
+  never has a Held contract released by this rule.
 - G2: a record with `status.endedAt` is frozen. The sync decision is `Ended`: no write, no push, no
   pull; the object gets `RecordEnded=True`, releases every contract and shows phase `Ended` (an
-  EphemeralInfra is then deleted as usual; its finalizer finds the end and writes nothing).
+  EphemeralInfra is then deleted as usual; its finalizer finds the end and writes nothing). The end
+  is kept in the object: while `RecordEnded=True` and `status.record.uri` names the bound record, a
+  record that lost its `endedAt` (an old binary, a client edit) is still Ended (Synced reason
+  `EndLost`, `infra_record_end_lost`), so a kept Infra never requests its contracts again.
 - G3: a new object (no `status.record`) whose name is the rkey of an ended or expired record binds
   `<name>-<first 8 hex of its UID>` instead (`infra_record_successor`) and keeps it in
-  `status.record.uri`; later passes use that URI. This covers the gateway's `nodes-<hash>` of a
-  Cluster created again, a kubectl re-apply and a reused page tab id. A reader that builds the URI
+  `status.record.uri`; later passes use that URI. An object whose record was Retained (unbound)
+  counts as new when it binds again. This covers the gateway's `nodes-<hash>` of a Cluster created
+  again (its record was ended at unbind), a kubectl re-apply and a reused page tab id. A reader that builds the URI
   from the name must read `status.record.uri` (page G6).
 - G4: the InfraCollection never lists. It reads the index at `computer.socialweb.infra/self` from its
   watch's held value, else by one getRecord (absent: `Indexed` reason `IndexEmpty`, no children), and

@@ -114,9 +114,9 @@
     },
     "index": {
       "type": "object",
-      "required": ["live", "updatedAt"],
+      "required": ["updatedAt"],
       "properties": {
-        "live": { "type": "array", "maxLength": 256, "items": { "type": "ref", "ref": "#indexEntry" } },
+        "live": { "type": "array", "maxLength": 256, "items": { "type": "ref", "ref": "#indexEntry" }, "description": "Absent means no live deployment." },
         "recentEnded": {
           "type": "array",
           "maxLength": 32,

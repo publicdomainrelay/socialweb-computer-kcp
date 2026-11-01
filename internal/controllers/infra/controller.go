@@ -73,6 +73,8 @@ type Controller struct {
 
 	unwritten map[indexKey]bool
 
+	retained map[indexKey]bool
+
 	repos map[string]*binding.Table[struct{}]
 
 	retries *netretry.Tracker[indexKey]
@@ -84,7 +86,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
-		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
+		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retained: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
 			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
 }
 
@@ -246,6 +248,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if !v.object.GetDeletionTimestamp().IsZero() {
 		return r.finalize(ctx, req, obj, v, contracts)
 	}
+	if err := r.retainOnce(ctx, req, v); err != nil {
+		return ctlruntime.Result{}, err
+	}
 	now := time.Now().UTC()
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Record: v.status.Record,
 		Conditions: slices.Clone(v.status.Conditions)}
@@ -309,7 +314,11 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	frozen := v.spec.Record != nil && meta.IsStatusConditionTrue(v.status.Conditions, v1alpha1.InfraConditionRecordEnded)
 	if rec != nil {
-		ending(rec.recorded)
+		recorded := rec.recorded
+		if slices.ContainsFunc(contracts, func(cc v1alpha1.ComputeContract) bool { return !infra.Finished(&cc) }) {
+			recorded.CreatedAt = time.Time{}
+		}
+		ending(recorded)
 		frozen = rec.action == infra.ActionEnded
 		if !frozen {
 			meta.RemoveStatusCondition(&status.Conditions, v1alpha1.InfraConditionRecordEnded)
@@ -333,8 +342,23 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			return ctlruntime.Result{}, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, v.ephemeral))
 		}
 	} else if v.spec.Record == nil {
-		r.c.forget(string(v.kind), req)
+		ended := true
 		if v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
+			done, err := r.finalWrite(ctx, req, v)
+			switch {
+			case err != nil && ReadRetrying(err):
+				ended, retry = false, r.readRetry(req, v, err)
+			case err != nil:
+				r.c.log.Warn("infra_record_end_skipped", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", v.status.Record.URI,
+					"err", err.Error())
+			default:
+				ended = done
+			}
+		}
+		if ended {
+			r.c.forget(string(v.kind), req)
+		}
+		if ended && v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
 			gone, err := r.unbindRecord(ctx, req, v)
 			if err != nil {
 				return ctlruntime.Result{}, err
@@ -503,7 +527,7 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 	}
 	backoff := false
 	var retry, giveUp, deadline time.Duration
-	if left == 0 && v.spec.Record != nil {
+	if left == 0 && (v.spec.Record != nil || (v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained)) {
 		done, err := r.finalWrite(ctx, req, v)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
