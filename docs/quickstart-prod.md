@@ -101,8 +101,8 @@ $SWC run request release "$NAME" --state-dir "$R"
 ```
 
 - identity: `-- --atproto-oauth-qr` (QR), `-- --atproto-oauth` (browser), or an existing account with an app password
-  (`-- --atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`, the password from
-  `--atproto-password` through the environment)
+  (`-- --atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`, the password in
+  `ATPROTO_PASSWORD` in the environment of that one command; `run request` has no `--atproto-password` option)
 - `run request list`, `run request resume <name>`, `run request release <name>` manage the invocations it recorded
 - one invocation is one contract; there is no `kubectl apply` of an Infra into it (section 7)
 
@@ -147,7 +147,8 @@ $SWC run request release "$NAME" --state-dir "$R"
 ## 6. Tenant Kubernetes Clusters: The Prod Gateway
 
 The prod gateway at `k8s.socialweb.computer` owns tenant clusters. With service auth from your account (runbook
-[0001](acceptance/0001-auth-modes.md) section 3):
+[0001](acceptance/0001-auth-modes.md) section 3; `CL`, `W` and the `xrpc` shell function over `goat` come from its
+"Variables" and "Service auth for the gateway" blocks, sourced first):
 
 ```bash
 xrpc procedure createCluster name="$CL"
@@ -186,7 +187,9 @@ kill -INT %1                                              # Ctrl-C: stops the kc
 
 - identity, after `--` (the MarketRequesterSpec options of `run request`, parsed by the same code): `--atproto-oauth-qr`,
   `--atproto-oauth`, or an existing account with an app password (`--atproto-identity-mode pdsAccount --atproto-handle
-  <handle> --atproto-pds-url <pds>`, the password through the environment); without one it is a local PDS (`localRepo`,
+  <handle> --atproto-pds-url <pds>`, the password in `ATPROTO_PASSWORD` in the environment of that one command, which
+  puts it into the requester's own OpenBao, or later `run requester password <name>` on stdin); without one it is a
+  local PDS (`localRepo`,
   `--identity <name>` before `--` reuses a stored one); comms, ingress, requester ingress and `--secrets-fallback` too. A
   contract option (`--vm-name`, `--tunnel`, `--hold`, ...) is refused: contracts are kubectl objects here
 - the ready file (`<dir>/ready.json`, and a second copy at `--ready-file <path>`): written to `<path>.tmp` then renamed,
@@ -316,12 +319,18 @@ that core's kcp. The core places it as one more unit (placement supervisor) in `
 `run requester --name lr2 --state-dir <dir> --fg`, which brings up its own kcp under that unit.
 
 ```bash
-export KUBECONFIG=$(sudo jq -r .kubeconfig "$R")                # the core that places it
+A=swc-requester; ST=/var/lib/socialweb-computer/$A               # the account whose core places it
+K=$(sudo jq -r .kubeconfig "$ST/requesters/me/ready.json")      # that core's kcp (the installed requester me)
 P=socialweb-hp-req-$(printf %s me | sha256sum | cut -c1-10)-  # the HostProcess prefix of the installed requester me
-sed -e "s|REPLACE-HP-PREFIX|$P|" -e "s|REPLACE-STATE-DIR|$HOME/lr2|g" examples/infra/requester-hostprocess.yaml | kubectl apply -f -
-kubectl get hostprocess requester-lr2 -o jsonpath='{.status.phase}{"\n"}'   # Running once the ready file is written
-kubectl delete hostprocess requester-lr2                        # SIGTERM: stops its kcp and keeps its state dir
+sed -e "s|REPLACE-HP-PREFIX|$P|" -e "s|REPLACE-STATE-DIR|$ST/lr2|g" examples/infra/requester-hostprocess.yaml \
+  | sudo -u $A kubectl --kubeconfig "$K" apply -f -
+sudo -u $A kubectl --kubeconfig "$K" get hostprocess requester-lr2 -o jsonpath='{.status.phase}{"\n"}'   # Running once the ready file is written
+sudo -u $A kubectl --kubeconfig "$K" delete hostprocess requester-lr2   # SIGTERM: stops its kcp and keeps its state dir
 ```
+
+- every command runs as the account (`sudo -u $A`): the kubeconfig is 0600 to it, and the unit runs as it, so the
+  state dir must be one it can write (here under its own state dir). As a normal account that runs its own core, drop
+  `sudo -u $A` and `sudo`, and use a dir of that account for `REPLACE-STATE-DIR`
 
 - the unit must start with the core's HostProcess prefix (`<unit-prefix>hp-<key>-`; an installed requester's key is
   `req-<sha256(name)[:10]>`, a dev instance's is its short id: read it from `kubectl get hostprocesses`), or the core
@@ -353,7 +362,7 @@ second sign-in, no gateway PDS, no gateway Requester and no web app.
 $SWC run requester --name me --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
 until jq -e .gateway "$ST/requesters/me/ready.json" >/dev/null 2>&1; do sleep 1; done
 $SWC run requester cluster me --cluster c1 --state-dir "$ST"         # account + home workspace and the Cluster
-TK=$($SWC run requester kubeconfig me --cluster c1 --state-dir "$ST") # once the Cluster is Ready
+until TK=$($SWC run requester kubeconfig me --cluster c1 --state-dir "$ST" 2>/dev/null); do sleep 2; done   # once the Cluster is Ready
 kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml
 kubectl --kubeconfig "$TK" wait --for=condition=Ready pod -l app=quickstart-k8s --timeout=5m
 kubectl --kubeconfig "$TK" logs deploy/quickstart-k8s                # quickstart-k8s-ok

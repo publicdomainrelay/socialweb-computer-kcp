@@ -155,3 +155,19 @@ func RequesterCluster(ctx context.Context, kubeconfig, base, did, cluster string
 	}
 	return clusterhome.HomePath(did, cluster), nil
 }
+
+func RequesterClusterPhase(ctx context.Context, kubeconfig, did, cluster string) (v1alpha1.ClusterPhase, error) {
+	restCfg, err := memberRestConfig(kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	home, err := kube.New(clusterConfig(restCfg, clusterhome.HomePath(did, cluster)))
+	if err != nil {
+		return "", err
+	}
+	c, err := kube.Get[v1alpha1.Cluster](ctx, home.Resource(clusterGVR), cluster)
+	if err != nil {
+		return "", err
+	}
+	return c.Status.Phase, nil
+}
