@@ -116,8 +116,8 @@ eval "$($SWC run requester env me --state-dir "$ST")"
 - identity options after `--`: `--atproto-oauth-qr`, `--atproto-oauth` (browser), or an existing account with an app
   password (`--atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`); with none it is a
   local PDS (`localRepo`). Contract options are refused: contracts are kubectl objects here
-- a restart with the same command (nothing after `--` needed) keeps the DID and the vault; Held contracts across a
-  restart: [Open items](#open-items)
+- a restart with the same command (nothing after `--` needed) keeps the DID, the vault and every Held contract (the
+  resume waits for its own policy engine, then runs the policy; since rc158)
 
 As a systemd user unit of its own account, in `socialweb.slice` (root, once). The account `swc-requester` is created,
 or an existing one is taken over with `--adopt-account`:
@@ -218,7 +218,6 @@ association, upgrade and the foreground form (`run bidder --host-backend proc --
 
 | item | state |
 | --- | --- |
-| a Held contract across a `run requester` restart: it is failed at once (`the held contract is not resumed: ... the policy engine is not running`), and an `endWhen: Complete` EphemeralInfra then releases the rest | fix in progress (`resumeReceipt` in `internal/market/requester/runner.go`) |
 | a node of a `--with-gateway` tenant cluster from a remote bidder: the node cannot fetch meshd (its download base is the local Exposure `http://192.0.2.1:<port>`, which only a bidder on the same host reaches) | fix in progress |
 | an atirc agent from a local PDS or a `pdsAccount` identity | built, not yet proven against irc.fedfork.com |
 
