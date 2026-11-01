@@ -271,6 +271,7 @@ type InfraContract struct {
 	DenyBidderDids     []string                   `json:"denyBidderDids,omitempty"`
 	GuestTools         []string                   `json:"guestTools,omitempty"`
 	Name               string                     `json:"name"`
+	OauthClients       []InfraOauthClient         `json:"oauthClients,omitempty"`
 	Policy             string                     `json:"policy,omitempty"`
 	PolicyArgs         string                     `json:"policyArgs,omitempty"`
 	ReleaseRequestedAt string                     `json:"releaseRequestedAt,omitempty"`
@@ -407,6 +408,32 @@ func (v *InfraIndexEntry) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = InfraIndexEntry(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type InfraOauthClient struct {
+	ClientID    string                     `json:"clientId"`
+	RedirectURI string                     `json:"redirectUri,omitempty"`
+	Scopes      []string                   `json:"scopes,omitempty"`
+	Extra       map[string]json.RawMessage `json:"-"`
+	absent      map[string]json.RawMessage
+}
+
+func (v InfraOauthClient) MarshalJSON() ([]byte, error) {
+	type plain InfraOauthClient
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraOauthClient) UnmarshalJSON(b []byte) error {
+	type plain InfraOauthClient
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraOauthClient(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil

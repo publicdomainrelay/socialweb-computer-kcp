@@ -2311,13 +2311,6 @@ func (in *ComputeContractSpec) DeepCopyInto(out *ComputeContractSpec) {
 		*out = new(ComputeContractNodeJoin)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.OAuthClients != nil {
-		in, out := &in.OAuthClients, &out.OAuthClients
-		*out = make([]ComputeContractOAuthClient, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 	if in.TTLSecondsAfterFinished != nil {
 		in, out := &in.TTLSecondsAfterFinished, &out.TTLSecondsAfterFinished
 		*out = new(int32)
@@ -2443,6 +2436,13 @@ func (in *ComputeContractTemplate) DeepCopyInto(out *ComputeContractTemplate) {
 		in, out := &in.GuestTools, &out.GuestTools
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.OAuthClients != nil {
+		in, out := &in.OAuthClients, &out.OAuthClients
+		*out = make([]ComputeContractOAuthClient, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	return
 }

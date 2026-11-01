@@ -111,6 +111,27 @@ spec:
                   enum:
                     - socialweb-computer
                 x-kubernetes-list-type: set
+              oauthClients:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    clientId:
+                      type: string
+                      pattern: ^https://[^ ]+$
+                    scopes:
+                      type: array
+                      items:
+                        type: string
+                      x-kubernetes-list-type: set
+                    redirectUri:
+                      type: string
+                  required:
+                    - clientId
+                    - scopes
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                  - clientId
               secretsRef:
                 type: object
                 properties:
@@ -200,27 +221,6 @@ spec:
                       - pins
                 required:
                   - clusterRef
-              oauthClients:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    clientId:
-                      type: string
-                      pattern: ^https://[^ ]+$
-                    scopes:
-                      type: array
-                      items:
-                        type: string
-                      x-kubernetes-list-type: set
-                    redirectUri:
-                      type: string
-                  required:
-                    - clientId
-                    - scopes
-                x-kubernetes-list-type: map
-                x-kubernetes-list-map-keys:
-                  - clientId
               ttlSecondsAfterFinished:
                 type: integer
                 format: int32

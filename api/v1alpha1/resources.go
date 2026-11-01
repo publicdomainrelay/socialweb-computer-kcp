@@ -131,8 +131,8 @@ var APIResources = []APIResource{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Infra", Plural: "infras", Revision: 13, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
-	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 13, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Infra", Plural: "infras", Revision: 14, Export: "computecontracts", Object: Infra{}, PrinterColumns: infraPrinterColumns},
+	{Kind: "EphemeralInfra", Plural: "ephemeralinfras", Revision: 14, Export: "computecontracts", Object: EphemeralInfra{}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Record", Type: "string", JSONPath: ".status.record.uri"},
 		{Name: "Sync", Type: "string", JSONPath: ".status.record.direction"},

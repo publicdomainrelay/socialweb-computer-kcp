@@ -164,7 +164,7 @@ func (d Declaration) Published() Declaration {
 	for _, c := range d.Contracts {
 		out.Contracts = append(out.Contracts, v1alpha1.InfraContract{Name: c.Name, State: c.State,
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: c.VMName, BidderDids: c.BidderDids,
-				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association, GuestTools: c.GuestTools}})
+				DenyBidderDids: c.DenyBidderDids, Tunnels: c.Tunnels, Agent: c.Agent, Association: c.Association, GuestTools: c.GuestTools, OAuthClients: c.OAuthClients}})
 	}
 	return normalize(out)
 }

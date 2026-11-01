@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-13.ephemeralinfras.socialweb.computer
+  name: v1alpha1-14.ephemeralinfras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -132,6 +132,27 @@ spec:
                         enum:
                           - socialweb-computer
                       x-kubernetes-list-type: set
+                    oauthClients:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          clientId:
+                            type: string
+                            pattern: ^https://[^ ]+$
+                          scopes:
+                            type: array
+                            items:
+                              type: string
+                            x-kubernetes-list-type: set
+                          redirectUri:
+                            type: string
+                        required:
+                          - clientId
+                          - scopes
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys:
+                        - clientId
                   required:
                     - name
                 x-kubernetes-list-type: map
