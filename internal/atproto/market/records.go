@@ -321,8 +321,10 @@ func (r *Offering) Validate() error {
 	if err := validateOptionalServiceRef(r.EndpointURL); err != nil {
 		return err
 	}
-	if err := validateAppliesTo(r.AppliesTo); err != nil {
-		return err
+	if r.WithdrawnAt == "" || len(r.AppliesTo) > 0 {
+		if err := validateAppliesTo(r.AppliesTo); err != nil {
+			return err
+		}
 	}
 	if err := validateIngressList(r.Ingress); err != nil {
 		return err
@@ -331,6 +333,9 @@ func (r *Offering) Validate() error {
 		return fmt.Errorf("%w: offering missing createdAt", ErrInvalidRecord)
 	}
 	if err := validateOptionalDatetime(r.CreatedAt, "createdAt"); err != nil {
+		return err
+	}
+	if err := validateOptionalDatetime(r.WithdrawnAt, "withdrawnAt"); err != nil {
 		return err
 	}
 	return validateOptionalDatetime(r.RefreshedAt, "refreshedAt")
@@ -753,6 +758,24 @@ func BuildOffering(endpointURL string, appliesTo []string, ingress []RecordRef, 
 		return Offering{}, err
 	}
 	return Offering{EndpointURL: endpointURL, AppliesTo: appliesTo, Ingress: records, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
+}
+
+func BuildWithdrawnOffering(createdAt, withdrawnAt string) (Offering, error) {
+	withdrawnAt = isoOrNow(withdrawnAt)
+	if err := validateOptionalDatetime(withdrawnAt, "withdrawnAt"); err != nil {
+		return Offering{}, err
+	}
+	return Offering{
+		AppliesTo:   []string{},
+		CreatedAt:   isoOrNow(createdAt),
+		RefreshedAt: withdrawnAt,
+		WithdrawnAt: withdrawnAt,
+		Extra:       map[string]json.RawMessage{"appliesTo": json.RawMessage("[]")},
+	}, nil
+}
+
+func OfferingWithdrawn(offering Offering) bool {
+	return offering.WithdrawnAt != "" && len(offering.AppliesTo) == 0
 }
 
 func BuildHeartbeat(offeringURI, createdAt string) (Heartbeat, error) {

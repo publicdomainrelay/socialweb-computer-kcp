@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.market.offering",
-  "description": "A bidder announces the payload collections it bids on and where it takes RFPs.",
+  "description": "A bidder announces the payload collections it bids on and where it takes RFPs. Writers use rkey self; readers read self and the record the bidder's heartbeat names.",
   "defs": {
     "main": {
       "type": "record",
@@ -18,7 +18,8 @@
             "items": { "type": "string", "format": "nsid" }
           },
           "createdAt": { "type": "string", "format": "datetime" },
-          "refreshedAt": { "type": "string", "format": "datetime" }
+          "refreshedAt": { "type": "string", "format": "datetime" },
+          "withdrawnAt": { "type": "string", "format": "datetime", "description": "Set when the bidder stopped taking RFPs; appliesTo is empty then." }
         }
       }
     }

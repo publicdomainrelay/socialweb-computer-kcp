@@ -2,13 +2,13 @@ package bidder
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
 func (b *Bidder) Run(ctx context.Context) {
@@ -93,18 +93,38 @@ func (b *Bidder) serveMarket(ctx context.Context) {
 }
 
 func (b *Bidder) withdraw(ctx context.Context) {
-	page, err := b.records.ListRecords(ctx, b.cfg.DID, market.OfferingNSID, 20, "")
+	b.offerWrite.Lock()
+	defer b.offerWrite.Unlock()
+	prior, err := b.selfOffering(ctx)
 	if err != nil {
-		b.log.Warn("listing the market offerings to withdraw failed", "err", err)
+		b.log.Warn("reading the market offering to withdraw failed", "err", err)
 		return
 	}
-	for _, rec := range page.Records {
-		if err := b.records.DeleteRecord(ctx, b.cfg.DID, market.OfferingNSID, participant.LastSegment(rec.URI)); err != nil {
-			b.log.Warn("withdrawing the market offering failed", "offering", rec.URI, "err", err)
-			continue
-		}
-		b.log.Info("the bidder offering is withdrawn while its participation is suspended", "offering", rec.URI)
+	if err := b.findLegacyOffering(ctx); err != nil {
+		b.log.Warn("reading the heartbeat to withdraw the market offering failed", "err", err)
+		return
 	}
+	if prior == nil && b.legacyOffering == "" {
+		return
+	}
+	createdAt := ""
+	if prior != nil {
+		if market.OfferingWithdrawn(*prior) {
+			return
+		}
+		createdAt = prior.CreatedAt
+	}
+	record, err := market.BuildWithdrawnOffering(createdAt, b.now().UTC().Format(time.RFC3339))
+	if err != nil {
+		b.log.Warn("building the withdrawn market offering failed", "err", err)
+		return
+	}
+	uri, err := b.putOffering(ctx, record)
+	if err != nil {
+		b.log.Warn("withdrawing the market offering failed", "err", err)
+		return
+	}
+	b.log.Info("the bidder offering is withdrawn while its participation is suspended", "offering", uri, "legacy", b.legacyOffering)
 }
 
 func (b *Bidder) setOffering(uri string) {
@@ -116,48 +136,44 @@ func (b *Bidder) setOffering(uri string) {
 func (b *Bidder) ensureOffering(ctx context.Context) error {
 	b.offerWrite.Lock()
 	defer b.offerWrite.Unlock()
-	return b.ensureOfferingLocked(ctx)
+	return b.ensureOfferingLocked(ctx, false)
 }
 
-func (b *Bidder) ensureOfferingLocked(ctx context.Context) error {
+func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	appliesTo := []string{market.ComputeVMNSID}
 	now := b.now().UTC().Format(time.RFC3339)
-	page, err := b.records.ListRecords(ctx, b.cfg.DID, market.OfferingNSID, 20, "")
+	prior, err := b.selfOffering(ctx)
 	if err != nil {
 		return err
 	}
-	if len(page.Records) > 0 {
-		rec := page.Records[0]
-		b.dropExtraOfferings(ctx, page.Records[1:])
-		offering, err := market.ParseOffering(rec.Value)
-		if err != nil {
-			return err
-		}
-		if offering.EndpointURL == b.cfg.EndpointURL && sameStrings(offering.AppliesTo, appliesTo) {
-			b.setOffering(rec.URI)
+	if err := b.findLegacyOffering(ctx); err != nil {
+		return err
+	}
+	createdAt := now
+	if prior != nil {
+		createdAt = prior.CreatedAt
+		if !touch && prior.WithdrawnAt == "" && prior.EndpointURL == b.cfg.EndpointURL && sameStrings(prior.AppliesTo, appliesTo) {
+			b.setOffering(b.heartbeatOffering())
 			return nil
 		}
-		record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, offering.CreatedAt, now)
-		if err != nil {
-			return err
-		}
-		if _, err := b.putRecord(ctx, participant.LastSegment(rec.URI), record); err != nil {
-			return err
-		}
-		b.setOffering(rec.URI)
-		b.log.Info("the bidder offering is corrected", "offering", rec.URI, "endpoint", b.cfg.EndpointURL)
-		return nil
 	}
-	record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, now, now)
+	record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, createdAt, now)
 	if err != nil {
 		return err
 	}
-	ref, err := b.putRecord(ctx, syntax.NewTIDNow(0).String(), record)
+	uri, err := b.putOffering(ctx, record)
 	if err != nil {
 		return err
 	}
-	b.setOffering(ref.URI)
-	b.log.Info("the bidder offering is written", "offering", ref.URI, "endpoint", b.cfg.EndpointURL)
+	b.setOffering(b.heartbeatOffering())
+	switch {
+	case touch:
+		b.log.Info("the bidder offering is refreshed for the relay", "offering", uri, "legacy", b.legacyOffering)
+	case prior == nil:
+		b.log.Info("the bidder offering is written", "offering", uri, "endpoint", b.cfg.EndpointURL, "legacy", b.legacyOffering)
+	default:
+		b.log.Info("the bidder offering is corrected", "offering", uri, "endpoint", b.cfg.EndpointURL, "legacy", b.legacyOffering)
+	}
 	return nil
 }
 
@@ -173,38 +189,72 @@ func (b *Bidder) TouchOffering(ctx context.Context) {
 func (b *Bidder) touchOffering(ctx context.Context) error {
 	b.offerWrite.Lock()
 	defer b.offerWrite.Unlock()
-	page, err := b.records.ListRecords(ctx, b.cfg.DID, market.OfferingNSID, 20, "")
+	return b.ensureOfferingLocked(ctx, true)
+}
+
+func (b *Bidder) selfOffering(ctx context.Context) (*market.Offering, error) {
+	rec, err := b.records.GetRecord(ctx, b.cfg.DID, market.OfferingNSID, market.OfferingRKey)
+	if errors.Is(err, market.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(page.Records) == 0 {
-		return b.ensureOfferingLocked(ctx)
-	}
-	rec := page.Records[0]
-	b.dropExtraOfferings(ctx, page.Records[1:])
 	offering, err := market.ParseOffering(rec.Value)
 	if err != nil {
+		b.log.Warn("the bidder's own market offering is invalid; it is written again", "offering", rec.URI, "err", err)
+		return nil, nil
+	}
+	return offering, nil
+}
+
+func (b *Bidder) findLegacyOffering(ctx context.Context) error {
+	if b.legacyChecked {
+		return nil
+	}
+	rkey, err := market.HeartbeatOfferingRKey(ctx, b.records, b.cfg.DID)
+	switch {
+	case errors.Is(err, market.ErrNotFound), errors.Is(err, market.ErrInvalidRecord):
+		b.legacyChecked = true
+		return nil
+	case err != nil:
 		return err
 	}
-	record, err := market.BuildOffering(b.cfg.EndpointURL, []string{market.ComputeVMNSID}, nil, offering.CreatedAt, b.now().UTC().Format(time.RFC3339))
-	if err != nil {
-		return err
+	if _, err := syntax.ParseTID(rkey); rkey == market.OfferingRKey || err != nil {
+		b.legacyChecked = true
+		return nil
 	}
-	if _, err := b.putRecord(ctx, participant.LastSegment(rec.URI), record); err != nil {
+	_, err = b.records.GetRecord(ctx, b.cfg.DID, market.OfferingNSID, rkey)
+	switch {
+	case errors.Is(err, market.ErrNotFound):
+	case err != nil:
 		return err
+	default:
+		b.legacyOffering = rkey
+		b.log.Info("the bidder mirrors its offering to the legacy record its heartbeat named", "legacy", rkey)
 	}
-	b.log.Info("the bidder offering is refreshed for the relay", "offering", rec.URI)
+	b.legacyChecked = true
 	return nil
 }
 
-func (b *Bidder) dropExtraOfferings(ctx context.Context, extra []market.ListedRecord) {
-	for _, rec := range extra {
-		if err := b.records.DeleteRecord(ctx, b.cfg.DID, market.OfferingNSID, participant.LastSegment(rec.URI)); err != nil {
-			b.log.Warn("deleting a second market offering failed", "offering", rec.URI, "err", err)
-			continue
-		}
-		b.log.Info("a second market offering is deleted; the bidder keeps one", "offering", rec.URI)
+func (b *Bidder) heartbeatOffering() string {
+	if b.legacyOffering != "" {
+		return "at://" + b.cfg.DID + "/" + market.OfferingNSID + "/" + b.legacyOffering
 	}
+	return market.OfferingURI(b.cfg.DID)
+}
+
+func (b *Bidder) putOffering(ctx context.Context, record market.Offering) (string, error) {
+	ref, err := b.putRecord(ctx, market.OfferingRKey, record)
+	if err != nil {
+		return "", err
+	}
+	if b.legacyOffering != "" {
+		if _, err := b.putRecord(ctx, b.legacyOffering, record); err != nil && ctx.Err() == nil {
+			b.log.Warn("updating the legacy market offering failed", "legacy", b.legacyOffering, "err", err)
+		}
+	}
+	return ref.URI, nil
 }
 
 func (b *Bidder) currentOffering() string {
