@@ -12,6 +12,7 @@ import (
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 )
 
@@ -32,7 +33,7 @@ type Owner struct {
 }
 
 func OwnerIdentityName(did string) string {
-	return "owner-" + Stamp(strings.TrimSpace(did))
+	return market.SessionOwnerName(market.SessionOwnerIdentityPrefix, did)
 }
 
 func (o Owner) pdsURL() string {

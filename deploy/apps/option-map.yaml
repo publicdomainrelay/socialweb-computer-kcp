@@ -274,6 +274,10 @@ apps:
       - {name: requester-ingress-webrtc-stun, to: spec.requesterIngress.webrtc.stunUrls}
       - {name: network-hosts, to: network.hosts}
       - {name: bidder-dids, to: spec.bidderDids}
+      - {name: ssh-public-listen, to: spec.ssh.publicListen}
+      - {name: ssh-web-listen, to: spec.ssh.webListen}
+      - {name: ssh-operator-did, to: spec.ssh.operatorDid}
+      - {name: ssh-max-accounts, to: spec.ssh.maxAccounts}
       - {name: guest-host-aliases, to: profile}
       - {name: guest-ca-file, to: profile}
       - {name: guest-curl-home, to: profile}

@@ -318,7 +318,7 @@ func (c *Core) register() error {
 			})
 		})},
 		{sshserver.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.SshServerSpec) (*sshserver.Service, error) {
-			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, TLS: tlsConfig})
+			return sshserver.New(spec, sshserver.Deps{Instance: in, Hosts: hosts, KCP: kcp, TLS: tlsConfig})
 		})},
 	} {
 		if err := c.runtime.Register(entry.kind, entry.factory); err != nil {

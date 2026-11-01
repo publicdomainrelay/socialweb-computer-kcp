@@ -23,6 +23,8 @@ const (
 	FieldManager = "run-gateway-ssh"
 	Poll         = time.Second
 	DefaultName  = "ssh-gateway"
+
+	SshPublicListener = "ssh-public"
 )
 
 type SpecInput struct {
@@ -33,6 +35,8 @@ type SpecInput struct {
 	Comms             *v1alpha1.MarketComms
 	RequesterIngress  *v1alpha1.IngressConfig
 	OwnerSessionsFile string
+
+	Ssh *v1alpha1.SshGatewaySsh
 }
 
 func Spec(in SpecInput) (v1alpha1.SshGatewaySpec, error) {
@@ -43,7 +47,7 @@ func Spec(in SpecInput) (v1alpha1.SshGatewaySpec, error) {
 		return v1alpha1.SshGatewaySpec{}, fmt.Errorf("gatewayssh: the %s profile takes its network value from a market network (--network)", in.Profile)
 	}
 	return v1alpha1.SshGatewaySpec{Profile: in.Profile, Network: in.Network, BidderDids: in.BidderDids, Comms: in.Comms, Options: in.Options,
-		RequesterIngress: in.RequesterIngress, OwnerSessionsFile: in.OwnerSessionsFile}, nil
+		RequesterIngress: in.RequesterIngress, OwnerSessionsFile: in.OwnerSessionsFile, Ssh: in.Ssh}, nil
 }
 
 func InstanceID(name string) string {
@@ -106,6 +110,11 @@ func (k *Kcp) WaitReady(ctx context.Context, timeout time.Duration, progress fun
 }
 
 func SshListener(ls []v1alpha1.ApplicationListener) string {
+	for _, l := range ls {
+		if l.Name == SshPublicListener && l.Address != "" {
+			return l.Address
+		}
+	}
 	for _, l := range ls {
 		if !strings.HasSuffix(l.Component, "-ssh-local") || l.Address == "" {
 			continue

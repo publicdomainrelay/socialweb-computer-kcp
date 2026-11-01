@@ -491,7 +491,10 @@ func (o *OAuth) callback(w http.ResponseWriter, r *http.Request) {
 	if o.opts.OnSignedIn != nil {
 		if err := o.opts.OnSignedIn(r.Context(), user); err != nil {
 			o.opts.Log.Error("web_signed_in_hook_failed", "did", grant.DID, "err", err)
-			o.finish(w, r, http.StatusBadGateway, nil, "sign-in failed: "+err.Error())
+			if _, signOutErr := o.opts.SignIn.SignOut(r.Context(), &WebCaller{WebUser: *user, Token: grant.Token}); signOutErr != nil {
+				o.opts.Log.Error("web_signed_in_hook_sign_out_failed", "did", grant.DID, "err", signOutErr)
+			}
+			o.finish(w, r, http.StatusForbidden, nil, "this account was not admitted")
 			return
 		}
 	}

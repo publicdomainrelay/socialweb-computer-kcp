@@ -131,7 +131,8 @@ func NetworkCAFile(dir string, n *v1alpha1.MarketNetworkValue) (string, error) {
 
 func RequesterMode(mode v1alpha1.MarketIdentityMode) string {
 	switch mode {
-	case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated:
+	case v1alpha1.MarketIdentityModeOAuthQr, v1alpha1.MarketIdentityModeOAuthBrowser, v1alpha1.MarketIdentityModeOAuthDelegated,
+		v1alpha1.MarketIdentityModeOAuthSessionProxy:
 		return "oauth"
 	case v1alpha1.MarketIdentityModePdsAccount:
 		return "callback"

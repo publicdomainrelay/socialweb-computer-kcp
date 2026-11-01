@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/kcp"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ssh/ownersession"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
 
 type Service struct {
@@ -63,6 +66,18 @@ type Service struct {
 
 	sshURL string
 
+	publicURL string
+
+	public net.Listener
+
+	webURL string
+
+	webServer *http.Server
+
+	web *webSignIn
+
+	perUser bool
+
 	gateway *gateway.Gateway
 }
 
@@ -78,9 +93,26 @@ type requester struct {
 }
 
 func (r requester) RunCommand(ctx context.Context, account sshcontract.Account, command string, env map[string]string, io sshcontract.CommandIO) error {
-	runner, err := r.service.resolveRequester(ctx, r.ref)
-	if err != nil {
-		return err
+	s := r.service
+	if !s.perUser {
+		runner, err := s.resolveRequester(ctx, r.ref)
+		if err != nil {
+			return err
+		}
+		return runner.RunCommand(ctx, account, command, env, io)
+	}
+	runner, err := s.resolveRequester(ctx, s.accountRequesterRef(account.DID))
+	switch {
+	case errors.Is(err, bus.ErrLinkDenied):
+		s.log.Info("sshserver_account_not_signed_in", "did", account.DID)
+		_ = io.WriteErr([]byte("sign in at " + s.publicOrigin() + " first: this ssh gateway rents VMs as you, with your own atproto session, and has none for " + account.DID + " yet\n"))
+		io.Exit(1)
+		return nil
+	case err != nil:
+		s.log.Warn("sshserver_account_requester_unavailable", "did", account.DID, "err", err.Error())
+		_ = io.WriteErr([]byte("ssh gateway error: your requester is not available: " + err.Error() + "\n"))
+		io.Exit(1)
+		return nil
 	}
 	return runner.RunCommand(ctx, account, command, env, io)
 }
@@ -146,13 +178,46 @@ func (s *Service) Start(ctx context.Context) error {
 		handlers.Remove(key)
 		return fail(fmt.Errorf("sshserver: registering the stream: %w", err))
 	}
+	publicURL := ""
+	if addr := strings.TrimSpace(s.spec.PublicListen); addr != "" {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			handlers.Remove(key)
+			return fail(fmt.Errorf("sshserver: the public ssh listener %s: %w", addr, err))
+		}
+		publicURL = "ssh://" + ln.Addr().String()
+		s.mu.Lock()
+		s.public = ln
+		s.mu.Unlock()
+		go s.servePublic(runCtx, ln)
+	}
+	webURL := ""
+	if addr := strings.TrimSpace(s.spec.WebListen); addr != "" {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			handlers.Remove(key)
+			return fail(fmt.Errorf("sshserver: the web listener %s: %w", addr, err))
+		}
+		webURL = "http://" + ln.Addr().String()
+		srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: webReadHeaderTimeout}
+		s.mu.Lock()
+		s.webServer = srv
+		s.mu.Unlock()
+		go func() {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.log.Warn("sshserver_web_serve_failed", "err", err)
+			}
+		}()
+	}
 	s.mu.Lock()
 	s.key = key
 	s.httpURL = httpURL
 	s.sshURL = sshURL
+	s.publicURL = publicURL
+	s.webURL = webURL
 	s.ready = true
 	s.mu.Unlock()
-	s.log.Info("sshserver_registered", "http", host, "ssh", host)
+	s.log.Info("sshserver_registered", "http", host, "ssh", host, "public", publicURL, "web", webURL)
 	s.readiness.Signal()
 
 	<-runCtx.Done()
@@ -161,29 +226,66 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
+func (s *Service) servePublic(ctx context.Context, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			s.log.Warn("sshserver_public_accept_failed", "err", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(publicAcceptBackoff):
+			}
+			continue
+		}
+		go func() {
+			defer conn.Close()
+			if err := s.gateway.ServeConn(ctx, conn); err != nil && ctx.Err() == nil {
+				s.log.Info("sshserver_public_conn_closed", "err", err)
+			}
+		}()
+	}
+}
+
 func (s *Service) setup(ctx context.Context) error {
 	ref, err := s.requesterRef()
 	if err != nil {
 		return err
 	}
-	if _, err := s.resolveRequester(ctx, ref); err != nil {
+	web, err := s.openSignIn(ctx)
+	if err != nil {
 		return err
 	}
+	if !s.perUser {
+		if _, err := s.resolveRequester(ctx, ref); err != nil {
+			return err
+		}
+	}
 	owners := ownersession.New(ownersession.Config{Sessions: s.ownerSessions}, ownersession.Deps{Open: s.openOwner})
+	var auth sshtransport.Authenticator = owners
+	var agents sshtransport.AgentProvider = owners
+	if web != nil {
+		auth, agents = web.auth, web.signIn
+	}
 	g, err := gateway.New(s.cfg, gateway.Deps{
 		Runner:    requester{service: s, ref: ref},
 		Directory: s.directory,
 		Trust:     s.inProcess,
 		Client:    s.httpClient(requestTimeout),
-		Auth:      owners,
-		Agents:    owners,
+		Auth:      auth,
+		Agents:    agents,
 		Log:       s.log,
 	})
 	if err != nil {
+		web.close()
 		return err
 	}
 	s.mu.Lock()
 	s.gateway = g
+	s.web = web
 	s.mu.Unlock()
 	return nil
 }
@@ -193,6 +295,10 @@ func (s *Service) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /connect.json", s.connect)
 	mux.HandleFunc("GET /.well-known/cocore-app.json", s.cocoreApp)
+	if s.web != nil {
+		s.web.oauth.Register(mux)
+		mux.HandleFunc("GET /{$}", s.page)
+	}
 	s.gateway.Register(mux)
 	return mux
 }
@@ -230,10 +336,17 @@ func (s *Service) Endpoints() []component.Endpoint {
 	if s.httpURL == "" || s.sshURL == "" {
 		return nil
 	}
-	return []component.Endpoint{
+	out := []component.Endpoint{
 		{Name: "http", Protocol: component.ProtocolHTTP, URL: s.httpURL},
 		{Name: "ssh", Protocol: component.ProtocolSSH, URL: s.sshURL},
 	}
+	if s.publicURL != "" {
+		out = append(out, component.Endpoint{Name: PublicEndpoint, Protocol: component.ProtocolSSH, URL: s.publicURL})
+	}
+	if s.webURL != "" {
+		out = append(out, component.Endpoint{Name: WebEndpoint, Protocol: component.ProtocolHTTP, URL: s.webURL})
+	}
+	return out
 }
 
 func (s *Service) Stop(ctx context.Context) error {
@@ -264,7 +377,20 @@ func (s *Service) shutdown(ctx context.Context) {
 	}
 	s.stopped = true
 	g := s.gateway
+	public := s.public
+	s.public = nil
+	web := s.web
+	s.web = nil
+	webServer := s.webServer
+	s.webServer = nil
 	s.mu.Unlock()
+	defer web.close()
+	if webServer != nil {
+		_ = webServer.Close()
+	}
+	if public != nil {
+		_ = public.Close()
+	}
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultShutdownTimeout)
 	defer cancel()
 	if g != nil {
@@ -276,5 +402,7 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.mu.Lock()
 	s.started = false
 	s.ready = false
+	s.publicURL = ""
+	s.webURL = ""
 	s.mu.Unlock()
 }

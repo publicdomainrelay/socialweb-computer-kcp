@@ -19,11 +19,14 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketrequester"
+	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	sshcontract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ssh"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/irohdial"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/services/sshserver"
 )
 
 const (
@@ -394,12 +397,147 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		VaultRef:          vault,
 		Hostnames:         hostnames,
 		OwnerSessionsFile: o.Spec.OwnerSessionsFile,
+		PublicListen:      publicListen(o.Spec),
+		WebListen:         webListen(o.Spec),
+		PublicOrigin:      compose.OptionValue(o.Spec.Options, compose.PublicOriginOption),
+		OperatorDid:       operatorDid(o.Spec),
+		MaxAccounts:       int32(maxAccounts(o.Spec)),
+		PolicyEngineRef:   compose.ComponentRefFor(compose.ComponentKindPolicyEngine, compose.PolicyEngineComponent),
 	}}
 	out := []compose.Desired{compose.PolicyEngineDesired(), requester, sshServer}
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, marketrequester.RequesterComponent, "http", network, hostnames, false, true)...)
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindSshServer, SshServerComponent, "http", network, hostnames, true, false)...)
 	out = append(out, compose.SSHExposures(ws, SshServerComponent)...)
 	return compose.ApplyOverrides(o.Spec.Components, out)
+}
+
+func operatorDid(spec v1alpha1.SshGatewaySpec) string {
+	if spec.Ssh == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Ssh.OperatorDid)
+}
+
+func webListen(spec v1alpha1.SshGatewaySpec) string {
+	if spec.Ssh == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Ssh.WebListen)
+}
+
+func publicListen(spec v1alpha1.SshGatewaySpec) string {
+	if spec.Ssh == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Ssh.PublicListen)
+}
+
+func perUserAccounts(spec v1alpha1.SshGatewaySpec) bool {
+	return spec.OwnerSessionsFile == "" && compose.OptionValue(spec.Options, compose.PublicOriginOption) != ""
+}
+
+func withoutSharedRequester(desired []compose.Desired) []compose.Desired {
+	prefix := compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)
+	out := make([]compose.Desired, 0, len(desired))
+	for _, d := range desired {
+		switch {
+		case d.Kind == compose.ComponentKindRequester && d.Name == marketrequester.RequesterComponent:
+		case compose.IsExposureKind(d.Kind) && strings.HasPrefix(d.Name, prefix):
+		default:
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired) ([]compose.Desired, []compose.Link, error) {
+	c, r, o := p.c, p.r, p.o
+	ws := r.Workspace
+	if !perUserAccounts(o.Spec) {
+		return nil, nil, nil
+	}
+	var base *v1alpha1.RequesterSpec
+	for _, d := range desired {
+		if spec, ok := d.Spec.(v1alpha1.RequesterSpec); ok && d.Kind == compose.ComponentKindRequester && d.Name == marketrequester.RequesterComponent {
+			base = &spec
+		}
+	}
+	if base == nil {
+		return nil, nil, nil
+	}
+	dids, err := c.SessionOwners(ctx, ws)
+	if err != nil {
+		return nil, nil, err
+	}
+	var keep []string
+	for _, did := range dids {
+		id, err := c.Identity(ctx, ws, compose.OwnerIdentityName(did))
+		if err != nil && !apierrors.IsNotFound(err) {
+			return nil, nil, err
+		}
+		if id != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseSessionExpired {
+			c.Log().Info("the ssh gateway forgets an account whose session expired", "root", r.Owner(), "did", did)
+			continue
+		}
+		if len(keep) >= maxAccounts(o.Spec) {
+			c.Log().Warn("the ssh gateway holds its maximum number of accounts", "root", r.Owner(), "did", did, "max", maxAccounts(o.Spec))
+			continue
+		}
+		keep = append(keep, did)
+	}
+	if err := c.PruneSessionOwners(ctx, ws, keep); err != nil {
+		return nil, nil, err
+	}
+	var out []compose.Desired
+	var links []compose.Link
+	server := compose.AppRef(compose.ComponentKindSshServer, SshServerComponent, ws)
+	for _, did := range keep {
+		owner := compose.SessionOwner{DID: did, Vault: SshGatewayVaultServer, Scope: compose.SshGatewayAtprotoScope()}
+		st, err := c.SessionOwnerState(ctx, ws, did)
+		if err != nil {
+			return nil, nil, err
+		}
+		links = append(links, compose.SessionOwnerLinks(r, ws, ws, owner, st.PdsURL)...)
+		if err := c.ApplySessionOwner(ctx, r, ws, owner, st.PdsURL); err != nil {
+			return nil, nil, err
+		}
+		if !st.Ready || st.PdsURL == "" {
+			continue
+		}
+		id, err := c.Identity(ctx, ws, compose.OwnerIdentityName(did))
+		if err != nil {
+			return nil, nil, err
+		}
+		name := contractmarket.SessionOwnerName(contractmarket.SessionOwnerRequesterPrefix, did)
+		handle := strings.TrimSpace(id.Status.Handle)
+		spec := *base
+		spec.ComponentSpec = c.NetworkComponentSpec(r, compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, name), o.Spec.Network)
+		spec.Identity = compose.ComponentIdentity(id, handle)
+		pdsRef, pdsDID := compose.SessionOwnerPds(st.PdsURL, "")
+		spec.PdsRef, spec.PdsDID = &pdsRef, pdsDID
+		spec.OperatorDID, spec.OwnerSessionsFile, spec.GuestSSHKeysFile, spec.Hostnames = "", "", "", nil
+		if handle != "" {
+			spec.Hostnames = []string{handle}
+		}
+		spec.Mode = compose.RequesterMode(v1alpha1.MarketIdentityModeOAuthSessionProxy)
+		out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: name, Spec: spec})
+		out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, name, "http", o.Spec.Network, spec.Hostnames, false, true)...)
+		requester := compose.AppRef(compose.ComponentKindRequester, name, ws)
+		links = append(links,
+			compose.PolicyRunLink(requester, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), marketrequester.Workflows...),
+			compose.ServiceAuthLink(requester, compose.AppRef(compose.KindMarketIdentity, id.Name, ws), did),
+			compose.RepoWriteLink(requester, compose.RepoRefIn(did, ws), compose.ScopeAll),
+			compose.RefLink(server, requester, compose.Cap(sshcontract.CapabilityRun, sshcontract.ScopeRun)))
+	}
+	links = append(links, compose.PolicyRunLink(server, compose.PolicyEngineRefIn(compose.PolicyEngineComponent, ws), sshserver.SignInWorkflow))
+	return out, links, nil
+}
+
+func maxAccounts(spec v1alpha1.SshGatewaySpec) int {
+	if spec.Ssh != nil && spec.Ssh.MaxAccounts > 0 {
+		return int(spec.Ssh.MaxAccounts)
+	}
+	return contractmarket.DefaultMaxSessionOwners
 }
 
 func (p *pass) ensure(ctx context.Context, desired []compose.Desired) error {
@@ -486,13 +624,25 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.SeedPdsAccountPassword(ctx, r, plan); err != nil {
 		return p.retry("the ssh requester's account password", err)
 	}
-	ident, id, err := p.requesterIdentity(ctx, plan, true)
+	perUser := perUserAccounts(o.Spec)
+	ident, id, err := p.requesterIdentity(ctx, plan, !perUser)
 	if err != nil {
 		return p.retry("the ssh requester's identity", err)
 	}
 	desired, err := p.desired(plan, ident, id)
 	if err != nil {
 		return p.fail(err)
+	}
+	accounts, accountLinks, err := p.accountRequesters(ctx, desired)
+	if err != nil {
+		return p.retry("the signed-in accounts", err)
+	}
+	if perUser {
+		desired = withoutSharedRequester(desired)
+	}
+	desired = append(desired, accounts...)
+	if err := c.ApplyLinks(ctx, r, "accounts", accountLinks); err != nil {
+		return ctlruntime.Result{}, err
 	}
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)
@@ -511,7 +661,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	var repoLinks []compose.Link
-	if ident.Did != "" {
+	if ident.Did != "" && !perUser {
 		if id != nil && !plan.Local {
 			accountLinks, err := c.AccountRepo(ctx, r, ws, marketrequester.RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 			if err != nil {
@@ -542,10 +692,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	switch {
-	case snap.Satisfied(desired) && exposuresReady(snap, desired) && dialer && ident.Did != "":
+	case snap.Satisfied(desired) && exposuresReady(snap, desired) && dialer && (perUser || ident.Did != ""):
 		p.st = compose.Ready(p.st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.SshGatewayGVR, p.st)
-	case ident.Did == "":
+	case ident.Did == "" && !perUser:
 		return p.wait("waiting for the owner's atproto identity")
 	case !dialer:
 		return p.wait("waiting for the iroh dialer HostProcess to run")

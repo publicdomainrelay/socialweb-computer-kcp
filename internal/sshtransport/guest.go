@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -487,6 +489,10 @@ func (p *GuestSessionProvider) pollOnce(ctx context.Context, privateKeyPath, tar
 }
 
 func (p *GuestSessionProvider) RunSession(ctx context.Context, privateKeyPath, target, program string, commandIO CommandIO, hostKeys GuestHostKeys) int {
+	return p.RunSessionEnv(ctx, privateKeyPath, target, program, nil, commandIO, hostKeys)
+}
+
+func (p *GuestSessionProvider) RunSessionEnv(ctx context.Context, privateKeyPath, target, program string, env map[string]string, commandIO CommandIO, hostKeys GuestHostKeys) int {
 	if err := irohdial.CheckTicket(target); err != nil {
 		p.log().Warn("guest_session_refused", "target", target, "err", err.Error())
 		_ = commandIO.WriteErr([]byte("guest session failed: " + err.Error() + "\n"))
@@ -521,6 +527,12 @@ func (p *GuestSessionProvider) RunSession(ctx context.Context, privateKeyPath, t
 		return 1
 	}
 	defer session.Close()
+	for _, name := range slices.Sorted(maps.Keys(env)) {
+		if err := session.Setenv(name, env[name]); err != nil {
+			p.log().Warn("guest_session_env_refused", "target", target, "name", name, "err", err)
+			_ = commandIO.WriteErr([]byte("guest session: the guest refused the environment variable " + name + "\n"))
+		}
+	}
 	if pty := commandIO.PTY(); pty != nil {
 		modes := ssh.TerminalModes{
 			ssh.ECHO:          1,

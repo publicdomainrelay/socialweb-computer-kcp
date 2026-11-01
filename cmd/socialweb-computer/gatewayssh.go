@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +38,7 @@ type gatewaySshRun struct {
 	bidderDids       []string
 	ownerSessions    string
 	requesterIngress *v1alpha1.IngressConfig
+	ssh              *v1alpha1.SshGatewaySsh
 	networkTimeout   time.Duration
 }
 
@@ -71,6 +74,11 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 			continue
 		case "bidder-dids":
 			r.bidderDids = append(r.bidderDids, splitList(p.Value)...)
+			continue
+		case "ssh-public-listen", "ssh-web-listen", "ssh-operator-did", "ssh-max-accounts":
+			if err := r.applySshOption(p.Name, p.Value); err != nil {
+				return err
+			}
 			continue
 		case "plc-directory-url", "ingress-proxy-host", "network-hosts":
 			if r.network != "" {
@@ -127,6 +135,40 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 	return nil
 }
 
+func (r *gatewaySshRun) applySshOption(name, value string) error {
+	if r.ssh == nil {
+		r.ssh = &v1alpha1.SshGatewaySsh{}
+	}
+	value = strings.TrimSpace(value)
+	switch name {
+	case "ssh-operator-did":
+		if !strings.HasPrefix(value, "did:") || strings.ContainsAny(value, " /") {
+			return fmt.Errorf("--ssh-operator-did %q is not a DID", value)
+		}
+		r.ssh.OperatorDid = value
+	case "ssh-max-accounts":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return fmt.Errorf("--ssh-max-accounts %q: want a positive number", value)
+		}
+		r.ssh.MaxAccounts = int32(n)
+	case "ssh-public-listen", "ssh-web-listen":
+		host, port, err := net.SplitHostPort(value)
+		if err != nil {
+			return fmt.Errorf("--%s %q: want host:port: %w", name, value, err)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("--%s %q: want a port from 1 to 65535", name, value)
+		}
+		if name == "ssh-web-listen" {
+			r.ssh.WebListen = net.JoinHostPort(host, port)
+		} else {
+			r.ssh.PublicListen = net.JoinHostPort(host, port)
+		}
+	}
+	return nil
+}
+
 func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
 	pos, pass := splitWords(rest)
 	if len(pos) > 0 {
@@ -154,6 +196,8 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	switch {
 	case r.network != "" && backend != hostsvc.BackendProc:
 		return a.fail(exitRefused, "run gateway ssh: --network: the market network places its children under its own devsup; pass --host-backend=proc")
+	case r.network != "" && r.ssh != nil:
+		return a.fail(exitRefused, "run gateway ssh: the --ssh-* options are options of a standalone ssh gateway; a market network child listens on loopback only")
 	case r.network != "":
 		return r.inNetwork(ctx)
 	case r.profile == sshgateway.SshGatewayProfileNetwork:
@@ -244,7 +288,7 @@ func (r *gatewaySshRun) standalone(ctx context.Context) int {
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: --name: %v", err)
 	}
-	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options, Comms: r.comms, RequesterIngress: r.requesterIngress})
+	spec, err := gatewayssh.Spec(gatewayssh.SpecInput{Profile: r.profile, Network: r.value, BidderDids: r.bidderDids, Options: r.options, Comms: r.comms, RequesterIngress: r.requesterIngress, Ssh: r.ssh})
 	if err != nil {
 		return r.a.fail(exitRefused, "run gateway ssh: %v", err)
 	}

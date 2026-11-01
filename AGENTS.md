@@ -203,7 +203,41 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
     `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
-    linux/amd64 only.
+    linux/amd64 only. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
+    command starts with `atirc`, or whose client sends `LC_ATIRC=1` (`LC_ATIRC=0` turns it off), gets,
+    when it is not an `LC_SESSION` held one, the agent module in its user_data (so the bidder seeds
+    `/usr/local/bin/atirc`), and after the receipt the requester mints, with its own service auth
+    (lxm chat.atirc.mint, aud `did:web:irc.fedfork.com#atirc`; the ssh gateway's sign-in scope carries
+    `rpc:chat.atirc.mint` and `rpc:chat.atirc.revoke`), the child `ssh-<rfp rkey>.<its handle>` leased
+    on the session's receipt and vm.terminated, exp at most the session cap; the command runs with
+    `ATIRC_TOKEN=<child>` (sent as the ssh session variable `LC_ATIRC_TOKEN` and exported by the
+    command, never in the command line) and the child is revoked when the command ends; a held
+    `LC_SESSION` session gets none. A failed mint runs the
+    command without it and writes one stderr line. `ssh <handle>@<gateway> atirc agent run <sub>` then
+    mints `<sub>` below the child.
+    The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
+    standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
+    listener `ssh-public`, next to the loopback Exposure); `spec.ssh.webListen` (`--ssh-web-listen
+    host:port`) binds the SshServer's web page and API the same way (listener `http-public`, the
+    address caddy proxies the public origin to). With the option `public-origin` (and no
+    owner sessions file) the SshServer serves the web sign-in at `/` over the same OpenBao atproto
+    plugin as GatewayAPI (`gatewayhttp.NewOAuth` over `internal/gateway/custody`, the session at
+    `auth/atproto session/<did>` of the ssh-gateway vault) and `/keys` (badgeBlueKeys at keyRkey in
+    the user's own repo, through the custody agent). A sign-in first runs the policy
+    `bidder-tangled-vouch` (scope lane, self `spec.ssh.operatorDid`, `--ssh-operator-did`; no operator
+    admits nobody); a refused or failed sign-in is signed out again and the page reads "this account
+    was not admitted". An admitted sign-in asks the SshServer-only handle `market.sessionowners`
+    (EnsureSessionOwner(did), built server side from the SshServer's vault and root labels, refused
+    past `spec.ssh.maxAccounts`, default 64) for the session owner MarketIdentity `owner-<stamp(did)>`
+    (oauthSessionProxy, `auth/atproto session/<did>`); sign-out deletes it. The SshGateway composer
+    applies each session owner (compose.ApplySessionOwner), prunes the kcp objects of the ones whose
+    session expired or past the cap (compose.PruneSessionOwners; never a repo record), and, once one
+    is Ready, composes a Requester `requester-<stamp(did)>` on it with its own ingress, policy, service
+    auth, repo links and the SshServer's stream link to it. An ssh session of DID X runs on X's
+    requester (which refuses any other DID), so its RFP, accept and records are X's; with no link to
+    it the client gets "sign in at <public-origin> first", any other failure "ssh gateway error", exit
+    1 either way. In this mode the shared Requester `requester` and its identity are not composed,
+    and the SshGateway is Ready without one. The set `ssh-gateway` binds marketidentities in root.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association
