@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -79,6 +80,12 @@ func (q *Requester) observeSync(ctx context.Context, item v1alpha1.StateSync) (t
 }
 
 func (q *Requester) forgetContract(name string) {
+	q.atircRevokesStarted.Range(func(key, _ any) bool {
+		if k, _ := key.(string); strings.HasPrefix(k, name+"/") {
+			q.atircRevokesStarted.Delete(key)
+		}
+		return true
+	})
 	q.mu.Lock()
 	delete(q.finished, name)
 	delete(q.waiting, name)

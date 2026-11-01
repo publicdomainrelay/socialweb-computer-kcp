@@ -216,6 +216,9 @@ func (r *contractRunner) writeAtircToken(ctx context.Context, contract v1alpha1.
 	if err != nil {
 		return fmt.Errorf("read the bundle: %w", err)
 	}
+	if _, pending := data[atircReleaseKey]; pending || r.released() || q.revokesStarted(contract) {
+		return errors.New("the contract's release has started; no atirc token is minted")
+	}
 	current := SecretEntry{Path: path, Mode: "0600"}
 	at := -1
 	for i, e := range entries {
@@ -392,8 +395,18 @@ func ReleaseWait(contract v1alpha1.ComputeContract, base time.Duration) time.Dur
 	return wait
 }
 
+func (q *Requester) revokesStarted(contract v1alpha1.ComputeContract) bool {
+	_, started := q.atircRevokesStarted.Load(contract.Name + "/" + string(contract.UID))
+	return started
+}
+
+func (q *Requester) markRevokesStarted(contract v1alpha1.ComputeContract) {
+	q.atircRevokesStarted.Store(contract.Name+"/"+string(contract.UID), true)
+}
+
 func (r *contractRunner) revokeAtircToken(ctx context.Context) (v1alpha1.AtircRevokesState, func()) {
 	contract := r.snapshot()
+	r.q.markRevokesStarted(contract)
 	if !ReleaseRevokesExpected(contract) || r.q.deps.VaultWrite == nil {
 		return "", nil
 	}
@@ -519,6 +532,7 @@ func (q *Requester) resumeReleaseRevokes(contract v1alpha1.ComputeContract) {
 	if !ReleaseRevokesExpected(contract) || q.deps.VaultWrite == nil {
 		return
 	}
+	q.markRevokesStarted(contract)
 	if state := contract.Status.AtircRevokes; state == v1alpha1.AtircRevokesDone || state == v1alpha1.AtircRevokesAbandoned {
 		return
 	}
