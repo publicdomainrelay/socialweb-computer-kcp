@@ -279,6 +279,8 @@ type Requester struct {
 
 	orphanSweep sync.Once
 
+	runnerEnded chan struct{}
+
 	waiting map[string]bool
 
 	settled map[string]bool
@@ -540,6 +542,7 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		bidders:        map[string]Bidder{},
 		secrets:        map[string]*secretsState{},
 		heldSessions:   map[string]*heldSession{},
+		runnerEnded:    make(chan struct{}, 1),
 	}
 	q.log = deps.Log.With("component", "requester", "did", q.did)
 	return q, nil

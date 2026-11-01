@@ -20,6 +20,8 @@ const (
 	atircIndexKey = "bundles"
 
 	orphanSweepAttempts = 10
+
+	orphanSweepReleaseBound = 2 * time.Minute
 )
 
 type atircIndexEntry struct {
@@ -151,8 +153,44 @@ func (q *Requester) startOrphanRevokes() {
 	})
 }
 
+func (q *Requester) releasesRunning() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, runner := range q.runners {
+		if runner.released() {
+			n++
+		}
+	}
+	return n
+}
+
+func (q *Requester) awaitReleases(stop context.Context) bool {
+	n := q.releasesRunning()
+	if n == 0 {
+		return true
+	}
+	q.log.Info("requester_atirc_orphan_sweep_after_releases", "releases", n)
+	bound := time.NewTimer(orphanSweepReleaseBound)
+	defer bound.Stop()
+	for q.releasesRunning() > 0 {
+		select {
+		case <-q.runnerEnded:
+		case <-bound.C:
+			q.log.Warn("requester_atirc_orphan_sweep_release_bound", "releases", q.releasesRunning(), "bound", orphanSweepReleaseBound.String())
+			return true
+		case <-stop.Done():
+			return false
+		}
+	}
+	return true
+}
+
 func (q *Requester) sweepOrphanRevokes() {
 	stop := q.runContext()
+	if !q.awaitReleases(stop) {
+		return
+	}
 	ref := q.atircMintedRef()
 	q.log.Info("requester_atirc_orphan_sweep", "index", ref.Mount+"/"+ref.Path)
 	for attempt := 1; ; attempt++ {

@@ -55,8 +55,12 @@ func (r Request) ApplyStatus(ctx context.Context, obj Object) error {
 		status = map[string]any{}
 	}
 	if !r.scope.sharedStatus {
-		if live, err := r.liveStatus(ctx, obj); err == nil {
-			dropped(live, status, r.scope.foreignStatus, "")
+		if live, owned, err := r.liveStatus(ctx, obj); err == nil {
+			if gone := dropped(live, status, owned, r.scope.foreignStatus, ""); len(gone) > 0 {
+				if err := r.clearStatus(ctx, obj, gone); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	u.Object["status"] = status
@@ -224,52 +228,113 @@ func (r Request) skeleton(full *unstructured.Unstructured, obj Object) *unstruct
 	}}
 }
 
-func (r Request) liveStatus(ctx context.Context, obj Object) (map[string]any, error) {
+func (r Request) liveStatus(ctx context.Context, obj Object) (map[string]any, map[string]any, error) {
 	gvk, err := apiutil.GVKForObject(obj, r.scope.scheme)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fresh, err := r.scope.scheme.New(gvk)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	live, ok := fresh.(client.Object)
 	if !ok {
-		return nil, fmt.Errorf("runtime: %T is not an object", fresh)
+		return nil, nil, fmt.Errorf("runtime: %T is not an object", fresh)
 	}
 	if err := r.scope.client.Get(ctx, types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}, live); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	m, err := kruntime.DefaultUnstructuredConverter.ToUnstructured(live)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	status, _ := m["status"].(map[string]any)
-	return status, nil
+	return status, ownedStatus(live.GetManagedFields(), r.scope.fieldManager), nil
 }
 
-func dropped(live, desired map[string]any, foreign []string, prefix string) {
+func ownedStatus(entries []metav1.ManagedFieldsEntry, manager string) map[string]any {
+	owned := map[string]any{}
+	for _, e := range entries {
+		if e.Manager != manager || e.FieldsV1 == nil {
+			continue
+		}
+		var fields map[string]any
+		if json.Unmarshal(e.FieldsV1.Raw, &fields) != nil {
+			continue
+		}
+		if node, ok := fields["f:status"].(map[string]any); ok {
+			mergeFields(owned, node)
+		}
+	}
+	return owned
+}
+
+func mergeFields(into, from map[string]any) {
+	for k, v := range from {
+		sub, isMap := v.(map[string]any)
+		cur, has := into[k].(map[string]any)
+		switch {
+		case isMap && has:
+			mergeFields(cur, sub)
+		case isMap:
+			next := map[string]any{}
+			mergeFields(next, sub)
+			into[k] = next
+		default:
+			into[k] = v
+		}
+	}
+}
+
+func (r Request) clearStatus(ctx context.Context, obj Object, gone map[string]any) error {
+	body, err := json.Marshal(map[string]any{"status": gone})
+	if err != nil {
+		return fmt.Errorf("runtime: encoding the dropped status fields of %s: %w", obj.GetName(), err)
+	}
+	target, ok := obj.DeepCopyObject().(Object)
+	if !ok {
+		return fmt.Errorf("runtime: %T is not an object", obj)
+	}
+	if err := r.scope.client.Status().Patch(ctx, target, client.RawPatch(types.MergePatchType, body), client.FieldOwner(r.scope.fieldManager)); err != nil {
+		if apierrors.IsMethodNotSupported(err) || apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("runtime: clearing the dropped status fields of %s: %w", obj.GetName(), err)
+	}
+	return nil
+}
+
+func dropped(live, desired, owned map[string]any, foreign []string, prefix string) map[string]any {
+	gone := map[string]any{}
 	for k, v := range live {
 		path := prefix + k
 		if slices.Contains(foreign, path) {
 			delete(desired, k)
 			continue
 		}
+		mine, isMine := owned["f:"+k]
+		if !isMine {
+			continue
+		}
+		mineMap, _ := mine.(map[string]any)
 		liveMap, liveIsMap := v.(map[string]any)
 		next, ok := desired[k]
 		if !ok || next == nil {
+			delete(desired, k)
 			if !liveIsMap || !holdsForeign(foreign, path) {
-				desired[k] = nil
+				gone[k] = nil
 				continue
 			}
 			next = map[string]any{}
-			desired[k] = next
 		}
 		nextMap, nextIsMap := next.(map[string]any)
 		if liveIsMap && nextIsMap {
-			dropped(liveMap, nextMap, foreign, path+".")
+			if sub := dropped(liveMap, nextMap, mineMap, foreign, path+"."); len(sub) > 0 {
+				gone[k] = sub
+			}
 		}
 	}
+	return gone
 }
 
 func holdsForeign(foreign []string, path string) bool {

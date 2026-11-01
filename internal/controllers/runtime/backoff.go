@@ -12,6 +12,8 @@ const (
 	DefaultBackoffBase = 500 * time.Millisecond
 
 	DefaultBackoffMax = 5 * time.Minute
+
+	ExportRetryFirst = 50 * time.Millisecond
 )
 
 type backoff struct {

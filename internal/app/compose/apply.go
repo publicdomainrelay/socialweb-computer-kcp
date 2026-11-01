@@ -3,12 +3,14 @@ package compose
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -278,27 +280,17 @@ func (c *Composer) GetComponent(ctx context.Context, ws, kind, name string) (Com
 }
 
 func (c *Composer) ListComponents(ctx context.Context, ws, owner string) ([]ComponentView, error) {
-	var out []ComponentView
-	for _, ct := range ComponentTypes {
-		ri, err := c.Client(ws, ct.GVR)
-		if err != nil {
-			return nil, err
-		}
-		items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
-		if apierrors.IsNotFound(err) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		for i := range items {
-			v, err := ComponentViewOf(ws, ct.Kind, &items[i])
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, v)
-		}
+	views := make([][]ComponentView, len(ComponentTypes))
+	errs := make([]error, len(ComponentTypes))
+	var wg sync.WaitGroup
+	for i, ct := range ComponentTypes {
+		wg.Go(func() { views[i], errs[i] = c.listComponents(ctx, ws, owner, ct.Kind, ct.GVR) })
 	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	out := slices.Concat(views...)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Kind != out[j].Kind {
 			return out[i].Kind < out[j].Kind
@@ -374,6 +366,29 @@ func (c *Composer) Prune(ctx context.Context, ws string, gvr schema.GroupVersion
 		}
 	}
 	return nil
+}
+
+func (c *Composer) listComponents(ctx context.Context, ws, owner, kind string, gvr schema.GroupVersionResource) ([]ComponentView, error) {
+	ri, err := c.Client(ws, gvr)
+	if err != nil {
+		return nil, err
+	}
+	items, err := kube.List[Generic](ctx, ri, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + owner})
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ComponentView, 0, len(items))
+	for i := range items {
+		v, err := ComponentViewOf(ws, kind, &items[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 func (c *Composer) DeleteOwned(ctx context.Context, ws string, gvr schema.GroupVersionResource, owner string) (int, error) {

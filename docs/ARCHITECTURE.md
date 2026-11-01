@@ -11581,6 +11581,93 @@ AtprotoRepo with no DID whose backend is gone (RepoBackendGone), or 24 h in Dele
 releases with the condition RecordOrphaned and `infra_record_orphaned`. An infra with no record in
 status, or a Retained one, releases as before.
 
+- **A new sign-in link is a spec request: MarketIdentity `spec.signInRequestedAt` (2026-10-30, r134).**
+  Before: the page's "Get a new sign-in link" cleared `status.pendingAction`; a status-only patch
+  does not wake the controller (the own-kind predicate passes generation and deletion changes only),
+  so the next URL came at the old URL's expiry requeue (15 min for oauthBrowser and the scope
+  upgrade). Now the composer (the page, the app) writes `spec.signInRequestedAt` (RFC3339, the time
+  of the click) by server-side apply with field manager `socialweb.computer/signin`
+  (`v1alpha1.FieldManagerMarketIdentitySignIn`). The generation change reconciles at once, and a
+  sign-in URL issued before that time is not reused: oauthBrowser and the ScopeUpgrade URL spend the
+  old OAuth state and issue a new authorization URL, oauthQr starts a new QR transfer. A request time
+  ahead of the controller clock counts as the issue time, so a skewed clock never reissues in a
+  loop. A Ready identity with no pending action is not signed out by it.
+
+- **Every deno sandbox run starts with fresh web storage (2026-10-30, r134).** Before: two policy
+  runs on the Linux deno runner (`internal/sandbox/deno`) shared Cache Storage and localStorage: a
+  run that put `https://a.invalid/k` into `caches.open("x")` and set `localStorage` saw both in the
+  next run (`hit true`, `v`). deno keeps Cache Storage under `$TMPDIR/deno_cache/<origin hash>` and
+  localStorage under `$DENO_DIR/location_data/<origin hash>`, and a stdin program has the same
+  origin every run. Now each run gets its own dir (`os.MkdirTemp`, removed after the run) with
+  `TMPDIR=<run>/tmp` and `DENO_DIR=<run>/deno`; the run's DENO_DIR links only the module caches of the
+  shared DENO_DIR (`remote`, `deps`, `npm`, `gen`, `registries`, the v8 code cache and the analysis
+  caches; the program's `DENO_DIR`, else the process's, else the user cache dir), never
+  `location_data`, so storage starts empty and compiled code stays warm. Readings on hat-8 with the
+  300 KB `policy-requester-tangled-vouch` bundle: shared dir 30 ms a run, a fresh empty DENO_DIR
+  125 ms, the linked fresh dir 31 to 38 ms; the next run sees `hit false`, `null`.
+
+- **A requester start releases before it seals secrets or sweeps orphans (2026-10-30, r134).**
+  Before (page reload with a release already requested): the requester sealed and published the
+  guest's secrets through the ContractEvent path (the guest's secrets key arriving from the
+  backlog) and ran the atirc orphan sweep, and `requester_release` came 13 s after
+  `requester_started`; 57901b31 had stopped only the contract runner from sealing. Now
+  `sealGuestSecrets` does nothing for a contract whose release is requested (`spec.release`, a
+  deletion, or a runner that took the release; `requester_guest_secrets_not_sealed`), an outbound
+  `secrets` or `secretsUpdated` ContractEvent of such a contract is not published (Pending "the
+  release ... is requested"; one already published is not submitted), and the orphan sweep starts
+  only when no runner is releasing (`requester_atirc_orphan_sweep_after_releases`, woken by each
+  runner end, at most 2 min, `requester_atirc_orphan_sweep_release_bound`). The release path and its
+  revoke-before-Released order are unchanged.
+
+- **The Infra and EphemeralInfra controllers queue on the fields they read only (2026-10-30, r134).**
+  Before: an idle page (one held contract, no input) ran 20 to 41 EphemeralInfra passes a minute,
+  each a no-op status apply (CPU only, no write). The infra watches had no predicate: `Owns`
+  ComputeContract queued it on every contract status write, its own AtprotoRecordWatch on every
+  `status.cursors` save of the record stream, and the repo ComponentLink watch on every link status
+  write. The reconcile reads none of those. Now the ComputeContract watch (by the infra labels, as
+  `owned` lists them) queues on a generation, label, owner or deletion change, or a change of
+  `status.phase`, `status.message`, the receipt URI or the winner DID; the AtprotoRecordWatch watch on
+  the same metadata or a change of `status.records` (URI and CID) or `status.deleted`; the
+  ComponentLink watch (`RepoLinkWatch`, the InfraCollection's too) on the metadata,
+  `status.observedGeneration` or its Accepted condition. The ExpiresAt requeue and the repo bind
+  events are unchanged. Open: the page reading after the change.
+
+- **A status field the controller stops setting is removed, whoever owns it (2026-10-30, r134).**
+  Before: a Ready, SignedIn MarketIdentity kept a stale `status.pendingAction` (hat-7 `prod-qr`: a
+  signInAgain that expired 2026-10-30T19:29:21Z, kept from rc130 to rc133; the page requester: the
+  ScopeUpgrade action after the upgrade sign-in had granted all 28 scopes, so the banner never
+  cleared). The hat-7 managedFields: `f:pendingAction` was owned by `socialweb.computer/marketidentity`
+  with operation Update on the status subresource (the kcp v0.33 APIExport virtual workspace forwards
+  a status apply as get and update), a separate entry from the same manager's Apply entry. An apply
+  removes only fields of its own Apply entry, and a null in an apply does not remove a field another
+  entry owns (repro on a local kcp v0.33.1: the field stays; a null for an object field leaves `{}`;
+  a null for a string fails validation). Now `ApplyStatus` (not SharedStatus) sends the live status
+  keys missing from the desired status as nulls in one status merge patch under the controller's
+  field manager, then applies the desired status without them. Only keys a managedFields entry of
+  the controller's own manager owns (any operation; through the virtual workspace that is the
+  Update entry) are cleared, never a ForeignStatus path (nested ones too) nor a key only another
+  manager owns, so the patch cannot fight another writer, and it is sent only when such a key is
+  live and not desired (a normal reconcile sends nothing more). Repro:
+  the merge patch removes the field and the empty Update entry with it; on an absent field it is a
+  no-op. Existing objects heal on their next reconcile; a status write costs one more patch only when
+  a field drops.
+
+- **A requester start no longer waits on the GC scan and the default client rate limit (2026-10-30,
+  r134).** Before (pkg/embedded on hat-8, a fresh kcp v0.33.0 each run, harness = `embedded.Start`
+  then `WaitReady`): `Start` 3.3 to 3.5 s, ready 10.9 and 11.3 s. Between the manager start and the
+  MarketRequester's own set (`market-requester` schemas) the first root pass ran the GC scan of the
+  status samples inline: about 40 sequential LISTs of every kind in root, three of them answered
+  Retry-After 1 s (kinds bound a second earlier), the rest client-side throttled at 200 ms each
+  (client-go's default 5 QPS: the embedded and page rest configs set no QPS). None of the suspected
+  backoff sites ran on the host (no APIExport retry, no out-of-scope requeue, no served wait). Now
+  the first GC scan waits `GCSampleEvery` (30 s) after the first status sample, `compose.New` and
+  `runtime.NewManager` default a rest config without QPS to 50 QPS, burst 100 (as kcpapply and
+  kcpserver do), `ListComponents` lists the component kinds in parallel, and the two waits that have
+  no watch start short: the kcpapply served-kind wait polls from 50 ms doubling to `Poll` (1 s), the
+  APIExport provider retry from 50 ms (`ExportRetryFirst`). After: `Start` 2.8 to 3.5 s (the first
+  boot's provider sets, sequential; a restart skips them), ready 5.7 s twice (8.4 and 8.7 s with the
+  QPS and parallel list only). The page and iOS readings after rc134 are open.
+
 ## 16. Vocabulary
 
 | | |

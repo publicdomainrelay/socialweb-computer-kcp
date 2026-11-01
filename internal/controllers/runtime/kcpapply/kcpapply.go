@@ -41,6 +41,7 @@ const (
 	FieldManager       = "socialweb-computer"
 	DefaultWaitTimeout = time.Minute
 	DefaultPoll        = time.Second
+	FirstPoll          = 50 * time.Millisecond
 	defaultNamespace   = "default"
 	schemaKind         = "APIResourceSchema"
 )
@@ -312,7 +313,7 @@ func (a *Applier) servedFor(ctx context.Context, cfg *rest.Config, workspace str
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(a.opts.Poll):
+		case <-time.After(min(FirstPoll<<min(attempt-1, 10), a.opts.Poll)):
 		}
 	}
 }

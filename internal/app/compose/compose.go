@@ -105,6 +105,9 @@ func New(cfg Config) (*Composer, error) {
 	var restCfg *rest.Config
 	if cfg.Rest != nil {
 		restCfg = rest.CopyConfig(cfg.Rest)
+		if restCfg.QPS == 0 {
+			restCfg.QPS, restCfg.Burst = kcpserver.ClientQPS, kcpserver.ClientBurst
+		}
 	} else if cfg.Kube == nil {
 		var err error
 		restCfg, err = kcpserver.FrontRestConfig(cfg.Kubeconfig)

@@ -558,7 +558,11 @@ func (s *samples) into(ctx context.Context, c *Composer, m map[string]any, decla
 			s.stateDir = &v1alpha1.StateDirUsage{Path: dir, Bytes: u.Bytes, Files: u.Files, SampledAt: now.UTC().Format(time.RFC3339)}
 		}
 	}
-	if s.gcAt.IsZero() || (now.Sub(s.gcAt) > GCSampleEvery && (s.gcDirty.Load() || now.Sub(s.gcAt) > GCRescanEvery)) {
+	if s.gcAt.IsZero() {
+		s.gcAt = now
+		s.gcDirty.Store(true)
+	}
+	if now.Sub(s.gcAt) > GCSampleEvery && (s.gcDirty.Load() || now.Sub(s.gcAt) > GCRescanEvery) {
 		s.gcAt = now
 		s.gcDirty.Store(false)
 		if st := c.scanGC(ctx); st != nil {

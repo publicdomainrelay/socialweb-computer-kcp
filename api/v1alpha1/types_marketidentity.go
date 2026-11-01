@@ -81,6 +81,8 @@ type MarketIdentitySpec struct {
 	CARef *commonv1.ObjectRef `json:"caRef,omitempty"`
 
 	SignOutGeneration int64 `json:"signOutGeneration,omitempty"`
+
+	SignInRequestedAt string `json:"signInRequestedAt,omitempty"`
 }
 
 type MarketIdentityPhase string
@@ -104,6 +106,8 @@ const (
 const FieldManagerMarketIdentityApproval = "socialweb.computer/approve"
 
 const FieldManagerMarketIdentitySignOut = "socialweb.computer/signout"
+
+const FieldManagerMarketIdentitySignIn = "socialweb.computer/signin"
 
 type PendingActionKind string
 

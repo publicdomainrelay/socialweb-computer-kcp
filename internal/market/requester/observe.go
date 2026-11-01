@@ -357,6 +357,10 @@ func (q *Requester) runnerDone(runner *contractRunner, account string) {
 		}
 	}
 	q.mu.Unlock()
+	select {
+	case q.runnerEnded <- struct{}{}:
+	default:
+	}
 	if q.stopping() {
 		return
 	}

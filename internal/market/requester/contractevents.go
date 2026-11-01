@@ -265,6 +265,12 @@ func (q *Requester) observeOutboundContractEvent(ctx context.Context, event v1al
 	if contract.DeletionTimestamp != nil {
 		return fail("the ComputeContract " + name + " is being deleted")
 	}
+	if secretsEvent(spec.NSID) && q.releasing(*contract) {
+		if status.Record != nil {
+			return 0, nil
+		}
+		return wait("the release of the ComputeContract " + name + " is requested; its secrets are not published")
+	}
 	if spec.NSID == market.ComputeEventsGuestAgentStartNSID && contract.Spec.Agent == nil {
 		return fail("the ComputeContract " + name + " has no spec.agent; an agentStart starts nothing")
 	}

@@ -96,6 +96,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	base := rest.CopyConfig(cfg.Rest)
 	host, _, _ := strings.Cut(strings.TrimSuffix(base.Host, "/"), "/clusters/")
 	base.Host = host
+	if base.QPS == 0 {
+		base.QPS, base.Burst = 50, 100
+	}
 	scheme := kruntime.NewScheme()
 	adders := append([]func(*kruntime.Scheme) error{clientgoscheme.AddToScheme, apisv1alpha1.AddToScheme}, cfg.AddToScheme...)
 	for _, add := range adders {
@@ -180,7 +183,7 @@ func (m *Manager) addExport(name string) {
 
 func (m *Manager) serveExport(ctx context.Context, name string) {
 	logger := m.logr.WithValues("export", name)
-	retry := newBackoff(DefaultBackoffBase, DefaultBackoffMax)
+	retry := newBackoff(ExportRetryFirst, DefaultBackoffMax)
 	for failures := 0; ctx.Err() == nil; failures++ {
 		p, err := apiexport.New(clusterConfig(m.base, m.exportWorkspace), name, apiexport.Options{Scheme: m.scheme, Log: &logger})
 		if err == nil {
