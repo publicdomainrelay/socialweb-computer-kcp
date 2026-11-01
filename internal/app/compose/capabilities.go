@@ -128,8 +128,11 @@ func InfraLinks(ws string, repo commonv1.ObjectRef) []Link {
 	for _, kind := range InfraKinds {
 		sel := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: kind, Workspace: ws}
 		caps := []exposurev1alpha1.LinkCapability{Cap(atprotorepo.CapabilityRead, collections...)}
-		if kind == "Infra" || kind == "EphemeralInfra" {
-			caps = append(caps, Cap(atprotorepo.CapabilityWrite, collections...))
+		switch kind {
+		case "Infra":
+			caps = append(caps, Cap(atprotorepo.CapabilityWrite, infrarecord.InfraNSID))
+		case "EphemeralInfra":
+			caps = append(caps, Cap(atprotorepo.CapabilityWrite, infrarecord.EphemeralInfraNSID))
 		}
 		out = append(out, SelectorLink(LinkName("infra-read", kind, repo.Name), sel, repo, caps...))
 	}
