@@ -75,6 +75,8 @@ echo "check.sh: ok policy engine specification tests"
 
 go test -count=1 -timeout 10m ./test/integration/ || fail "integration tests (go test ./test/integration/)"
 echo "check.sh: ok integration tests (test/integration, in process)"
+(cd cmd/openbao-plugin-auth-sshsig && go test -count=1 ./...) || fail "workload identity issuer tests (cmd/openbao-plugin-auth-sshsig)"
+echo "check.sh: ok workload identity issuer tests (cmd/openbao-plugin-auth-sshsig, in process)"
 
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"

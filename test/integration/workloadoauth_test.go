@@ -46,9 +46,12 @@ var appScopes = []string{"atproto", "repo:" + scrobbleCollection + "?action=crea
 
 type issuer struct {
 	srv *httptest.Server
+	url string
 	key *ecdsa.PrivateKey
 	kid string
 }
+
+const issuerPath = "/v1/auth/sshsig/wid"
 
 func newIssuer(t *testing.T) *issuer {
 	t.Helper()
@@ -60,10 +63,11 @@ func newIssuer(t *testing.T) *issuer {
 	mux := http.NewServeMux()
 	is.srv = httptest.NewServer(mux)
 	t.Cleanup(is.srv.Close)
-	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"issuer": is.srv.URL, "jwks_uri": is.srv.URL + "/.well-known/jwks.json"})
+	is.url = is.srv.URL + issuerPath
+	mux.HandleFunc("GET "+issuerPath+"/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"issuer": is.url, "jwks_uri": is.url + "/.well-known/keys"})
 	})
-	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET "+issuerPath+"/.well-known/keys", func(w http.ResponseWriter, r *http.Request) {
 		pad := func(b []byte) string {
 			out := make([]byte, 32)
 			copy(out[32-len(b):], b)
@@ -83,7 +87,7 @@ func (is *issuer) token(t *testing.T, sub, aud string) string {
 	jti := make([]byte, 12)
 	_, _ = rand.Read(jti)
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"iss": is.srv.URL, "sub": sub, "aud": aud, "iat": now.Unix(), "nbf": now.Unix(),
+		"iss": is.url, "sub": sub, "aud": aud, "iat": now.Unix(), "nbf": now.Unix(),
 		"exp": now.Add(5 * time.Minute).Unix(), "jti": base64.RawURLEncoding.EncodeToString(jti),
 	})
 	tok.Header["kid"] = is.kid
@@ -210,7 +214,7 @@ func (w *world) passwordSession() string {
 func (w *world) allow(scopes []string) {
 	w.t.Helper()
 	record, err := workloadoauth.Record(workloadoauth.Role{
-		Name: roleName, Account: w.did, Service: serviceDID, Issuer: w.issuer.srv.URL, Subject: workloadSubject,
+		Name: roleName, Account: w.did, Service: serviceDID, Issuer: w.issuer.url, Subject: workloadSubject,
 		Clients: []workloadoauth.Client{{ID: w.app.clientID, Scopes: scopes}},
 	}, time.Now())
 	if err != nil {

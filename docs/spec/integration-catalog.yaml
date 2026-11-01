@@ -1788,6 +1788,26 @@ entries:
       answers 401 within 10 s and its refresh answers 400 invalid_grant.
     cleanup: test temp dir and servers.
 
+  - id: TestAGuestGetsAnOIDCJWTForAnyAudienceWithItsBoundHostKeyAndNoToken
+    kind: integration
+    source: cmd/openbao-plugin-auth-sshsig/wid_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S4, S8)
+    actors: [the sshsig OpenBao auth plugin backend in process, a guest ed25519 host key]
+    asserts: >
+      After bind, a challenge signed by the bound key gets from wid/token an ES256 JWT (no OpenBao
+      token) with iss the configured issuer, sub the role's wid_subject, aud the requested one, a 300 s
+      life and a jti; the discovery document names the issuer and jwks_uri <issuer>/.well-known/keys,
+      and the JWT verifies with the published key of its kid; https, api:// and DID audiences all work.
+    cleanup: none (in-memory storage).
+
+  - id: TestATokenNeedsTheBoundKeyAFreshChallengeAndAnAudience
+    kind: integration
+    source: cmd/openbao-plugin-auth-sshsig/wid_test.go
+    authorized: owner, 2026-11-01 (plan 0040 S4, S8)
+    actors: [the sshsig OpenBao auth plugin backend in process]
+    asserts: A signature by another key, a reused challenge, and an empty or malformed audience get no token.
+    cleanup: none (in-memory storage).
+
 deleted_fixtures:
   - internal/eso/testdata/bundle-v2.11.0-subset.yaml (read only by internal/eso tests)
   - testdata/apiresourceschema/v1alpha1-1.nodeclaims.socialweb.computer.yaml (read only by internal/apigen tests)

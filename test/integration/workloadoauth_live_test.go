@@ -152,7 +152,7 @@ func TestLiveWorkloadMintsAnAtircSessionAndScrobblesThroughIt(t *testing.T) {
 
 	w := &world{t: t, pdsURL: pds.URL, did: pds.DID, password: pds.Password, issuer: is}
 	record, err := workloadoauth.Record(workloadoauth.Role{
-		Name: liveRole, Account: pds.DID, Service: pds.Server.ServiceDID(), Issuer: is.srv.URL, Subject: workloadSubject,
+		Name: liveRole, Account: pds.DID, Service: pds.Server.ServiceDID(), Issuer: is.url, Subject: workloadSubject,
 		Clients: []workloadoauth.Client{{ID: liveAtirc + "/oauth/client-metadata*", RedirectURI: liveAtirc + "/oauth/callback", Scopes: atircScopes(t)}},
 	}, time.Now())
 	if err != nil {
