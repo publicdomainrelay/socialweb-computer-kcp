@@ -464,7 +464,7 @@ items:
       written in the format of 0012 and linked from the acceptance README and quickstart-prod.md.
     risks:
       - "The deno contract needs a bidder that opted in; without one sbx1 stays Degraded (no bids); the runbook says so."
-    status: todo
+    status: done
 
   - id: ACC39-MIXED-PROD
     title: "Acceptance 0013 passes live against a user-configured prod bidder, default policy only"

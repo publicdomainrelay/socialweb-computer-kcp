@@ -7,10 +7,14 @@
 - what works today: the browser page (section 3), the CLI per contract (section 4), the agent join (section 5), tenant clusters
   through the prod gateway (section 6), a long-lived requester from the CLI that `kubectl apply` works against (section 7,
   `run requester`)
-- what is planned: installing that requester as a systemd unit and the gateway in it (section 7, plan
-  [0039](plans/0039-long-lived-requester.yaml)); the atirc agent from a local PDS is built (section 5) and not yet proven on prod
+- also on main: that requester installed as a systemd unit of its own account (section 7a, `install requester`) or as a
+  HostProcess of an account's core (section 7b); the atirc agent from a local PDS or a pdsAccount identity is built
+  (section 5) and not yet proven on prod
+- what is planned: the gateway in the requester kcp (section 7, plan [0039](plans/0039-long-lived-requester.yaml) item
+  C-GATEWAY-COMPOSE)
 - acceptance: [acceptance/0012-infra-quickstart.md](acceptance/0012-infra-quickstart.md) "Prod Step For The Agent Join" and
-  "Prod Readings"; the runbook rules of [acceptance/README.md](acceptance/README.md) apply (announce on atirc first, release
+  "Prod Readings"; [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) for
+  [../examples/infra/mixed-prod.yaml](../examples/infra/mixed-prod.yaml) on a bidder you configured; the runbook rules of [acceptance/README.md](acceptance/README.md) apply (announce on atirc first, release
   what you rent, no secret on any terminal)
 
 ```mermaid
@@ -193,7 +197,8 @@ kill -INT %1                                              # Ctrl-C: stops the kc
 - foreground only: it blocks until Ctrl-C (or SIGTERM), then stops its kcp and keeps its state; `--fg` is accepted (the
   installed unit form). A second `run requester` on the same name is refused while the first holds `<dir>/owner.lock`
 - restart: the same command (or the same command with nothing after `--`) adopts the units and keeps the DID, the vault
-  and every contract; a Held contract stays Held across the restart and ssh works again. `<dir>/requester.json` records
+  and every contract; a Held contract stays Held across the restart and ssh works again (the A-RUN-REQUESTER
+  reading below; on main 6497fe61 a restart failed Held contracts: Not Supported below). `<dir>/requester.json` records
   the first start's network, `--identity` and options; a restart with other options is refused (start a new name)
 - `run requester env <name>` prints `KUBECONFIG`, `SOCIALWEB_KCP_HOST`, `SOCIALWEB_KCP_WORKSPACE`, the DID and the ssh public
   key path from the ready file (`--json`); `run requester ssh <name> --contract <cc>` is the `run request ssh` code over
@@ -327,7 +332,9 @@ Still planned in plan 0039:
 
 - the gateway in the same kcp (item C-GATEWAY-COMPOSE): `kubectl apply` a Cluster, its k3s control plane runs as
   HostProcesses of the requester's core, and its nodes are rented by the same requester
-- `examples/infra/mixed-prod.yaml` and acceptance `docs/acceptance/0013-mixed-prod.md` (item F-MIXED-PROD, not written yet)
+- its live pass: [../examples/infra/mixed-prod.yaml](../examples/infra/mixed-prod.yaml) (vm1, sbx1, agent1 pinned to one
+  bidder, no policy field) by acceptance [acceptance/0013-mixed-prod.md](acceptance/0013-mixed-prod.md) (item
+  ACC39-MIXED-PROD; written, not yet run on prod)
 
 ## Not Supported On Prod Today
 
@@ -336,4 +343,5 @@ Still planned in plan 0039:
 | a tenant cluster without the prod gateway | plan 0039 C-GATEWAY-COMPOSE |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
-| deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |
+| deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or put `"compute-kinds": "vm,deno"` in an installed bidder's `config.json` (`install bidder` has no flag for it); pin such a bidder with `bidderDids` | operator setting |
+| a Held contract across a `run requester` restart: main 6497fe61 fails it at once (`the held contract is not resumed: ... the policy engine is not running`), and an `endWhen: Complete` EphemeralInfra then releases the rest | a fix in `internal/market/requester/runner.go` (`resumeReceipt`); acceptance [0013](acceptance/0013-mixed-prod.md) Local Readings |

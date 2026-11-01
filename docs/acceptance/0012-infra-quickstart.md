@@ -2,12 +2,13 @@
 
 Proves the path of [../quickstart-local.md](../quickstart-local.md) end to end (the prod step: [../quickstart-prod.md](../quickstart-prod.md)): a local kcp with a market in it, a
 requester app, kubectl apply of each example in [../../examples/infra/](../../examples/infra/), await, use each
-resource, release, dev down. The atirc join of the agent VM is the one prod step.
+resource, release, dev down. The atirc join of the agent VM is a prod step ([0013](0013-mixed-prod.md)).
 
 - Paths: kubectl against a market network (`dev up --profile market-network`); the browser page applies the same
   `mixed.yaml` from its terminal ([0009](0009-browser-page.md))
 - Last pass: local market network `qs1` on hat-8, main 12ff7b53 dev build, 2026-11-01 03:24-03:50Z: VM, k8s, Deno pass with
-  the default policy; agent VM passes up to the mint (join is the prod step below)
+  the default policy; agent VM passes up to the mint (join is the prod step below). Since main 2ea66d62 (plan 0039 D) the
+  local agent contract is refused before its RFP (step 7); read 2026-11-01 08:38Z on own network `mxp`, main 6497fe61
 
 ```mermaid
 sequenceDiagram
@@ -55,8 +56,11 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
 4. VM: apply `vm.yaml` (your key in), `kubectl wait ... phase=Deployed`, ssh over iroh, read `/root/quickstart`.
 5. k8s: apply `k8s-cluster.yaml` to the tenant kubeconfig; read the gateway Infra `nodes-<hex>`, node Ready, pod logs.
 6. Deno: apply `deno-sandbox.yaml`; read `status.contract.sandbox`.
-7. Agent: write `agent-bundle.json` into the requester OpenBao (quickstart-local section 4); apply `agent-vm.yaml`; read the
-   requester log for `requester_atirc_*`; on prod apply `agent-start.yaml` and watch the channel for the nick JOIN.
+7. Agent: apply `agent-vm.yaml` (no bao step: the requester writes the placeholder bundle, log
+   `requester_agent_bundle_placeholder`). On a dev network the requester handle is `.local`
+   (`<workspace>.requester.local`), so the contract is Failed before its RFP with `refused: the atirc agent needs a
+   requester handle that resolves to <did>: ... start the requester with --atproto-handle ...`, no record written; a
+   plain VM contract of the same requester still runs. The agent join is a prod step ([0013](0013-mixed-prod.md)).
 8. Release: patch each contract `state: Released` (or delete the object); delete the Deployment; `dev down`; release
    the live slot.
 
@@ -71,7 +75,7 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
 | ssh prints `quickstart-vm-ok`, `x86_64` | ssh over dumbpipe | 0.7 s |
 | gateway Infra `nodes-<hex>` Deployed, node `<acct>-tenant-node1` Ready, pod Running, log `quickstart-k8s-ok` | `root:gateway`, tenant k3s | pod applied 03:27:30, Infra Deployed 20 s, node Ready 37 s, pod Running 46 s |
 | ComputeVM backend `DenoSandbox`; `sandbox.stdout` `quickstart-deno-ok sum=10 on linux/x86_64`, exit 0 | `root:bidder-1`, contract status | 6 s to Held (03:46:01 -> 03:46:07) |
-| agent contract: mint attempted after receipt | requester core log | Held 19 s; `requester_atirc_mint_failed ... the requester identity signs no service auth` every retry; `agent-start.yaml` Submitted < 1 s, bidder: `a requester guest event is queued for the guest` |
+| agent contract: placeholder bundle, then refused before the RFP | requester core log, contract status | at once: `requester_agent_bundle_placeholder` (`/etc/atirc/atirc.env`, 0600), `requester_contract_refused`, Failed `refused: ... <workspace>.requester.local is a .local handle that nobody resolves; start the requester with --atproto-handle ...`; no RFP, no record (before main 2ea66d62: Held 19 s, `requester_atirc_mint_failed` every retry) |
 | tenant scale to zero: Deployment deleted 03:47:03, pod gone 03:47:35, Infra entry Releasing 03:49:35 (2 min idle), Infra and node gone 03:49:39 | `root:gateway`, tenant k3s | ~2.5 min |
 | state Released -> contract Released | Infra status | VM and Deno Released 1 s after the patch; agent EphemeralInfra delete: `requester_atirc_release_revoke left=0`, `infra_released` 0.1 s |
 
@@ -80,8 +84,9 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
 - every example passes `kubectl apply --dry-run=server` in `root:qs` (k8s-cluster.yaml: applied to the tenant cluster)
 - examples carry no `policy`: the default `requester-tangled-vouch` admits the bidder only after the vouch record
 - VM, k8s, Deno reach Deployed / Running and are used as documented; no secret printed on any terminal
-- agent: locally everything up to the mint; on prod the nick joins after `agent-start.yaml`, and release revokes the
-  token before `vm.terminated` (0004 pass criteria)
+- agent: locally the placeholder bundle is written and the contract is refused before its RFP with the
+  `--atproto-handle` message; on prod ([0013](0013-mixed-prod.md)) the nick joins after `agent-start.yaml`, and release
+  revokes the token before `vm.terminated` (0004 pass criteria)
 - after release and `dev down`: no VM unit of the instance left (`dev down` `vmsLeft` 0)
 
 ## Vouch Readings (2026-11-01, qs1)
@@ -138,7 +143,8 @@ No token or key material in any log (plaintext check 0 on every log file).
 | requester -> bidder vouch alone, still `not vouched` | expected: that is the requester's own direction; the bidder-side run needs the operator -> requester record |
 | deno contract `no bids` | the bidder does not serve `deno`: `dev up` without `--compute-kinds vm,deno` (`MarketBidder.spec.computeKinds`) |
 | agent contract fails before the RFP: `an agent needs its token in spec.secretsRef` | add `spec.secrets` for the contract |
-| agent mint error | the bundle path is not in the vault (write it first), or the local requester DID is unknown to irc.fedfork.com (prod step) |
+| agent contract Failed `refused: the atirc agent needs a requester handle that resolves to <did> ... --atproto-handle ...` | expected on a dev network: the requester handle is `.local`; the join is the prod step ([0013](0013-mixed-prod.md)) |
+| agent mint error on prod | the requester identity signs no atirc service auth (`requester_service_auth` `atircSigning` `none`, reason in `atircReason`): use an OAuth or pdsAccount identity, or a local PDS on plc.directory with a public ingress and handle ([../quickstart-prod.md](../quickstart-prod.md) section 5) |
 | `Using secret key ...` on the terminal | dumbpipe's own ephemeral key on stderr: `2>/dev/null` in the ProxyCommand |
 | EphemeralInfra `endWhen: Complete` stays `Released` until its ttl | fixed in rc156: it ends in the pass that sees every contract Released or Failed (released 04:02:28, gone 04:02:30) |
 | released DenoSandbox ComputeVM stays `Running` with `spec.release` set | fixed in rc156: the bidder terminates and deletes it like a VM (released 04:01:45, gone 04:01:47) |

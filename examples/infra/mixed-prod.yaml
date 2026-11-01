@@ -1,0 +1,48 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: EphemeralInfra
+metadata:
+  name: mixedprod
+spec:
+  description: mixed prod run on one user-configured bidder, VM, deno sandbox and atirc agent VM for one hour
+  ttlSeconds: 3600
+  endWhen: Complete
+  contracts:
+  - name: vm1
+    state: Requested
+    vmName: einfra-mixedprod-vm1
+    bidderDids:
+    - REPLACE-BIDDER-DID
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
+    sshAuthorizedKeys:
+    - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
+    userData: |
+      #cloud-config
+      runcmd:
+        - [sh, -c, "echo mixedprod-vm-ok > /root/mixedprod"]
+  - name: sbx1
+    state: Requested
+    computeKind: deno
+    bidderDids:
+    - REPLACE-BIDDER-DID
+    userData: |
+      const n = [1, 2, 3, 4].reduce((a, b) => a + b, 0);
+      console.log(`mixedprod-deno-ok sum=${n} on ${Deno.build.os}/${Deno.build.arch}`);
+  - name: agent1
+    state: Requested
+    vmName: einfra-mixedprod-agent1
+    bidderDids:
+    - REPLACE-BIDDER-DID
+    tunnels:
+    - tag: ssh
+      port: 22
+      transport: webrtc
+    agent:
+      envFile: /etc/atirc/atirc.env
+  secrets:
+  - contract: agent1
+    secretsRef:
+      mount: requester
+      path: contracts/einfra-mixedprod-agent1/secrets
