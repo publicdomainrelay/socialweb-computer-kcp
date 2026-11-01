@@ -215,8 +215,6 @@ type Requester struct {
 
 	pdsURL string
 
-	marketURL string
-
 	repoKey atcrypto.PrivateKey
 
 	attestationKey atcrypto.PrivateKey
@@ -562,15 +560,6 @@ func (q *Requester) Start(ctx context.Context) error {
 			return fmt.Errorf("requester: state dir: %w", err)
 		}
 	}
-	if name := q.marketExposure(); name != "" && q.marketURL == "" {
-		if raw := q.deps.Inputs.AwaitAddress(ctx, name, MarketExposureWait, nil); raw != "" {
-			q.marketURL = raw
-		} else if err := ctx.Err(); err != nil {
-			return err
-		} else {
-			q.log.Warn("the requester market URL is not resolved yet", "exposure", name)
-		}
-	}
 	if q.cfg.IdentityMode == IdentityModeOAuth {
 		if err := q.resolveOAuthIdentity(ctx); err != nil {
 			return err
@@ -728,11 +717,9 @@ func (q *Requester) marketExposure() string {
 
 func (q *Requester) marketAddress() string {
 	if name := q.marketExposure(); name != "" {
-		if raw := q.deps.Inputs.Address(name); raw != "" {
-			return raw
-		}
+		return q.deps.Inputs.Address(name)
 	}
-	return strings.TrimRight(strings.TrimSpace(q.marketURL), "/")
+	return ""
 }
 
 func (q *Requester) DID() string {
