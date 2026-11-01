@@ -110,7 +110,7 @@ items:
     status: doing
   - id: P1
     title: "page: associate-agent-DID action + Associated display (wasm)"
-    status: planned
+    status: done
   - id: R1
     title: "atirc: agentOperator.assoc, mint embeds assoc, exp clamp (atirc-dev)"
     status: done
