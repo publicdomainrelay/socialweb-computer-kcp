@@ -34,6 +34,9 @@ func (q *Requester) Synced() {
 		q.log.Info("requester_start_timing", "step", "synced", "sinceStartMs", since)
 	}
 	q.startOrphanRevokes()
+	q.staleSweep.Do(func() {
+		q.wg.Go(q.releaseStaleTransient)
+	})
 }
 
 func (q *Requester) addressees(skip func(v1alpha1.ComputeContract) bool) *market.Addressees {
