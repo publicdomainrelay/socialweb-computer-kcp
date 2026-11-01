@@ -398,7 +398,7 @@ func (c *Controller) verify(ctx context.Context, obj *v1alpha1.AtprotoRecordWatc
 			existing.Reason != "StreamNotReady" && existing.Reason != "MatchPending" {
 			return existing.Status == metav1.ConditionTrue, existing.Reason, existing.Message
 		}
-		return true, "Verified", "the watched records are verified"
+		return true, "Verified", eventstream.Verification{Records: w.status.Records}.Message()
 	}
 	result := c.backend.Verify(ctx, w.status.Records, matches)
 	w.status.Records = result.Records
