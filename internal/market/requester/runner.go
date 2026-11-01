@@ -1277,7 +1277,8 @@ func (r *contractRunner) releaseRequestedAt() string {
 }
 
 func guestMayRun(state *v1alpha1.NodeClaimContract) bool {
-	return state != nil && state.Receipt != nil && state.Termination == nil && (state.Release == nil || !state.Release.OK)
+	return state != nil && state.Receipt != nil && state.ReceiptOk != nil && *state.ReceiptOk && state.Termination == nil &&
+		(state.Release == nil || !state.Release.OK)
 }
 
 func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
