@@ -64,6 +64,8 @@ const (
 
 	DefaultPolicyWorkflow = v1alpha1.RequesterDefaultPolicy
 
+	SessionFullDeniesPerPick = 5
+
 	DefaultVMNamePrefix = "compute-"
 
 	ServiceAuthTTL = 5 * time.Minute

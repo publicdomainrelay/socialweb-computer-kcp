@@ -573,6 +573,15 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 			return nil, err
 		}
 	}
+	attachedRef, err := rfpPolicyRef(rfp.Record)
+	if err != nil {
+		return nil, fmt.Errorf("the session RFP %s: %w", rfp.URI, err)
+	}
+	gate, err := q.attachedPolicy(ctx, attachedRef, workflow)
+	if err != nil {
+		return nil, err
+	}
+	policyRef = attachedRef
 	discovery, err := q.market.Discover(ctx, q.now(), nil)
 	if err != nil {
 		q.log.Warn("requester_session_discovery_failed", "err", err)
@@ -583,7 +592,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 		q.log.Warn("requester_no_bidders", "session", vmName, "candidates", discovery.Candidates, "dropped", discovery.DroppedText())
 	}
 	q.rememberBidders(discovery.Bidders)
-	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, discovery.Bidders, workflow)
+	winner, winnerBidder, err := q.sessionWinner(ctx, rfp, discovery.Bidders, gate)
 	if err != nil {
 		if noBidders != "" {
 			return nil, fmt.Errorf("%w; %s", err, noBidders)
@@ -655,7 +664,7 @@ func (q *Requester) provisionSession(ctx context.Context, vmName, policyName str
 	}, nil
 }
 
-func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, workflow string) (*BidRecord, Bidder, error) {
+func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, bidders []Bidder, workflow PolicyGate) (*BidRecord, Bidder, error) {
 	for _, bidder := range bidders {
 		if bidder.Endpoint == "" {
 			continue
@@ -715,12 +724,15 @@ func (q *Requester) sessionWinner(ctx context.Context, rfp market.SignedRecord, 
 	return nil, Bidder{}, errors.New("every bid was denied by policy")
 }
 
-func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord, bids map[string]BidRecord, workflow string, full map[string]bool) *BidRecord {
+func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord, bids map[string]BidRecord, workflow PolicyGate, full map[string]bool) *BidRecord {
 	fullKey := func(bid BidRecord) string {
-		return strings.Join([]string{bid.URI, bid.CID, workflow, rfp.URI, rfp.CID}, "|")
+		return strings.Join([]string{bid.URI, bid.CID, workflow.Key(), rfp.URI, rfp.CID}, "|")
 	}
 	var best *BidRecord
-	for {
+	for denied := 0; ; {
+		if denied >= SessionFullDeniesPerPick {
+			return nil
+		}
 		best = nil
 		for _, bid := range bids {
 			candidate := bid
@@ -748,17 +760,17 @@ func (q *Requester) sessionBestBid(ctx context.Context, rfp market.SignedRecord,
 		}
 		key := fullKey(*best)
 		if _, done := full[key]; !done {
-			decision := q.policy.Evaluate(ctx, PolicyInput{
-				Workflow:         workflow,
+			decision := q.policy.Evaluate(ctx, workflow.Input(PolicyInput{
 				SelfDid:          q.marketDID,
 				SubjectDid:       best.DID,
 				CounterpartyDid:  best.DID,
 				RootRequesterDid: q.marketDID,
 				RFP:              &PolicyRef{URI: rfp.URI, CID: rfp.CID},
 				Bid:              &PolicyRef{URI: best.URI, CID: best.CID},
-			})
+			}))
 			full[key] = decision.Allow
 			if !decision.Allow {
+				denied++
 				q.log.Info("requester_bid_policy_denied", "bidder", best.DID, "bid", best.URI, "mode", participant.PolicyModeFull, "reason", decision.Reason)
 			}
 		}

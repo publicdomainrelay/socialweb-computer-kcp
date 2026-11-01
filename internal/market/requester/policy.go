@@ -3,10 +3,11 @@ package requester
 import (
 	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
-	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	bundledactions "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/bundled-actions"
@@ -61,29 +62,75 @@ func (e *PolicyEvaluator) run(ctx context.Context, input PolicyInput) PolicyDeci
 	input.Mode = cmp.Or(input.Mode, participant.PolicyModeFull)
 	input.SelfDid = cmp.Or(input.SelfDid, e.DID)
 	input.CounterpartyDid = cmp.Or(input.CounterpartyDid, input.SubjectDid)
+	if len(input.WorkflowBody) > 0 {
+		if input.WorkflowSource == "" {
+			return PolicyDecision{Reason: "the attached policy workflow names no source record"}
+		}
+		return e.Runs.Run(ctx, runs.Request{Workflow: input.WorkflowBody, Source: input.WorkflowSource, Input: input.Runs()})
+	}
 	return e.Runs.Run(ctx, runs.Request{WorkflowRef: workflow, Input: input.Runs()})
 }
 
-func (q *Requester) attachedPolicyWorkflow(ctx context.Context, ref commonv1.StrongRef) (string, error) {
+type PolicyGate struct {
+	Name string
+
+	Source string
+
+	CID string
+
+	Body json.RawMessage
+}
+
+func (g PolicyGate) Key() string {
+	return g.Name + "@" + g.Source + "#" + g.CID
+}
+
+func (g PolicyGate) Input(in PolicyInput) PolicyInput {
+	in.Workflow = g.Name
+	in.WorkflowBody = g.Body
+	in.WorkflowSource = g.Source
+	return in
+}
+
+func (q *Requester) attachedPolicy(ctx context.Context, ref market.StrongRef, want string) (PolicyGate, error) {
 	aturi, err := market.ParseATURI(ref.URI)
 	if err != nil {
-		return "", fmt.Errorf("the attached policy %s: %w", ref.URI, err)
+		return PolicyGate{}, fmt.Errorf("the attached policy %s: %w", ref.URI, err)
 	}
 	record, err := q.repo.GetRecord(ctx, aturi.Authority().String(), aturi.Collection().String(), aturi.RecordKey().String())
 	if err != nil {
-		return "", fmt.Errorf("read the attached policy %s: %w", ref.URI, err)
+		return PolicyGate{}, fmt.Errorf("read the attached policy %s: %w", ref.URI, err)
 	}
 	if ref.CID != "" && record.CID != ref.CID {
-		return "", fmt.Errorf("the attached policy %s changed: cid %s, want %s", ref.URI, record.CID, ref.CID)
+		return PolicyGate{}, fmt.Errorf("the attached policy %s changed: cid %s, want %s", ref.URI, record.CID, ref.CID)
 	}
-	if kind, _ := record.Value["$type"].(string); kind != PolicyGhaLiteNSID {
-		return "", fmt.Errorf("the attached policy %s is %q, not gha-lite", ref.URI, kind)
+	body, err := participant.PolicyRecordWorkflow(record.Value)
+	if err != nil {
+		return PolicyGate{}, fmt.Errorf("the attached policy %s: %w", ref.URI, err)
 	}
 	name, _ := record.Value["name"].(string)
 	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("the attached policy %s names no policy", ref.URI)
+		return PolicyGate{}, fmt.Errorf("the attached policy %s names no policy", ref.URI)
 	}
-	return PolicyWorkflowName(name), nil
+	gate := PolicyGate{Name: PolicyWorkflowName(name), Source: record.URI, CID: record.CID, Body: body}
+	if gate.Name != PolicyWorkflowName(want) {
+		return PolicyGate{}, fmt.Errorf("the contract names policy %s but its RFP attaches %s at %s", PolicyWorkflowName(want), gate.Name, ref.URI)
+	}
+	return gate, nil
+}
+
+func rfpPolicyRef(record map[string]any) (market.StrongRef, error) {
+	rfp, err := market.ParseRFP(record)
+	if err != nil {
+		return market.StrongRef{}, err
+	}
+	if len(rfp.Policies) != 1 {
+		return market.StrongRef{}, fmt.Errorf("the RFP attaches %d policies, want 1", len(rfp.Policies))
+	}
+	if rfp.Policies[0].URI == "" {
+		return market.StrongRef{}, errors.New("the RFP attaches a policy without a uri")
+	}
+	return rfp.Policies[0], nil
 }
 
 func PolicyWorkflowName(name string) string {
