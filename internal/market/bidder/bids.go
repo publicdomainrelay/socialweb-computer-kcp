@@ -87,9 +87,14 @@ func (b *Bidder) stepBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) 
 			b.verified.Store(bid.Name, true)
 			return b.sendBid(ctx, bid, now), nil
 		}
+		decided, err := b.revalidateBid(ctx, bid, now)
+		if err != nil || decided == nil {
+			return 0, err
+		}
+		rfp = decided
 	}
 	if rfp == nil {
-		rfp = b.rfpForBid(ctx, bid)
+		return 0, errors.New("resuming the bid publish: no policy-checked RFP")
 	}
 	if err := b.publishBidRecord(ctx, bid, rfp, now, true); err != nil {
 		return 0, fmt.Errorf("resuming the bid publish: %w", err)
@@ -227,6 +232,14 @@ func untilExpiry(bid *v1alpha1.Bid, now time.Time) time.Duration {
 }
 
 func (b *Bidder) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) (*market.RFP, error) {
+	return b.decideBid(ctx, bid, now, "", "")
+}
+
+func (b *Bidder) revalidateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time) (*market.RFP, error) {
+	return b.decideBid(ctx, bid, now, "Republish", "the published bid record is missing and its rewrite was refused: ")
+}
+
+func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time, stage, lead string) (*market.RFP, error) {
 	resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID})
 	if err != nil {
 		return nil, fmt.Errorf("resolving the RFP of a bid: %w", err)
@@ -255,12 +268,12 @@ func (b *Bidder) validateBid(ctx context.Context, bid *v1alpha1.Bid, now time.Ti
 	}
 	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: bid.Spec.Requester,
 		RFP: &participant.PolicyRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID}}); !scope.Allow {
-		b.failBid(ctx, bid, "ScopeDenied", scope.Reason, now)
+		b.failBid(ctx, bid, stage+"ScopeDenied", lead+scope.Reason, now)
 		return nil, nil
 	}
 	decision := b.policy.EvaluatePolicies(ctx, rfp.Policies, b.fullInput(bid.Spec.Requester, bid.Spec.Rfp.URI, bid.Spec.Rfp.CID))
 	if !decision.Allow {
-		b.failBid(ctx, bid, "PolicyRejected", decision.Reason, now)
+		b.failBid(ctx, bid, stage+"PolicyRejected", lead+decision.Reason, now)
 		return nil, nil
 	}
 	return rfp, nil
