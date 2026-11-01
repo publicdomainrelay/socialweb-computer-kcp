@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -81,6 +82,10 @@ type Controller struct {
 	log *slog.Logger
 
 	backends *binding.Table[backend]
+
+	mu sync.Mutex
+
+	ready map[binding.Target]bool
 }
 
 func New(opts Options) *Controller {
@@ -89,7 +94,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, network: opts.Network, log: log.With("component", "remoterepo-controller"),
-		backends: binding.New[backend]()}
+		backends: binding.New[backend](), ready: map[binding.Target]bool{}}
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -177,6 +182,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	target := binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}
 	if !object.DeletionTimestamp.IsZero() {
 		c.backends.Set(target, nil)
+		c.settle(target, false)
 		return ctlruntime.Result{}, nil
 	}
 	generation := object.Generation
@@ -204,9 +210,12 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	}
 	b := backend{self: commonv1.ObjectRef{Group: v1alpha1.GroupName, Kind: Kind, Name: object.Name, Workspace: req.Workspace},
 		labels: maps.Clone(object.Labels), pds: pdsRef, credentials: credentials, did: status.DID}
+	prior, held := c.backends.Get(req.Workspace, req.Name)
 	c.backends.Set(target, &b, binding.Key(pdsRef.Workspace, RemotePDSKind, pdsRef.Name),
 		binding.Key(credentials.Workspace, credentials.Kind, credentials.Name))
-	c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
+	if !held || prior.self != b.self || prior.pds != b.pds || prior.credentials != b.credentials || prior.did != b.did || !maps.Equal(prior.labels, b.labels) {
+		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: Kind, Name: req.Name})
+	}
 	transport, err := c.transport(ctx, b)
 	if err != nil {
 		return c.resolveFailed(ctx, req, object, status, ReasonPDSUnavailable, err)
@@ -227,7 +236,25 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	status.Writable = true
 	conds.Set(&status.Conditions, generation, commonv1.ConditionReady, true, ReasonReady,
 		fmt.Sprintf("the RemotePDS %s serves %s with the credentials of %s %s", pdsRef.Name, status.DID, credentials.Kind, credentials.Name))
-	return ctlruntime.Result{}, c.apply(ctx, req, object, status)
+	if err := c.apply(ctx, req, object, status); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	c.settle(target, true)
+	return ctlruntime.Result{}, nil
+}
+
+func (c *Controller) settle(target binding.Target, ready bool) {
+	c.mu.Lock()
+	was := c.ready[target]
+	if ready {
+		c.ready[target] = true
+	} else {
+		delete(c.ready, target)
+	}
+	c.mu.Unlock()
+	if ready && !was {
+		c.bus.NotifyBound(bus.Key{Workspace: target.Workspace, Kind: Kind, Name: target.Name})
+	}
 }
 
 func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, object *v1alpha1.RemoteRepo,
@@ -243,6 +270,7 @@ func (c *Controller) resolveFailed(ctx context.Context, req ctlruntime.Request, 
 
 func (c *Controller) notReady(ctx context.Context, req ctlruntime.Request, object *v1alpha1.RemoteRepo, status v1alpha1.AtprotoRepoBackendStatus,
 	reason, message string, cause error) (ctlruntime.Result, error) {
+	c.settle(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, false)
 	status.Writable = false
 	conds.Set(&status.Conditions, object.Generation, commonv1.ConditionReady, false, reason, message)
 	if err := c.apply(ctx, req, object, status); err != nil {
