@@ -294,10 +294,13 @@ func (l *Loop) consume(ctx context.Context, upstream events.Stream) (bool, error
 		l.mu.Lock()
 		recovered := l.state.Failed && l.state.Reason == ReasonDeliverFailed
 		l.mu.Unlock()
-		if recovered {
+		switch {
+		case recovered:
 			l.set(PhaseRunning, true, false, ReasonStreamOpen, "")
-		} else {
+		case first:
 			l.changed()
+		default:
+			l.progressed()
 		}
 	}
 }

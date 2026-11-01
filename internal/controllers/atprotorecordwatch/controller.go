@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/events"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotorecord"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/events/delivery"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
@@ -136,6 +138,10 @@ type watch struct {
 	verifyAt time.Time
 
 	sink *eventstream.Sink
+
+	persisted *v1alpha1.AtprotoRecordWatchStatus
+
+	cursorsAt time.Time
 }
 
 func New(opts Options) (*Controller, error) {
@@ -256,6 +262,7 @@ func (c *Controller) bind(req ctlruntime.Request, obj *v1alpha1.AtprotoRecordWat
 			Cursors: slices.Clone(obj.Status.Cursors)}
 		w.matches, w.matched = nil, false
 		w.verifiedGeneration, w.verifyAt = 0, time.Time{}
+		w.persisted, w.cursorsAt = nil, time.Time{}
 		w.sink.Take()
 	}
 	c.mu.Unlock()
@@ -429,7 +436,43 @@ func (c *Controller) apply(ctx context.Context, req ctlruntime.Request, obj *v1a
 		conds.Set(&next.Status.Conditions, condition.ObservedGeneration, condition.Type, condition.Status == metav1.ConditionTrue,
 			condition.Reason, condition.Message)
 	}
-	return req.ApplyStatus(ctx, next)
+	now := time.Now()
+	cursorsMoved := w.persisted == nil || !slices.Equal(next.Status.Cursors, w.persisted.Cursors)
+	if w.persisted != nil {
+		held := next.Status
+		held.Cursors = w.persisted.Cursors
+		if sameStatus(held, *w.persisted) {
+			if !cursorsMoved {
+				return nil
+			}
+			if now.Sub(w.cursorsAt) < delivery.ProgressDelay {
+				w.sink.MarkProgress()
+				return nil
+			}
+		}
+	}
+	if err := req.ApplyStatus(ctx, next); err != nil {
+		return err
+	}
+	persisted := *next.Status.DeepCopy()
+	w.persisted = &persisted
+	if cursorsMoved {
+		w.cursorsAt = now
+	}
+	return nil
+}
+
+func sameStatus(a, b v1alpha1.AtprotoRecordWatchStatus) bool {
+	strip := func(in []metav1.Condition) []metav1.Condition {
+		out := make([]metav1.Condition, len(in))
+		for i, c := range in {
+			c.LastTransitionTime = metav1.Time{}
+			out[i] = c
+		}
+		return out
+	}
+	a.Conditions, b.Conditions = strip(a.Conditions), strip(b.Conditions)
+	return reflect.DeepEqual(a, b)
 }
 
 func failedConditions(reason string, err error, generation int64) []metav1.Condition {

@@ -113,7 +113,7 @@ func (t *Tracked) Next(ctx context.Context) (events.Event, error) {
 		t.gapless = event.ServerFilter.Gapless()
 		return event, nil
 	}
-	if t.tracker.Observe(event, t.gapless) || len(event.Ops) > 0 {
+	if t.tracker.Observe(event, t.gapless) {
 		t.changed()
 	} else {
 		t.progress()
