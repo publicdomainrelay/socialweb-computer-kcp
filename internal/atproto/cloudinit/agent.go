@@ -182,9 +182,11 @@ install -d -m 0700 -o root -g root "` + AgentEnvStampDir + `"
 if [ -f "${ENV_FILE}" ]; then cp -f "${ENV_FILE}" "` + AgentEnvSnapshotPath + `"; else : > "` + AgentEnvSnapshotPath + `"; fi
 chmod 0600 "` + AgentEnvSnapshotPath + `"
 sha256sum < "` + AgentEnvSnapshotPath + `" > "` + AgentEnvStampPath + `"
-set -a
-. "` + AgentEnvSnapshotPath + `"
-set +a
+while IFS= read -r line || [ -n "${line}" ]; do
+  if [[ "${line}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+    export "${line}"
+  fi
+done < "` + AgentEnvSnapshotPath + `"
 if [ ! -f "` + GuestSecretsReadyPath + `" ] && [ ! -f "` + SecretsDoneStamp + `" ]; then
   echo "atirc-agent: the secrets bundle is not written yet (` + GuestSecretsReadyPath + `); the agent waits" >&2
   exit 1
