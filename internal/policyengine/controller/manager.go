@@ -30,10 +30,11 @@ type EngineManager struct {
 	mu      sync.Mutex
 	factory EngineFactory
 	engines map[string]*managedEngine
+	failed  map[string]string
 }
 
 func NewEngineManager(factory EngineFactory) *EngineManager {
-	return &EngineManager{factory: factory, engines: make(map[string]*managedEngine)}
+	return &EngineManager{factory: factory, engines: make(map[string]*managedEngine), failed: make(map[string]string)}
 }
 
 func NewDefaultEngineFactory(base Config) EngineFactory {
@@ -119,6 +120,9 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, e
 		}
 		engine, factoryErr := m.factory(ctx, engineCR)
 		if factoryErr != nil {
+			m.mu.Lock()
+			m.failed[key] = factoryErr.Error()
+			m.mu.Unlock()
 			state := EngineReconcileState{Phase: policyv1alpha1.PolicyEngineFailed}
 			meta.SetStatusCondition(&state.Conditions, metav1.Condition{
 				Type:    policyengine.ConditionReady,
@@ -136,6 +140,7 @@ func (m *EngineManager) ReconcilePolicyEngine(ctx context.Context, key string, e
 		}
 		fence := probeFence(ctx, engine.Sandbox())
 		m.mu.Lock()
+		delete(m.failed, key)
 		m.engines[key] = &managedEngine{engine: engine, hash: hash, fence: fence}
 		managed = m.engines[key]
 		stored := *managed
@@ -237,6 +242,7 @@ func (m *EngineManager) Delete(ctx context.Context, name string) error {
 	m.mu.Lock()
 	managed := m.engines[name]
 	delete(m.engines, name)
+	delete(m.failed, name)
 	m.mu.Unlock()
 	if managed == nil {
 		return nil
@@ -246,10 +252,62 @@ func (m *EngineManager) Delete(ctx context.Context, name string) error {
 	return managed.engine.Shutdown(shutdownCtx)
 }
 
+func (m *EngineManager) NotReady(key string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if message, ok := m.failed[key]; ok {
+		return "the policy engine could not be created: " + message, true
+	}
+	if managed, ok := m.engines[key]; ok {
+		return managed.notReady()
+	}
+	return "", false
+}
+
+func (m *EngineManager) OnlyNotReady(prefix string) (string, bool) {
+	m.mu.Lock()
+	keys := map[string]struct{}{}
+	for key := range m.engines {
+		if strings.HasPrefix(key, prefix) {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range m.failed {
+		if strings.HasPrefix(key, prefix) {
+			keys[key] = struct{}{}
+		}
+	}
+	m.mu.Unlock()
+	if len(keys) != 1 {
+		return "", false
+	}
+	for key := range keys {
+		return m.NotReady(key)
+	}
+	return "", false
+}
+
+func (managed *managedEngine) notReady() (string, bool) {
+	runner := managed.engine.Sandbox()
+	switch {
+	case managed.engine.Ready():
+		return "", false
+	case runner == nil:
+		return "the policy engine has no sandbox runner", true
+	case !runner.Available():
+		return fmt.Sprintf("the %s policy sandbox runtime is unavailable", runner.Kind()), true
+	case managed.fence != nil && !managed.fence.Fenced:
+		return fmt.Sprintf("the %s policy sandbox is not fenced (%s): %s", runner.Kind(), managed.fence.Reason, managed.fence.Message), true
+	default:
+		return fmt.Sprintf("the %s policy sandbox is not fenced", runner.Kind()), true
+	}
+}
+
 func (m *EngineManager) stop(ctx context.Context, name string) {
 	m.mu.Lock()
 	managed := m.engines[name]
 	delete(m.engines, name)
+	delete(m.failed, name)
 	m.mu.Unlock()
 	if managed == nil {
 		return
