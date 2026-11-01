@@ -284,11 +284,26 @@ func (q *Requester) releaseRetryOnce(contract v1alpha1.ComputeContract) bool {
 
 func releaseRequestedAgain(contract v1alpha1.ComputeContract) bool {
 	requested := contract.Spec.ReleaseRequestedAt
-	if !contract.Spec.Release || requested == "" || contract.Status.Phase != v1alpha1.ComputeContractFailed ||
-		!meta.IsStatusConditionTrue(contract.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed) || contractTerminal(contract) {
+	if !contract.Spec.Release || requested == "" || contract.Status.Phase != v1alpha1.ComputeContractFailed || contractTerminal(contract) {
 		return false
 	}
-	return contract.Status.Release == nil || contract.Status.Release.RequestedAt != requested
+	releaseFailed := meta.IsStatusConditionTrue(contract.Status.Conditions, v1alpha1.ComputeContractConditionReleaseFailed)
+	if !releaseFailed && !guestMayRun(contract.Status.Contract) {
+		return false
+	}
+	return contract.Status.Release == nil || stampNewer(requested, contract.Status.Release.RequestedAt)
+}
+
+func stampNewer(requested, answered string) bool {
+	if answered == "" {
+		return true
+	}
+	next, nerr := time.Parse(time.RFC3339, requested)
+	last, lerr := time.Parse(time.RFC3339, answered)
+	if nerr != nil || lerr != nil {
+		return requested != answered
+	}
+	return next.After(last)
 }
 
 func (q *Requester) markFinished(name string) {
