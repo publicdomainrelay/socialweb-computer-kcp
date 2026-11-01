@@ -152,7 +152,7 @@ flowchart LR
 | `market.rfp` | requester | requester | signed request for proposals; strongRefs vm payload + policy; callbacks submitBid/submitEvent |
 | `market.offering`, `market.heartbeat` | bidder | bidder | what the bidder sells; liveness. offering at rkey `self` |
 | `market.bid` + `market.bids.free` / `bids.x402` | bidder | bidder | bid envelope + payload. rkey `market.BidRKey` (one bid per RFP) |
-| `market.accept` + `market.accepts.free` | requester | requester | the chosen bid |
+| `market.accept` | requester | requester | the chosen bid (no payload record) |
 | `market.receipt` + `market.receipts.free` | bidder | bidder | bidder took the accept |
 | `market.event` + `compute.events.vm.*`, `compute.events.guest.*` | both | sender | lifecycle: vm.started, vm.onNetwork, vm.delete, vm.terminated, guest.* |
 | `market.association`, `market.associationRequest` | requester | requester / guest requester | contract-scoped association (guest requester R2) |
