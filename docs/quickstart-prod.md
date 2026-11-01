@@ -61,10 +61,14 @@ The page `shell.socialweb.computer` runs a kcp and the requester in the browser 
 Its kubectl terminal applies the same files into the page's own kcp ([acceptance/0009-browser-page.md](acceptance/0009-browser-page.md)).
 
 1. sign in with your account (OAuth)
-2. in the terminal: `kubectl apply -f agent-vm.yaml` (or `mixed.yaml`, `vm.yaml`)
+2. in the terminal, paste the file with a heredoc (the page terminal has no repo checkout, so `-f agent-vm.yaml` finds
+   no file): `kubectl apply -f - <<EOF` + the contents of `examples/infra/agent-vm.yaml` (or `vm.yaml`) + `EOF`
 3. read `kubectl get ephemeralinfras.socialweb.computer -o yaml` until the contract is Deployed
 4. the Agent button sends `guest.agentStart`; `ssh <contract>` opens a shell from the page terminal
-5. `kubectl patch ... state Released` (or delete the object) releases it
+5. `kubectl patch ... state Released` releases it
+
+- proven on the page: `agent-vm.yaml` and `vm.yaml`, released by `kubectl patch ... state Released`; `mixed.yaml` (with
+  the DenoSandbox `sbx1`) and release by deleting the object are not yet proven on the page
 
 - page-rc142 and later write the ssh key and the agent secrets bundle for a kubectl-applied contract; on page-rc141 an
   `agent` contract failed at once and `ssh <contract>` had no key
