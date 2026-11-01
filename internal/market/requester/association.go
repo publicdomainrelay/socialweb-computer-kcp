@@ -143,7 +143,7 @@ func (r *contractRunner) associationStep(ctx context.Context, state *v1alpha1.No
 }
 
 func (r *contractRunner) associationFailed(ctx context.Context, step string, err error) bool {
-	refused := errors.Is(err, errAssociationRefused)
+	refused := errors.Is(err, errAssociationRefused) || errors.Is(err, errAtircLeaseMissing)
 	r.log().Warn("requester_association_failed", "step", step, "err", err.Error(), "retry", !refused)
 	message := step + ": " + err.Error()
 	r.mu.Lock()
