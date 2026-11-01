@@ -11707,7 +11707,7 @@ Decision. The declared records are AtprotoRecord objects (the existing abstracti
 at a deterministic rkey, a putRecord only when the repo differs), one file set per account:
 `deploy/testaccounts/<account>/identity.yaml` (handle, did, PDS, the expected OAuth scope sets from
 `oauth.RequesterOAuthScope`, `compose.GatewayAtprotoScope` and `oauth.BidderOAuthScope`, the
-declared list with each record's live cid, the runtime-owned records and the retention keep list;
+declared list with each record's live cid, the runtime-owned records;
 never a credential, token or jti) and `kcp/` (one ComponentLink, `testaccount-<account>-records`,
 granting `repo.write` on the declared collections from the AtprotoRecords labelled
 `socialweb.computer/testaccount=<account>` to the account's AtprotoRepo
@@ -11742,14 +11742,8 @@ password-session write by the owner; the badgeBlueKeys claims are repaired throu
 (`write: oauth` in identity.yaml). Adding those scopes forces a new sign-in of every OAuth session,
 so it waits for a planned one.
 
-Retention (r137, `MarketRequester spec.retention`). The requester sweep runs in page, iOS, CLI and
-gateway kcps, which do not hold these objects, so the keep rule is in the repo itself: (collection,
-rkey). The sweep covers only the churn allowlist (market.rfp, accept, event, compute.vm, vm.delete,
-the requester-written guest.*, policy.ghalite, ephemeralInfra); every declared record is outside
-it; badgeBlueKeys is never swept; an rkey starting `fixture-` is kept in every collection (reserved
-for a later declared record in a churn collection); `spec.retention.keep` takes the identity.yaml
-list; the `socialweb.computer/declared-state=testaccounts` label is an extra guard where the
-objects exist.
+No record is ever deleted from a test account (owner, 2026-10-31 05:05Z: "we never want to be
+deleting records for people"); the r137 requester retention sweep was reverted in r138.
 
 ## 16. Vocabulary
 
