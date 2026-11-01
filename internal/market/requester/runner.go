@@ -646,8 +646,7 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 		}
 		state.Outcome = v1alpha1.ContractOutcomePolicyRejected
 		state.Error = "the recorded accept is not resubmitted: " + err.Error()
-		r.recoverReceipt(ctx, state)
-		if releaseErr := r.releaseContract(ctx, state, bidderDID); releaseErr != nil {
+		if releaseErr := r.releaseDeniedAccept(ctx, state, bidderDID); releaseErr != nil {
 			return fmt.Errorf("%s; releasing it: %w", state.Error, releaseErr)
 		}
 		return errors.New(state.Error)
@@ -671,6 +670,20 @@ func (r *contractRunner) resumeAccepted(ctx context.Context, state *v1alpha1.Nod
 		return fmt.Errorf("no receipt arrived within %s", r.q.cfg.ReceiptTimeout)
 	}
 	return r.acceptReceipt(ctx, state, accept.Value, acceptRef.URI, receipt)
+}
+
+func (r *contractRunner) releaseDeniedAccept(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string) error {
+	if !r.recoverReceipt(ctx, state) {
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, state.Error+"; waiting for the bidder's receipt to release its guest", state, r.currentBids(), r.currentChosen(), "releasing", 1)
+		receipt, err := r.q.waitReceiptWithin(ctx, bidderDID, state.Accept.URI, r.q.cfg.ReceiptTimeout)
+		if err != nil {
+			return err
+		}
+		if receipt == nil || !r.recoverReceipt(ctx, state) {
+			return errors.New("no receipt arrived for the recorded accept; its records stay so a later run can release the guest")
+		}
+	}
+	return r.releaseContract(ctx, state, bidderDID)
 }
 
 func (q *Requester) recordedWinnerAllowed(ctx context.Context, state *v1alpha1.NodeClaimContract, policyName string) error {

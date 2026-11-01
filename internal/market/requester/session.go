@@ -175,6 +175,14 @@ type heldSession struct {
 	generation uint64
 }
 
+func (h *heldSession) stopTimer() {
+	if h.timer != nil {
+		h.timer.Stop()
+		h.timer = nil
+	}
+	h.generation++
+}
+
 func (h *heldSession) clear() {
 	h.target = nil
 	h.privateKeyPath = ""
@@ -279,26 +287,38 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 	}
 	key := account.DID + "\x00" + name
 	held := q.heldSession(key)
-	held.mu.Lock()
-	if held.timer != nil {
-		held.timer.Stop()
-		held.timer = nil
-	}
-	reused := held.target != nil
-	target, privateKeyPath, contract := held.target, held.privateKeyPath, held.contract
-	if reused {
+	var reused bool
+	var target *SessionTarget
+	var privateKeyPath, contract string
+	for {
+		held.mu.Lock()
+		held.stopTimer()
+		reused = held.target != nil
+		target, privateKeyPath, contract = held.target, held.privateKeyPath, held.contract
+		if !reused {
+			break
+		}
+		held.mu.Unlock()
 		policyCtx, policyCancel := context.WithTimeout(ctx, HeldSessionPolicyTimeout)
 		err := q.heldSessionAllowed(policyCtx, contract, policyName)
 		policyCancel()
-		if err != nil {
-			q.log.Info("requester_held_session_policy_denied", "contract", contract, "err", err)
-			if errors.Is(err, ErrPolicyRejected) {
-				held.clear()
-				q.releaseHeldSessionTarget(contract, privateKeyPath)
-			}
+		held.mu.Lock()
+		if held.target != target || held.contract != contract {
 			held.mu.Unlock()
-			return commandFailed(io, "policy denied: ", err)
+			held = q.heldSession(key)
+			continue
 		}
+		held.stopTimer()
+		if err == nil {
+			break
+		}
+		q.log.Info("requester_held_session_policy_denied", "contract", contract, "err", err)
+		if errors.Is(err, ErrPolicyRejected) {
+			held.clear()
+			q.releaseHeldSessionTarget(contract, privateKeyPath)
+		}
+		held.mu.Unlock()
+		return commandFailed(io, "policy denied: ", err)
 	}
 	fresh := target == nil
 	if target == nil {
