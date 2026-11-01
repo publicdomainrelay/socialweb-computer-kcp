@@ -37,6 +37,9 @@ func (h *RepoRBAC) Records(ctx context.Context, requesterDID string) ([]RBACReco
 	seen := map[string]bool{}
 	for range maximumRBACPages {
 		page, err := h.Reader.ListRecords(ctx, requesterDID, RBACCollection, atprotorepo.ListOptions{Limit: 100, Cursor: cursor})
+		if err != nil && cursor == "" && errors.Is(err, atprotorepo.ErrNotFound) {
+			return out, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("guestidentity: listing the RBAC records of %s: %w", requesterDID, err)
 		}
