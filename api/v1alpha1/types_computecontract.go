@@ -291,5 +291,7 @@ const (
 
 	ComputeContractConditionReleaseFailed = "ReleaseFailed"
 
+	ComputeContractConditionGuestRequesterReleased = "GuestRequesterReleased"
+
 	ComputeContractConditionTerminated = "Terminated"
 )

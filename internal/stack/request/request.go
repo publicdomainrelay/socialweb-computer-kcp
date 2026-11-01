@@ -90,6 +90,8 @@ type ContractSummary struct {
 	ReleaseStatus int             `json:"releaseStatus,omitempty"`
 	Termination   string          `json:"termination,omitempty"`
 	Sandbox       *SandboxSummary `json:"sandbox,omitempty"`
+	R2Release     string          `json:"r2Release,omitempty"`
+	AtircRevokes  string          `json:"atircRevokes,omitempty"`
 }
 
 type SandboxSummary struct {
@@ -190,6 +192,13 @@ func SummaryOf(c *v1alpha1.ComputeContract) *ContractSummary {
 	if k.Receipt != nil {
 		s.ReceiptUri = k.Receipt.URI
 	}
+	if k.R2Release != nil {
+		s.R2Release = string(k.R2Release.Phase)
+		if k.R2Release.Message != "" {
+			s.R2Release += ": " + k.R2Release.Message
+		}
+	}
+	s.AtircRevokes = string(c.Status.AtircRevokes)
 	if k.Sandbox != nil {
 		s.Sandbox = &SandboxSummary{ExitCode: k.Sandbox.ExitCode, TimedOut: k.Sandbox.TimedOut, Stdout: k.Sandbox.Stdout, Stderr: k.Sandbox.Stderr}
 	}

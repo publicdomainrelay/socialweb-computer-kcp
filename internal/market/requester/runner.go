@@ -1570,6 +1570,15 @@ func (r *contractRunner) applyConditions(status *v1alpha1.ComputeContractStatus,
 			conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionReleaseFailed, metav1.ConditionFalse, "Acknowledged", message, now)
 		}
 	}
+	if state != nil && state.R2Release != nil {
+		rel := state.R2Release
+		ok := rel.Phase == v1alpha1.ContractR2ReleaseReleased
+		message := "the guest requester's release is " + string(rel.Phase)
+		if rel.Message != "" {
+			message += ": " + rel.Message
+		}
+		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionGuestRequesterReleased, conds.Status(ok), string(rel.Phase), message, now)
+	}
 	switch {
 	case state != nil && state.SecretsApplied != nil && state.SecretsApplied.Via == market.GuestSecretsViaSealed:
 		conds.SetStatusAt(&status.Conditions, generation, v1alpha1.ComputeContractConditionSecretsApplied, metav1.ConditionTrue, "SealedFallback",

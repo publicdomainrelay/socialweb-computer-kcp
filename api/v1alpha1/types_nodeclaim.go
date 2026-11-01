@@ -138,6 +138,8 @@ type NodeClaimContract struct {
 
 	GuestRequester *ContractGuestRequester `json:"guestRequester,omitempty"`
 
+	R2Release *ContractR2Release `json:"r2Release,omitempty"`
+
 	Outcome ContractOutcome `json:"outcome,omitempty"`
 
 	Error string `json:"error,omitempty"`
@@ -251,6 +253,30 @@ type ContractSecretsRequested struct {
 	Event commonv1.StrongRef `json:"event"`
 
 	Payload commonv1.StrongRef `json:"payload"`
+}
+
+type ContractR2ReleasePhase string
+
+const (
+	ContractR2ReleaseRequested ContractR2ReleasePhase = "Requested"
+
+	ContractR2ReleaseReleased ContractR2ReleasePhase = "Released"
+
+	ContractR2ReleaseFailed ContractR2ReleasePhase = "Failed"
+
+	ContractR2ReleaseTimedOut ContractR2ReleasePhase = "TimedOut"
+)
+
+type ContractR2Release struct {
+	Phase ContractR2ReleasePhase `json:"phase" apigen:"enum=Requested|Released|Failed|TimedOut"`
+
+	Ok bool `json:"ok,omitempty"`
+
+	Message string `json:"message,omitempty"`
+
+	RequestedAt string `json:"requestedAt,omitempty"`
+
+	AnsweredAt string `json:"answeredAt,omitempty"`
 }
 
 type ContractGuestRequesterState string

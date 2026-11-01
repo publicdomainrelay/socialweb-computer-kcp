@@ -1390,8 +1390,15 @@ func runRequestList(ctx context.Context, a *app, vals clicfg.Values, rest []stri
 		if s.Network != "" {
 			where = "network " + s.Network
 		}
-		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t identity=%s did=%s winner=%s guest=%s %s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
-			cmp.Or(s.Identity, "-"), cmp.Or(s.Did, "-"), cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message)
+		extra := ""
+		if c.R2Release != "" {
+			extra += " r2Release=" + strconv.Quote(c.R2Release)
+		}
+		if c.AtircRevokes != "" {
+			extra += " atircRevokes=" + c.AtircRevokes
+		}
+		fmt.Fprintf(a.stdout, "%-24s %-20s %-10s kcp=%-5t identity=%s did=%s winner=%s guest=%s %s%s\n", s.Name, where, cmp.Or(s.Phase), s.KcpRunning,
+			cmp.Or(s.Identity, "-"), cmp.Or(s.Did, "-"), cmp.Or(c.WinnerDid), cmp.Or(c.VMAddress), s.Message, extra)
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "no invocations under", request.Root(root))

@@ -48,6 +48,14 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 		return
 	}
 	q.contractEvents.Put(name, event)
+	if state.R2Release == nil || state.R2Release.Phase != v1alpha1.ContractR2ReleaseRequested {
+		state.R2Release = &v1alpha1.ContractR2Release{Phase: v1alpha1.ContractR2ReleaseRequested, RequestedAt: q.nowISO()}
+	}
+	settle := func(phase v1alpha1.ContractR2ReleasePhase, ok bool, message string) {
+		state.R2Release.Phase, state.R2Release.Ok, state.R2Release.Message, state.R2Release.AnsweredAt = phase, ok, message, q.nowISO()
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "the guest requester's release: "+string(phase)+" "+message, state,
+			r.currentBids(), r.currentChosen(), "releasingGuestRequester", 1)
+	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "asking the guest requester to release its own contracts before the guest goes", state,
 		r.currentBids(), r.currentChosen(), "releasingGuestRequester", 1)
 	r.log().Info("requester_guest_requester_release", "contractEvent", name, "timeout", GuestRequesterReleaseTimeout.String())
@@ -63,6 +71,11 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 			return false
 		}
 		r.log().Info("requester_guest_requester_released", "ok", *parsed.R2Released, "message", parsed.R2Message)
+		phase := v1alpha1.ContractR2ReleaseReleased
+		if !*parsed.R2Released {
+			phase = v1alpha1.ContractR2ReleaseFailed
+		}
+		settle(phase, *parsed.R2Released, parsed.R2Message)
 		return true
 	}
 	for _, e := range pending {
@@ -79,6 +92,8 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 		case <-timer.C:
 			r.log().Warn("requester_guest_requester_release_timeout", "after", GuestRequesterReleaseTimeout.String(),
 				"next", "the guest is destroyed; the guest requester's bidders end its contracts when its association goes")
+			settle(v1alpha1.ContractR2ReleaseTimedOut, false, "no guest.r2Released within "+GuestRequesterReleaseTimeout.String()+
+				"; the guest requester's bidders release its VMs at its association expiresAt plus 10m")
 			return
 		case e := <-events:
 			if answered(e) {
