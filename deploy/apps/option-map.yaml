@@ -135,7 +135,6 @@ apps:
       - {name: vm-ready-timeout-sec, to: options}
       - {name: test-owner-sessions-file, to: spec.marketNetwork.ownerSessionsFile}
       - {name: test-node-user-data-base-file, to: spec.marketNetwork.nodeUserDataBaseFile}
-      - {name: record-retention-sec, to: requester}
   - app: market-requester
     entry: request-vm-ssh
     options:
@@ -185,8 +184,6 @@ apps:
       - {name: per-account-max, to: options}
       - {name: unclaimed-grace-ms, to: options}
       - {name: orphan-scan-interval-ms, to: options}
-      - {name: record-retention-sec, to: options}
-      - {name: record-retention-scan-ms, to: options}
       - {name: compute-contract-kcp-server, to: profile}
       - {name: compute-contract-kcp-workspace, to: profile}
       - {name: compute-contract-kcp-token-file, to: state}

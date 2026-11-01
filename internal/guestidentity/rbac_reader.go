@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
@@ -19,13 +20,15 @@ const (
 	maximumRBACRecords = 5000
 )
 
+var RBACAtAcceptSince = time.Date(2026, time.October, 30, 21, 18, 3, 0, time.UTC)
+
 type RepoRBAC struct {
 	Reader atprotorepo.RecordReader
 
 	Log *slog.Logger
 }
 
-func (h *RepoRBAC) Records(ctx context.Context, requesterDID, acceptURI string) ([]RBACRecord, error) {
+func (h *RepoRBAC) Records(ctx context.Context, requesterDID, acceptURI string, acceptedAt time.Time) ([]RBACRecord, error) {
 	if h == nil || h.Reader == nil {
 		return nil, errors.New("guestidentity: the RBAC reader has no record reader")
 	}
@@ -46,6 +49,9 @@ func (h *RepoRBAC) Records(ctx context.Context, requesterDID, acceptURI string) 
 		case !errors.Is(err, atprotorepo.ErrNotFound):
 			return nil, fmt.Errorf("guestidentity: reading the RBAC record %s of %s: %w", key, requesterDID, err)
 		}
+	}
+	if acceptedAt.IsZero() || !acceptedAt.Before(RBACAtAcceptSince) {
+		return []RBACRecord{}, nil
 	}
 	return h.listed(ctx, requesterDID, log)
 }

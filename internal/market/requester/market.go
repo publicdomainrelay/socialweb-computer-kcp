@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -209,9 +210,9 @@ type MarketClient interface {
 
 	SubmitEvent(ctx context.Context, bidder Bidder, event SubmitEventRequest) (int, error)
 
-	FindReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error)
+	FindReceipt(ctx context.Context, bidderDID, acceptURI, acceptCID string) (*market.ResolvedRecord, error)
 
-	FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error)
+	FindTermination(ctx context.Context, bidderDID, receiptURI string) (*MarketEvent, error)
 }
 
 type HTTPMarket struct {
@@ -248,6 +249,10 @@ type HTTPMarket struct {
 	Timeout time.Duration
 
 	Log *slog.Logger
+
+	StartedAt time.Time
+
+	firstDiscovery atomic.Bool
 
 	discoveryOnce sync.Once
 
@@ -292,6 +297,7 @@ func (m *HTTPMarket) Discover(ctx context.Context, now time.Time, only []string)
 }
 
 func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string) Discovery {
+	discoveryStart := time.Now()
 	found := Discovery{Restricted: len(only) > 0}
 	seen := map[string]bool{}
 	explicit := map[string]bool{}
@@ -358,8 +364,13 @@ func (m *HTTPMarket) discover(ctx context.Context, now time.Time, only []string)
 	for _, bidder := range found.Bidders {
 		bidderDIDs = append(bidderDIDs, bidder.DID)
 	}
+	discoveryMs := time.Since(discoveryStart).Milliseconds()
 	m.log().Info("requester_bidder_discovery", "source", source, "sources", counts, "candidates", len(found.Candidates), "bidders", bidderDIDs,
-		"dropped", len(found.Dropped))
+		"dropped", len(found.Dropped), "discoveryMs", discoveryMs)
+	if !m.StartedAt.IsZero() && !m.firstDiscovery.Swap(true) {
+		m.log().Info("requester_start_timing", "step", "firstBidderDiscovery", "sinceStartMs", time.Since(m.StartedAt).Milliseconds(),
+			"discoveryMs", discoveryMs, "bidders", len(found.Bidders))
+	}
 	return found
 }
 
@@ -739,69 +750,59 @@ func (m *HTTPMarket) SubmitEvent(ctx context.Context, bidder Bidder, event Submi
 	return status, err
 }
 
-func (m *HTTPMarket) FindReceipt(ctx context.Context, bidderDID, acceptURI string) (*market.ResolvedRecord, error) {
+func (m *HTTPMarket) FindReceipt(ctx context.Context, bidderDID, acceptURI, acceptCID string) (*market.ResolvedRecord, error) {
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
 	}
-	records, err := listAll(ctx, m.Reader, bidderDID, market.ReceiptNSID, 100)
+	if strings.TrimSpace(acceptCID) == "" {
+		return nil, fmt.Errorf("requester: the accept %s names no cid, so its receipt rkey is unknown", acceptURI)
+	}
+	record, err := m.Reader.GetRecord(ctx, bidderDID, market.ReceiptNSID, market.ReceiptRKey(acceptURI, acceptCID))
+	if errors.Is(err, market.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, record := range records {
-		accept, _ := record.Value["accept"].(map[string]any)
-		if accept == nil || stringOf(accept["uri"]) != acceptURI {
-			continue
-		}
-		found := market.ResolvedRecord{URI: record.URI, CID: record.CID, Value: record.Value}
-		return &found, nil
+	accept, _ := record.Value["accept"].(map[string]any)
+	if accept == nil || stringOf(accept["uri"]) != acceptURI {
+		m.log().Warn("requester_receipt_accept_mismatch", "receipt", record.URI, "accept", acceptURI)
+		return nil, nil
 	}
-	return nil, nil
+	return &record, nil
 }
 
-func (m *HTTPMarket) FindTerminations(ctx context.Context, bidderDID, receiptURI string) ([]MarketEvent, error) {
-	return m.findEvents(ctx, bidderDID, receiptURI, market.ComputeEventsVMTerminatedNSID)
-}
-
-func (m *HTTPMarket) findEvents(ctx context.Context, bidderDID, receiptURI, payloadNSID string) ([]MarketEvent, error) {
+func (m *HTTPMarket) FindTermination(ctx context.Context, bidderDID, receiptURI string) (*MarketEvent, error) {
 	if m == nil || m.Reader == nil {
 		return nil, errors.New("requester: the market has no record reader")
 	}
-	records, err := listAll(ctx, m.Reader, bidderDID, market.EventNSID, 100)
+	_, eventRKey := market.EventRKeys(market.TerminationKey(receiptURI))
+	record, err := m.Reader.GetRecord(ctx, bidderDID, market.EventNSID, eventRKey)
+	if errors.Is(err, market.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	out := []MarketEvent{}
-	for _, record := range records {
-		event, ok := m.receiptEvent(ctx, market.ResolvedRecord{URI: record.URI, CID: record.CID, Value: record.Value}, receiptURI, payloadNSID)
-		if ok {
-			out = append(out, *event)
-		}
-	}
-	return out, nil
-}
-
-func (m *HTTPMarket) receiptEvent(ctx context.Context, record market.ResolvedRecord, receiptURI, payloadNSID string) (*MarketEvent, bool) {
 	receipt, _ := record.Value["receipt"].(map[string]any)
-	if receipt == nil || stringOf(receipt["uri"]) != receiptURI {
-		return nil, false
-	}
 	payload, _ := record.Value["payload"].(map[string]any)
-	if payload == nil {
-		return nil, false
+	var ref market.RecordRef
+	if payload != nil {
+		ref = market.RecordRef{URI: stringOf(payload["uri"]), CID: stringOf(payload["cid"])}
 	}
-	ref := market.RecordRef{URI: stringOf(payload["uri"]), CID: stringOf(payload["cid"])}
-	if ref.URI == "" {
-		return nil, false
-	}
-	if payloadNSID != "" && market.NSIDFromURI(ref.URI) != payloadNSID {
-		return nil, false
+	if receipt == nil || stringOf(receipt["uri"]) != receiptURI || market.NSIDFromURI(ref.URI) != market.ComputeEventsVMTerminatedNSID {
+		m.log().Warn("requester_termination_event_mismatch", "event", record.URI, "receipt", receiptURI, "payload", ref.URI)
+		return nil, nil
 	}
 	resolved, err := m.Reader.Resolve(ctx, ref)
-	if err != nil {
-		m.log().Warn("requester_event_payload_failed", "uri", ref.URI, "err", err)
-		return nil, false
+	if errors.Is(err, market.ErrNotFound) {
+		m.log().Warn("requester_termination_payload_missing", "event", record.URI, "payload", ref.URI)
+		return nil, nil
 	}
-	return &MarketEvent{Event: record, Payload: resolved}, true
+	if err != nil {
+		return nil, fmt.Errorf("requester: the termination payload %s: %w", ref.URI, err)
+	}
+	return &MarketEvent{Event: record, Payload: resolved}, nil
 }
 
 func listAll(ctx context.Context, lister market.RecordLister, repoDID, collection string, limit int) ([]market.ListedRecord, error) {

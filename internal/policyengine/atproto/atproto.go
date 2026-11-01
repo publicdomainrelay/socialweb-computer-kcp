@@ -11,8 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 )
 
 const (
@@ -175,51 +173,6 @@ func (c *Client) GetRecordAt(ctx context.Context, ref StrongRef) (Record, error)
 		response.Value = map[string]any{}
 	}
 	return Record{URI: response.URI, CID: response.CID, Value: response.Value}, nil
-}
-
-func (c *Client) ListRecords(ctx context.Context, repo, collection string, limit int) ([]Record, error) {
-	limit = opt.Positive(limit, 100)
-	page := min(limit, 100)
-	pds, err := c.ResolvePDS(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	endpoint := pds + "/xrpc/com.atproto.repo.listRecords"
-	records := make([]Record, 0, page)
-	cursor := ""
-	seen := map[string]bool{}
-	for len(records) < limit {
-		query := url.Values{}
-		query.Set("repo", repo)
-		query.Set("collection", collection)
-		query.Set("limit", fmt.Sprintf("%d", page))
-		if cursor != "" {
-			query.Set("cursor", cursor)
-		}
-		var response struct {
-			Records []struct {
-				URI   string         `json:"uri"`
-				CID   string         `json:"cid"`
-				Value map[string]any `json:"value"`
-			} `json:"records"`
-			Cursor string `json:"cursor"`
-		}
-		if err := c.getJSON(ctx, endpoint+"?"+query.Encode(), &response); err != nil {
-			return nil, fmt.Errorf("listRecords %s %s: %w", repo, collection, err)
-		}
-		for _, record := range response.Records {
-			records = append(records, Record{URI: record.URI, CID: record.CID, Value: record.Value})
-			if len(records) >= limit {
-				break
-			}
-		}
-		if response.Cursor == "" || len(response.Records) == 0 || seen[response.Cursor] {
-			break
-		}
-		seen[response.Cursor] = true
-		cursor = response.Cursor
-	}
-	return records, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, target any) error {

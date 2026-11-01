@@ -5230,6 +5230,10 @@ refutation.
 - **The requester's orphan records, the bidder's bid sweep, the requester heap and the gateway requester's retention (plan 0013
   M3-PDS-RECORD-RETENTION and M3-DISK-RETENTION, 2026-10-18, commits 8dad7806, b517683f, 1be95509, feccd06d, a60721ac,
   efa7e5cd).** The four series that section 14 kept open after dev-gc-1. Causes and changes:
+  **Historical.** This is the TypeScript-era record retention. The Go rewrite (963f7980) deleted it with `ts/`, and no
+  record retention exists: nothing deletes a market record by age, the options `record-retention-sec` and
+  `record-retention-scan-ms` are gone from `deploy/apps/option-map.yaml`, and the owner's rule is that no component
+  deletes records for people. What follows describes code that no longer exists.
   (1) Orphan records. Every 30 s the controller's resync lists the ComputeContracts and called `forget()` on every runner whose
   name the list lacked. A contract created while the list was in flight had already been launched from the watch, so it was taken
   for deleted: the runner set deleted and released, skipped every later status write and ended with "the contract was released
@@ -5778,8 +5782,9 @@ the run made (canary-dry, the leaked canary-to and canary-dry2) and never again,
 - **The requester's RBAC records are the source of the guest's identity grants, on 2026-10-15 (plan 0009
   M3-RBAC-TO-OPENBAO).** For each live guest the bidder reads the `com.fedproxy.rbac` records of its
   requester's repo (the DID resolved through the PLC directory; since rc129 one `getRecord` at rkey
-  `node.<accept rkey>`, the rkey the requester writes it at, and `listRecords` only when that record is
-  missing, for records written before rc129) when it accepts, on every
+  `node.<accept rkey>`, the rkey the requester writes it at; a miss means not written yet or already
+  released, and grants nothing; `listRecords` runs on a miss only for a ComputeVM accepted before rc129,
+  `guestidentity.RBACAtAcceptSince`, by `spec.contract.acceptedAt` or else its creation time) when it accepts, on every
   firehose event for that collection and DID, and every `--compute-provider-kcp-guest-identity-resync-sec`
   (30 s; the market network's requester keeps its repo in its own process, no relay crawls it and its
   commits are not on the firehose, so the read is also the floor under a lost event). A role of a record
@@ -10163,7 +10168,12 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   stale ResourceQuota and 9 Bids after a TTL deletion, that retry was declined again (the third `capacity`
   decline) because the stale `used` still read 10, which is why the exact count moved into the bidder.
 - **A bidder and a requester remove their own market records when no object needs them (plan 0013
-  M3-PDS-RECORD-RETENTION, 2026-10-15).** The bidder (`bid-retention.ts`, started by the bid loop after its
+  M3-PDS-RECORD-RETENTION, 2026-10-15).**
+  **Historical.** This is the TypeScript-era record retention. The Go rewrite (963f7980) deleted it with `ts/`, and no
+  record retention exists: nothing deletes a market record by age, the options `record-retention-sec` and
+  `record-retention-scan-ms` are gone from `deploy/apps/option-map.yaml`, and the owner's rule is that no component
+  deletes records for people. What follows describes code that no longer exists.
+  The bidder (`bid-retention.ts`, started by the bid loop after its
   restore) lists its own `market.bid` records page by page 30 s after it starts and then every 10 minutes
   (up to 50 pages and 200 removals a pass). A record is removed, with the `bids.free` payload and the bid
   config it points at, when the Bid object of its RFP is settled (`Complete` or `Failed` condition) and its
@@ -11787,6 +11797,44 @@ resume from their saved cursors.
 Left open: each AtprotoRecordWatch still verifies every record in its `status.records` by getRecord
 every 5 min (`VerifyInterval`), and each non-collection infra owns a watch of the whole collection,
 so those reads still grow with infras x records seen.
+
+### r139: the requester reads the receipt and the termination by getRecord
+
+Before: `FindReceipt` paged the bidder's whole `market.receipt` collection (bob 354 records, 4
+pages) on every receipt poll (0.5 s doubling to 2 s while an accept waits) and on every start of an
+accepted contract without a receipt; `FindTerminations` paged the bidder's whole `market.event`
+collection (bob 1241 records, 13 pages, cap 20 pages, plus one Resolve per event naming the receipt)
+on every requester start, once per Held, adopted, or Released-with-receipt contract without a
+termination. A Released contract whose bidder never wrote `vm.terminated` was not terminal
+(`market.RequesterContractDone`), so it paid those 13 pages on every start forever.
+
+After: `FindReceipt` is one getRecord of `market.receipt/ReceiptRKey(accept uri, accept cid)`, the
+rkey every Go bidder writes at (`bidder/submit.go` createReceipt, since `963f7980`); the caller
+passes the accept cid it holds. `FindTermination` is one getRecord of
+`market.event/<EventRKeys(TerminationKey(receipt uri)) event rkey>` (the derivation the bidder's
+termination StateSync writes with and trust reads), plus one Resolve of its `vm.terminated` payload
+only when the event exists. No legacy listing is kept: no release tag holds a Go bidder that wrote
+either record at another rkey (the TID-era and `terminated:event:` termination writers never left
+the first rewrite day), and TS-era contracts did not survive the Go rewrite's fresh deploy. Read
+2026-10-31 by public reads: bob 361 receipts, 129 at `ReceiptRKey` and 232 at TIDs, the newest TID
+one 2026-10-16T02:04Z; 138 vm.terminated, 120 at the derived rkey with their market.event at the
+derived event rkey, 18 at TIDs, the newest 2026-10-16T02:06Z; john 457 receipts, all TIDs, the newest
+2026-09-22. Every record at another rkey predates the Go rewrite (2026-10-21). The
+first start after a release that finds no termination event (a real not-found, not a read
+failure or a refused signature) writes the Terminated condition False, reason `NotReported`, on the
+Released contract; `RequesterContractDone` counts such a contract as terminal, so later starts
+read nothing for it. The sink already dropped records for a Released and acknowledged contract
+(`RequesterContractSettled`), so no late `vm.terminated` is lost by this. Reads per requester start
+for N contracts: Held, before 13N pages plus Resolves, after N getRecords (2N when terminated);
+Released without a termination, before 13N pages on every start, after N getRecords on the first
+start and 0 after. `HTTPReader` no longer reads a 429 as not found: it retries like a 5xx and then
+returns the error, so a rate-limited read never records `NotReported`.
+
+Start timing: `requester_start_timing` with `step` `started` (`identityMs`, `repoMs`,
+`sinceStartMs`), `synced` (kcp informers synced), `firstContractResumed` (`terminationReadMs`)
+and `firstBidderDiscovery` (`discoveryMs`, `bidders`), all from the entry of `Requester.Start`;
+`requester_bidder_discovery` carries `discoveryMs`, and each start-time termination check logs
+`requester_termination_checked` at debug with `readMs`.
 
 ## 16. Vocabulary
 

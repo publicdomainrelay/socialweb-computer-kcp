@@ -2,6 +2,7 @@ package openbao
 
 import (
 	"context"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestidentity"
 )
@@ -44,13 +45,15 @@ func (p *Plane) reconcile(ctx context.Context) bool {
 		}
 		live[vm.Name] = true
 		accept := guestidentity.AcceptURIOf(vm)
-		key := vm.Name + "\x00" + subject + "\x00" + requester + "\x00" + accept
+		acceptedAt := guestidentity.AcceptedAtOf(vm)
+		key := vm.Name + "\x00" + subject + "\x00" + requester + "\x00" + accept + "\x00" + acceptedAt.UTC().Format(time.RFC3339)
 		if prior, known := p.known[vm.Name]; !known || prior != key {
 			if err := p.syncer.Register(ctx, guestidentity.GrantSubject{
 				ComputeVM:    vm.Name,
 				OwnerUID:     string(vm.UID),
 				RequesterDID: requester,
 				AcceptURI:    accept,
+				AcceptedAt:   acceptedAt,
 				Subject:      subject,
 			}); err != nil {
 				if ctx.Err() == nil {

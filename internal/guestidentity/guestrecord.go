@@ -76,6 +76,18 @@ func AcceptURIOf(o *v1alpha1.ComputeVM) string {
 	return ""
 }
 
+func AcceptedAtOf(o *v1alpha1.ComputeVM) time.Time {
+	if o == nil {
+		return time.Time{}
+	}
+	if c := o.Spec.Contract; c != nil && c.AcceptedAt != "" {
+		if at, err := time.Parse(time.RFC3339, c.AcceptedAt); err == nil {
+			return at
+		}
+	}
+	return o.CreationTimestamp.Time
+}
+
 func Releasing(o *v1alpha1.ComputeVM) bool {
 	if o == nil {
 		return false
