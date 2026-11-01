@@ -92,7 +92,7 @@ items:
   - id: S2
     title: "listRecords paging and badge-binding cache TTL"
     detail: "trust.go:115/:160 and badgeblue.go read 100 records without a cursor; alice's repo holds ~85 per-run market_requester key bindings and grows. Page with a cursor, add a TTL to BadgeBlueKeyBinding, and GC stale per-run key bindings."
-    status: planned
+    status: dropped
   - id: A1
     title: "association lexicon + scopes (Go/TS mirrors)"
     status: done
