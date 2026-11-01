@@ -822,6 +822,8 @@ type SshGatewaySpec struct {
 
 type SshGatewaySsh struct {
 	PublicListen string `json:"publicListen,omitempty"`
+
+	WebListen string `json:"webListen,omitempty"`
 }
 
 type MarketNetwork struct {

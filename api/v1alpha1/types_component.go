@@ -785,6 +785,8 @@ type SshServerSpec struct {
 
 	PublicOrigin string `json:"publicOrigin,omitempty"`
 
+	WebListen string `json:"webListen,omitempty"`
+
 	MaxConnections int32 `json:"maxConnections,omitempty" apigen:"default=10000,minimum=1"`
 
 	MaxSessions int32 `json:"maxSessions,omitempty" apigen:"default=1000,minimum=1"`

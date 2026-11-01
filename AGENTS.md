@@ -215,7 +215,9 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     mints `<sub>` below the child.
     The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,
     standalone only) makes the SshServer bind that address itself (the edge; a fixed bind, reported as
-    listener `ssh-public`, next to the loopback Exposure). With the option `public-origin` (and no
+    listener `ssh-public`, next to the loopback Exposure); `spec.ssh.webListen` (`--ssh-web-listen
+    host:port`) binds the SshServer's web page and API the same way (listener `http-public`, the
+    address caddy proxies the public origin to). With the option `public-origin` (and no
     owner sessions file) the SshServer serves the web sign-in at `/` over the same OpenBao atproto
     plugin as GatewayAPI (`gatewayhttp.NewOAuth` over `internal/gateway/custody`, the session at
     `auth/atproto session/<did>` of the ssh-gateway vault) and `/keys` (badgeBlueKeys at keyRkey in

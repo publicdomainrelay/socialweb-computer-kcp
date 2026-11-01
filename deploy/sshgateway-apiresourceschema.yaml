@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-33.sshgateways.socialweb.computer
+  name: v1alpha1-34.sshgateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -552,6 +552,8 @@ spec:
                 type: object
                 properties:
                   publicListen:
+                    type: string
+                  webListen:
                     type: string
               components:
                 type: object

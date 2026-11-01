@@ -32,6 +32,10 @@ const (
 
 	PublicEndpoint = "ssh-public"
 
+	WebEndpoint = "http-public"
+
+	webReadHeaderTimeout = 10 * time.Second
+
 	rootLabelPrefix = "apps.socialweb.computer/root"
 
 	publicAcceptBackoff = 100 * time.Millisecond

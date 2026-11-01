@@ -75,7 +75,7 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 		case "bidder-dids":
 			r.bidderDids = append(r.bidderDids, splitList(p.Value)...)
 			continue
-		case "ssh-public-listen":
+		case "ssh-public-listen", "ssh-web-listen":
 			if err := r.applySshOption(p.Name, p.Value); err != nil {
 				return err
 			}
@@ -141,15 +141,19 @@ func (r *gatewaySshRun) applySshOption(name, value string) error {
 	}
 	value = strings.TrimSpace(value)
 	switch name {
-	case "ssh-public-listen":
+	case "ssh-public-listen", "ssh-web-listen":
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
-			return fmt.Errorf("--ssh-public-listen %q: want host:port: %w", value, err)
+			return fmt.Errorf("--%s %q: want host:port: %w", name, value, err)
 		}
 		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("--ssh-public-listen %q: want a port from 1 to 65535", value)
+			return fmt.Errorf("--%s %q: want a port from 1 to 65535", name, value)
 		}
-		r.ssh.PublicListen = net.JoinHostPort(host, port)
+		if name == "ssh-web-listen" {
+			r.ssh.WebListen = net.JoinHostPort(host, port)
+		} else {
+			r.ssh.PublicListen = net.JoinHostPort(host, port)
+		}
 	}
 	return nil
 }
@@ -182,7 +186,7 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	case r.network != "" && backend != hostsvc.BackendProc:
 		return a.fail(exitRefused, "run gateway ssh: --network: the market network places its children under its own devsup; pass --host-backend=proc")
 	case r.network != "" && r.ssh != nil:
-		return a.fail(exitRefused, "run gateway ssh: --ssh-public-listen is an option of a standalone ssh gateway; a market network child listens on loopback only")
+		return a.fail(exitRefused, "run gateway ssh: --ssh-public-listen and --ssh-web-listen are options of a standalone ssh gateway; a market network child listens on loopback only")
 	case r.network != "":
 		return r.inNetwork(ctx)
 	case r.profile == sshgateway.SshGatewayProfileNetwork:

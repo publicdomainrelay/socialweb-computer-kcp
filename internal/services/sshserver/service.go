@@ -72,6 +72,10 @@ type Service struct {
 
 	public net.Listener
 
+	webURL string
+
+	webServer *http.Server
+
 	web *webSignIn
 
 	gateway *gateway.Gateway
@@ -212,14 +216,33 @@ func (s *Service) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		go s.servePublic(runCtx, ln)
 	}
+	webURL := ""
+	if addr := strings.TrimSpace(s.spec.WebListen); addr != "" {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			handlers.Remove(key)
+			return fail(fmt.Errorf("sshserver: the web listener %s: %w", addr, err))
+		}
+		webURL = "http://" + ln.Addr().String()
+		srv := &http.Server{Handler: s.handler(), ReadHeaderTimeout: webReadHeaderTimeout}
+		s.mu.Lock()
+		s.webServer = srv
+		s.mu.Unlock()
+		go func() {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.log.Warn("sshserver_web_serve_failed", "err", err)
+			}
+		}()
+	}
 	s.mu.Lock()
 	s.key = key
 	s.httpURL = httpURL
 	s.sshURL = sshURL
 	s.publicURL = publicURL
+	s.webURL = webURL
 	s.ready = true
 	s.mu.Unlock()
-	s.log.Info("sshserver_registered", "http", host, "ssh", host, "public", publicURL)
+	s.log.Info("sshserver_registered", "http", host, "ssh", host, "public", publicURL, "web", webURL)
 	s.readiness.Signal()
 
 	<-runCtx.Done()
@@ -345,6 +368,9 @@ func (s *Service) Endpoints() []component.Endpoint {
 	if s.publicURL != "" {
 		out = append(out, component.Endpoint{Name: PublicEndpoint, Protocol: component.ProtocolSSH, URL: s.publicURL})
 	}
+	if s.webURL != "" {
+		out = append(out, component.Endpoint{Name: WebEndpoint, Protocol: component.ProtocolHTTP, URL: s.webURL})
+	}
 	return out
 }
 
@@ -380,8 +406,13 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.public = nil
 	web := s.web
 	s.web = nil
+	webServer := s.webServer
+	s.webServer = nil
 	s.mu.Unlock()
 	defer web.close()
+	if webServer != nil {
+		_ = webServer.Close()
+	}
 	if public != nil {
 		_ = public.Close()
 	}
@@ -397,5 +428,6 @@ func (s *Service) shutdown(ctx context.Context) {
 	s.started = false
 	s.ready = false
 	s.publicURL = ""
+	s.webURL = ""
 	s.mu.Unlock()
 }

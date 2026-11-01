@@ -275,6 +275,7 @@ apps:
       - {name: network-hosts, to: network.hosts}
       - {name: bidder-dids, to: spec.bidderDids}
       - {name: ssh-public-listen, to: spec.ssh.publicListen}
+      - {name: ssh-web-listen, to: spec.ssh.webListen}
       - {name: guest-host-aliases, to: profile}
       - {name: guest-ca-file, to: profile}
       - {name: guest-curl-home, to: profile}
