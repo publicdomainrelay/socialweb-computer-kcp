@@ -153,8 +153,8 @@ flowchart LR
 | `market.offering`, `market.heartbeat` | bidder | bidder | what the bidder sells; liveness. offering at rkey `self` |
 | `market.bid` + `market.bids.free` / `bids.x402` | bidder | bidder | bid envelope + payload. rkey `market.BidRKey` (one bid per RFP) |
 | `market.accept` | requester | requester | the chosen bid (no payload record) |
-| `market.receipt` + `market.receipts.free` | bidder | bidder | bidder took the accept |
-| `market.event` + `compute.events.vm.*`, `compute.events.guest.*` | both | sender | lifecycle: vm.started, vm.onNetwork, vm.delete, vm.terminated, guest.* |
+| `market.receipt` | bidder | bidder | bidder took the accept; payload = the RFP compute.vm ref |
+| `market.event` + `compute.events.vm.*`, `compute.events.guest.*` | both | sender | lifecycle: vm.hostKeys, vm.onNetwork, vm.delete, vm.terminated, guest.* |
 | `market.association`, `market.associationRequest` | requester | requester / guest requester | contract-scoped association (guest requester R2) |
 | `badgeBlueKeys` | operator / user | operator / user | key claims: bidder association (`bidder_associate`), requester association, ssh key claims |
 | `sh.tangled.graph.vouch` | operators, users | voucher | trust edge read by tangled-vouch policies |
