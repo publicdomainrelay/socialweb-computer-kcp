@@ -64,6 +64,14 @@ type Controller struct {
 	mu sync.Mutex
 
 	over map[retryKey]map[string]bool
+
+	absent map[retryKey]absentAt
+}
+
+type absentAt struct {
+	index string
+
+	uris map[string]bool
 }
 
 type retryKey struct {
@@ -88,7 +96,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), over: map[retryKey]map[string]bool{}, repos: map[string]*binding.Table[struct{}]{
+	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), over: map[retryKey]map[string]bool{}, absent: map[retryKey]absentAt{}, repos: map[string]*binding.Table[struct{}]{
 		infractl.CollectionKind: binding.New[struct{}](), infractl.EphemeralCollectionKind: binding.New[struct{}]()}}
 	if err := register[*v1alpha1.InfraCollection, *v1alpha1.Infra](m, c, Name, infraOps, opts.Scope); err != nil {
 		return nil, err
@@ -287,7 +295,7 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	if err != nil {
 		return fail(err)
 	}
-	raw, present, err := readIndex(ctx, dyn, reader, watchName, did)
+	raw, indexCID, present, err := readIndex(ctx, dyn, reader, watchName, did)
 	if err != nil {
 		return fail(infractl.ReadFailed(err))
 	}
@@ -343,8 +351,14 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			children = append(children, entry)
 			continue
 		}
+		if r.c.isAbsent(key, indexCID, uri) {
+			entry.Message = "NotFound: the index names a record the repo does not hold"
+			children = append(children, entry)
+			continue
+		}
 		got, err := reader.GetRecord(ctx, did, nsid, e.Rkey)
 		if errors.Is(err, atprotorepo.ErrNotFound) {
+			r.c.noteAbsent(key, indexCID, uri)
 			entry.Message = "NotFound: the index names a record the repo does not hold"
 			children = append(children, entry)
 			continue
@@ -390,28 +404,49 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	return ctlruntime.Result{}, nil
 }
 
-func readIndex(ctx context.Context, dyn *kube.Client, reader atprotorepo.RecordReader, watchName, did string) (json.RawMessage, bool, error) {
+func readIndex(ctx context.Context, dyn *kube.Client, reader atprotorepo.RecordReader, watchName, did string) (json.RawMessage, string, bool, error) {
 	uri := infra.IndexURI(did)
 	watch, err := kube.Get[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), watchName)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	if err == nil {
 		if i := slices.IndexFunc(watch.Status.Records, func(rec v1alpha1.WatchedRecord) bool { return rec.URI == uri }); i >= 0 {
-			return watch.Status.Records[i].Value, true, nil
+			return watch.Status.Records[i].Value, watch.Status.Records[i].Cid, true, nil
 		}
 		if slices.Contains(watch.Status.Deleted, uri) {
-			return nil, false, nil
+			return nil, "", false, nil
 		}
 	}
 	got, err := reader.GetRecord(ctx, did, infra.KindInfra.NSID(), infra.ReservedRkey)
 	if errors.Is(err, atprotorepo.ErrNotFound) {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("infracollection: reading %s: %w", uri, err)
+		return nil, "", false, fmt.Errorf("infracollection: reading %s: %w", uri, err)
 	}
-	return got.Value, true, nil
+	return got.Value, got.CID, true, nil
+}
+
+func (c *Controller) isAbsent(key retryKey, index, uri string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	memo, ok := c.absent[key]
+	return ok && index != "" && memo.index == index && memo.uris[uri]
+}
+
+func (c *Controller) noteAbsent(key retryKey, index, uri string) {
+	if index == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	memo, ok := c.absent[key]
+	if !ok || memo.index != index {
+		memo = absentAt{index: index, uris: map[string]bool{}}
+	}
+	memo.uris[uri] = true
+	c.absent[key] = memo
 }
 
 func (c *Controller) ended(key retryKey, uri string) bool {
@@ -433,6 +468,7 @@ func (c *Controller) forget(key retryKey) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.over, key)
+	delete(c.absent, key)
 }
 
 func ownedBy(k child, uid types.UID) bool {
