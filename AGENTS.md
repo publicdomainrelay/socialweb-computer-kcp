@@ -225,7 +225,8 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     and, once it is Ready, a Requester `requester-<stamp(did)>` on that identity with its own ingress,
     policy, service auth and repo links. An ssh session of DID X runs on X's requester, so its RFP,
     accept and records are X's; with none, the client gets "sign in at <public-origin> first" and
-    exit 1. The set `ssh-gateway` binds marketidentities in root.
+    exit 1. In this mode the shared Requester `requester` and its identity are not composed, and the
+    SshGateway is Ready without one. The set `ssh-gateway` binds marketidentities in root.
   - The requester association of a guest (plan 0036 A5): `spec.association {subject | fromGuest, refFile}`
     (default refFile `/etc/socialweb-computer/association-ref`, under `/etc/socialweb-computer/` only)
     needs `spec.secretsRef`. With a subject the requester writes a contract-scoped market.association

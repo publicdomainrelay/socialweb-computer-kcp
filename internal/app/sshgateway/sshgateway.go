@@ -412,10 +412,28 @@ func publicListen(spec v1alpha1.SshGatewaySpec) string {
 	return strings.TrimSpace(spec.Ssh.PublicListen)
 }
 
+func perUserAccounts(spec v1alpha1.SshGatewaySpec) bool {
+	return spec.OwnerSessionsFile == "" && compose.OptionValue(spec.Options, compose.PublicOriginOption) != ""
+}
+
+func withoutSharedRequester(desired []compose.Desired) []compose.Desired {
+	prefix := compose.ServiceNameFor(compose.ComponentKindRequester, marketrequester.RequesterComponent)
+	out := make([]compose.Desired, 0, len(desired))
+	for _, d := range desired {
+		switch {
+		case d.Kind == compose.ComponentKindRequester && d.Name == marketrequester.RequesterComponent:
+		case compose.IsExposureKind(d.Kind) && strings.HasPrefix(d.Name, prefix):
+		default:
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 func (p *pass) accountRequesters(ctx context.Context, desired []compose.Desired) ([]compose.Desired, []compose.Link, error) {
 	c, r, o := p.c, p.r, p.o
 	ws := r.Workspace
-	if o.Spec.OwnerSessionsFile != "" || compose.OptionValue(o.Spec.Options, compose.PublicOriginOption) == "" {
+	if !perUserAccounts(o.Spec) {
 		return nil, nil, nil
 	}
 	var base *v1alpha1.RequesterSpec
@@ -557,7 +575,8 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := c.SeedPdsAccountPassword(ctx, r, plan); err != nil {
 		return p.retry("the ssh requester's account password", err)
 	}
-	ident, id, err := p.requesterIdentity(ctx, plan, true)
+	perUser := perUserAccounts(o.Spec)
+	ident, id, err := p.requesterIdentity(ctx, plan, !perUser)
 	if err != nil {
 		return p.retry("the ssh requester's identity", err)
 	}
@@ -568,6 +587,9 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	accounts, accountLinks, err := p.accountRequesters(ctx, desired)
 	if err != nil {
 		return p.retry("the signed-in accounts", err)
+	}
+	if perUser {
+		desired = withoutSharedRequester(desired)
 	}
 	desired = append(desired, accounts...)
 	if err := c.ApplyLinks(ctx, r, "accounts", accountLinks); err != nil {
@@ -590,7 +612,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	var repoLinks []compose.Link
-	if ident.Did != "" {
+	if ident.Did != "" && !perUser {
 		if id != nil && !plan.Local {
 			accountLinks, err := c.AccountRepo(ctx, r, ws, marketrequester.RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 			if err != nil {
@@ -621,10 +643,10 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	switch {
-	case snap.Satisfied(desired) && exposuresReady(snap, desired) && dialer && ident.Did != "":
+	case snap.Satisfied(desired) && exposuresReady(snap, desired) && dialer && (perUser || ident.Did != ""):
 		p.st = compose.Ready(p.st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.SshGatewayGVR, p.st)
-	case ident.Did == "":
+	case ident.Did == "" && !perUser:
 		return p.wait("waiting for the owner's atproto identity")
 	case !dialer:
 		return p.wait("waiting for the iroh dialer HostProcess to run")
