@@ -376,7 +376,12 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     (15 min) while it is Pending or unset on a contract that names token paths; on that timeout they
     exit non-zero and keep the invocation's state, and a rerun of `run request release` starts the kcp
     so the requester resumes the revokes, from the marker or, with no marker, over every token path
-    again. A refFile, agent envFile or `--secrets` path equal to a token path is refused (CLI and
+    again. The process that starts an invocation's kcp (`run request`, `resume`, or a `release` with no
+    other process) owns it through `requests/<name>/owner.lock` (flock) and is the only one that
+    stops it. A `run request release` that finds the lock held asks for the release through the
+    running kcp, waits for Released (exit non-zero otherwise), then for the owner to exit, and stops
+    nothing; a `--hold` owner whose contract leaves Held with `spec.release` set keeps its kcp until
+    the release settles, then stops (and removes) it as its own release would. A refFile, agent envFile or `--secrets` path equal to a token path is refused (CLI and
     requester admission). Every release request stamps `spec.releaseRequestedAt` (SSA, the release
     field manager) and the outcome it answers is `status.release.requestedAt`; a denied accept whose
     receipt never arrives leaves the contract Failed with ReleaseFailed, and a new release request
