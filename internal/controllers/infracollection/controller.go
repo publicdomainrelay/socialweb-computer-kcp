@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/netretry"
 )
 
 const (
@@ -55,6 +56,16 @@ type Controller struct {
 	log *slog.Logger
 
 	repos map[string]*binding.Table[struct{}]
+
+	retries *netretry.Tracker[retryKey]
+}
+
+type retryKey struct {
+	kind string
+
+	cluster string
+
+	name string
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -71,7 +82,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), repos: map[string]*binding.Table[struct{}]{
+	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), repos: map[string]*binding.Table[struct{}]{
 		infractl.CollectionKind: binding.New[struct{}](), infractl.EphemeralCollectionKind: binding.New[struct{}]()}}
 	if err := register[*v1alpha1.InfraCollection, *v1alpha1.Infra](m, c, Name, infraOps, opts.Scope); err != nil {
 		return nil, err
@@ -101,6 +112,7 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		ctlruntime.Events(infractl.RepoBindEvents(c.bus, func(workspace, name string) []ctlruntime.Request { return c.repoUsers(ops.kind, workspace, name) })),
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
 			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
+			c.retries.Reset(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name})
 		})}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -226,19 +238,24 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	status := v1alpha1.InfraCollectionStatus{ObservedGeneration: gen, Collection: nsid, Did: previous.Did, Records: previous.Records,
 		Children: previous.Children, Conditions: slices.Clone(previous.Conditions)}
 	attrs := []any{"kind", r.ops.kind, "workspace", req.Workspace, "name", req.Name}
+	key := retryKey{kind: r.ops.kind, cluster: req.Cluster, name: req.Name}
 	fail := func(err error) (ctlruntime.Result, error) {
 		status.Message = err.Error()
 		reason, retry := "ListFailed", err
 		unresolvedReason, unresolved := infractl.Unresolved(err)
+		delay := infractl.ReadRetry(r.c.log, r.c.retries, key, err, attrs...)
 		switch {
 		case errors.Is(err, infractl.ErrRepoNoDID):
 			reason, retry = "RepoPending", nil
 		case unresolved:
 			reason, retry = unresolvedReason, nil
 			infractl.NoteUnresolved(r.c.log, previous.Conditions, &status.Conditions, gen, unresolvedReason, err, attrs...)
+		case delay > 0:
+			reason, retry = v1alpha1.InfraReasonRecordReadRetrying, nil
+			status.Message = v1alpha1.InfraMessageRecordReadRetrying
 		}
-		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, reason, err.Error())
-		return ctlruntime.Result{Backoff: unresolved}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
+		conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, false, reason, status.Message)
+		return ctlruntime.Result{Backoff: unresolved, RequeueAfter: delay}, errors.Join(retry, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)))
 	}
 	repo, err := infractl.RepoRef(req.Workspace, spec.RepoRef)
 	if err != nil {
@@ -259,8 +276,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	records, err := listAll(ctx, reader, did, nsid)
 	if err != nil {
-		return fail(err)
+		return fail(infractl.ReadFailed(err))
 	}
+	r.c.retries.Reset(key)
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return fail(err)

@@ -249,4 +249,8 @@ const (
 	InfraConditionRecordUnresolved = "RecordUnresolved"
 
 	InfraConditionRecordOrphaned = "RecordOrphaned"
+
+	InfraReasonRecordReadRetrying = "RecordReadRetrying"
+
+	InfraMessageRecordReadRetrying = "retrying: the PDS could not be reached"
 )
