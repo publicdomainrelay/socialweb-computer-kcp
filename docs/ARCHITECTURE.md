@@ -11593,6 +11593,19 @@ status, or a Retained one, releases as before.
   ahead of the controller clock counts as the issue time, so a skewed clock never reissues in a
   loop. A Ready identity with no pending action is not signed out by it.
 
+- **Every deno sandbox run starts with fresh web storage (2026-10-30, r134).** Before: two policy
+  runs on the Linux deno runner (`internal/sandbox/deno`) shared Cache Storage and localStorage: a
+  run that put `https://a.invalid/k` into `caches.open("x")` and set `localStorage` saw both in the
+  next run (`hit true`, `v`). deno keeps Cache Storage under `$TMPDIR/deno_cache/<origin hash>` and
+  localStorage under `$DENO_DIR/location_data/<origin hash>`, and a stdin program has the same
+  origin every run. Now each run gets its own dir (`os.MkdirTemp`, removed after the run) with
+  `TMPDIR=<run>/tmp` and `DENO_DIR=<run>/deno`; the run's DENO_DIR links only the module caches of the
+  shared DENO_DIR (`remote`, `deps`, `npm`, `gen`, `registries`, the v8 code cache and the analysis
+  caches; the program's `DENO_DIR`, else the process's, else the user cache dir), never
+  `location_data`, so storage starts empty and compiled code stays warm. Readings on hat-8 with the
+  300 KB `policy-requester-tangled-vouch` bundle: shared dir 30 ms a run, a fresh empty DENO_DIR
+  125 ms, the linked fresh dir 31 to 38 ms; the next run sees `hit false`, `null`.
+
 ## 16. Vocabulary
 
 | | |
