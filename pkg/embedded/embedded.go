@@ -19,6 +19,7 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -118,6 +119,8 @@ type Config struct {
 	OnRestoreError func(error)
 
 	PolicySandbox PolicySandbox
+
+	Retention *v1alpha1.RequesterRetention
 
 	ProviderIdentities []byte
 
@@ -421,12 +424,13 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 	comms := &v1alpha1.MarketComms{Mode: v1alpha1.MarketCommsModeFirehose}
 	provider := policySandboxProvider(cfg.PolicySandbox)
 	components := policySandboxComponents(provider)
+	retention := embeddedRetention(cfg.Retention)
 	if cur, err := kube.Get[v1alpha1.MarketRequester](ctx, resource, AppName); err == nil {
 		if cur.Spec.Comms != nil && cur.Spec.Comms.Mode == comms.Mode && cur.Spec.SecretsFallback == v1alpha1.SecretsFallbackSealed &&
-			componentsPolicySandbox(cur.Spec.Components) == provider {
+			componentsPolicySandbox(cur.Spec.Components) == provider && sameRetention(cur.Spec.Retention, retention) {
 			return nil
 		}
-		spec := map[string]any{"comms": comms, "secretsFallback": v1alpha1.SecretsFallbackSealed}
+		spec := map[string]any{"comms": comms, "secretsFallback": v1alpha1.SecretsFallbackSealed, "retention": retention}
 		if components != nil {
 			spec["components"] = components
 		}
@@ -451,6 +455,7 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 		Network:         &v1alpha1.MarketNetworkValue{PLCDirectoryURL: PLCDirectoryURL},
 		Comms:           comms,
 		SecretsFallback: v1alpha1.SecretsFallbackSealed,
+		Retention:       retention,
 		Components:      components,
 	}}
 	obj.APIVersion = v1alpha1.GroupVersion.String()
@@ -458,6 +463,19 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 	obj.Name = AppName
 	_, err = kube.Apply[*v1alpha1.MarketRequester](ctx, resource, obj, kube.ApplyOptions{FieldManager: FieldManager, Force: true})
 	return err
+}
+
+func embeddedRetention(opted *v1alpha1.RequesterRetention) *v1alpha1.RequesterRetention {
+	if opted != nil {
+		return opted.DeepCopy()
+	}
+	return &v1alpha1.RequesterRetention{Days: ptr.To[int32](0), InfraDays: ptr.To[int32](0)}
+}
+
+func sameRetention(a, b *v1alpha1.RequesterRetention) bool {
+	left, _ := json.Marshal(a)
+	right, _ := json.Marshal(b)
+	return string(left) == string(right)
 }
 
 func presentPolicySandbox(host PolicySandbox) PolicySandbox {

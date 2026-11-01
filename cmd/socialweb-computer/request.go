@@ -20,6 +20,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/utils/ptr"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
@@ -362,7 +363,7 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 		case "identity", "pds-state-dir", "expected-pds-url":
 			return fmt.Errorf("--%s is reserved; pass global flags before --", p.Name)
 		}
-		perApp := p.To == "spec.secretsFallback" || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
+		perApp := p.To == "spec.secretsFallback" || strings.HasPrefix(p.To, "spec.retention") || p.To == "spec.comms.mode" || p.To == "spec.comms.eventSourceRefs" || strings.HasPrefix(p.To, "spec.requesterIngress")
 		if network && !perApp && (strings.HasPrefix(p.To, compose.MapToSpec) || strings.HasPrefix(p.To, compose.MapToNetwork)) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
 		}
@@ -419,6 +420,10 @@ func (r *requestRun) passthrough(args []string, network bool) error {
 			}
 			if !applied {
 				return fmt.Errorf("--%s maps to %s, which run request does not take", p.Name, p.To)
+			}
+		case strings.HasPrefix(p.To, "spec.retention"):
+			if r.root.Retention, err = applyRetentionOption(r.root.Retention, p.Name, p.Value); err != nil {
+				return err
 			}
 		case p.To == "spec.secretsFallback":
 			switch fallback := v1alpha1.SecretsFallback(strings.TrimSpace(p.Value)); fallback {
@@ -1607,4 +1612,40 @@ func dropTime(groups []string, attr slog.Attr) slog.Attr {
 		return slog.Attr{}
 	}
 	return attr
+}
+
+func applyRetentionOption(cur *v1alpha1.RequesterRetention, name, value string) (*v1alpha1.RequesterRetention, error) {
+	out := &v1alpha1.RequesterRetention{}
+	if cur != nil {
+		out = cur.DeepCopy()
+	}
+	value = strings.TrimSpace(value)
+	number := func(most int64) (*int32, error) {
+		n, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || n < 0 || n > most {
+			return nil, fmt.Errorf("--%s %q: want a whole number from 0 to %d", name, value, most)
+		}
+		return ptr.To(int32(n)), nil
+	}
+	var err error
+	switch name {
+	case "retention-mode":
+		switch mode := v1alpha1.RetentionMode(value); mode {
+		case v1alpha1.RetentionModeDryRun, v1alpha1.RetentionModeDelete:
+			out.Mode = mode
+		default:
+			return nil, fmt.Errorf("--retention-mode %q: want DryRun or Delete", value)
+		}
+	case "retention-days":
+		out.Days, err = number(requester.RetentionMaxDays)
+	case "retention-infra-days":
+		out.InfraDays, err = number(requester.RetentionMaxDays)
+	case "retention-delay-seconds":
+		out.DelaySeconds, err = number(requester.RetentionMaxDelaySeconds)
+	case "retention-keep":
+		out.Keep = append(out.Keep, splitList(value)...)
+	default:
+		return nil, fmt.Errorf("--%s is not a retention option", name)
+	}
+	return out, err
 }

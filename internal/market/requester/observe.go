@@ -42,6 +42,8 @@ func (q *Requester) Observe(ctx context.Context, change contractmarket.Change) (
 			return 0, nil
 		}
 		return q.observeSync(ctx, *change.StateSync)
+	case contractmarket.KindInfra, contractmarket.KindEphemeralInfra:
+		q.observeInfra(change)
 	}
 	return 0, nil
 }

@@ -467,6 +467,26 @@ const (
 	SecretsFallbackSealed SecretsFallback = "Sealed"
 )
 
+type RetentionMode string
+
+const (
+	RetentionModeDryRun RetentionMode = "DryRun"
+
+	RetentionModeDelete RetentionMode = "Delete"
+)
+
+type RequesterRetention struct {
+	Mode RetentionMode `json:"mode,omitempty" apigen:"enum=DryRun|Delete"`
+
+	Days *int32 `json:"days,omitempty" apigen:"minimum=0,maximum=3650"`
+
+	InfraDays *int32 `json:"infraDays,omitempty" apigen:"minimum=0,maximum=3650"`
+
+	DelaySeconds *int32 `json:"delaySeconds,omitempty" apigen:"minimum=0,maximum=86400"`
+
+	Keep []string `json:"keep,omitempty"`
+}
+
 type GuestControlPlane struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -674,6 +694,8 @@ type RequesterSpec struct {
 	AtircMintedRef *commonv1.SecretRef `json:"atircMintedRef,omitempty"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
+
+	Retention *RequesterRetention `json:"retention,omitempty"`
 }
 
 type GatewayAPI struct {

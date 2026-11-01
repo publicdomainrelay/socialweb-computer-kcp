@@ -245,6 +245,8 @@ type Requester struct {
 
 	contractEvents *participant.Index[v1alpha1.ContractEvent]
 
+	infras *participant.Index[infraBinding]
+
 	creatingInbound sync.Map
 
 	bids *bidQueue
@@ -278,6 +280,8 @@ type Requester struct {
 	atircRevokesStarted sync.Map
 
 	orphanSweep sync.Once
+
+	retentionOnce sync.Once
 
 	runnerEnded chan struct{}
 
@@ -532,6 +536,7 @@ func New(cfg Config, deps Deps) (*Requester, error) {
 		syncs:          participant.NewIndex[v1alpha1.StateSync](),
 		receipts:       participant.NewIndex[market.ResolvedRecord](),
 		contractEvents: participant.NewIndex[v1alpha1.ContractEvent](),
+		infras:         participant.NewIndex[infraBinding](),
 		bids:           newBidQueue(),
 		runners:        map[string]*contractRunner{},
 		finished:       map[string]bool{},

@@ -4522,6 +4522,79 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **The requester sweeps its own finished market and compute records after 30 days, dry-run by
+  default (rc137, owner ask ae7ad38d, 2026-10-31).** Before: alice's repo held about 1076
+  compute.vm, 1074 market.rfp, 672 market.event, 462 market.accept, 417 vm.delete and 794
+  policy.ghalite records from testing, and nothing ever deleted one. Decided: every requester
+  shares `internal/market/requester/retention.go` and runs one sweep `RetentionStartDelay` (5 min)
+  after its controllers are synced, then once per 24 h (`RetentionInterval`, the ticker of
+  `deploy/obligations.txt`). Requester `spec.retention` (MarketRequester passes it through) holds
+  `mode` (`DryRun` or `Delete`), `days` (default 30, 0 turns the market sweep off), `infraDays`
+  (default 7, 0 turns the ephemeralInfra sweep off), both at most 3650 (schema maximum, CLI check
+  and a clamp), `delaySeconds` (at most 86400) and `keep` (a DID at-uri, `collection/rkey`, a
+  collection, or a prefix ending in `*`; a keep at-uri with a handle authority is rejected and
+  logged as `requester_retention_keep_rejected`; a kept record keeps its whole RFP group).
+  `run request -- --retention-mode Delete --retention-days N --retention-infra-days N
+  --retention-delay-seconds N --retention-keep a,b` sets them. Defaults: the gateway and the CLI
+  run DryRun; pkg/embedded (iOS) composes `days: 0, infraDays: 0` (off) unless its
+  `Config.Retention` opts in, and the page's composition does the same. Only a spec that says
+  `Delete` deletes. The marker `retention-last-run` in the state dir is written only after a
+  Delete run and delays only the first Delete run of a restart; a DryRun sweep repeats.
+  The sweep is an allowlist of churn collections in the requester's own repo: market.accept,
+  market.event (only an envelope whose receipt is in another repo and whose payload is one of the
+  requester's own vm.delete or guest.* payloads), market.rfp, compute.vm, policy.ghalite,
+  vm.delete, the requester-written guest.* payloads (publicKey, signalWebRTC, secrets, agentStart,
+  secretsUpdated, r2Start, r2Release) and computer.socialweb.ephemeralInfra. Never swept: every
+  badgeBlueKeys record (a page tab or the iOS app keeps its key claim for weeks), association and
+  associationRequest, ingress.webRTC, fedproxy RBAC, config.wif.simple, computer.socialweb.infra,
+  market.bid and market.receipt (bidder-written), offering, heartbeat, vouch, every app.bsky or
+  tangled record, and any rkey `self` or starting `fixture-` (declared test-account state).
+  Age is the record's `createdAt`; a present `createdAt` that does not parse or lies in the future
+  keeps the record, and the TID rkey time counts only when `createdAt` is absent. A listed record
+  whose at-uri is not this repo and the listed collection is skipped.
+  A record goes only when it is older than the retention, no ComputeContract of this kcp that is
+  not finished names it (finished: Released or Failed, the release complete when there was a
+  receipt (a termination or an OK release), `status.atircRevokes` Done or Abandoned, or no agent
+  and no association), and its thread is proven finished in the repos. An event: the bidder's
+  vm.terminated for its receipt (one getRecord at the deterministic termination rkey) is older than
+  `RetentionTokenBound` (48 h, twice the atirc token lifetime, so every token leased to it
+  expired). An accept: the same for the receipt at `ReceiptRKey(accept)`, or, with no
+  vm.terminated, the receipt answers 400 RecordNotFound (the xrpc error name, not the text) while
+  its bid reads back from the same bidder repo; an accept is deleted only inside the group of its
+  own RFP. An RFP: its rkey is its own TID (an owner-session RFP, compute.vm or policy has a
+  reused rkey and is kept), every accept naming it is finished, and with no accept its bid window
+  ended more than 48 h ago; its compute.vm and policies go with it unless another RFP that is not
+  finished names them or one of them is kept. Deletes run payload before envelope and dependents,
+  accepts, then the RFP, so an interrupted run leaves the root for the next one. Before each group
+  the live set (the contract statuses, the runners, the Infra and EphemeralInfra objects) is read
+  again and a group it now names is dropped (`liveAtDelete`). Every delete carries the listed CID
+  as swapRecord, so a record rewritten since the listing stays.
+  An ephemeralInfra record goes when it is older than `infraDays`; no Infra or EphemeralInfra
+  object of this kcp is bound to it (the requester subscribes to both kinds through
+  marketintents and matches `spec.record.uri`, `status.record.uri` and the object name, as the
+  infra controller binds them) and no ComputeContract is labelled with or owned by one of its
+  name; it ended (status.endedAt, else status.expiresAt, else createdAt plus ttlSeconds) more than
+  48 h ago; and every contract it lists has a status entry that is Released, Staged for a staged
+  declaration, Failed with no receipt, or has a receipt with a vm.terminated. An entry with no
+  status, or Requesting, Deployed or Releasing with no receipt, keeps the record. Deleting the
+  record also ends an object bound to it elsewhere (`infra_record_gone`), which is why these
+  rules hold even for a record this kcp does not know.
+  listRecords is used here, and only here, as the enumeration of a rare GC: paged at 100, every
+  swept collection listed once per run, at most `RetentionListCap` 20000 records; a cut listing or
+  a repeated cursor deletes nothing that run (`requester_retention_skipped`). Point reads at bidder
+  repos are paced at 10/s (`RetentionReadGap`), cached per run and capped at `RetentionReadCap`
+  5000 (past it, a thread is kept as `readCap`); deletes at 1/s (`RetentionDeleteGap`, the bsky
+  PDS write budget) and at most `RetentionDeleteCap` 2000 per run (`capped`). An OAuth requester
+  deletes a collection only when its session was granted `repo:<collection>?action=delete`;
+  `RequesterOAuthScope` grants no delete on the market and compute collections, so an OAuth host
+  reports `noDeleteScope` and stays a dry run until a planned re-sign-in adds that scope. Each run
+  logs one `requester_retention_run` line: mode, the listed, would, deleted, noDeleteScope counts
+  per collection, failed and up to 20 failures, liveAtDelete, capped, the kept counts per reason,
+  reads, seconds and up to 20 candidate at-uris. The spec is read when the Requester component
+  starts, like every Requester field. The `socialweb.computer/declared-state` label of the
+  gateway's AtprotoRecord objects is not read (a page or iOS kcp never holds them); the
+  allowlist, the `fixture-` and `self` rkeys and `keep` stand for it.
+
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app
   launches stalled with `Workspace [app] in root for Ready after 1m0s (last error: Workspace app
