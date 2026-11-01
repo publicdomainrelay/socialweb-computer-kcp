@@ -74,7 +74,10 @@ func (r *Repo) DID() string { return r.did.String() }
 
 func notFound(err error) error {
 	var failure *pdsclient.XRPCError
-	if errors.As(err, &failure) && (failure.StatusCode == http.StatusNotFound || failure.Code == "RecordNotFound" || failure.Code == "RepoNotFound") {
+	if errors.As(err, &failure) && failure.Code == "RecordNotFound" {
+		return fmt.Errorf("%w: %w: %v", atprotorepo.ErrNotFound, atprotorepo.ErrRecordNotFound, err)
+	}
+	if errors.As(err, &failure) && (failure.StatusCode == http.StatusNotFound || failure.Code == "RepoNotFound") {
 		return fmt.Errorf("%w: %v", atprotorepo.ErrNotFound, err)
 	}
 	return err

@@ -45,7 +45,10 @@ func openRepo(ctx context.Context, srv *atpds.Server, raw string) (*Repo, error)
 func (r *Repo) DID() string { return r.did.String() }
 
 func notFound(err error) error {
-	if errors.Is(err, repo.ErrRecordNotFound) || errors.Is(err, repo.ErrRepoNotFound) {
+	if errors.Is(err, repo.ErrRecordNotFound) {
+		return fmt.Errorf("%w: %w: %v", atprotorepo.ErrNotFound, atprotorepo.ErrRecordNotFound, err)
+	}
+	if errors.Is(err, repo.ErrRepoNotFound) {
 		return fmt.Errorf("%w: %v", atprotorepo.ErrNotFound, err)
 	}
 	return err

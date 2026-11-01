@@ -32,6 +32,14 @@ func Transient(err error) bool {
 	return errors.As(err, &netErr)
 }
 
+func After(err error) time.Duration {
+	var hinted interface{ RetryAfter() time.Duration }
+	if errors.As(err, &hinted) {
+		return max(hinted.RetryAfter(), 0)
+	}
+	return 0
+}
+
 func Delay(failures int) time.Duration {
 	d := First
 	for i := 1; i < failures && d < Cap; i++ {

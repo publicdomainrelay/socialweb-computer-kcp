@@ -53,6 +53,8 @@ type Options struct {
 
 	Scope func(workspace string) bool
 
+	Writer string
+
 	Log *slog.Logger
 }
 
@@ -78,6 +80,20 @@ type Controller struct {
 	repos map[string]*binding.Table[struct{}]
 
 	retries *netretry.Tracker[indexKey]
+
+	writer string
+
+	indexes map[string]indexCache
+
+	wants map[indexKey]indexWant
+
+	indexFailed map[indexKey]indexFailure
+
+	indexWatches map[string]bool
+
+	probed map[string]time.Time
+
+	indexRetries *netretry.Tracker[indexKey]
 }
 
 func New(opts Options) *Controller {
@@ -87,7 +103,17 @@ func New(opts Options) *Controller {
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
 		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retained: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
-			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
+			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()},
+		writer: writerLabel(opts.Writer), indexes: map[string]indexCache{}, wants: map[indexKey]indexWant{}, indexFailed: map[indexKey]indexFailure{},
+		indexWatches: map[string]bool{}, probed: map[string]time.Time{}, indexRetries: netretry.NewTracker[indexKey]()}
+}
+
+func writerLabel(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 64 {
+		raw = raw[:64]
+	}
+	return raw
 }
 
 func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
@@ -121,9 +147,10 @@ func register[T ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name st
 		ctlruntime.WatchesIn(RecordExport, func(_ context.Context, _ ctlruntime.Request, obj *v1alpha1.AtprotoRecord) []ctlruntime.Request {
 			return labelled(obj, kind)
 		}),
-		ctlruntime.WatchesFiltered(RecordExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRecordWatch]{Changed: recordWatchChanged},
+		ctlruntime.WatchesFiltered(RecordExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRecordWatch]{Changed: recordWatchChanged, Observe: c.observeIndexWatch},
 			func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.AtprotoRecordWatch) []ctlruntime.Request {
-				return append(labelled(obj, kind), c.watched(src.Cluster, kind, obj)...)
+				out := append(labelled(obj, kind), c.watched(src.Cluster, kind, obj)...)
+				return append(out, c.indexUsers(src.Cluster, src.Workspace, kind, obj)...)
 			}),
 		ctlruntime.WatchesFiltered(RepoExport, ctlruntime.WatchFilter[*v1alpha1.AtprotoRepo]{Changed: func(old, new *v1alpha1.AtprotoRepo) bool {
 			return old.Status.DID != new.Status.DID
@@ -355,6 +382,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 				ended = done
 			}
 		}
+		if ended && v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
+			r.indexEnd(ctx, req, v, nil)
+		}
 		if ended {
 			r.c.forget(string(v.kind), req)
 		}
@@ -400,6 +430,9 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			return ctlruntime.Result{}, err
 		}
 		r.c.setUnwritten(keyOf(req, v), false)
+	}
+	if indexRetry := r.indexPass(ctx, req, v, &status, rec, ephemeral, end, frozen, now); indexRetry > 0 && (retry <= 0 || indexRetry < retry) {
+		retry = indexRetry
 	}
 	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
 		return ctlruntime.Result{}, err
@@ -558,6 +591,13 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 			status.Message = "writing the record's final status; the record is kept"
 			left, deadline = 1, giveUp
 		}
+	}
+	if left == 0 && v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained {
+		var ref *commonv1.ObjectRef
+		if v.spec.Record != nil {
+			ref = &v.spec.Record.RepoRef
+		}
+		r.indexEnd(ctx, req, v, ref)
 	}
 	if left == 0 && v.status.Record != nil {
 		gone, err := r.unbindRecord(ctx, req, v)

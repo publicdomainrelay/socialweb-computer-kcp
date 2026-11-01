@@ -323,7 +323,7 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 	if _, err := contractevent.Register(r.manager, contractevent.Options{Bus: r.bus, Scope: inRoot, Log: log, Clients: clients}); err != nil {
 		return err
 	}
-	if _, err := infra.Register(r.manager, infra.Options{Bus: r.bus, Scope: inRoot, Log: log,
+	if _, err := infra.Register(r.manager, infra.Options{Bus: r.bus, Scope: inRoot, Writer: "embedded", Log: log,
 		Dynamic: func(workspace string) (*kube.Client, error) { return kube.ForWorkspace(cfg.Rest, workspace) }}); err != nil {
 		return err
 	}

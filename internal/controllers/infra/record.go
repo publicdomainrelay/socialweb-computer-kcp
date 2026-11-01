@@ -819,7 +819,10 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	delete(c.moved, k)
 	delete(c.unwritten, k)
 	delete(c.retained, k)
+	delete(c.wants, k)
+	delete(c.indexFailed, k)
 	c.retries.Reset(k)
+	c.indexRetries.Reset(k)
 }
 
 func (c *Controller) bindRepo(kind string, req ctlruntime.Request, repo commonv1.ObjectRef) {

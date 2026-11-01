@@ -3,7 +3,10 @@ package xrpc
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const errorDetailLimit = 300
@@ -17,7 +20,30 @@ type Error struct {
 
 	Body []byte
 
+	Wait time.Duration
+
 	verdict Verdict
+}
+
+func (e *Error) RetryAfter() time.Duration { return e.Wait }
+
+func retryAfter(status int, h http.Header, now time.Time) time.Duration {
+	if raw := strings.TrimSpace(h.Get("Retry-After")); raw != "" {
+		if s, err := strconv.ParseInt(raw, 10, 64); err == nil && s > 0 {
+			return time.Duration(s) * time.Second
+		}
+		if at, err := http.ParseTime(raw); err == nil && at.After(now) {
+			return at.Sub(now)
+		}
+	}
+	if raw := strings.TrimSpace(h.Get("Ratelimit-Reset")); raw != "" && status == http.StatusTooManyRequests {
+		if s, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			if at := time.Unix(s, 0); at.After(now) {
+				return at.Sub(now)
+			}
+		}
+	}
+	return 0
 }
 
 func (e *Error) HTTPStatus() int { return e.Status }

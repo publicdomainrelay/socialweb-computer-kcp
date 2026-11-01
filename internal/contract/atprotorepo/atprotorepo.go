@@ -23,6 +23,8 @@ const (
 var (
 	ErrNotFound = errors.New("atprotorepo: record not found")
 
+	ErrRecordNotFound = errors.New("atprotorepo: the PDS answered RecordNotFound")
+
 	ErrOutOfScope = errors.New("atprotorepo: the collection is outside the granted scope")
 
 	ErrNotBound = errors.New("atprotorepo: the repo has no bound backend")

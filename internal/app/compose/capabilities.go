@@ -132,7 +132,7 @@ func InfraLinks(ws string, repo commonv1.ObjectRef) []Link {
 		case "Infra":
 			caps = append(caps, Cap(atprotorepo.CapabilityWrite, infrarecord.InfraNSID))
 		case "EphemeralInfra":
-			caps = append(caps, Cap(atprotorepo.CapabilityWrite, infrarecord.EphemeralInfraNSID))
+			caps = append(caps, Cap(atprotorepo.CapabilityWrite, infrarecord.EphemeralInfraNSID, infrarecord.InfraNSID))
 		}
 		out = append(out, SelectorLink(LinkName("infra-read", kind, repo.Name), sel, repo, caps...))
 	}
