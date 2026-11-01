@@ -258,7 +258,16 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `spec.ownerDid` is that DID and their StateSyncs and ContractEvents, so many requesters share one
     workspace. Every ssh session, transient (`ssh-run-<hash>`, TTL 1 h, released when the command
     ends unless `LC_KEEP_VM`) or held, is a ComputeContract, so bids and events reach it through the
-    addressee index and the ingress like any contract. The iroh dialer socket lives in the SshServer
+    addressee index and the ingress like any contract. A session ends with its ssh channel: when the
+    client closes it or the connection drops (the server sends keepalive@openssh.com every 15 s and
+    closes a connection after 3 missed replies), the command's context is cancelled, the guest
+    session closes, the session's atirc token is revoked and then the contract released (a release
+    is tried 6 times, 1 s doubling to 30 s). A requester's Shutdown ends its live transient sessions
+    the same way, and its first sync releases every `ssh-run-` contract it owns that is not Released,
+    Failed, already releasing, labelled `socialweb.computer/ssh-keep-vm` (`LC_KEEP_VM`), created
+    after its start or held by a live session (`requester_stale_session_release`); a VM whose token
+    could not be revoked then ends it through the token's vm.terminated lease.
+    The iroh dialer socket lives in the SshServer
     state dir, or in the instance runtime dir when that path is over 107 bytes; `run gateway ssh`
     refuses a layout where both are. The set `ssh-gateway` binds marketidentities in root. A restart
     keeps the path whole: every app root (gateway, bidder, requester, network, ssh gateway), when it

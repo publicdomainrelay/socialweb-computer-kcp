@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/sshtransport"
 )
@@ -126,6 +127,8 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 	sessionCtx, cancel := context.WithTimeout(ctx, q.cfg.SessionCap)
 	defer cancel()
 	ctx = sessionCtx
+	contractName := transientContractName(account.DID, vmName)
+	defer q.trackTransient(contractName, cancel)()
 	publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(q.guestKeyDir(), vmName)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
@@ -143,13 +146,17 @@ func (q *Requester) runTransientCommand(ctx context.Context, account sshtranspor
 			return commandFailed(io, "provisioning failed: ", fmt.Errorf("the guest atirc agent: %w", err))
 		}
 	}
-	contractName := transientContractName(account.DID, vmName)
-	target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, userData, transientContractTTLSeconds)
+	keep := truthy(lc["LC_KEEP_VM"])
+	var labels map[string]string
+	if keep {
+		labels = map[string]string{keepVMLabel: "true"}
+	}
+	target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, userData, transientContractTTLSeconds, labels)
 	if err != nil {
 		q.releaseHeldContract(contractName)
 		return commandFailed(io, "provisioning failed: ", err)
 	}
-	if !truthy(lc["LC_KEEP_VM"]) {
+	if !keep {
 		defer q.releaseHeldContract(contractName)
 	}
 	ticket, err := ValidateTicket(target.Address)
@@ -297,7 +304,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		if err != nil {
 			return nil, "", err
 		}
-		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, "", heldContractTTLSeconds)
+		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, "", heldContractTTLSeconds, nil)
 		if err != nil {
 			q.releaseHeldContract(contractName)
 			_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
@@ -401,7 +408,63 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 
 func transientContractName(did, vmName string) string {
 	sum := sha256.Sum256([]byte(did + "\x00" + vmName))
-	return "ssh-run-" + hex.EncodeToString(sum[:10])
+	return transientContractPrefix + hex.EncodeToString(sum[:10])
+}
+
+func (q *Requester) trackTransient(name string, cancel context.CancelFunc) func() {
+	q.transientMu.Lock()
+	if q.transient == nil {
+		q.transient = map[string]context.CancelFunc{}
+	}
+	q.transient[name] = cancel
+	q.transientWG.Add(1)
+	q.transientMu.Unlock()
+	return func() {
+		q.transientMu.Lock()
+		delete(q.transient, name)
+		q.transientMu.Unlock()
+		q.transientWG.Done()
+	}
+}
+
+func (q *Requester) transientLive(name string) bool {
+	q.transientMu.Lock()
+	defer q.transientMu.Unlock()
+	_, ok := q.transient[name]
+	return ok
+}
+
+func (q *Requester) endTransientSessions(ctx context.Context, reason string) {
+	q.transientMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(q.transient))
+	for _, cancel := range q.transient {
+		cancels = append(cancels, cancel)
+	}
+	q.transientMu.Unlock()
+	if len(cancels) == 0 {
+		return
+	}
+	q.log.Info("requester_transient_sessions_ended", "sessions", len(cancels), "reason", reason)
+	for _, cancel := range cancels {
+		cancel()
+	}
+	_ = supervise.Join(ctx, q.transientWG.Wait)
+}
+
+func (q *Requester) releaseStaleTransient() {
+	started := q.startedAt.Load()
+	for _, contract := range q.contracts.List() {
+		switch {
+		case !strings.HasPrefix(contract.Name, transientContractPrefix), !q.ownsContract(contract),
+			contract.DeletionTimestamp != nil, contract.Spec.Release, contract.Labels[keepVMLabel] == "true",
+			contract.Status.Phase == v1alpha1.ComputeContractReleased, contract.Status.Phase == v1alpha1.ComputeContractFailed,
+			started != nil && !contract.CreationTimestamp.Time.Before(*started), q.transientLive(contract.Name):
+			continue
+		}
+		q.log.Info("requester_stale_session_release", "contract", contract.Name, "phase", contract.Status.Phase,
+			"reason", "no live ssh session holds this transient contract after a requester start")
+		q.releaseHeldContract(contract.Name)
+	}
 }
 
 func (q *Requester) contractState(name string) *v1alpha1.NodeClaimContract {
@@ -470,7 +533,7 @@ func (q *Requester) heldSessionAllowed(ctx context.Context, contract, policyName
 }
 
 func (q *Requester) provisionHeldContract(ctx context.Context, name, vmName, did, publicKey, policyName string, policyArgs map[string]string,
-	userData string, ttlSeconds int32) (*SessionTarget, error) {
+	userData string, ttlSeconds int32, labels map[string]string) (*SessionTarget, error) {
 	args := ""
 	if len(policyArgs) > 0 {
 		raw, err := json.Marshal(policyArgs)
@@ -484,7 +547,7 @@ func (q *Requester) provisionHeldContract(ctx context.Context, name, vmName, did
 	defer cancel()
 	contract := v1alpha1.ComputeContract{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: contractmarket.KindComputeContract},
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
 		Spec: v1alpha1.ComputeContractSpec{
 			ComputeContractTemplate: v1alpha1.ComputeContractTemplate{VMName: vmName, SshAuthorizedKeys: []string{publicKey},
 				Policy: policyName, PolicyArgs: args, UserData: userData},
@@ -572,10 +635,22 @@ func (q *Requester) releaseHeldContract(name string) {
 	if name == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(q.runContext()), DefaultReleaseTimeout)
-	defer cancel()
-	if err := q.deps.Intents.ReleaseComputeContract(ctx, name); err != nil && !errors.Is(err, contractmarket.ErrNotFound) {
-		q.log.Warn("requester_held_contract_release_failed", "contract", name, "err", err)
+	for attempt := 1; ; attempt++ {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(q.runContext()), DefaultReleaseTimeout)
+		err := q.deps.Intents.ReleaseComputeContract(ctx, name)
+		cancel()
+		if err == nil || errors.Is(err, contractmarket.ErrNotFound) {
+			if attempt > 1 {
+				q.log.Info("requester_held_contract_released", "contract", name, "attempt", attempt)
+			}
+			return
+		}
+		q.log.Warn("requester_held_contract_release_failed", "contract", name, "attempt", attempt, "err", err)
+		if attempt >= heldReleaseAttempts {
+			q.log.Warn("requester_held_contract_release_left", "contract", name, "reason", "the next requester start releases it")
+			return
+		}
+		time.Sleep(min(time.Second<<(attempt-1), heldReleaseBackoffMax))
 	}
 }
 

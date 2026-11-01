@@ -48,6 +48,10 @@ const (
 
 	DefaultAuthorizationLookupTimeout = 30 * time.Second
 
+	DefaultKeepAliveInterval = 15 * time.Second
+
+	DefaultKeepAliveMisses = 3
+
 	DefaultShutdownGrace = 5 * time.Second
 )
 
@@ -321,6 +325,7 @@ func (s *Server) handleConnection(ctx context.Context, raw net.Conn) {
 	}
 	raw.SetDeadline(time.Time{})
 	defer conn.Close()
+	s.connWG.Go(func() { s.keepAlive(conn) })
 	account := accountFromPermissions(conn.Permissions)
 	noKeyUsername := ""
 	if conn.Permissions != nil {
@@ -340,6 +345,44 @@ func (s *Server) handleConnection(ctx context.Context, raw net.Conn) {
 			continue
 		}
 		s.connWG.Go(func() { s.serveSession(ctx, channel, channelRequests, account, conn.User(), noKeyUsername) })
+	}
+}
+
+func (s *Server) keepAlive(conn *ssh.ServerConn) {
+	gone := make(chan struct{})
+	go func() {
+		_ = conn.Wait()
+		close(gone)
+	}()
+	ticker := time.NewTicker(DefaultKeepAliveInterval)
+	defer ticker.Stop()
+	misses := 0
+	for {
+		select {
+		case <-gone:
+			return
+		case <-ticker.C:
+		}
+		replied := make(chan error, 1)
+		go func() {
+			_, _, err := conn.SendRequest("keepalive@openssh.com", true, nil)
+			replied <- err
+		}()
+		select {
+		case <-gone:
+			return
+		case err := <-replied:
+			if err == nil {
+				misses = 0
+				continue
+			}
+		case <-time.After(DefaultKeepAliveInterval):
+		}
+		if misses++; misses >= DefaultKeepAliveMisses {
+			s.log.Info("connection_keepalive_lost", "user", conn.User(), "misses", misses)
+			_ = conn.Close()
+			return
+		}
 	}
 }
 
@@ -381,6 +424,8 @@ type execRequest struct {
 
 func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests <-chan *ssh.Request, account *AuthorizedAccount, username, noKeyUsername string) {
 	defer channel.Close()
+	ctx, closed := context.WithCancel(ctx)
+	defer closed()
 	io := newChannelIO(channel, &s.connWG)
 	env := map[string]string{}
 	envBytes := 0
@@ -440,6 +485,10 @@ func (s *Server) serveSession(ctx context.Context, channel ssh.Channel, requests
 		}
 	}
 	io.markClosed()
+	if started && !io.exited() {
+		s.log.Info("session_channel_closed", "username", username, "reason", "the client closed the channel or the connection dropped; the command ends")
+	}
+	closed()
 }
 
 func copyEnv(env map[string]string) map[string]string {

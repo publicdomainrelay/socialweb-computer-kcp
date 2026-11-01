@@ -53,6 +53,14 @@ const (
 
 	DefaultReleaseTimeout = 30 * time.Second
 
+	heldReleaseAttempts = 6
+
+	heldReleaseBackoffMax = 30 * time.Second
+
+	transientContractPrefix = "ssh-run-"
+
+	keepVMLabel = "socialweb.computer/ssh-keep-vm"
+
 	HeldSessionPolicyTimeout = 30 * time.Second
 
 	DefaultReleaseRetryFirst = 5 * time.Second
@@ -316,6 +324,14 @@ type Requester struct {
 	heldMu sync.Mutex
 
 	heldSessions map[string]*heldSession
+
+	transientMu sync.Mutex
+
+	transient map[string]context.CancelFunc
+
+	transientWG sync.WaitGroup
+
+	staleSweep sync.Once
 
 	ingressMu sync.Mutex
 
@@ -675,6 +691,7 @@ func (q *Requester) noteFirstResume(contract string, readMs int64) {
 }
 
 func (q *Requester) Shutdown(ctx context.Context) {
+	q.endTransientSessions(ctx, "shutdown")
 	_ = supervise.Join(ctx, q.wg.Wait)
 	q.releaseAllHeldSessions("shutdown")
 }
