@@ -219,6 +219,13 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
     `-`, at most 253 chars; anything else is refused with one stderr line before provisioning), and
     the guest runs plain `atirc agent run` with that token, so the agent joins atirc as
     `<sub>.<handle>`; its mint failing fails the command, and the token is revoked at command end.
+    A session command with a minted token runs as the atirc agent user, not root (the guest's claude
+    refuses `--dangerously-skip-permissions` as root): the agent module writes
+    `/usr/local/bin/atirc-agent-user.sh` (creates the user named by `atirc nick` for the token, in
+    wheel with NOPASSWD sudo, lingering, and prints its name; `atirc-agent-run.sh` uses it too) and
+    `/usr/local/bin/atirc-agent-exec.sh '<command>'`, which runs the command with `runuser -u <nick>`
+    and `bash -c` from that user's HOME; the session waits for both scripts like the binary, and
+    ATIRC_TOKEN reaches only that process environment (never argv or a file).
     A requester with no `vaultRef` (the per-user ssh requesters) mints into no bundle, so it skips the
     atirc orphan sweep (`requester_atirc_orphan_sweep_skipped`, logged once).
     The SshGateway's `spec.ssh.publicListen` (`run gateway ssh -- --ssh-public-listen host:port`,

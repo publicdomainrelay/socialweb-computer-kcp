@@ -80,8 +80,9 @@ func atircCommand(command string) string {
 	if strings.TrimSpace(command) == "" {
 		return command
 	}
-	return fmt.Sprintf("i=0; while [ ! -x %s ] && [ \"$i\" -lt %d ]; do sleep 1; i=$((i+1)); done; export %s=\"$%s\"; unset %s; %s",
-		cloudinit.AtircBinary, sessionAtircBinaryWaitSec, AtircTokenEnv, sessionAtircTokenEnv, sessionAtircTokenEnv, command)
+	return fmt.Sprintf("i=0; while { [ ! -x %s ] || [ ! -x %s ]; } && [ \"$i\" -lt %d ]; do sleep 1; i=$((i+1)); done; export %s=\"$%s\"; unset %s; exec %s %s",
+		cloudinit.AtircBinary, cloudinit.AgentExecPath, sessionAtircBinaryWaitSec, AtircTokenEnv, sessionAtircTokenEnv, sessionAtircTokenEnv,
+		cloudinit.AgentExecPath, "'"+strings.ReplaceAll(command, "'", "'\"'\"'")+"'")
 }
 
 func (q *Requester) sessionAtircLifetime() time.Duration {

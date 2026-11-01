@@ -77,6 +77,10 @@ const (
 
 	AtircBinary = "/usr/local/bin/atirc"
 
+	AgentUserPath = "/usr/local/bin/atirc-agent-user.sh"
+
+	AgentExecPath = "/usr/local/bin/atirc-agent-exec.sh"
+
 	GuestAgentAgentPath = GuestAgentConfigDir + "/agent.json"
 )
 
@@ -134,6 +138,8 @@ func agentPatch(opts AgentOptions) (UserDataPatch, error) {
 					"StandardError=journal",
 				})},
 			{Path: AgentRunPath, Owner: "root:root", Permissions: "0700", Content: agentRunScript},
+			{Path: AgentUserPath, Owner: "root:root", Permissions: "0700", Content: agentUserScript},
+			{Path: AgentExecPath, Owner: "root:root", Permissions: "0700", Content: agentExecScript},
 			{Path: AgentEnvRestartPath, Owner: "root:root", Permissions: "0700", Content: agentEnvRestartScript},
 			{Path: "/etc/systemd/system/" + AgentEnvUnit, Owner: "root:root", Permissions: "0644", Content: strings.Join([]string{
 				"[Unit]",
@@ -204,6 +210,13 @@ if [ -z "${ATIRC_TOKEN:-}" ]; then
   exit 1
 fi
 export ATIRC_TOKEN
+nick="$(` + AgentUserPath + `)"
+uid="$(id -u "${nick}")"
+exec runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ` + AtircBinary + ` agent run
+`
+
+const agentUserScript = `#!/usr/bin/env bash
+set -euo pipefail
 nick="$(` + AtircBinary + ` nick)"
 if ! [[ "${nick}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
   echo "atirc-agent: atirc nick printed ${nick@Q}, not a user name" >&2
@@ -215,13 +228,26 @@ printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
 id "${nick}" >/dev/null 2>&1 || useradd -m -G wheel -s /bin/bash "${nick}"
 if getent group ` + GuestRequesterGroup + ` >/dev/null; then usermod -aG ` + GuestRequesterGroup + ` "${nick}"; fi
-loginctl enable-linger "${nick}"
+loginctl enable-linger "${nick}" >&2
 uid="$(id -u "${nick}")"
 for _ in $(seq 1 30); do
   [ -S "/run/user/${uid}/bus" ] && break
   sleep 1
 done
-exec runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ` + AtircBinary + ` agent run
+printf '%s\n' "${nick}"
+`
+
+const agentExecScript = `#!/usr/bin/env bash
+set -euo pipefail
+if [ -z "${ATIRC_TOKEN:-}" ]; then
+  echo "atirc-agent-exec: ATIRC_TOKEN is empty" >&2
+  exit 1
+fi
+nick="$(` + AgentUserPath + `)"
+uid="$(id -u "${nick}")"
+home="$(getent passwd "${nick}" | cut -d: -f6)"
+cd "${home}"
+exec runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" bash -c "$1"
 `
 
 func AssociationRefPath(raw string) (string, error) {
