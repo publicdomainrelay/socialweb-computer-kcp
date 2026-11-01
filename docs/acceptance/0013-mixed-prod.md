@@ -9,8 +9,8 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: 2026-11-01 on prod, rc159 (`ec0f4849`): A pass, C pass, B partial (ssh from the installed account and
-  the sign-in URL in the journal fail; Known Pitfalls). Prod readings below
+- Last pass: 2026-11-01 on prod: A and C on rc159 (`ec0f4849`), B on the rc160 CLI (`840f0437`; on rc159 B failed its
+  ssh step, Known Pitfalls). Prod readings below
 
 ```mermaid
 sequenceDiagram
@@ -93,8 +93,8 @@ minutes before the first apply when a contract was denied before (verdicts are c
 ### B. install requester (systemd user unit)
 
 1. `sudo $SWC install requester --name mp --dry-run`, then `sudo $SWC install requester --name mp` (account
-   `swc-requester`, identity `--atproto-oauth-qr` by default); the sign-in URL is in `journalctl --user -u
-   socialweb-computer-requester@mp.service` of that account; sign in with `scripts/oauth-signin.ts`.
+   `swc-requester`, identity `--atproto-oauth-qr` by default); the sign-in URL: `$SWC run requester signin mp --state-dir
+   /var/lib/socialweb-computer/swc-requester` (as root or the account); sign in with `scripts/oauth-signin.ts`.
 2. `R=/var/lib/socialweb-computer/swc-requester/requesters/mp/ready.json`; as the account, `kubectl --kubeconfig
    "$(jq -r .kubeconfig "$R")"` reads `MarketRequester app` Ready.
 3. Steps A3 to A8 as the account, `$SWC run requester ssh mp --state-dir /var/lib/socialweb-computer/swc-requester`.
@@ -147,10 +147,11 @@ user (`check-host` reports it).
 | 10:38:31 | A8 | placeholder bundle, mint, agent JOIN, answered `x86_64` |
 | 10:39 | A9 | restart: same DID, all Held, ssh again |
 | 10:40:16.805 | A10 | agent1 revoked, then the terminations at 10:40:17; 0 contracts in 5 s; host empty |
-| 11:19:01 | B1, B2 | `install requester` (account `swc-requester`, `socialweb.slice`); sign-in URL read from the MarketIdentity `status.pendingAction.url` (journal empty); Ready |
-| 11:19:31 | B3 | `vm.yaml` pinned to hat-7 Deployed in 30 s; `run requester ssh` as the account: did not answer within 1m (FAIL) |
-| 11:20:33 | B4 | `systemctl --user restart`: same DID, contract Held |
-| 11:21:52 | B5 | delete: 0 contracts; `uninstall --purge` removed the account |
+| 11:19:31 | B3 (rc159) | `run requester ssh` as the account: did not answer within 1m (the ProxyCommand ran under the account's `nologin` shell) |
+| 11:46:44 | B1, B2 (rc160) | `install requester` (account `swc-requester`, `socialweb.slice`) printed the journal and `run requester signin` hints; the URL from `run requester signin mp`; Ready |
+| 11:47:14 | B3 | `vm.yaml` pinned to hat-7; ssh as the account: `quickstart-vm-ok`, `x86_64`, exit 0 |
+| 11:47:15 | B4 | `systemctl --user restart`: same DID, contract Held, ssh `quickstart-vm-ok` again |
+| 11:47:35 | B5 | delete: 0 contracts; `uninstall --purge` removed the account; hat-7 empty |
 | 11:31:52 | C1 | `--with-gateway`, ready file names the gateway |
 | 11:32:03 | C2 | cluster `c1` kubeconfig |
 | 11:33:04 | C3, C4 | node `2wjeqtgx-c1-node1` on hat-7 (remote, local bidder suspended), k3s v1.36.4+k3s1, pod Ready, `quickstart-k8s-ok` |
@@ -198,9 +199,9 @@ No plaintext token, key or sign-in URL in any log (check 0 on every file).
 | Symptom | Cause / fix |
 | --- | --- |
 | after a restart every Held contract is Failed `the held contract is not resumed: ... the policy engine is not running` | main 6497fe61 and rc157: fixed in rc158 (resume waits for the policy engine) |
-| B: no sign-in URL in `journalctl --user` of the account | rc159: the user units of a system account log to the system journal, which the account cannot read; read `status.pendingAction.url` of MarketIdentity `requester` with the kubeconfig of the instance (fix in progress) |
-| B: `run requester ssh` as the account does not answer within 1m | rc159: open, root cause in progress |
-| C: `run requester cluster` says the requester runs no gateway | rc159: the ready file is first written before the gateway is Ready; wait for `.gateway` in it (fix in progress) |
+| B: no sign-in URL in `journalctl --user` of the account | the user units of a system account log to the system journal, which the account cannot read: `run requester signin mp --state-dir /var/lib/socialweb-computer/swc-requester` (rc160), or as root `journalctl _UID=<uid> _SYSTEMD_USER_UNIT=socialweb-computer-requester@mp.service` |
+| B: `run requester ssh` as the account does not answer within 1m | rc159: ssh ran its ProxyCommand with the account's `nologin` shell; rc160 runs it under `/bin/sh` |
+| C: `run requester cluster` says the requester runs no gateway | rc159: the ready file was first written before the gateway was Ready; rc160 writes it once, with `.gateway` |
 | sbx1 `no bids received within 30s`, stays without a bid | the pinned bidder does not serve deno: `--compute-kinds vm,deno` on `run bidder`, or `install bidder --compute-kinds vm,deno` again for an installed bidder |
 | every contract `no bids`; bidder `policy rejected ... not vouched` | the operator -> requester record is missing (step A4); denials are cached 5 minutes |
 | agent1 Failed before its RFP, `refused: the atirc agent needs a requester handle that resolves to <did> ... --atproto-handle ...` | the requester handle is `.local` (a localRepo identity, the default without an identity option) or does not resolve; use the OAuth account, or a local PDS on plc.directory with `--atproto-handle <a domain you control>` ([../quickstart-prod.md](../quickstart-prod.md) section 5) |

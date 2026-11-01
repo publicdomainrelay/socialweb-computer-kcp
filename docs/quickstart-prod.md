@@ -412,7 +412,6 @@ kubectl --kubeconfig "$TK" delete deployment quickstart-k8s          # the node 
 
 | gap | where it is planned |
 |---|---|
-| `run requester ssh` from an `install requester` account (does not answer within 1m), and the sign-in URL in that account's journal (read `status.pendingAction.url` of MarketIdentity `requester` with the instance kubeconfig meanwhile) | fix in progress (acceptance 0013 B) |
 | an atirc agent from a local PDS identity or a pdsAccount identity: built, not yet proven against irc.fedfork.com | plan 0039 D-AGENT-IDENTITY (the lead's prod run) |
 | `vouch-bidder-operator.yaml` on an installed bidder whose operator did not set `--bidder-operator-signin`, or before the QR page (qr.fedfork.com) asks for `repo:sh.tangled.graph.vouch` | operator setting; the QR page's scope |
 | deno on a prod bidder unless its operator ran `run bidder --compute-kinds vm,deno` or `install bidder --compute-kinds vm,deno`; pin such a bidder with `bidderDids` | operator setting |

@@ -15,7 +15,7 @@ market network of one host (`dev up`); **built** = in the code, not yet proven l
 | `EphemeralInfra` lifetime: `ttlSeconds`, `endWhen: Deadline` or `Complete` | Complete ends in the pass that sees every contract Released or Failed | local | [acceptance/0012](acceptance/0012-infra-quickstart.md) |
 | Infra records in the user's repo, never deleted (`endedAt`, successor rkeys) | `computer.socialweb.infra` / `ephemeralInfra` | prod | [protocol/infra.md](protocol/infra.md) |
 | Long-lived requester in the foreground | `run requester --name <n>`: own kcp, port 0, `ready.json` with kcpUrl + kubeconfig | prod (alice, OAuth QR, acceptance 0013 A) | [quickstart-prod.md](quickstart-prod.md) section 7 |
-| Requester as a systemd unit of its own account | `install requester` (account created or adopted, `socialweb.slice`, upgrade, uninstall) | prod: install, sign-in, contract, restart, uninstall (0013 B); ssh as the account not yet working | quickstart-prod.md 7a |
+| Requester as a systemd unit of its own account | `install requester` (account created or adopted, `socialweb.slice`, upgrade, uninstall) | prod (0013 B, rc160 CLI): install, `run requester signin`, contract, ssh as the account, restart keeps Held, uninstall --purge | quickstart-prod.md 7a |
 | Requester under an account that already runs a core | `kubectl apply -f examples/infra/requester-hostprocess.yaml` | local | quickstart-prod.md 7b |
 | Restart keeps the DID, the vault and every Held contract | resume waits for its policy engine, then runs the policy | local + prod (rc158) | [acceptance/0013](acceptance/0013-mixed-prod.md) |
 | Tenant k8s cluster from the requester | `run requester --with-gateway`, `run requester cluster`, `kubeconfig`; nodes rented by the same requester | prod: node on a remote bidder (hat-7) fetches meshd from the public bucket, pod runs, scale to zero (0013 C) | quickstart-prod.md section 8 |
@@ -103,7 +103,7 @@ The embedded requester (`pkg/embedded`) runs in the app on its own in-process kc
 | [0010](acceptance/0010-ios-app.md) iOS app | not run (no iOS client session); last pass simulator 2026-10-31 | - |
 | [0011](acceptance/0011-atirc.md) atirc | pass | v0.1.0-5a8dfa2 |
 | [0012](acceptance/0012-infra-quickstart.md) Infra quickstart, every example | pass (own network) | main ec97f78e |
-| [0013](acceptance/0013-mixed-prod.md) mixed prod: A run requester, B install requester, C gateway in the requester | A pass, C pass, B partial | rc159 |
+| [0013](acceptance/0013-mixed-prod.md) mixed prod: A run requester, B install requester, C gateway in the requester | pass (A, C on rc159; B on the rc160 CLI) | rc159 / rc160 |
 
 ## Known limits
 
