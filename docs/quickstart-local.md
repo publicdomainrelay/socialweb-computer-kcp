@@ -2,7 +2,7 @@
 
 - clone -> build -> `dev up` a market network -> apply prerequisites -> define Infra -> apply -> await -> use -> release -> `dev down`
 - one local market network (one kcp, its own PLC, relay, PDSes, a bidder, a cluster gateway) on one Linux host; nothing here touches prod
-- scenarios: firecracker VM, tenant Kubernetes cluster, Deno sandbox, VM with an atirc agent (up to the mint), all in one EphemeralInfra
+- scenarios: firecracker VM, tenant Kubernetes cluster, Deno sandbox, VM with an atirc agent (refused before its RFP locally: `.local` handle), all in one EphemeralInfra
 - everything on this page is proven by acceptance [0012](acceptance/0012-infra-quickstart.md) on a local network
 - example files: [../examples/infra/](../examples/infra/)
 - against prod bidders (the browser page, the CLI per contract, the prod gateway, the agent join): [quickstart-prod.md](quickstart-prod.md)
@@ -21,7 +21,7 @@ flowchart TD
   RFP --> HELD["ComputeContract Held<br/>Infra contract Deployed"]
   HELD --> VM["VM: ssh over iroh (dumbpipe)"]
   HELD --> SBX["DenoSandbox: status.contract.sandbox.stdout"]
-  HELD --> AG["agent VM: up to the atirc mint<br/>(join: quickstart-prod.md)"]
+  HELD --> AG["agent VM: refused locally (.local handle)<br/>(join: quickstart-prod.md)"]
   POD["kubectl apply a pod to the tenant cluster"] --> NC["NodeClaim -> gateway Infra nodes-&lt;hex&gt;"]
   NC --> RFP
   HELD --> K8S["tenant node Ready, pod Running"]
@@ -154,8 +154,9 @@ On prod the same two records are written by people with their own accounts: [qui
 ### Secrets bundle (agent VMs only)
 
 A contract with `spec.agent` needs `spec.secretsRef`: the requester writes the minted atirc token into that bundle and
-the bidder hands the bundle to the guest. Write the bundle ([../examples/infra/agent-bundle.json](../examples/infra/agent-bundle.json),
-one placeholder entry for the env file) into the requester's own OpenBao before applying:
+the bidder hands the bundle to the guest. When the path holds no bundle, the requester writes the placeholder itself
+(one entry at `agent.envFile`, mode 0600). To write it by hand ([../examples/infra/agent-bundle.json](../examples/infra/agent-bundle.json),
+the same placeholder entry) into the requester's own OpenBao before applying:
 
 ```bash
 D=$ST/dev/$I/apps/dev/$I-qs/openbaoservers/requester/openbao
@@ -299,32 +300,33 @@ k root:qs get computecontracts.socialweb.computer einfra-quickstart-deno-sbx1 -o
   finalizer dropped
 - a bidder without `deno` in its kinds drops the RFP before bidding: `no bids received within 30s`
 
-### Agent VM via atirc (up to the mint)
+### Agent VM via atirc (refused locally before the RFP)
 
 ```bash
-k root:qs apply -f examples/infra/agent-vm.yaml          # after the bundle of section 4
-k root:qs wait ephemeralinfras.socialweb.computer/quickstart-agent --for=jsonpath='{.status.phase}'=Deployed --timeout=3m
-k root:qs apply -f examples/infra/agent-start.yaml       # guest.agentStart
-k root:qs get contractevents.socialweb.computer quickstart-agent-agent1-start -o jsonpath='{.status.phase}{"\n"}'
+k root:qs apply -f examples/infra/agent-vm.yaml          # the bundle of section 4 is optional
+k root:qs get computecontracts.socialweb.computer einfra-quickstart-agent-agent1 -o jsonpath='{.status.phase} {.status.message}{"\n"}'
 ```
 
 What happens:
 
-- after the receipt the requester tries to mint a leased atirc token `<label>-<rfp rkey>.<handle>` at irc.fedfork.com and to
-  write it into the bundle (`/etc/atirc/atirc.env`, 0600); a token is never in a kcp object, record or log
-- the guest has `atirc-agent.service` installed and inactive; `guest.agentStart` (ContractEvent `direction: outbound`) is
-  Submitted and queued for the guest
-- locally the mint fails by design: the network requester (MarketIdentity `localRepo`) signs no atirc service auth, so the
-  requester logs `requester_atirc_mint_failed ... the requester identity signs no service auth`, the guest boots with the
-  placeholder env file and the agent has no token to join with
-- the join needs a requester identity irc.fedfork.com resolves: [quickstart-prod.md](quickstart-prod.md) section 5; a local
-  PDS identity that can mint is plan [0039](plans/0039-long-lived-requester.yaml) item D-AGENT-IDENTITY
+- when the contract's `secretsRef` path holds no bundle, the requester writes the placeholder bundle itself (one entry at
+  `agent.envFile`, `ATIRC_TOKEN=`, mode 0600; log `requester_agent_bundle_placeholder`)
+- before the RFP the requester checks its own handle: irc.fedfork.com mints only for a handle that resolves to the DID.
+  The network requester's handle is `<workspace>.requester.local`, so locally the contract is Failed with `refused: the
+  atirc agent needs a requester handle that resolves to <did>: ... is a .local handle that nobody resolves; start the
+  requester with --atproto-handle ...`, with no RFP and no record; a plain VM contract of the same requester still runs
+- with a handle that resolves, after the receipt the requester mints a leased atirc token `<label>-<rfp rkey>.<handle>`
+  at irc.fedfork.com into the bundle (`/etc/atirc/atirc.env`, 0600; never in a kcp object, record or log), the guest has
+  `atirc-agent.service` installed and inactive, and `examples/infra/agent-start.yaml` (`guest.agentStart`) starts it
+- the join needs a requester identity irc.fedfork.com resolves: [quickstart-prod.md](quickstart-prod.md) section 5 (which
+  identity signs, the ingress options of a local PDS)
 
 ### All in one
 
 [mixed.yaml](../examples/infra/mixed.yaml): vm1, sbx1 and agent1 in one EphemeralInfra `quickstart` for 30 minutes
-(`endWhen: Deadline`). Write the agent bundle to `contracts/einfra-quickstart-agent1/secrets` first, put your key in vm1,
-apply, and read each contract as above (`einfra-quickstart-vm1`, `einfra-quickstart-sbx1`, `einfra-quickstart-agent1`).
+(`endWhen: Deadline`). Put your key in vm1, apply, and read each contract as above (`einfra-quickstart-vm1`,
+`einfra-quickstart-sbx1`, `einfra-quickstart-agent1`); locally `agent1` is refused before its RFP (the `.local` handle,
+above) while vm1 and sbx1 run.
 
 ## 8. Release And Clean Up
 
@@ -348,6 +350,6 @@ Each one is an item of plan [0039](plans/0039-long-lived-requester.yaml):
 
 | gap | plan 0039 item |
 |---|---|
-| an atirc agent join from a local requester (needs a DID irc.fedfork.com resolves and service auth) | D-AGENT-IDENTITY, D-AGENT-INGRESS |
+| an atirc agent join from a local network requester (its DID is on the network PLC and its handle is `.local`; a local PDS on plc.directory with a public handle and ingress mints: [quickstart-prod.md](quickstart-prod.md) section 5) | D-AGENT-IDENTITY (the lead's prod run) |
 | creating a tenant cluster by writing an object: the gateway composes the cluster's Infra from NodeClaims; a Cluster you apply needs the gateway in your own requester kcp | C-GATEWAY-COMPOSE |
 | applying an Infra against prod bidders from the CLI (no long-lived requester root outside the page and the iOS app) | A-RUN-REQUESTER ([quickstart-prod.md](quickstart-prod.md) section 6) |

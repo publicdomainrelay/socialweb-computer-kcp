@@ -12,6 +12,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
@@ -32,12 +33,7 @@ func (q *Requester) resolveOAuthIdentity(ctx context.Context) error {
 	if did == "" {
 		return fmt.Errorf("requester: its MarketIdentity %s is not signed in (phase %s)", ref.Name, found.Status.Phase)
 	}
-	for _, ws := range workspaces {
-		if _, has := q.deps.Inputs.Identity(ws, ref.Name); has {
-			q.identityRef = commonv1.ObjectRef{Name: ref.Name, Workspace: ws}
-			break
-		}
-	}
+	q.noteIdentityRef(ref.Name)
 	q.did, q.repoDID, q.marketDID = did, did, did
 	q.pdsURL = cmp.Or(q.pdsURL, strings.TrimSpace(found.Status.PdsURL))
 	q.handle = cmp.Or(q.handle, found.Status.Handle)
@@ -52,6 +48,37 @@ func (q *Requester) oauthServiceAuth() ServiceAuthSource {
 	return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
 		return open(ctx, identity, did)
 	}}
+}
+
+func (q *Requester) atircServiceAuth(market ServiceAuthSource) (ServiceAuthSource, string, string) {
+	if market != nil {
+		return market, serviceAuthName(market), ""
+	}
+	if q.deps.ServiceAuth == nil || q.did == "" {
+		return nil, "none", "the requester has no service-auth handle"
+	}
+	open, did := q.deps.ServiceAuth, q.did
+	switch pdsRef := q.cfg.Spec.PdsRef; {
+	case !q.cfg.LocalSigner && q.cfg.IdentityMode == IdentityModeCallback && q.identityRef.Name != "":
+		identity := q.identityRef
+		return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
+			return open(ctx, identity, did)
+		}}, "owner-identity", ""
+	case q.cfg.LocalSigner && pdsRef != nil && pdsRef.Name != "":
+		plcURL := ""
+		if network := q.cfg.Spec.Network; network != nil {
+			plcURL = network.PLCDirectoryURL
+		}
+		if ok, reason := LocalPdsSignsAtirc(plcURL, q.pdsURL); !ok {
+			return nil, "none", reason
+		}
+		target := commonv1.ObjectRef{Group: cmp.Or(pdsRef.Group, v1alpha1.GroupName), Kind: cmp.Or(pdsRef.Kind, "Pds"), Name: pdsRef.Name,
+			Workspace: cmp.Or(pdsRef.Workspace, q.cfg.Workspace)}
+		return participant.PDSServiceAuth{DID: did, Open: func(ctx context.Context) (pds.ServiceAuth, error) {
+			return open(ctx, target, did)
+		}}, "local-pds", ""
+	}
+	return nil, "none", "the identity mode signs no service auth"
 }
 
 func (q *Requester) oauthGranted(ctx context.Context, scope string) (bool, error) {

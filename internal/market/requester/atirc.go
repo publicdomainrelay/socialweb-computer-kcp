@@ -259,12 +259,12 @@ func (q *Requester) serviceAtircIssuer(ctx context.Context) (atircIssuer, error)
 	switch {
 	case handle == "":
 		return atircIssuer{}, errors.New("the requester identity has no handle")
-	case q.serviceAuth == nil:
+	case q.atircAuth == nil:
 		return atircIssuer{}, errors.New("the requester identity signs no service auth")
 	}
 	ctx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()
-	bearer, err := q.serviceAuth.ServiceAuth(ctx, AtircServiceAudience, AtircMintNSID)
+	bearer, err := q.atircAuth.ServiceAuth(ctx, AtircServiceAudience, AtircMintNSID)
 	if err != nil {
 		return atircIssuer{}, fmt.Errorf("service auth for %s: %w", AtircServiceAudience, err)
 	}
