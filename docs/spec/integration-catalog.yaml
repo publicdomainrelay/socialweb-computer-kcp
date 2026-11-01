@@ -1697,6 +1697,21 @@ entries:
     asserts: requester-tangled-vouch runs and denies; "", "tangled-vouch" in any case map to requester-tangled-vouch.
     cleanup: none.
 
+  - id: TestRequesterRecordedWinnerRelease
+    kind: policyspec
+    source: internal/market/requester/policy_release_spec_test.go (needs policyfix recordedWinnerAllowed)
+    actors: [requester, policy engine]
+    setup: >
+      A recorded contract (winner, attached policy, RFP, bid) checked as a resumed contract
+      (recordedWinnerAllowed) and as a reused held session (heldSessionAllowed): a vouched winner, an
+      unvouched winner, an unfenced sandbox, a run cancelled mid-flight, a run past a 2s wait, and a run
+      the engine refuses to create.
+    asserts: >
+      The attached policy runs for the recorded winner (no run only when the engine refuses it). A
+      completed allow resumes; only a completed deny returns ErrPolicyRejected, which releases; a
+      failed, cancelled, timed-out or uncreated run refuses to resume and does not release.
+    cleanup: none.
+
   - id: TestRequesterScopeCache
     kind: policyspec
     source: internal/market/requester/policy_spec_test.go
