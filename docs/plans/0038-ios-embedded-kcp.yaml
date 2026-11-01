@@ -57,7 +57,7 @@ items:
   - id: I3-PERSIST
     title: "Persistence across app restarts: snapshot/restore and persist hooks into the app container; cold boot vs resume times measured"
     owner: atirc-ios-client-dev
-    status: todo
+    status: done
   - id: I4-SOCIALWEB-IOS
     title: "socialweb builds for ios/arm64: the MarketRequester root and Requester component compose in the app's kcp (comms Firehose, no ingress), with ios build tags for host-only packages; build gate covers ios/arm64"
     owner: linux-kcp
