@@ -69,6 +69,10 @@ type Controller struct {
 
 	pulls map[indexKey]pullNote
 
+	moved map[indexKey]string
+
+	unwritten map[indexKey]bool
+
 	repos map[string]*binding.Table[struct{}]
 
 	retries *netretry.Tracker[indexKey]
@@ -80,7 +84,7 @@ func New(opts Options) *Controller {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), bound: map[string]map[indexKey]string{},
-		pulls: map[indexKey]pullNote{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
+		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
 			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()}}
 }
 
@@ -258,11 +262,19 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	var recordErr error
 	backoff := false
 	var retry time.Duration
-	if v.spec.Record != nil {
+	finished := contractsFinished(v, contracts)
+	if v.spec.Record != nil && !r.settled(ctx, req, v, finished) {
 		rec, err = r.syncRecord(ctx, req, v, now)
 		reason, isUnresolved := Unresolved(err)
 		r.noteUnresolved(req, v, &status, isUnresolved, reason, err)
-		retry = r.readRetry(req, v, err)
+		if finished {
+			r.c.retries.Reset(keyOf(req, v))
+			if ReadRetrying(err) {
+				r.c.log.Info("infra_record_read_failed", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "finished", true, "err", err.Error())
+			}
+		} else {
+			retry = r.readRetry(req, v, err)
+		}
 		if err != nil {
 			syncedReason, message := "RecordUnavailable", err.Error()
 			if errors.Is(err, ErrRepoNoDID) {
@@ -276,10 +288,10 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 			}
 			conds.Set(&status.Conditions, status.ObservedGeneration, v1alpha1.InfraConditionSynced, false, syncedReason, message)
 			recordErr = err
-			if errors.Is(err, ErrRepoNoDID) || isUnresolved || retry > 0 {
+			if errors.Is(err, ErrRepoNoDID) || isUnresolved || retry > 0 || finished {
 				recordErr = nil
 			}
-			backoff = isUnresolved
+			backoff = isUnresolved && !finished
 			if !Publishing(v.spec.Record) && end.Ended {
 				recordErr = nil
 			} else if !Publishing(v.spec.Record) {
@@ -337,20 +349,22 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 		status.Phase = v1alpha1.InfraPhaseEnding
 		status.Message = fmt.Sprintf("ended (%s); %d contract(s) releasing", end.Reason, left)
 	}
-	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
-		return ctlruntime.Result{}, err
-	}
-	if recordErr != nil {
-		return ctlruntime.Result{}, recordErr
-	}
 	if rec != nil && rec.write {
 		observed := infra.Observed{Phase: status.Phase, Contracts: statuses}
 		if ephemeral != nil {
 			observed.ExpiresAt, observed.EndedAt, observed.EndReason = ephemeral.ExpiresAt, ephemeral.EndedAt, ephemeral.EndReason
 		}
+		r.c.setUnwritten(keyOf(req, v), true)
 		if err := r.writeRecord(ctx, req, v, rec, observed); err != nil {
 			return ctlruntime.Result{}, err
 		}
+		r.c.setUnwritten(keyOf(req, v), false)
+	}
+	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status, ephemeral)); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if recordErr != nil {
+		return ctlruntime.Result{}, recordErr
 	}
 	if end.Ended {
 		if left == 0 {
@@ -372,9 +386,29 @@ func requeueAt(v view, end infra.End, backoff bool, retry time.Duration) ctlrunt
 	return ctlruntime.Result{RequeueAfter: after, Backoff: backoff}
 }
 
+func keyOf(req ctlruntime.Request, v view) indexKey {
+	return indexKey{kind: string(v.kind), cluster: req.Cluster, name: req.Name}
+}
+
 func (r *reconciler[T]) readRetry(req ctlruntime.Request, v view, err error) time.Duration {
-	return ReadRetry(r.c.log, r.c.retries, indexKey{kind: string(v.kind), cluster: req.Cluster, name: req.Name}, err,
-		"kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+	return ReadRetry(r.c.log, r.c.retries, keyOf(req, v), err, "kind", v.kind, "workspace", req.Workspace, "name", req.Name)
+}
+
+func contractsFinished(v view, contracts []v1alpha1.ComputeContract) bool {
+	if len(v.declaration.Contracts) == 0 || len(v.status.Contracts) != len(v.declaration.Contracts) {
+		return false
+	}
+	for _, s := range v.status.Contracts {
+		if s.Phase != v1alpha1.InfraContractPhaseReleased && s.Phase != v1alpha1.InfraContractPhaseFailed {
+			return false
+		}
+	}
+	for i := range contracts {
+		if !infra.Finished(&contracts[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func ReadRetry[K comparable](log *slog.Logger, retries *netretry.Tracker[K], key K, err error, attrs ...any) time.Duration {

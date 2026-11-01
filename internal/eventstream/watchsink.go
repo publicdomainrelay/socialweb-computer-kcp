@@ -185,6 +185,19 @@ func (s *Sink) Close() {
 	s.flush.Stop()
 }
 
+func NoteDeleted(deleted []string, uris []string) []string {
+	out := slices.Clone(deleted)
+	for _, uri := range uris {
+		if !slices.Contains(out, uri) {
+			out = append(out, uri)
+		}
+	}
+	if len(out) > maxDeletedRecords {
+		out = out[len(out)-maxDeletedRecords:]
+	}
+	return out
+}
+
 func MergeStatus(status v1alpha1.AtprotoRecordWatchStatus, p Pending) v1alpha1.AtprotoRecordWatchStatus {
 	status.Records = slices.Clone(status.Records)
 	status.Deleted = slices.Clone(status.Deleted)

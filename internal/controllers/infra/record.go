@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -158,12 +160,17 @@ func backendGone(ctx context.Context, dynamic kube.Factory, workspace string, re
 }
 
 func collectionOwned(obj metav1.Object) bool {
+	_, ok := collectionOwner(obj)
+	return ok
+}
+
+func collectionOwner(obj metav1.Object) (string, bool) {
 	for _, o := range obj.GetOwnerReferences() {
 		if o.Controller != nil && *o.Controller && (o.Kind == CollectionKind || o.Kind == EphemeralCollectionKind) {
-			return true
+			return o.Name, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, v view, now time.Time) (*recordSync, error) {
@@ -287,6 +294,65 @@ func (r *reconciler[T]) syncRecord(ctx context.Context, req ctlruntime.Request, 
 			conds.New(v1alpha1.InfraConditionSynced, false, "RecordInvalid", "the record is neither pulled nor overwritten", gen)}
 	}
 	return out, nil
+}
+
+func (r *reconciler[T]) settled(ctx context.Context, req ctlruntime.Request, v view, finished bool) bool {
+	stored := v.status.Record
+	if !finished || stored == nil || strings.TrimSpace(stored.URI) == "" || stored.CID == "" {
+		return false
+	}
+	synced := meta.FindStatusCondition(v.status.Conditions, v1alpha1.InfraConditionSynced)
+	if synced == nil || synced.Status != metav1.ConditionTrue || synced.ObservedGeneration != v.object.GetGeneration() {
+		return false
+	}
+	k := keyOf(req, v)
+	r.c.mu.Lock()
+	cid, indexed := r.c.bound[stored.URI][k]
+	_, moved := r.c.moved[k]
+	unwritten := r.c.unwritten[k]
+	r.c.mu.Unlock()
+	switch {
+	case moved || unwritten:
+		return false
+	case indexed:
+		return cid == stored.CID
+	}
+	repo, err := RepoRef(req.Workspace, v.spec.Record.RepoRef)
+	if err != nil {
+		return false
+	}
+	r.c.bindRepo(string(v.kind), req, repo)
+	if !collectionOwned(v.object) {
+		if err := r.ensureWatch(ctx, req, v, repo, v.spec.Record.EventSourceRefs); err != nil {
+			return false
+		}
+	}
+	if changed, err := r.watchedChange(ctx, req, v, stored); err != nil || changed {
+		return false
+	}
+	r.c.index(string(v.kind), req, stored.URI, stored.CID)
+	r.c.log.Info("infra_record_settled", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "uri", stored.URI, "cid", stored.CID)
+	return true
+}
+
+func (r *reconciler[T]) watchedChange(ctx context.Context, req ctlruntime.Request, v view, stored *v1alpha1.InfraRecordStatus) (bool, error) {
+	name := infra.ChildName(v.kind, v.object.GetName())
+	if owner, ok := collectionOwner(v.object); ok {
+		name = infra.ChildName(v.kind, "coll", owner)
+	}
+	dyn, err := r.c.dynamic(req.Workspace)
+	if err != nil {
+		return false, err
+	}
+	watch, err := kube.Get[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), name)
+	if err != nil {
+		return false, err
+	}
+	i := slices.IndexFunc(watch.Status.Records, func(rec v1alpha1.WatchedRecord) bool { return rec.URI == stored.URI })
+	if i >= 0 {
+		return watch.Status.Records[i].Cid != stored.CID, nil
+	}
+	return slices.Contains(watch.Status.Deleted, stored.URI), nil
 }
 
 func (r *reconciler[T]) pull(ctx context.Context, req ctlruntime.Request, v view, d infra.Declaration) error {
@@ -558,6 +624,9 @@ func (c *Controller) index(kind string, req ctlruntime.Request, uri, cid string)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dropLocked(k)
+	if moved, ok := c.moved[k]; ok && moved == cid {
+		delete(c.moved, k)
+	}
 	users := c.bound[uri]
 	if users == nil {
 		users = map[indexKey]string{}
@@ -573,6 +642,8 @@ func (c *Controller) forget(kind string, req ctlruntime.Request) {
 	k := indexKey{kind: kind, cluster: req.Cluster, name: req.Name}
 	c.dropLocked(k)
 	delete(c.pulls, k)
+	delete(c.moved, k)
+	delete(c.unwritten, k)
 	c.retries.Reset(k)
 }
 
@@ -602,19 +673,38 @@ func (c *Controller) watched(cluster, kind string, watch *v1alpha1.AtprotoRecord
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var out []ctlruntime.Request
-	add := func(uri string, changed func(cid string) bool) {
+	present := map[string]bool{}
+	add := func(uri, now string) {
 		for key, cid := range c.bound[uri] {
-			if key.kind != kind || key.cluster != cluster || !changed(cid) {
+			if key.kind != kind || key.cluster != cluster {
 				continue
 			}
+			if cid == now {
+				delete(c.moved, key)
+				continue
+			}
+			c.moved[key] = now
 			out = append(out, ctlruntime.Request{Cluster: key.cluster, Name: key.name})
 		}
 	}
 	for _, rec := range watch.Status.Records {
-		add(rec.URI, func(cid string) bool { return cid != rec.Cid })
+		present[rec.URI] = true
+		add(rec.URI, rec.Cid)
 	}
 	for _, uri := range watch.Status.Deleted {
-		add(uri, func(cid string) bool { return cid != "" })
+		if !present[uri] {
+			add(uri, "")
+		}
 	}
 	return out
+}
+
+func (c *Controller) setUnwritten(k indexKey, pending bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pending {
+		c.unwritten[k] = true
+		return
+	}
+	delete(c.unwritten, k)
 }

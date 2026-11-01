@@ -9,14 +9,19 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	eventsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/events/v1alpha1"
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
@@ -24,6 +29,7 @@ import (
 	infractl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/infra"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/eventstream"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/infra"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
@@ -36,6 +42,10 @@ const (
 	EphemeralName = "ephemeralinfracollection"
 
 	listPage = 100
+
+	maxListPages = 50
+
+	resyncFloor = 10 * time.Minute
 )
 
 type Options struct {
@@ -58,6 +68,10 @@ type Controller struct {
 	repos map[string]*binding.Table[struct{}]
 
 	retries *netretry.Tracker[retryKey]
+
+	mu sync.Mutex
+
+	marks map[retryKey]*mark
 }
 
 type retryKey struct {
@@ -82,7 +96,7 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), repos: map[string]*binding.Table[struct{}]{
+	c := &Controller{bus: opts.Bus, dynamic: opts.Dynamic, log: log.With("controller", Name), retries: netretry.NewTracker[retryKey](), marks: map[retryKey]*mark{}, repos: map[string]*binding.Table[struct{}]{
 		infractl.CollectionKind: binding.New[struct{}](), infractl.EphemeralCollectionKind: binding.New[struct{}]()}}
 	if err := register[*v1alpha1.InfraCollection, *v1alpha1.Infra](m, c, Name, infraOps, opts.Scope); err != nil {
 		return nil, err
@@ -113,6 +127,7 @@ func register[T, C ctlruntime.Object](m *ctlruntime.Manager, c *Controller, name
 		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) {
 			c.repos[ops.kind].Set(binding.Target{Cluster: req.Cluster, Workspace: req.Workspace, Name: req.Name}, nil)
 			c.retries.Reset(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name})
+			c.setMark(retryKey{kind: ops.kind, cluster: req.Cluster, name: req.Name}, nil)
 		})}
 	if scope != nil {
 		options = append(options, ctlruntime.InWorkspaces(scope))
@@ -270,19 +285,55 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	infractl.NoteUnresolved(r.c.log, previous.Conditions, &status.Conditions, gen, "", nil, attrs...)
 	owner := metav1.OwnerReference{APIVersion: v1alpha1.GroupVersion.String(), Kind: r.ops.kind, Name: req.Name, UID: obj.GetUID(), Controller: ptr.To(true)}
 	labels := map[string]string{v1alpha1.InfraKindLabel: r.ops.kind, v1alpha1.InfraNameLabel: req.Name}
-	if err := infractl.EnsureWatch(ctx, r.c.dynamic, r.manager, req.Workspace, infra.ChildName(r.ops.child, "coll", req.Name), labels, owner,
+	watchName := infra.ChildName(r.ops.child, "coll", req.Name)
+	if err := infractl.EnsureWatch(ctx, r.c.dynamic, r.manager, req.Workspace, watchName, labels, owner,
 		repo, nsid, spec.EventSourceRefs); err != nil {
 		return fail(err)
 	}
-	records, err := listAll(ctx, reader, did, nsid)
-	if err != nil {
-		return fail(infractl.ReadFailed(err))
-	}
-	r.c.retries.Reset(key)
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return fail(err)
 	}
+	f, err := readFeed(ctx, dyn, watchName, "at://"+did+"/"+nsid+"/")
+	if err != nil {
+		return fail(err)
+	}
+	m := r.c.markOf(key)
+	listed := (m != nil && m.did == did && m.gen == gen) || (listedAt(previous.Conditions, gen) && previous.Did == did)
+	gap, after := false, time.Duration(0)
+	if listed && m != nil && (m.resync || m.freshStream(f)) {
+		gap = true
+		if wait := resyncFloor - time.Since(m.resyncAt); wait > 0 {
+			gap, after = false, wait
+		}
+	}
+	var records []atprotorepo.Record
+	var next *mark
+	capped := false
+	if !listed || gap {
+		if gap {
+			r.c.log.Info("infra_collection_resync", attrs...)
+			r.c.flagResync(key)
+		}
+		records, capped, err = listAll(ctx, reader, did, nsid)
+		if err != nil {
+			return fail(infractl.ReadFailed(err))
+		}
+		next = f.baseline(true)
+		if gap {
+			next.resyncAt = time.Now()
+		}
+	} else {
+		base := m
+		if base == nil {
+			base = f.baseline(true)
+			base.seen, base.records = nil, childRecords(previous.Children)
+		}
+		records = applyFeed(base, f)
+		next = f.baseline(false)
+		next.streams, next.resyncAt = base.streams, base.resyncAt
+	}
+	r.c.retries.Reset(key)
 	kids, err := r.ops.children(ctx, dyn)
 	if err != nil {
 		return fail(err)
@@ -334,24 +385,177 @@ func (r *reconciler[T]) Reconcile(ctx context.Context, req ctlruntime.Request, o
 	}
 	status.Did, status.Records, status.Children = did, len(records), children
 	status.Message = fmt.Sprintf("%d %s record(s), %d child object(s) created this pass", len(records), nsid, created)
-	conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, true, "Listed", status.Message)
-	return ctlruntime.Result{}, req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status))
+	reason := "Listed"
+	if capped {
+		reason = "ListCapped"
+		status.Message += fmt.Sprintf("; the listing stopped at %d pages", maxListPages)
+	}
+	conds.Set(&status.Conditions, gen, v1alpha1.InfraCollectionConditionListed, true, reason, status.Message)
+	if err := req.ApplyStatus(ctx, r.ops.statusObject(req.Name, status)); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	next.did, next.gen, next.records = did, gen, records
+	r.c.setMark(key, next)
+	return ctlruntime.Result{RequeueAfter: after}, nil
 }
 
-func listAll(ctx context.Context, reader atprotorepo.RecordReader, did, nsid string) ([]atprotorepo.Record, error) {
+func listAll(ctx context.Context, reader atprotorepo.RecordReader, did, nsid string) ([]atprotorepo.Record, bool, error) {
 	var out []atprotorepo.Record
 	cursor := ""
-	for {
+	for range maxListPages {
 		page, err := reader.ListRecords(ctx, did, nsid, atprotorepo.ListOptions{Limit: listPage, Cursor: cursor})
 		if err != nil {
-			return nil, fmt.Errorf("infracollection: listRecords %s of %s: %w", nsid, did, err)
+			return nil, false, fmt.Errorf("infracollection: listRecords %s of %s: %w", nsid, did, err)
 		}
 		out = append(out, page.Records...)
 		if page.Cursor == "" || page.Cursor == cursor || len(page.Records) == 0 {
-			return out, nil
+			return out, false, nil
 		}
 		cursor = page.Cursor
 	}
+	return out, true, nil
+}
+
+type feed struct {
+	present map[string]string
+
+	order []string
+
+	gone map[string]bool
+
+	streams map[types.UID]bool
+}
+
+type mark struct {
+	streams map[types.UID]bool
+
+	seen map[string]string
+
+	records []atprotorepo.Record
+
+	gone map[string]bool
+
+	resyncAt time.Time
+
+	resync bool
+
+	did string
+
+	gen int64
+}
+
+func listedAt(conditions []metav1.Condition, gen int64) bool {
+	listed := meta.FindStatusCondition(conditions, v1alpha1.InfraCollectionConditionListed)
+	return listed != nil && listed.Status == metav1.ConditionTrue && listed.ObservedGeneration == gen
+}
+
+func readFeed(ctx context.Context, dyn *kube.Client, name, prefix string) (feed, error) {
+	f := feed{present: map[string]string{}, gone: map[string]bool{}, streams: map[types.UID]bool{}}
+	watch, err := kube.Get[v1alpha1.AtprotoRecordWatch](ctx, dyn.Resource(v1alpha1.AtprotoRecordWatchGVR), name)
+	if apierrors.IsNotFound(err) {
+		return f, nil
+	}
+	if err != nil {
+		return f, err
+	}
+	for _, rec := range watch.Status.Records {
+		if strings.HasPrefix(rec.URI, prefix) {
+			f.present[rec.URI] = rec.Cid
+			f.order = append(f.order, rec.URI)
+		}
+	}
+	for _, uri := range watch.Status.Deleted {
+		if _, ok := f.present[uri]; !ok && strings.HasPrefix(uri, prefix) {
+			f.gone[uri] = true
+		}
+	}
+	streams, err := kube.List[eventsv1alpha1.EventStream](ctx, dyn.Resource(eventsv1alpha1.EventStreamGVR),
+		metav1.ListOptions{LabelSelector: eventstream.RecordWatchLabel + "=" + name})
+	if err != nil {
+		return f, err
+	}
+	for _, s := range streams {
+		f.streams[s.UID] = s.Status.Cursor > 0 || meta.IsStatusConditionTrue(s.Status.Conditions, eventsv1alpha1.EventStreamConditionReady)
+	}
+	return f, nil
+}
+
+func (f feed) baseline(listing bool) *mark {
+	out := &mark{streams: map[types.UID]bool{}, seen: f.present, gone: f.gone}
+	for uid, resumable := range f.streams {
+		if resumable || !listing {
+			out.streams[uid] = true
+		}
+	}
+	return out
+}
+
+func (m *mark) freshStream(f feed) bool {
+	for uid, resumable := range f.streams {
+		if resumable && !m.streams[uid] {
+			return true
+		}
+	}
+	return false
+}
+
+func childRecords(children []v1alpha1.InfraCollectionChild) []atprotorepo.Record {
+	out := make([]atprotorepo.Record, 0, len(children))
+	for _, c := range children {
+		out = append(out, atprotorepo.Record{URI: c.URI, CID: c.CID, RKey: c.Rkey})
+	}
+	return out
+}
+
+func applyFeed(m *mark, f feed) []atprotorepo.Record {
+	out := make([]atprotorepo.Record, 0, len(m.records))
+	at := map[string]int{}
+	for _, rec := range m.records {
+		if f.gone[rec.URI] && !m.gone[rec.URI] {
+			continue
+		}
+		at[rec.URI] = len(out)
+		out = append(out, rec)
+	}
+	for _, uri := range f.order {
+		cid := f.present[uri]
+		if seen, ok := m.seen[uri]; ok && seen == cid {
+			continue
+		}
+		if i, ok := at[uri]; ok {
+			out[i].CID = cid
+			continue
+		}
+		at[uri] = len(out)
+		out = append(out, atprotorepo.Record{URI: uri, CID: cid})
+	}
+	return out
+}
+
+func (c *Controller) markOf(key retryKey) *mark {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.marks[key]
+}
+
+func (c *Controller) flagResync(key retryKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m := c.marks[key]; m != nil {
+		next := *m
+		next.resync = true
+		c.marks[key] = &next
+	}
+}
+
+func (c *Controller) setMark(key retryKey, m *mark) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m == nil {
+		delete(c.marks, key)
+		return
+	}
+	c.marks[key] = m
 }
 
 func ownedBy(k child, uid types.UID) bool {

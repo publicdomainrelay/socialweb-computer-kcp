@@ -3657,7 +3657,7 @@ internal/controllers/guestidentitygrant/    GuestIdentityGrant
 internal/controllers/hostinstall/           HostInstall
 internal/controllers/hostrelease/           HostRelease
 internal/controllers/infra/                 Infra and EphemeralInfra: their ComputeContracts (staged, requested, released), their AtprotoRecord and AtprotoRecordWatch, the pull of a record edited elsewhere
-internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: listRecords of an account's collection into child objects
+internal/controllers/infracollection/       InfraCollection and EphemeralInfraCollection: one listing of an account's collection, then its record watch, into child objects
 internal/controllers/jetstreameventsource/  JetstreamEventSource
 internal/controllers/kcpinstallation/       KcpInstallation
 internal/controllers/localrepo/             LocalRepo: a repo on a local Pds component
@@ -11754,6 +11754,63 @@ so it waits for a planned one.
 
 No record is ever deleted from a test account (owner, 2026-10-31 05:05Z: "we never want to be
 deleting records for people"); the r137 requester retention sweep was reverted in r138.
+
+### A finished infra reads its record only on a real change; a collection lists once, then follows its watch (2026-10-31, r139)
+
+Before: the Infra and EphemeralInfra controller read its PDS record (one getRecord) on every
+reconcile, and a reconcile came from every change of its AtprotoRecordWatch (that watch covers the
+whole collection, so every record write of every other tab woke every infra of the account), every
+AtprotoRecord, ComputeContract, repo bind and link event, and the netretry timer (2 s doubling to
+30 s) while a read failed. An EphemeralInfra with `endWhen: deadline` stays to its expiry (`ttlSeconds`,
+default `infra.DefaultTTL` 1 h; the page keeps them 24 h) after its contracts are released, so a page's PDS reads grew with
+tabs x time. Measured on prod 2026-10-30 by the wasm page: alice's PDS answered 429 and one page
+load logged 26 `infra_record_read_retrying`. Under a 429 a finished infra read at least 120 times
+an hour on the retry timer alone, plus once per event above. The InfraCollection relisted the whole
+collection (unbounded pages) on every change of its watch, cursor updates included: O(N) reads per
+record event, O(N^2) over a collection's life.
+
+Now an infra whose contracts are all finished (every declared contract Released or Failed in
+`status.contracts`, every owned ComputeContract Released or Failed) and whose record is Synced at the
+current generation is settled: its reconcile does no getRecord and writes no AtprotoRecord. It reads
+again only on a real change: a generation change (Synced is then older), its own record's cid
+changing in the watch (`watched` keeps the cid the watch reported as moved until a read indexes
+that same cid, so a newer cid that lands while a read is in flight is read too), the record
+deleted (the stream's delete, or the watch's verify, which now adds a NotFound record to
+`status.deleted`), or its deletion (the finalizer path is unchanged). A record write is part of
+the pass: the AtprotoRecord is applied before the status, and a failed apply keeps the key
+unwritten, so the Released phase always reaches the record before the infra counts as settled.
+The first settled reconcile in a process binds the repo, applies its own watch (a non-collection
+infra), checks that watch (or its collection's) in kcp once against `status.record`, logs
+`infra_record_settled` and indexes the cid, so a change made while the process was down is still
+read. A finished infra never retries a read on a timer: a failed read leaves Synced False
+(`RecordUnavailable`, `infra_record_read_failed`), and the next event reads again. A live infra
+keeps `RecordReadRetrying` and its retry timer. After: 0 reads an hour per finished infra with no
+change to its own record, one read per change of it.
+
+The collection keeps one full enumeration: an InfraCollection is a view of every record of one
+collection in one repo, so its first sync must list (the owner's rule allows a listing where the
+answer is an enumeration; no rkey derivation names records written by other tabs, apps or
+devices). The listing is bounded by the object's own scope (its repo and NSID), paged by 100 and
+capped at 50 pages (`ListCapped`). After it, the collection applies its watch's `status.records`
+and `status.deleted` as a diff against the record set it applied last, kept in memory (never
+against the cached `status.children`, which can lag a pass), so a burst cannot drop or bring back
+an entry (new uri: a child; new cid: the entry's cid; a uri newly deleted: the entry goes;
+children are never deleted), with no PDS read. A capped listing stops at the newest 50 pages; an
+older record shows up only when it changes.
+It lists again only after a gap: a ready EventStream of its watch that it has not seen (a new
+stream starts live, with no cursor), a new generation or DID, or a failed relist, and at most once
+per 10 min (`resyncFloor`, a delayed requeue) for a relist that succeeded; a failed relist retries
+on the netretry rate like the first listing. A process restart is not a gap for a stream with a
+saved cursor; one with no cursor at restart counts as new.
+
+Left open: each AtprotoRecordWatch still verifies every record in its `status.records` by getRecord
+every 5 min (`VerifyInterval`), and each non-collection infra owns a watch of the whole collection,
+so those reads still grow with infras x records seen. A stream that resumes under the same UID
+from a cursor its source no longer replays loses events with no relist (the client sees no
+expired-cursor signal). The watch keeps 512 records, so in a larger collection a settled infra's
+record can be evicted and then only the stream reports its changes. After a restart, deletes the
+watch recorded while the process was down are not applied to `status.children`. Keeping the first
+listing on a collection that grows with every page load needs the owner's sign-off (review I3).
 
 ### r139: the requester reads the receipt and the termination by getRecord
 
