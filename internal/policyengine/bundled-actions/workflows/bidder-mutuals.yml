@@ -32,6 +32,9 @@ on:
       root-requester-did:
         description: 'DID of the root requester, when the caller knows it and record derivation would get it wrong.'
         required: false
+      cache-key:
+        description: 'Verdict memo key: workflow, mode, perspective, every DID, the records and the args.'
+        required: false
 
 jobs:
   evaluate:
@@ -53,3 +56,4 @@ jobs:
         perspective: ${{ inputs.perspective || '' }}
         subject-did: ${{ inputs.subject-did || '' }}
         root-requester-did: ${{ inputs.root-requester-did || '' }}
+        cache-key: ${{ inputs.cache-key || '' }}

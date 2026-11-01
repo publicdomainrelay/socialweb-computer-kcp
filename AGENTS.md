@@ -356,8 +356,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   (`requester-tangled-vouch` on a requester, every contract and RFP carries it, owner-session mode
   included; `bidder-tangled-vouch` on a bidder). The bidder's full lane runs its own workflow and then
   every policy the RFP attaches, and allows only if all allow; a stored bid verdict never skips it.
-  The requester gate runs the workflow of the attached policy record and refuses a contract whose
-  spec.policy names another. Free winners get the full run too. A missing evaluator, run client or
+  The requester gate (scope and full, contract and session) runs the body of the attached policy
+  record and refuses a contract or session whose policy names another. On the bidder the requester
+  is the subject. Every run sends `cache-key` (`runs.CacheKey`: workflow, mode, perspective, every
+  DID, the records, the args), so a memoized verdict never crosses parties. Free winners get the full run too. A missing evaluator, run client or
   engine, or an `allow` output that is not a strict boolean, denies. `open` runs the open workflow
   only when named; it never skips.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
