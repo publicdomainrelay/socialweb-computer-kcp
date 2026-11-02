@@ -1,6 +1,6 @@
 plan: "0040"
 title: "Workload identity OAuth on our PDS: OpenBao issues OIDC JWTs, a token exchange XRPC and an approve XRPC gated by com.fedproxy.rbac records keyed by role name, scope enforcement, and an atirc session minted by a workload"
-status: doing
+status: done
 source: >
   2026-11-01, owner (verbatim, first): "take the reference implementation and study it and understand the
   com.fedproxy.rbac records and then I want you to find the social Webb computer KCP PDS implementation and I
@@ -264,7 +264,7 @@ items:
       status.contract.oauthClients shows what is allowed. `run request --allow-oauth <client_id>[=<scope>,...]`
       (repeatable) and the page's Request VM form field "Allow OAuth apps". `run requester` takes the same in
       the contract it is given. The iOS app is future work.
-    status: doing
+    status: done
   - id: S8-INTEGRATION-TEST
     title: "Go integration test (authorized by the owner 2026-11-01)"
     files: [test/integration/workloadoauth_test.go, docs/spec/integration-catalog.yaml, AGENTS.md]

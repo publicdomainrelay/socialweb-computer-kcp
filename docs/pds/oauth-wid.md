@@ -277,8 +277,11 @@ checks signatures itself.
 
 `spec.oauthClients` is part of the contract template, so Infra, EphemeralInfra and the browser page
 (which requests VMs through an EphemeralInfra template) carry it. The page's "Allow OAuth apps"
-field (Compute block, one app per line: client_id, then scopes) lives in the page repository
-(johnandersen777/kcp, branch kcp-wasm-memory-storage-1); the change is
-[browser-page-oauth-clients.patch](browser-page-oauth-clients.patch) (`git am` it there). The page's
-own identity is oauthBrowser today, so its requests with apps listed are refused until the page
-signs in with an account on a socialweb-computer PDS. The iOS app is future work.
+field (Compute block, one app per line: client_id, then scopes) is on branch
+`claude/socialweb-oauth-clients` of johnandersen777/kcp, on top of `kcp-wasm-2` (the page in prod,
+rc141); the same change is [browser-page-oauth-clients.patch](browser-page-oauth-clients.patch).
+A listed app gives the contract a secrets bundle, which carries `oauth-wid.json` to the VM. The
+page's unit suite passes its three new cases (`parseOAuthClients`, `infraContract`); its 27 policy
+suite cases need a socialweb mirror and fail the same way without the change. The page's own
+identity is oauthBrowser today, so its requests with apps listed are refused until the page signs
+in with an account on a socialweb-computer PDS. The iOS app is future work.
