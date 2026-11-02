@@ -8,6 +8,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/auth"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
@@ -61,6 +62,13 @@ func (s *Server) handleGetServiceAuth(w http.ResponseWriter, r *http.Request, in
 			return
 		}
 		lexMethod = &parsed
+	}
+	want := oauth.ScopeTransitionGeneric
+	if lexMethod != nil {
+		want = oauth.RPCScope(lexMethod.String(), req.Aud)
+	}
+	if !requireScope(w, info, want) {
+		return
 	}
 	ttl := serviceauth.MaxTokenLifetime
 	if req.Exp != 0 {

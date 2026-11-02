@@ -92,6 +92,7 @@ type AuthorizationCodeStore interface {
 type PARStore interface {
 	StorePAR(ctx context.Context, request PARRequest) error
 	ConsumePAR(ctx context.Context, requestURI string, at time.Time) (*PARRequest, error)
+	GetPAR(ctx context.Context, requestURI string, at time.Time) (*PARRequest, error)
 }
 
 type TokenStore interface {

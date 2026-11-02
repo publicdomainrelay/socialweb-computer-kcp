@@ -274,6 +274,8 @@ type IngressXrpcConfig struct {
 	RelayRef *commonv1.ObjectRef `json:"relayRef,omitempty"`
 
 	IdentityRef *commonv1.ObjectRef `json:"identityRef,omitempty"`
+
+	EphemeralKey bool `json:"ephemeralKey,omitempty"`
 }
 
 type FirecrackerProvider struct {
@@ -698,6 +700,8 @@ type MarketRequesterSpec struct {
 	SecretsFallback SecretsFallback `json:"secretsFallback,omitempty" apigen:"enum=None|Sealed"`
 
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
+
+	OAuthGrants []RequesterOAuthGrant `json:"oauthGrants,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 

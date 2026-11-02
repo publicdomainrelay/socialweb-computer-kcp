@@ -40,8 +40,18 @@ type ExposureSpec struct {
 
 	PublicHost string `json:"publicHost,omitempty"`
 
+	IngressKey ExposureIngressKey `json:"ingressKey,omitempty" apigen:"enum=Persistent|Ephemeral"`
+
 	Suspend bool `json:"suspend,omitempty"`
 }
+
+type ExposureIngressKey string
+
+const (
+	ExposureIngressKeyPersistent ExposureIngressKey = "Persistent"
+
+	ExposureIngressKeyEphemeral ExposureIngressKey = "Ephemeral"
+)
 
 type ExposureTLS struct {
 	Enabled bool `json:"enabled,omitempty"`

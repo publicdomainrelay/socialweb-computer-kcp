@@ -213,8 +213,31 @@ func ScopeSubject(scope string) string {
 	return subject
 }
 
+func Permitted(granted []string, want string) bool {
+	have := map[string]bool{}
+	for _, scope := range granted {
+		have[scope] = true
+	}
+	return have[want] || grantedBy(want, granted, have)
+}
+
+func RepoScope(collection, action string) string {
+	return collectionScope(collection, action)
+}
+
+func RPCScope(lxm, aud string) string {
+	return "rpc:" + lxm + "?aud=" + url.QueryEscape(aud)
+}
+
+func BlobScope(mimeType string) string {
+	return "blob:" + mimeType
+}
+
 func grantedBy(want string, granted []string, have map[string]bool) bool {
 	resource, subject, params := parsePermission(want)
+	if resource == "blob" {
+		return blobGranted(subject, granted, have)
+	}
 	if resource != "repo" && resource != "rpc" {
 		return false
 	}
@@ -246,6 +269,41 @@ func grantedBy(want string, granted []string, have map[string]bool) bool {
 		}
 	}
 	return false
+}
+
+func blobGranted(mimeType string, granted []string, have map[string]bool) bool {
+	if have[ScopeTransitionGeneric] {
+		return true
+	}
+	for _, scope := range granted {
+		resource, subject, params := parsePermission(scope)
+		if resource != "blob" {
+			continue
+		}
+		accepts := params["accept"]
+		if subject != "" {
+			accepts = append(accepts, subject)
+		}
+		for _, accept := range accepts {
+			if mimeMatches(accept, mimeType) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mimeMatches(pattern, mimeType string) bool {
+	pattern, mimeType = strings.ToLower(strings.TrimSpace(pattern)), strings.ToLower(strings.TrimSpace(mimeType))
+	if pattern == "*/*" || pattern == mimeType {
+		return true
+	}
+	kind, sub, ok := strings.Cut(pattern, "/")
+	if !ok || sub != "*" {
+		return false
+	}
+	gotKind, _, ok := strings.Cut(mimeType, "/")
+	return ok && gotKind == kind
 }
 
 func parsePermission(scope string) (string, string, url.Values) {

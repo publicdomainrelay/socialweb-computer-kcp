@@ -17,7 +17,7 @@ var APIResources = []APIResource{
 		{Name: "Suspend", Type: "boolean", JSONPath: ".spec.suspend"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "Exposure", Plural: "exposures", Revision: 5, Export: "exposures", Object: Exposure{}, PrinterColumns: []PrinterColumn{
+	{Kind: "Exposure", Plural: "exposures", Revision: 6, Export: "exposures", Object: Exposure{}, PrinterColumns: []PrinterColumn{
 		{Name: "Mode", Type: "string", JSONPath: ".spec.mode"},
 		{Name: "Hostname", Type: "string", JSONPath: ".spec.hostname"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},

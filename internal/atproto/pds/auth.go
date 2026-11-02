@@ -42,7 +42,20 @@ type authInfo struct {
 	AppPassword bool
 	Privileged  bool
 	OAuth       bool
+	Scopes      []string
 	Service     bool
+}
+
+func (a *authInfo) permits(want string) bool {
+	return !a.OAuth || oauth.Permitted(a.Scopes, want)
+}
+
+func requireScope(w http.ResponseWriter, info *authInfo, want string) bool {
+	if info.permits(want) {
+		return true
+	}
+	writeXRPCError(w, http.StatusForbidden, "ScopeMissingError", "missing required scope "+want)
+	return false
 }
 
 func (s *Server) mintToken(did syntax.DID, sid, jti, scope string, ttl time.Duration) (string, error) {
@@ -152,6 +165,7 @@ func (s *Server) authenticate(r *http.Request) (*authInfo, error) {
 			DID:       sess.Account.DID,
 			SessionID: sess.ID,
 			OAuth:     true,
+			Scopes:    strings.Fields(sess.Scope),
 		}, nil
 	}
 	scheme, token, ok := serviceauth.SplitAuthorization(r.Header.Get("Authorization"))

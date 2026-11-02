@@ -1444,9 +1444,9 @@ Decisions, made by Claude, user may veto:
 
 How a guest logs in, which is the requester's and the guest's half (`claim.json`, written by the
 guest's cloud-init from `internal/atproto/cloudinit/k3sjoin.go`, carries `jwtMount`,
-`role`, `audience`, `kvMount`, `kvPath`): ask `guest-login.sh token <audience>` for a token of the
-bidder's OpenBao identity/oidc whose `aud` is the grant's audience (`api://socialweb-node?actx=<clusterKey>/<node>`)
-and whose `wid_sub` claim is the grant's subject, then `POST /v1/auth/jwt-<12 hex>/login` with `{"role": "<node>", "jwt": "<token>"}`, then
+`role`, `audience`, `kvMount`, `kvPath`): ask `guest-login.sh token <audience>` for a JWT from the
+bidder's sshsig plugin issuer (`wid/token`, plan 0040 D1) whose `aud` is that audience
+(`api://socialweb-node?actx=<clusterKey>/<node>`) and whose `sub` is the guest's subject, then `POST /v1/auth/jwt-<12 hex>/login` with `{"role": "<node>", "jwt": "<token>"}`, then
 `GET /v1/socialweb-nodes/data/<node>` with the returned `client_token` in `X-Vault-Token`
 (`internal/nodeagent`). Measured against a real OpenBao v2.6.2 (`bao server -dev`) and an ES256 OIDC
 issuer when it was built: the node's own token logs in and reads its path; a token for another
@@ -2194,11 +2194,9 @@ releases every node. The Requester component of the same application carries the
   = `{issuer, subject, audience: api://socialweb-node?actx=<clusterKey>/<node>, role: <node>}` and
   appends `claim.json` = `{node, cluster, jwtMount, role, audience, kvMount, kvPath}` to the bundle
   (`jwtMount` = `jwt-<first 12 hex of sha256(issuer)>` needs the winning bid's issuer). The wrapped
-  capability's RBAC record also names a role `<role>-node` whose `aud` is that audience, so the bidder
-  keeps a GuestIdentityGrant (api `socialweb-node`, actx `<clusterKey>/<node>`) and the guest can get the
-  token; an audience that is not `api://<api>?actx=<actx>` gets no grant. The cluster vault's JWT role
-  binds `wid_sub` (the user claim) with `bound_claims`, because the `sub` of an OpenBao identity token is
-  the entity id. A grant write
+  guest gets a token for that audience from the bidder's sshsig plugin issuer, which mints any one
+  audience for the guest's fixed subject (plan 0040 D2; no RBAC record and no grant object). The cluster
+  vault's JWT role binds `sub` (the user claim) with `bound_claims`. A grant write
   that fails leaves the inner capability unauthorized and the contract `Failed`, releasable from its
   receipt. The Requester waits up to `vmReadyTimeoutSec` (default 120) from the accept for the guest to fetch its
   bundle (`status.secretsFetchedAt`), then writes phase `Held`; a guest that never fetches ends
@@ -3652,8 +3650,7 @@ internal/controllers/eventstream/           EventStream: connects an EventSource
 internal/controllers/exposure/              Exposure: publishes a service through its ingress
 internal/controllers/exposurelocal/         Exposure, in process: Ready on a given origin, routes to the bus handler; no listener, no ingress (pkg/embedded)
 internal/controllers/firecrackervm/         FirecrackerVM: places and runs the guest through internal/compute/firecracker
-internal/controllers/guestcontrolplane/     GuestControlPlane: its inputs from ComputeVM, GuestIdentityGrant, MarketIdentity, OpenBaoServer and Exposure
-internal/controllers/guestidentitygrant/    GuestIdentityGrant
+internal/controllers/guestcontrolplane/     GuestControlPlane: its inputs from ComputeVM, MarketIdentity, OpenBaoServer and Exposure
 internal/controllers/hostinstall/           HostInstall
 internal/controllers/hostrelease/           HostRelease
 internal/controllers/infra/                 Infra and EphemeralInfra: their ComputeContracts (staged, requested, released), their AtprotoRecord and AtprotoRecordWatch, the pull of a record edited elsewhere
@@ -4521,6 +4518,32 @@ fail, rather than the code read against this document alone.
   so the one-kcp network has no standing check until plan 0027.
 
 ## 15. Settled decisions, and the defects they closed
+
+- **Workload identity OAuth on our PDS; the guest's JWTs come from the sshsig plugin with any audience
+  (plan 0040, 2026-11-01).** Before: every OAuth session on our PDS was full access (authenticate
+  dropped its scope); a workload could not sign an app in as an account without a password or a
+  person; the guest held an OpenBao token and asked for one identity/oidc role per audience, each a
+  GuestIdentityGrant the bidder derived from the requester's com.fedproxy.rbac record at
+  `node.<accept rkey>`, with a listRecords fallback and a 30 s re-read. After: our PDS enforces the
+  granted scopes on every write (403 ScopeMissingError); `com.fedproxy.temp.oauth.exchangeToken`
+  (RFC 8693 names, DPoP) and `approveAuthorization` let a workload JWT approve a PAR request as the
+  account, admitted only by the account's `com.fedproxy.rbac` record at rkey = role (one role per
+  record, protects naming the PDS service DID, the body schema evaluated on a document the PDS builds
+  from the PAR); refresh re-checks the record and a commit to it revokes the sessions it admitted.
+  The sshsig auth plugin issues the guest's OIDC JWTs (`wid/token`, `sub` = the workload subject, any
+  one audience); the bidder reads no requester record, GuestIdentityGrant and the identity/oidc
+  roles are gone, and relying parties check `sub`. Requester rules: ComputeContract
+  `spec.oauthClients` (rkey `oauth-<vm role>`, flow 2) and Requester `spec.oauthGrants` (flow 1). An
+  ingress Exposure with `ingressKey: Ephemeral` makes a PDS public at a run-time
+  `<did:key label>.xrpc.fedproxy.com` host with no key on disk. Readings: `go test ./test/integration/`
+  6 cases PASS (5 runs with -race, 23.9 s); live `TestLiveWorkloadMintsAnAtircSessionAndScrobblesThroughIt`
+  PASS in 130 s: irc.fedfork.com signed in a did:plc on an ephemeral xrpc.fedproxy.com PDS through
+  the workload's approval and wrote `com.vibescrobble.scrobble/3mzbvauwixf22` through the session;
+  the run found two interop defects, fixed: `scopes_supported` lacked `transition:generic` (atirc's
+  atproto-oauth refused the server) and indigo's re-registered `ES256` jwt method made every
+  standard ES256 workload token fail verification inside the PDS process (the verifier now checks
+  signatures itself). How it works: `docs/pds/oauth-wid.md`; protocol note:
+  `docs/protocol/workload-oauth.md`.
 
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app

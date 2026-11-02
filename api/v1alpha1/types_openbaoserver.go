@@ -157,8 +157,6 @@ type OpenBaoServerDeclared struct {
 	KV []OpenBaoKVScope `json:"kv,omitempty"`
 
 	PKITidy []OpenBaoPKITidy `json:"pkiTidy,omitempty"`
-
-	IdentityOIDC *OpenBaoIdentityOIDC `json:"identityOIDC,omitempty"`
 }
 
 type OpenBaoPKITidy struct {
@@ -167,18 +165,6 @@ type OpenBaoPKITidy struct {
 	Interval string `json:"interval,omitempty"`
 
 	SafetyBuffer string `json:"safetyBuffer,omitempty"`
-}
-
-type OpenBaoIdentityOIDC struct {
-	Key string `json:"key"`
-
-	Algorithm string `json:"algorithm,omitempty"`
-
-	RotationPeriod string `json:"rotationPeriod,omitempty"`
-
-	VerificationTTL string `json:"verificationTTL,omitempty"`
-
-	TokenTTL string `json:"tokenTTL,omitempty"`
 }
 
 type OpenBaoSecretMount struct {

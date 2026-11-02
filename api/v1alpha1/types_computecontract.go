@@ -47,6 +47,16 @@ type ComputeContractTemplate struct {
 	Association *ComputeContractAssociation `json:"association,omitempty"`
 
 	GuestTools []string `json:"guestTools,omitempty" apigen:"listType=set,enum=socialweb-computer"`
+
+	OAuthClients []ComputeContractOAuthClient `json:"oauthClients,omitempty" apigen:"listType=map,listMapKey=clientId"`
+}
+
+type ComputeContractOAuthClient struct {
+	ClientID string `json:"clientId" apigen:"pattern=^https://[^ ]+$"`
+
+	Scopes []string `json:"scopes" apigen:"listType=set"`
+
+	RedirectURI string `json:"redirectUri,omitempty" apigen:"userEndpoint"`
 }
 
 type ComputeContractSpec struct {

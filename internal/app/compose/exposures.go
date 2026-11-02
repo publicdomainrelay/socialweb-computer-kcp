@@ -160,6 +160,9 @@ func IngressExposure(kind, name, hostname string, network *v1alpha1.MarketNetwor
 	if cfg != nil {
 		if cfg.Xrpc != nil {
 			spec.IngressAddress = IngressHost(cfg.Xrpc.IngressProxyHost)
+			if cfg.Xrpc.EphemeralKey {
+				spec.IngressKey = exposurev1alpha1.ExposureIngressKeyEphemeral
+			}
 		}
 	} else if network != nil {
 		spec.IngressAddress = network.IngressProxyHost

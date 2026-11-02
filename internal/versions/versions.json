@@ -1327,7 +1327,7 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "62b84df545733353fb478d5b2e4aded9158f0a0a1bb258288e00679a44a60ea8",
+          "sha256": "f9d8af696ab95231590efdd874d20f520687705c8451b9e0c74b21eebaa5c073",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
@@ -1336,7 +1336,7 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "f40a63039dcf6d7441806c961a3c9b863eaf3fcf65fe2ce221ce2a962cd45cd1",
+          "sha256": "e791a8e7e395fbb0af8f31761d3e1cfba406ba8a0495164933b98191252ca10d",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
@@ -1345,7 +1345,7 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499",
+          "sha256": "f830a7714c3501d3ee6502bb82515b765951fc3acdba143c8eb7806a972d4d25",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
@@ -1353,19 +1353,19 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "330dbd48ca4fd731d104ba2d361ec754520b9b4668367d4bd2a36f213ceee75a",
-          "rawBytes": 16228478,
-          "zstdBytes": 5093784
+          "treeSha256": "6cc2d6aff12abb73ed5c8875432a5af6c71de50fe43af76c19c9485cc60650de",
+          "rawBytes": 16273534,
+          "zstdBytes": 5117861
         },
         "linux/arm64": {
-          "treeSha256": "a03e44b8460a5a54a4577e3c083e9184e6164eb10a3696feb1f10543c35836be",
+          "treeSha256": "77b72c0bef238e58b4a3dd53d0df40c2de0b2461fed357258dcbec6ac88d5388",
           "rawBytes": 15204478,
-          "zstdBytes": 4532474
+          "zstdBytes": 4551370
         },
         "darwin/arm64": {
-          "treeSha256": "eaa7c8fb8fb56754e7617ca485fa9bfa4156a6b59ba2ab4f3e0f79321504f154",
-          "rawBytes": 16146018,
-          "zstdBytes": 4930055,
+          "treeSha256": "a5a99ac2a82978ada00a6787cd04b6a06b5204374a8f9873bf1c08bcfeca0ebf",
+          "rawBytes": 15730226,
+          "zstdBytes": 4770935,
           "binarySha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499"
         }
       }

@@ -11,6 +11,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 	"github.com/ipfs/go-cid"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
@@ -31,6 +32,11 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 		writeXRPCError(w, http.StatusNotImplemented, "Unsupported", "blob storage is not configured")
 		return
 	}
+	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	mimeType = cmp.Or(mimeType, "application/octet-stream")
+	if !requireScope(w, info, oauth.BlobScope(mimeType)) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxBlobSize+1)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -41,8 +47,6 @@ func (s *Server) handleUploadBlob(w http.ResponseWriter, r *http.Request, info *
 		writeXRPCError(w, http.StatusBadRequest, "BlobTooLarge", "blob exceeds maximum size")
 		return
 	}
-	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
-	mimeType = cmp.Or(mimeType, "application/octet-stream")
 	ref, err := s.blobs.PutBlob(ctx, info.DID, mimeType, data)
 	if err != nil {
 		writeXRPCError(w, http.StatusInternalServerError, "InternalError", "failed to store blob")

@@ -21,17 +21,23 @@ type backend struct {
 func factory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	b := &backend{}
 	b.Backend = &framework.Backend{
-		Help:        "Logs a guest in by an sshsig made with its bound ed25519 ssh host key.",
+		Help:        "Logs a guest in, and issues its OIDC workload identity tokens, by an sshsig made with its bound ed25519 ssh host key.",
 		BackendType: logical.TypeCredential,
 		PathsSpecial: &logical.Paths{
-			Unauthenticated: []string{"bind", "challenge", "login"},
+			Unauthenticated: []string{"bind", "challenge", "login", "wid/token", "wid/.well-known/*"},
 		},
 		Paths: []*framework.Path{
 			pathRoleList(b),
 			pathRole(b),
+			pathRoleWID(b),
 			pathBind(b),
 			pathChallenge(b),
 			pathLogin(b),
+			pathWIDConfig(b),
+			pathWIDRotate(b),
+			pathWIDToken(b),
+			pathWIDDiscovery(b),
+			pathWIDKeys(b),
 		},
 		AuthRenew: b.loginRenew,
 	}

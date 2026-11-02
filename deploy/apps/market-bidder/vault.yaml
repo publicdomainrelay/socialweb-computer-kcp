@@ -22,10 +22,12 @@ spec:
         rules:
           - path: bidder/data/relay-keypair/kcp
             capabilities: ["create", "read", "update"]
-          - path: identity/oidc/config
+          - path: auth/sshsig/wid/config
             capabilities: ["create", "read", "update"]
           - path: auth/sshsig/role/*
             capabilities: ["read"]
+          - path: auth/sshsig/role/+/wid
+            capabilities: ["update"]
       - name: bidder-repo-key
         rules:
           - path: bidder/data/identity/bidder/keys
@@ -36,7 +38,7 @@ spec:
             capabilities: ["create", "read", "update"]
       - name: bidder-oidc-rotate
         rules:
-          - path: identity/oidc/key/guest/rotate
+          - path: auth/sshsig/wid/rotate
             capabilities: ["update"]
       - name: bidder-guest-user-data-write
         rules:
@@ -50,8 +52,6 @@ spec:
         rules:
           - path: auth/sshsig/role/*
             capabilities: ["create", "read", "update", "delete"]
-    identityOIDC:
-      key: guest
   plugins:
     - name: sshsig
       type: auth
@@ -86,9 +86,6 @@ rules:
   - apiGroups: ["socialweb.computer"]
     resources: ["bids/status"]
     verbs: ["get", "patch", "update"]
-  - apiGroups: ["socialweb.computer"]
-    resources: ["guestidentitygrants"]
-    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
   - apiGroups: ["socialweb.computer"]
     resources: ["marketidentities"]
     verbs: ["get", "list", "watch", "patch", "update"]

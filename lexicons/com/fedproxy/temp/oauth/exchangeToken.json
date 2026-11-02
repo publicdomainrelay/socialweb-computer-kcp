@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "com.fedproxy.temp.oauth.exchangeToken",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Exchange a workload identity token (an OIDC JWT) for a short PDS token bound to one com.fedproxy.rbac role of one account on this PDS. Field names follow RFC 8693. Requires a DPoP proof (RFC 9449); the issued token is bound to its key. The account's record at the role's rkey must protect this PDS and name the token's iss, aud and sub, and a policy of the role must allow capability create on /xrpc/com.fedproxy.temp.oauth.exchangeToken. A subject token is exchanged at most once.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject_token", "subject_token_type", "audience"],
+          "properties": {
+            "subject_token": { "type": "string", "maxLength": 8192 },
+            "subject_token_type": { "type": "string", "const": "urn:ietf:params:oauth:token-type:jwt" },
+            "audience": { "type": "string", "description": "<account DID>#role/<rkey>" },
+            "requested_token_type": { "type": "string", "const": "urn:ietf:params:oauth:token-type:access_token" }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["access_token", "issued_token_type", "token_type", "expires_in"],
+          "properties": {
+            "access_token": { "type": "string", "description": "A JWT of typ wid+jwt: iss the PDS service DID, sub the account DID, aud the requested audience, lxm com.fedproxy.temp.oauth.approveAuthorization, act {iss, sub} of the workload, cnf.jkt of the DPoP key, at most 5 minutes and never past the subject token." },
+            "issued_token_type": { "type": "string" },
+            "token_type": { "type": "string", "const": "DPoP" },
+            "expires_in": { "type": "integer" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidRequest" },
+        { "name": "Forbidden" }
+      ]
+    }
+  }
+}

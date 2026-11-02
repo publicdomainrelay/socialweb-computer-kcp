@@ -606,6 +606,11 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "allow-oauth": {
+      "type": "string",
+      "repeat": true,
+      "description": "run request: --allow-oauth <client_id>=<scope>,<scope>... (repeatable, one OAuth client each; spec.oauthClients) lets the guest approve that atproto OAuth client's authorization as the requesting account, with at most those scopes: the requester writes com.fedproxy.rbac/oauth-<vm> in its own repo (iss the winning bidder's workload issuer, sub the guest, aud <did>#role/oauth-<vm>) and, with --secrets, /etc/socialweb-computer/oauth-wid.json into the bundle; the guest runs com.fedproxy.temp.oauth.exchangeToken and approveAuthorization on the requester's PDS. Needs a localRepo identity (--identity) on the requester's own PDS; the client_id is an https URL without a query; transition:* and repo:com.fedproxy.rbac scopes are refused"
+    },
     "guest-tools": {
       "type": "string",
       "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"
@@ -806,6 +811,78 @@
     "compute-kinds": {
       "type": "string",
       "description": "run bidder, install bidder and dev up --profile market-network: comma-separated compute kinds the bidder serves (vm, deno; spec.computeKinds of the MarketBidder, on every network bidder for dev up); unset, vm only; install bidder writes it to config.json. For run bidder without --network, no vm makes it a deno sandbox bidder, which needs --host-backend=proc and --fg"
+    },
+    "oauth-pds": {
+      "type": "string",
+      "description": "oauth allow and revoke: the account's PDS URL (our PDS); the record is written there through a session signed in with ATPROTO_PASSWORD, and the PDS service DID is read from its describeServer"
+    },
+    "oauth-account": {
+      "type": "string",
+      "description": "oauth allow, revoke and approve: the account DID whose com.fedproxy.rbac record grants the workload; oauth approve defaults it (and --oauth-role) from /etc/socialweb-computer/oauth-wid.json, which a contract's spec.oauthClients puts into the guest's secrets bundle"
+    },
+    "oauth-role": {
+      "type": "string",
+      "description": "oauth allow, revoke and approve: the role name, which is the com.fedproxy.rbac record key; the workload token's audience is <account>#role/<role>"
+    },
+    "oauth-issuer": {
+      "type": "string",
+      "description": "oauth allow: the workload's OIDC issuer URL (https; the iss of its tokens)"
+    },
+    "oauth-subject": {
+      "type": "string",
+      "description": "oauth allow: the workload's subject (the sub of its tokens)"
+    },
+    "oauth-client": {
+      "type": "string",
+      "description": "oauth allow: the OAuth client_id URL(s) the workload may approve, comma-separated"
+    },
+    "oauth-scope": {
+      "type": "string",
+      "description": "oauth allow: the scopes the workload may approve, comma-separated; unset takes the client metadata's scope without transition:* and repo:com.fedproxy.rbac"
+    },
+    "oauth-redirect-uri": {
+      "type": "string",
+      "description": "oauth allow: pin the client's redirect_uri"
+    },
+    "oauth-service": {
+      "type": "string",
+      "description": "oauth allow: the PDS service DID the record protects; unset reads it from --oauth-pds describeServer"
+    },
+    "oauth-print": {
+      "type": "boolean",
+      "description": "oauth allow: print the record JSON and write nothing"
+    },
+    "oauth-login": {
+      "type": "string",
+      "description": "oauth approve: the app's sign-in URL that answers a redirect to the PDS authorize page when given ?handle=, e.g. https://irc.fedfork.com/login"
+    },
+    "oauth-login-handle": {
+      "type": "string",
+      "description": "oauth approve: the handle or DID typed into the app's sign-in; default the account DID"
+    },
+    "oauth-token-command": {
+      "type": "string",
+      "description": "oauth approve: the command that prints a workload JWT for the audience given as its last argument; default /usr/local/bin/guest-login.sh token"
+    },
+    "oauth-token-file": {
+      "type": "string",
+      "description": "oauth approve: read the workload JWT from this file instead of running a command"
+    },
+    "oauth-jar": {
+      "type": "string",
+      "description": "oauth approve: write the app's cookies (its signed-in session) to this file, mode 0600, as [{url, name, value}]"
+    },
+    "oauth-grants-file": {
+      "type": "string",
+      "description": "run request and run requester, after --: a JSON file holding a list of {role, issuer, subject, clients: [{clientId, scopes, redirectUri}]}; the requester writes one com.fedproxy.rbac record per role in its own repo on its own PDS (localRepo identity) so that workload may approve those OAuth clients as the requester's account, and deletes a role that leaves the list"
+    },
+    "oauth-self": {
+      "type": "string",
+      "description": "run request and run requester, after --: <client_id>[=<scope>,...]; inside a guest, let this guest's own workload identity (the iss and sub of guest-login.sh token) approve that OAuth client as the requester's account (role oauth-self); a * in the client_id matches a keyed client_id such as https://irc.fedfork.com/oauth/client-metadata*; no scopes take the client metadata's"
+    },
+    "ingress-ephemeral-key": {
+      "type": "boolean",
+      "description": "run request and run requester, after --: the app PDS's ingress host on the xrpc ingress proxy comes from a key held only in memory, so its URL (and the PDS handle, which becomes that host) is new on every start and no key is written; the PDS keeps its keys in memory and tombstones the DIDs it made when it stops"
     }
   }
 }

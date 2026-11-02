@@ -8,7 +8,7 @@ import (
 
 func applyIngressOption(ingress *v1alpha1.IngressConfig, name, value string) (*v1alpha1.IngressConfig, bool, error) {
 	switch name {
-	case "ingress-provider", "ingress-public-host", "ingress-xrpc-host", "ingress-relay-url",
+	case "ingress-provider", "ingress-public-host", "ingress-xrpc-host", "ingress-relay-url", "ingress-ephemeral-key",
 		"ingress-opentunnel-command", "ingress-opentunnel-route-name", "ingress-opentunnel-local-host", "ingress-opentunnel-proxy-protocol",
 		"requester-ingress-provider", "requester-ingress-webrtc-stun":
 	default:
@@ -32,6 +32,11 @@ func applyIngressOption(ingress *v1alpha1.IngressConfig, name, value string) (*v
 			ingress.Xrpc = &v1alpha1.IngressXrpcConfig{}
 		}
 		ingress.Xrpc.IngressProxyHost = value
+	case "ingress-ephemeral-key":
+		if ingress.Xrpc == nil {
+			ingress.Xrpc = &v1alpha1.IngressXrpcConfig{}
+		}
+		ingress.Xrpc.EphemeralKey = value == "" || value == "true" || value == "1"
 	case "ingress-relay-url":
 		if ingress.Xrpc == nil {
 			ingress.Xrpc = &v1alpha1.IngressXrpcConfig{}

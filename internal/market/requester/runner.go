@@ -67,8 +67,6 @@ type contractRunner struct {
 
 	secrets *secretsState
 
-	rbacRKey string
-
 	atircRevoke sync.Once
 
 	releaseRequested string
@@ -259,6 +257,13 @@ func (r *contractRunner) Run(ctx context.Context) {
 			return
 		}
 	}
+	if len(contract.Spec.OAuthClients) > 0 && (state == nil || state.RFPURI == "") && !r.released() {
+		if err := r.q.checkOAuthClients(contract); err != nil {
+			r.log().Warn("requester_contract_refused", "err", err.Error())
+			r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+err.Error(), state, nil, nil, "refused", 1)
+			return
+		}
+	}
 	if contract.Spec.SecretsRef != nil && contract.Status.SecretsFetchedAt == "" {
 		if err := r.untilSettled(ctx, "ensureSecrets", func() error { return r.ensureSecrets(ctx, contract) }); err != nil {
 			if !r.q.stopping() {
@@ -333,6 +338,9 @@ func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.Node
 	}
 	r.log().Warn("requester_contract_failed", "err", err)
 	r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "the contract flow failed: "+err.Error(), state, r.currentBids(), r.currentChosen(), "failed", attempts)
+	if state == nil || state.Receipt == nil {
+		r.deleteOAuthClients(ctx)
+	}
 	if state != nil && state.Receipt != nil && state.Termination == nil {
 		if waitErr := r.waitForRelease(ctx, state, state.Receipt.URI, winnerDID(state)); waitErr != nil {
 			r.log().Info("requester_contract_failed_hold_ended", "err", waitErr)
@@ -565,7 +573,10 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	r.chosen = chosen
 	r.mu.Unlock()
 	acceptRKey := acceptRKeyFor(q.repoDID, r.name, rfpURI, rfpCID, winner.URI, winner.CID)
-	if err := r.prepareWorkloadGrant(ctx, state, winner, acceptRKey); err != nil {
+	if err := r.prepareWorkloadGrant(ctx, state, winner); err != nil {
+		return err
+	}
+	if err := r.prepareOAuthClients(ctx, state, winner); err != nil {
 		return err
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected

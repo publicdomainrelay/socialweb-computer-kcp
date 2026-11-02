@@ -25,7 +25,6 @@ const (
 	ComputeVMResource                = "computevms"
 	FirecrackerVMResource            = "firecrackervms"
 	BidResource                      = "bids"
-	GuestIdentityGrantResource       = "guestidentitygrants"
 	HostProcessResource              = "hostprocesses"
 	PostgresResource                 = "postgreses"
 	OpenBaoServerResource            = "openbaoservers"
@@ -85,7 +84,6 @@ var (
 	ComputeVMGVR                = GroupVersion.WithResource(ComputeVMResource)
 	FirecrackerVMGVR            = GroupVersion.WithResource(FirecrackerVMResource)
 	BidGVR                      = GroupVersion.WithResource(BidResource)
-	GuestIdentityGrantGVR       = GroupVersion.WithResource(GuestIdentityGrantResource)
 	HostProcessGVR              = GroupVersion.WithResource(HostProcessResource)
 	PostgresGVR                 = GroupVersion.WithResource(PostgresResource)
 	OpenBaoServerGVR            = GroupVersion.WithResource(OpenBaoServerResource)
@@ -159,8 +157,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&FirecrackerVMList{},
 		&Bid{},
 		&BidList{},
-		&GuestIdentityGrant{},
-		&GuestIdentityGrantList{},
 		&HostProcess{},
 		&HostProcessList{},
 		&Postgres{},
@@ -416,20 +412,6 @@ func (in *Bid) DeepCopyObject() runtime.Object {
 }
 
 func (in *BidList) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-func (in *GuestIdentityGrant) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-func (in *GuestIdentityGrantList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

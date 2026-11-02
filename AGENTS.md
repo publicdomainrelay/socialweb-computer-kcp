@@ -30,6 +30,7 @@ needs the argument behind it. Do not read it end to end.
 | The operator handoff | `handoff.yaml` |
 | What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
 | The integration scenarios (no Go tests until plan 0027) | `docs/spec/integration-catalog.yaml` |
+| How a workload signs an OAuth app in as an account on our PDS (`com.fedproxy.rbac`, exchangeToken, approveAuthorization) | `docs/pds/oauth-wid.md` |
 
 ## Layout
 
@@ -590,6 +591,11 @@ Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
   `internal/market/requester`, and their harness `internal/policyengine/policytest` (real engine, real
   bundled actions in the pinned deno, a fake PDS, no network). Every case asserts that the selected
   policy ran for the decision and that its verdict and the decision are right. No skip.
+- The workload OAuth integration tests are authorized by the owner (2026-11-01, plan 0040 S8) and must
+  pass: `test/integration` (in process: our PDS, an in-process PLC, an OIDC issuer and an atproto
+  OAuth app; no network; entries in `docs/spec/integration-catalog.yaml`), and the guest workload
+  identity issuer tests in `cmd/openbao-plugin-auth-sshsig` (the plugin backend in process). The live
+  acceptance in `test/integration` runs only with `SWC_LIVE_WORKLOAD_OAUTH=1`.
 
 ## Prod deployments
 

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-43.marketbidders.socialweb.computer
+  name: v1alpha1-44.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -160,6 +160,8 @@ spec:
                             required:
                               - kind
                               - name
+                          ephemeralKey:
+                            type: boolean
                       opentunnel:
                         type: object
                         properties:
@@ -376,6 +378,8 @@ spec:
                         required:
                           - kind
                           - name
+                      ephemeralKey:
+                        type: boolean
                   opentunnel:
                     type: object
                     properties:
@@ -657,6 +661,8 @@ spec:
                               required:
                                 - kind
                                 - name
+                            ephemeralKey:
+                              type: boolean
                         opentunnel:
                           type: object
                           properties:
@@ -760,9 +766,6 @@ spec:
                               type: string
                             role:
                               type: string
-                            grantSyncSeconds:
-                              type: integer
-                              format: int32
                             issuerRetrySeconds:
                               type: integer
                               format: int32

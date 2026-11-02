@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-37.marketrequesters.socialweb.computer
+  name: v1alpha1-39.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -160,6 +160,8 @@ spec:
                             required:
                               - kind
                               - name
+                          ephemeralKey:
+                            type: boolean
                       opentunnel:
                         type: object
                         properties:
@@ -342,6 +344,41 @@ spec:
                 required:
                   - mount
                   - path
+              oauthGrants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    role:
+                      type: string
+                      pattern: ^[A-Za-z0-9._:~-]{1,512}$
+                    issuer:
+                      type: string
+                    subject:
+                      type: string
+                    clients:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          clientId:
+                            type: string
+                            pattern: ^https://[^ ]+$
+                          scopes:
+                            type: array
+                            items:
+                              type: string
+                            x-kubernetes-list-type: set
+                          redirectUri:
+                            type: string
+                        required:
+                          - clientId
+                          - scopes
+                  required:
+                    - role
+                    - issuer
+                    - subject
+                    - clients
               ingress:
                 type: object
                 properties:
@@ -409,6 +446,8 @@ spec:
                         required:
                           - kind
                           - name
+                      ephemeralKey:
+                        type: boolean
                   opentunnel:
                     type: object
                     properties:
@@ -511,6 +550,8 @@ spec:
                         required:
                           - kind
                           - name
+                      ephemeralKey:
+                        type: boolean
                   opentunnel:
                     type: object
                     properties:
@@ -737,6 +778,8 @@ spec:
                               required:
                                 - kind
                                 - name
+                            ephemeralKey:
+                              type: boolean
                         opentunnel:
                           type: object
                           properties:
@@ -840,9 +883,6 @@ spec:
                               type: string
                             role:
                               type: string
-                            grantSyncSeconds:
-                              type: integer
-                              format: int32
                             issuerRetrySeconds:
                               type: integer
                               format: int32

@@ -6,11 +6,7 @@ import (
 	"fmt"
 	"regexp"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vault/openbao"
 )
 
@@ -91,26 +87,6 @@ func (h *Host) DropGuestLogin(ctx context.Context, o v1alpha1.ComputeVM) {
 		return
 	}
 	h.c.log().Info("the guest login role is gone with its ComputeVM", "computevm", o.Name, "role", path)
-}
-
-func (h *Host) DropGuestGrants(ctx context.Context, name string) {
-	list, err := kube.List[v1alpha1.GuestIdentityGrant](ctx, h.grants, metav1.ListOptions{})
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			h.c.log().Warn("listing the GuestIdentityGrants of a released ComputeVM", "computevm", name, "err", err.Error())
-		}
-		return
-	}
-	for _, it := range list {
-		if it.Spec.ComputeVMRef.Name != name {
-			continue
-		}
-		if err := h.grants.Delete(ctx, it.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			h.c.log().Warn("deleting a GuestIdentityGrant of a released ComputeVM", "computevm", name, "grant", it.Name, "err", err.Error())
-			continue
-		}
-		h.c.log().Info("a GuestIdentityGrant goes with its ComputeVM", "computevm", name, "grant", it.Name)
-	}
 }
 
 func RefusedLogin(err error) bool {

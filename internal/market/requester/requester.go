@@ -654,6 +654,7 @@ func (q *Requester) Start(ctx context.Context) error {
 		serviceAuth = q.ownerIdentityServiceAuth()
 	}
 	q.serviceAuth = serviceAuth
+	go q.syncOAuthGrants(ctx)
 	atircAuth, atircSigning, atircReason := q.atircServiceAuth(serviceAuth)
 	q.atircAuth = atircAuth
 	q.log.Info("requester_service_auth", "identityMode", q.cfg.IdentityMode, "localSigner", q.cfg.LocalSigner,

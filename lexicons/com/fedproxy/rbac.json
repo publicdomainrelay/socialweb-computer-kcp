@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "com.fedproxy.rbac",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One role an account grants to a workload identity. The record key is the role name; the record holds exactly that one role, the policies it names and what it protects.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["protects", "roles", "policies"],
+        "properties": {
+          "protects": { "type": "unknown", "description": "Map of name to {service, scope}. service is the DID of the service that enforces this record (the PDS service DID for workload OAuth); scope is com.fedproxy.temp.oauth for workload OAuth." },
+          "roles": { "type": "unknown", "description": "Map with exactly one key, the record key, to {role_name, definition: {iss, aud, sub, policies}}. iss is the workload's OIDC issuer, aud the audience its token must carry (<account DID>#role/<rkey> for workload OAuth), sub its subject, policies the policy names." },
+          "policies": { "type": "unknown", "description": "Map of policy name to {meta, schemas}. schemas maps an XRPC path (or a glob with *) to a JSON Schema object with properties.capability.enum (read, create, update, delete) and optionally properties.body, a JSON Schema the request document must satisfy." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

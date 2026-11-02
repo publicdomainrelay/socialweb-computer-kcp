@@ -26,8 +26,6 @@ const (
 	SecretsRoute = "/xrpc/" + SecretsNSID + ".getSecrets"
 
 	SecretsAPIAudience = "ATProto"
-
-	FedproxyRBACNSID = "com.fedproxy.rbac"
 )
 
 type SecretEntry struct {
@@ -309,23 +307,6 @@ func secretsRouteOf(contract string) string {
 	return SecretsRoute + "/" + contract
 }
 
-func secretsRBACKey(contract string) string {
-	safe := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			return r
-		case r == '.', r == '_', r == '~', r == ':', r == '-':
-			return r
-		default:
-			return '-'
-		}
-	}, "node."+contract)
-	if len(safe) > 512 {
-		return safe[:512]
-	}
-	return safe
-}
-
 type bidConfig struct {
 	IssuerURI string
 
@@ -373,38 +354,6 @@ func nodeClaimDocument(cluster, node, issuer string) map[string]any {
 		"audience": cloudinit.NodeAudience(cluster, node),
 		"kvMount":  cloudinit.NodeKVMount,
 		"kvPath":   node,
-	}
-}
-
-func nodeRBACRecord(role, issuer, subject, secretsAud, nodeAud string, nodeJoin bool) map[string]any {
-	roles := map[string]any{
-		role: map[string]any{
-			"role_name": role,
-			"definition": map[string]any{
-				"iss":      issuer,
-				"aud":      secretsAud,
-				"sub":      subject,
-				"policies": []string{},
-			},
-		},
-	}
-	if nodeJoin {
-		nodeRole := role + "-node"
-		roles[nodeRole] = map[string]any{
-			"role_name": nodeRole,
-			"definition": map[string]any{
-				"iss":      issuer,
-				"aud":      nodeAud,
-				"sub":      subject,
-				"policies": []string{},
-			},
-		}
-	}
-	return map[string]any{
-		"$type":     FedproxyRBACNSID,
-		"roles":     roles,
-		"policies":  map[string]any{},
-		"createdAt": time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
@@ -473,56 +422,12 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 			return err
 		}
 		state.addEntries(SecretEntry{Path: cloudinit.NodeClaimDocPath, Value: string(doc) + "\n"})
-		record := nodeRBACRecord(grant.Role, grant.Issuer, grant.Subject, audience, grant.Audience, true)
-		key := r.rbacKeyOf(contract.Status.Contract)
-		if key == "" {
-			return nil
-		}
-		if err := r.putRBAC(ctx, key, record); err != nil {
-			return fmt.Errorf("requester: rewriting the contract's RBAC record: %w", err)
-		}
 	}
 	return nil
-}
-
-func (r *contractRunner) rbacKeyOf(state *v1alpha1.NodeClaimContract) string {
-	switch {
-	case state == nil:
-		return ""
-	case state.Accept != nil && state.Accept.URI != "":
-		return market.RBACRKeyOfAccept(state.Accept.URI)
-	case state.RFP != nil && state.RFP.URI != "" && state.Bid != nil && state.Bid.URI != "":
-		return market.RBACRKey(acceptRKeyFor(r.q.repoDID, r.name, state.RFP.URI, state.RFP.CID, state.Bid.URI, state.Bid.CID))
-	}
-	return ""
 }
 
 func acceptRKeyFor(repoDID, contract, rfpURI, rfpCID, bidURI, bidCID string) string {
 	return sessionRKey("accept", repoDID, contract, rfpURI, rfpCID, bidURI, bidCID)
-}
-
-func (r *contractRunner) putRBAC(ctx context.Context, key string, record map[string]any) error {
-	if _, err := r.q.repo.PutRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key, record); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.rbacRKey = key
-	r.mu.Unlock()
-	r.deleteLegacyRBAC(ctx)
-	return nil
-}
-
-func (r *contractRunner) deleteLegacyRBAC(ctx context.Context) {
-	key := secretsRBACKey(r.name)
-	if _, err := r.q.repo.GetRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key); err != nil {
-		if !rbacGone(err) {
-			r.log().Warn("requester_rbac_legacy_unread", "rkey", key, "err", err)
-		}
-		return
-	}
-	if err := r.q.repo.DeleteRecord(ctx, r.q.repoDID, FedproxyRBACNSID, key); err != nil && !rbacGone(err) {
-		r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
-	}
 }
 
 func (r *contractRunner) contractModules(userData string, contract v1alpha1.ComputeContract) (string, error) {
@@ -582,7 +487,7 @@ func (r *contractRunner) contractModules(userData string, contract v1alpha1.Comp
 	return cloudinit.BuildUserData(cloudinit.BuildOptions{Base: userData, Modules: modules, Ctx: values})
 }
 
-func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alpha1.NodeClaimContract, winner *BidRecord, acceptRKey string) error {
+func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alpha1.NodeClaimContract, winner *BidRecord) error {
 	if winner == nil || (r.nodeJoin == nil && r.secrets == nil) {
 		return nil
 	}
@@ -624,14 +529,6 @@ func (r *contractRunner) prepareWorkloadGrant(ctx context.Context, state *v1alph
 		}
 		r.secrets.addEntries(SecretEntry{Path: cloudinit.NodeClaimDocPath, Value: string(doc) + "\n"})
 	}
-	nodeAud := ""
-	if r.nodeJoin != nil {
-		nodeAud = cloudinit.NodeAudience(r.nodeJoin.ClusterRef.Name, vmName)
-	}
-	record := nodeRBACRecord(vmName, cfg.IssuerURI, subject, audience, nodeAud, r.nodeJoin != nil)
-	if err := r.putRBAC(ctx, market.RBACRKey(acceptRKey), record); err != nil {
-		return fmt.Errorf("requester: writing the contract's RBAC record: %w", err)
-	}
 	return nil
 }
 
@@ -642,37 +539,6 @@ func (r *contractRunner) cleanup() {
 	if secrets != nil {
 		r.q.unregisterSecrets(r.name)
 	}
-}
-
-func (r *contractRunner) deleteRBAC(ctx context.Context) {
-	r.mu.Lock()
-	held := r.rbacRKey
-	r.mu.Unlock()
-	if r.q.repo == nil || (held == "" && r.snapshot().Spec.SecretsRef == nil) {
-		return
-	}
-	deleteCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	keys := []string{held}
-	if key := r.rbacKeyOf(r.stateCopy()); key != held {
-		keys = append(keys, key)
-	}
-	for _, key := range keys {
-		if key == "" {
-			continue
-		}
-		if err := r.q.repo.DeleteRecord(deleteCtx, r.q.repoDID, FedproxyRBACNSID, key); err != nil && !rbacGone(err) {
-			r.log().Warn("requester_rbac_delete_failed", "rkey", key, "err", err)
-		}
-	}
-	r.deleteLegacyRBAC(deleteCtx)
-	r.mu.Lock()
-	r.rbacRKey = ""
-	r.mu.Unlock()
-}
-
-func rbacGone(err error) bool {
-	return errors.Is(err, market.ErrNotFound) || strings.Contains(err.Error(), "not found")
 }
 
 func (r *contractRunner) secretsFetched() string {

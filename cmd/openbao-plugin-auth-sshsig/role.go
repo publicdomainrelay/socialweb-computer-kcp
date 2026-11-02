@@ -29,6 +29,8 @@ type roleEntry struct {
 	HostKey        string               `json:"host_key,omitempty"`
 	BoundAt        time.Time            `json:"bound_at,omitempty"`
 	Challenges     map[string]time.Time `json:"challenges,omitempty"`
+	WIDSubject     string               `json:"wid_subject,omitempty"`
+	WIDClaims      map[string]string    `json:"wid_claims,omitempty"`
 }
 
 func (r *roleEntry) hostKey() (ssh.PublicKey, error) {
@@ -94,6 +96,14 @@ func pathRole(b *backend) *framework.Path {
 		"challenge_ttl": {
 			Type:        framework.TypeDurationSecond,
 			Description: "Lifetime of a login challenge. Defaults to 60s, at most 10m.",
+		},
+		"wid_subject": {
+			Type:        framework.TypeString,
+			Description: "The sub of the workload identity tokens wid/token issues for this role.",
+		},
+		"wid_claims": {
+			Type:        framework.TypeKVPairs,
+			Description: "Extra string claims of the workload identity tokens; iss, sub, aud, exp, nbf, iat and jti are refused.",
 		},
 	}
 	tokenutil.AddTokenFields(fields)
@@ -162,6 +172,22 @@ func (b *backend) roleWrite(ctx context.Context, req *logical.Request, d *framew
 		}
 		r.ChallengeTTL = ttl
 	}
+	if raw, ok := d.GetOk("wid_subject"); ok {
+		subject := strings.TrimSpace(raw.(string))
+		if subject == "" || len(subject) > 512 {
+			return logical.ErrorResponse("wid_subject must be 1 to 512 characters"), nil
+		}
+		r.WIDSubject = subject
+	}
+	if raw, ok := d.GetOk("wid_claims"); ok {
+		claims := raw.(map[string]string)
+		for k := range claims {
+			if widReservedClaims[k] {
+				return logical.ErrorResponse(fmt.Sprintf("wid_claims may not set %q", k)), nil
+			}
+		}
+		r.WIDClaims = claims
+	}
 	if err := r.ParseTokenFields(req, d); err != nil {
 		return logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
 	}
@@ -183,6 +209,8 @@ func (b *backend) roleRead(ctx context.Context, req *logical.Request, d *framewo
 		"bound":                r.HostKey != "",
 		"host_key":             r.HostKey,
 		"host_key_fingerprint": r.hostKeyFingerprint(),
+		"wid_subject":          r.WIDSubject,
+		"wid_claims":           r.WIDClaims,
 	}
 	if !r.BoundAt.IsZero() {
 		data["bound_at"] = r.BoundAt.UTC().Format(time.RFC3339)

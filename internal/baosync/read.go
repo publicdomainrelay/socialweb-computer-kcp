@@ -160,9 +160,6 @@ func kvLeaves(ctx context.Context, c *openbao.Client, key, name string) ([]strin
 }
 
 func collectionTypeMatches(coll string, d Desired, a Actual) bool {
-	if coll == IdentityRoleCollection {
-		return d.IdentityOIDC
-	}
 	for _, m := range d.AuthMounts {
 		if d.AuthRoleCollection(m) == coll {
 			return a.AuthMounts[strings.Trim(m.Path, "/")] == m.Type

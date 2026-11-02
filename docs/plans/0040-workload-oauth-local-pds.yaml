@@ -1,0 +1,353 @@
+plan: "0040"
+title: "Workload identity OAuth on our PDS: OpenBao issues OIDC JWTs, a token exchange XRPC and an approve XRPC gated by com.fedproxy.rbac records keyed by role name, scope enforcement, and an atirc session minted by a workload"
+status: doing
+source: >
+  2026-11-01, owner (verbatim, first): "take the reference implementation and study it and understand the
+  com.fedproxy.rbac records and then I want you to find the social Webb computer KCP PDS implementation and I
+  want you to figure out how to allow workload identities to complete. Oauth flows leveraging their account on
+  the local PDS then submit a request."
+  Second: "We need the com.fedproxy.rbac record rkeys' to be a role name so we avoid perpetuating our
+  listRecords pattern - I hate polling and I hate unbounded listRecords calls - it sounds like maybe we're
+  already keying some off the accept rkey - we also need a flow which is irrespetive of the market flow and is
+  just plain-ol' support for automated oauth. Make sure the plan addresses fixing that issue with the scopes.
+  also, do we need any modifications to our record format to support this? or could our new XRPC to do the
+  oauth from the workload be protected by our current format? You need to understand the nested requester
+  association flow more. We create a new PDS instance and a new account on that within the guest and then the
+  guest is associated with the parent account. However, our focus right now is twofold. First: enable workload
+  identity based oauth via XRPC configured by writing com.fedproxy.rbac record - for the same account - one
+  account - example usecase is we spin up a PDS within a guest and then need to oauth to an external service
+  from that workload itself - PDS running within it but different process than the one that launched the PDS,
+  just leverages workload identity and XRPC(s) to oauth authorize some app something like
+  https://irc.fedproxy.com for example. Second: on VM create or from requester side rules and UI stuff so the
+  user can allow the guest to preform oauth authorizations they choose as the account that made the VM
+  request - no second account. In both cases some kind of token exchange based off the workload identity token
+  takes place to get a new token with aud as the PDS perhaps in format did:plc:<plc>#role/rkey or whatever
+  makes sense then uses the token to call XRPCs to do oauth authorziation for some app - use irc.fedproxy.com
+  for our example. make sure our plan includes an acceptance test."
+  Answers: "1. I meant irc.fedfork.com 2. we may need to configure openbao to be issuing JWTs because I don't
+  like that we have openbao tokens involved rightnow, we want it to be issuing OIDC compliant JWTs so we can
+  chain like this 3. We are only making this enhancement for the PDS we maintain, we want to consider proposing
+  the work we do here as a standard so keep that in mind, for now only our PDS is in scope but if we do this
+  will there's a chance we could take future versions of this for discussion to the IETF ATproto WG etc. 4. you
+  pick 5. only the CLI, spec, and browser, don't worry about iOS right now mark that as future work 6. I
+  authorize a golang integration test for this, besides, we are well past that plan number right now 7. Yes I
+  want you to mint and atirc session. You will likely need to use the xrpc.fedproxy.com IngressProxy+Expose
+  whatever it is to make the local PDS resolvable so the callback works."
+principle: >
+  An account says, in a com.fedproxy.rbac record in its own repo whose rkey is a role name, which workload
+  (OIDC issuer and subject) may act for it on its PDS and which OAuth clients and scopes that workload may
+  approve. A workload presents an OIDC compliant JWT, exchanges it at the account's PDS for a short PDS token
+  bound to that one role, and with that token approves a pending OAuth authorization of a third-party app, the
+  step a human does on the PDS's authorize page. Every lookup is one getRecord by role name: no listRecords, no
+  polling. Nothing here depends on the market: the market only writes the record and hands the guest its JWT.
+  Only our PDS implements it now; the XRPCs, the record rules and the token shapes are written as a protocol
+  that another PDS could implement, for discussion in the IETF atproto working group later.
+grounding: >
+  Read at socialweb-computer-kcp 0e83b5b, compute-contract-reference-implementation-poc 10fa82e,
+  atproto-reverse-proxy 95b1448, and irc.fedfork.com live on 2026-11-01.
+  (1) Reference record (lib/rbac-helper/mod.ts, spindle/marketRFP.ts, lib/compute-provider-local/mod.ts):
+  {protects: {<n>: {service, scope}}, roles: {<n>: {role_name, definition: {iss, aud, sub, policies[]}}},
+  policies: {<n>: {meta, schemas: {<path or glob>: {properties: {capability: {enum}, body?, allowed_parameters?}}}}},
+  createdAt}. The checker lists every record of the actx DID (listRecords, unbounded pages), keeps those whose
+  protects names (service, scope), joins them by name, verifies the token against configured issuers, lets the
+  record's iss values narrow that set, matches the verified sub to roles, takes the longest matching path
+  schema and checks the method's capability (GET read, POST create, PUT/PATCH update, DELETE delete). The
+  `body` schema is written by the spindle (ssh-key-register) but checkRBACPolicy never evaluates it.
+  fedproxy's oauth-client-webapp HandleProxy is the same gate in front of a PDS.
+  (2) kcp record keys: the requester writes rkey node.<accept rkey> (market.RBACRKey,
+  internal/market/requester/secrets.go nodeRBACRecord: one role named after the VM, policies {}); the bidder
+  reads that rkey by getRecord (internal/guestidentity/rbac_reader.go) and falls back to listRecords of the
+  whole collection (up to 100 pages) for accepts before 2026-10-30 21:18:03Z; internal/guestidentity/grants.go
+  Syncer.run re-reads every 30 s (deploy/obligations.txt line 76). The bidder already knows the role:
+  ComputeVM spec.vm.role (internal/guestcp/openbao/grants.go).
+  (3) Workload identity today: the guest logs in to the bidder's OpenBao with its ssh host key (sshsig auth
+  plugin, guest-login.sh in internal/atproto/cloudinit/modules.go), keeps an X-Vault-Token on disk, and reads
+  identity/oidc/token/<role> per audience. The JWT's sub is the OpenBao entity id (a reserved claim the role
+  template cannot set), so the real subject rides in the custom claim wid_sub
+  (actx:<bidder>:plc:<requester>:role:<role>); one OpenBao role and one GuestIdentityGrant exist per audience
+  the requester's RBAC record names. Relying parties: the requester's getSecrets (wid_sub) and the k3s node join
+  (cloudinit.NodeJWTUserClaim).
+  (4) Our PDS (internal/atproto/pds, internal/atproto/oauth): /oauth/par, /oauth/authorize (password or a DPoP
+  access token, endpoints.go:200), /oauth/token, /oauth/revoke; PAR requests are stored server side
+  (PARStore). Server.authenticate (pds/auth.go:150) maps any live OAuth session to authInfo{OAuth: true}
+  without its scope; no repo, blob or getServiceAuth handler reads a scope. Every OAuth session is full access.
+  (5) Nested association (plan 0036, docs/acceptance/0005): `run request --guest-requester` starts R2 in the
+  guest: its own requester kcp, its own PDS, its own did:plc; the guest reports R2's DID (guest.requesterDid),
+  R2 writes a market.associationRequest, alice proves it and writes market.association naming R2. R2's PDS is
+  public through the did:key ingress (xrpc.fedproxy.com IngressProxy plus an ingress Exposure; the relay
+  forwards every path of a data subdomain, internal/atproto/ingress/server.go handleForward).
+  (6) atirc (irc.fedfork.com): client_id https://irc.fedfork.com/oauth/client-metadata.json, web,
+  private_key_jwt ES256, DPoP, redirect https://irc.fedfork.com/oauth/callback, scope atproto plus repo:
+  com.fedfork.irc.agentOperator, com.fedfork.irc.agents, com.vibescrobble.scrobble, app.bsky.actor.profile,
+  bot.did.registration, bot.did.operator; the sign-in starts with POST /login (handle or DID). atirc resolves
+  the DID on https://plc.directory and needs the PDS on a public https host (market/requester/agent.go
+  LocalPdsSignsAtirc). irc.fedproxy.com does not exist (404 on every path).
+decisions:
+  - id: D1
+    question: "How does OpenBao issue OIDC compliant JWTs with no OpenBao token in the guest?"
+    decided: >
+      Inside the sshsig auth plugin itself (cmd/openbao-plugin-auth-sshsig/wid.go), not a separate secrets
+      plugin: a secrets plugin cannot read the auth mount's bound host keys or its single-use challenges, and the
+      proof is the one the plugin already checks. Unauthenticated auth/<mount>/wid/token takes {role, challenge,
+      signature, audience}: the challenge from auth/<mount>/challenge, consumed like login consumes it, and an
+      sshsig over it by the role's bound host key. It answers an ES256 JWT: iss (auth/<mount>/wid/config, which
+      the guest control plane sets to <bidder ingress>/v1/auth/<mount>/wid), sub = the role's wid_subject
+      (actx:<bidder>:plc:<requester>:role:<role>), aud = the one requested audience, iat, nbf, exp (5 min), jti,
+      plus the role's wid_claims (computevm). The guest control plane writes wid_subject and wid_claims through
+      auth/<mount>/role/<vm>/wid (policy bidder-guest-kcp, update on that path only). The signing key lives in
+      the plugin's storage, rotates every 24h or on auth/<mount>/wid/rotate (MarketBidder signingKeyRotation),
+      and a retired key stays in auth/<mount>/wid/.well-known/keys for 48h beside
+      auth/<mount>/wid/.well-known/openid-configuration. No OpenBao token is created: guest-login.sh binds once
+      and `guest-login.sh token <aud>` does challenge, sign, wid/token. The guest control plane proxies
+      /v1/auth/<mount>/{bind,challenge}, /v1/auth/<mount>/wid/token and the two documents, and nothing of
+      identity/oidc any more. A token bucket per role.
+  - id: D2
+    question: "Which audiences may a guest ask for?"
+    decided: >
+      Any one audience (an https URL, an api://<api>?actx=<ctx> or a DID, at most 512 bytes), as GitHub Actions
+      does: the subject is fixed by the proof, and every relying party checks iss, sub and aud. Then the bidder
+      reads no requester RBAC record at all: GuestIdentityGrant, the identity/oidc roles, RepoRBAC, the
+      listRecords fallback and the 30 s Syncer ticker are deleted, and the requester's record is read only by
+      the relying parties that enforce it. getSecrets and the node join check sub instead of wid_sub. The
+      alternative, audiences gated by the requester's record, keeps a bidder-side read per guest.
+  - id: D3
+    question: "rkey and record shape"
+    decided: >
+      rkey = role name (atproto record-key syntax, at most 512). A record holds exactly one role, named as its
+      rkey, and the policies that role names; a record with another shape admits nothing. The format needs no
+      new field: protects, roles.definition {iss, aud, sub, policies} and policies.schemas with capability and
+      body cover both XRPCs. Two rules change from the reference: the body schema is evaluated (a fixed JSON
+      Schema subset: type, const, enum, items, required, properties, additionalProperties, pattern on strings),
+      and the body it is evaluated against is a document the PDS builds from its own state (the stored PAR),
+      never the caller's JSON. Expiry is deletion of the record. The market role name stays the VM role, so
+      today's node.<accept rkey> key goes away (deploy fresh, no migration).
+  - id: D4
+    question: "Token exchange and the PDS token"
+    decided: >
+      XRPC procedure com.fedproxy.temp.oauth.exchangeToken, input named as RFC 8693: {subject_token,
+      subject_token_type: urn:ietf:params:oauth:token-type:jwt, audience: <account DID>#role/<rkey>,
+      requested_token_type: urn:ietf:params:oauth:token-type:access_token}, with a DPoP proof. Output
+      {access_token, issued_token_type, token_type: DPoP, expires_in}. The PDS token: iss = the PDS service DID,
+      sub = the workload sub, aud = <account DID>#role/<rkey>, lxm = com.fedproxy.temp.oauth.approveAuthorization,
+      act {iss, sub} of the subject token, cnf.jkt of the DPoP key, exp at most 5 min and never after the
+      subject token's exp, jti single use per approval. Signed by the PDS OAuth signer and accepted only by the
+      PDS that issued it. The NSIDs are com.fedproxy.temp.* until a standard names them; a later version can be
+      the RFC 8693 grant at /oauth/token with the same fields.
+  - id: D5
+    question: "The approve step"
+    decided: >
+      XRPC procedure com.fedproxy.temp.oauth.approveAuthorization {request_uri}, authorization DPoP with the
+      PDS token. The PDS reads the stored PAR, builds {client_id, redirect_uri, scope: [...]} from it, evaluates
+      the role's policy for path /xrpc/com.fedproxy.temp.oauth.approveAuthorization, capability create, on that
+      document, consumes the PAR and answers {redirect_uri} (code, state, iss), the same code a password
+      sign-in issues, for the account in the token's aud. The approved scope is the PAR's scope, which the body
+      schema bounds. The OAuth session records {role rkey, iss, sub}; a refresh re-reads the record by rkey and
+      refuses when it is gone or no longer admits; a commit that deletes or changes the record revokes the
+      sessions it admitted (the PDS sees its own commits in its sequencer; no polling).
+  - id: D6
+    question: "Which PDS and accounts"
+    decided: "Only our PDS (internal/atproto/pds). Flow 2 works only for an account hosted on it (requester identity localRepo, --identity). An account on bsky.social is refused with a clear message; no proxy route."
+  - id: D7
+    question: "How is a local PDS made resolvable for atirc with no saved private key and no domain of ours?"
+    decided: >
+      Through the xrpc.fedproxy.com IngressProxy and an ingress Exposure whose key is ephemeral. Today the
+      Exposure's ingress keypair is a jwk under <state>/exposure-identity (internal/stack/componentcore/exposure_identity.go,
+      market.LoadOrCreateSignerFile), and the public host is <did:key label>.xrpc.fedproxy.com
+      (internal/exposure/registrar.go). A new Exposure spec field ingress.key: Ephemeral makes the registrar
+      generate the keypair in memory, never write it, and report the host it yields in status.ingress.url, so the
+      URL is known only at run time. The Pds takes its public URL and its OAuth issuer from that status (port 0
+      rule: the bound address is reported, peers read it), its handle is that host (the PDS already answers
+      /.well-known/atproto-did through the ingress), and the account is created only after the URL is known: a
+      did:plc genesis whose PDS service endpoint is the URL, with the PLC rotation key and the repo key held in
+      memory (a memory RepoKeyStore) for the life of the run and the DID tombstoned at the end. An Exposure
+      restart gives a new host; an ephemeral account is not carried over. A persistent account keeps the file
+      key as today.
+records:
+  example: >
+    at://<account DID>/com.fedproxy.rbac/<role>
+    {$type: com.fedproxy.rbac,
+     protects: {<role>: {service: <PDS service DID>, scope: com.fedproxy.temp.oauth}},
+     roles: {<role>: {role_name: <role>, definition: {iss: <workload issuer>, aud: <account DID>#role/<role>,
+       sub: <workload sub>, policies: [<role>]}}},
+     policies: {<role>: {meta: {policy: <role>}, schemas: {
+       /xrpc/com.fedproxy.temp.oauth.exchangeToken: {properties: {capability: {enum: [create]}}},
+       /xrpc/com.fedproxy.temp.oauth.approveAuthorization: {properties: {capability: {enum: [create]}, body: {
+         type: object, required: [client_id, scope], properties: {
+           client_id: {const: https://irc.fedfork.com/oauth/client-metadata.json},
+           redirect_uri: {const: https://irc.fedfork.com/oauth/callback},
+           scope: {type: array, items: {enum: [atproto, repo:com.fedfork.irc.agents?action=create&action=update, ...]}}}}}}}}},
+     createdAt}
+  flow1: >
+    Same account, in the guest: R2's requester (or the user with `socialweb-computer oauth allow`) writes the
+    record in R2's repo on R2's PDS with iss = the bidder's wid issuer and sub = the guest's subject (the guest
+    reads both from its own JWT). A second process in the guest takes `guest-login.sh token <R2 DID>#role/<role>`,
+    exchanges it at R2's PDS and approves atirc's PAR as R2.
+  flow2: >
+    The account that made the VM request (on our PDS): `run request --allow-oauth <client_id>[=<scope>,...]`,
+    ComputeContract spec.oauthClients [{clientId, scopes, redirectUri?}] or the page's "Allow OAuth apps" field
+    make the requester write the record in its own repo at rkey = the VM role, iss = the winning bid's issuer,
+    sub = the guest subject; it deletes it at release. The guest approves atirc's PAR as alice.
+items:
+  - id: S1-PDS-SCOPES
+    title: "Our PDS enforces OAuth scopes"
+    files: [internal/atproto/pds/auth.go, internal/atproto/pds/repo_handlers.go, internal/atproto/pds/blob.go, internal/atproto/pds/service_auth.go, internal/atproto/pds/accounts.go, internal/atproto/oauth/scope.go]
+    work: >
+      authInfo carries the granted scope set of an OAuth session. createRecord, putRecord, deleteRecord and each
+      applyWrites op check repo:<collection>?action=create|update|delete (repo:* and transition:generic
+      allow); uploadBlob checks blob:<mime>; getServiceAuth checks rpc:<lxm>?aud=<aud> (rpc:*, transition:generic);
+      account and identity XRPCs check account: and identity:. A miss is 403 ScopeMissingError naming the
+      scope. Password and app password sessions are unchanged. Every OAuth client of our PDS (requester,
+      bidder, ssh gateway, page) is read against its requested scope before this ships.
+    status: done
+  - id: S2-RBAC-GO
+    title: "com.fedproxy.rbac in Go: one role per record, rkey = role name, the matcher and the body schema subset"
+    files: [internal/contract/workloadauth/workloadauth.go, internal/rbac/record.go, internal/rbac/match.go, internal/rbac/schema.go, lexicons/com/fedproxy/rbac.json]
+    work: >
+      A contract package (types and the Authorizer interface) and one impl package: parse and check a record
+      (D3), protects filter, globMatch and the longest path rule ported from the reference, the method to
+      capability map, the JSON Schema subset evaluator. The lexicon of com.fedproxy.rbac written down as the
+      reference uses it, with record key any (the role name).
+    status: done
+  - id: S3-RKEY-ROLE
+    title: "The market writes and reads the record at the role name; no listRecords, no polling"
+    files: [internal/market/requester/secrets.go, internal/atproto/market/records.go, internal/guestidentity/rbac_reader.go, internal/guestidentity/grants.go, deploy/obligations.txt]
+    work: >
+      Done by deletion: with D2 nothing reads a per-contract record, so the requester writes none (the record at
+      node.<accept rkey>, its legacy secrets-<contract> key, market.RBACRKey and RBACRKeyOfAccept are gone) and
+      the bidder reads none (RepoRBAC, the listRecords fallback, RBACAtAcceptSince, the 30 s Syncer and its
+      obligations line are gone). A com.fedproxy.rbac record is written only where a relying party reads it, at
+      rkey = the role name, by one getRecord (S5, S7).
+    status: done
+  - id: S4-OPENBAO-WID
+    title: "openbao-plugin-secrets-wid issues OIDC JWTs; the guest holds no OpenBao token"
+    files: [cmd/openbao-plugin-secrets-wid, internal/openbaoplugin/wid, internal/versions/versions.json, deploy/apps/market-bidder/vault.yaml, internal/openbaoctl, internal/services/guestcontrolplane/routes.go, internal/atproto/cloudinit/modules.go, internal/guestidentity, internal/market/requester/secrets.go, internal/atproto/cloudinit/k3sjoin.go]
+    work: >
+      D1 and D2. The plugin is pinned and staged like the auth plugins; the bidder vault declares the mount; the
+      guest control plane proxies GET wid/.well-known/* and POST wid/token and nothing else of wid/;
+      guest-login.sh token <aud> does challenge, sign, wid/token and prints the JWT; the bid's wif.simple
+      issuer_uri is the wid issuer; getSecrets and the node join check sub. The identity/oidc key, roles, the
+      per-guest policies and GuestIdentityGrant go when D2 is taken.
+    status: done
+  - id: S5-PDS-XRPC
+    title: "exchangeToken and approveAuthorization on our PDS"
+    files: [lexicons/com/fedproxy/temp/oauth/exchangeToken.json, lexicons/com/fedproxy/temp/oauth/approveAuthorization.json, internal/atproto/pds/workload.go, internal/atproto/pds/server.go, internal/atproto/oauth/endpoints.go, internal/atproto/oauth/store.go, internal/atproto/pds/oauth_store.go, api/v1alpha1 PdsOAuth]
+    work: >
+      D4, D5. exchangeToken: parse the audience, the account must be local and active, getRecord at the rkey
+      from the local repo store (no network), the record must protect (PDS service DID, com.fedproxy.temp.oauth),
+      the subject token's iss must equal the role's iss (https, fetched through the hardened client: no
+      loopback, link-local or private address, bounded size and time; OIDC discovery then JWKS, cached by kid),
+      signature, exp, nbf, aud = the requested audience, sub = the role's sub, then the exchangeToken schema.
+      approveAuthorization as D5. Session and AuthorizationCode gain WorkloadGrant {rkey, iss, sub}; refresh and
+      revocation as D5. Errors are atproto XRPC errors (InvalidToken, Forbidden with the policy reason); no
+      token in a log. Token buckets per account and per sub.
+    status: done
+  - id: S6-CLIENT
+    title: "The workload side: one library and one CLI verb, market or not"
+    files: [internal/atproto/workloadoauth, cmd/socialweb-computer/oauth.go]
+    work: >
+      `socialweb-computer oauth allow --role <r> --iss <url> --sub <s> --client <client_id> [--scope ...]
+      [--redirect-uri ...]` writes the record through the caller's own session (or the requester's kcp);
+      `socialweb-computer oauth revoke --role <r>` deletes it. `socialweb-computer oauth approve --account
+      <did or handle> --role <r> --token-command '<cmd>' --login https://irc.fedfork.com/login [--jar <file>]`:
+      POST the app's login with the handle, read the PDS authorize Location (request_uri, client_id), run the
+      token command for audience <did>#role/<r>, exchangeToken with a fresh DPoP key, approveAuthorization,
+      GET the returned redirect_uri with the app's cookies, and keep the app's session cookie in the jar (0600).
+      No browser. The guest default token command is `guest-login.sh token`.
+    status: done
+  - id: S7-REQUESTER-RULES
+    title: "Flow 2 rules: spec, CLI and page"
+    files: [api/v1alpha1 ComputeContract, internal/market/requester, cmd/socialweb-computer/request.go, internal/app/compose, the browser page]
+    work: >
+      ComputeContract spec.oauthClients [{clientId, scopes, redirectUri}] (admission: our PDS hosts the
+      requester's account, else refused; the scopes must be within the client's metadata scope); the requester
+      writes the record at the VM role after the winner is known and deletes it at release (and on Failed);
+      status.contract.oauthClients shows what is allowed. `run request --allow-oauth <client_id>[=<scope>,...]`
+      (repeatable) and the page's Request VM form field "Allow OAuth apps". `run requester` takes the same in
+      the contract it is given. The iOS app is future work.
+    status: doing
+  - id: S8-INTEGRATION-TEST
+    title: "Go integration test (authorized by the owner 2026-11-01)"
+    files: [test/integration/workloadoauth_test.go, docs/spec/integration-catalog.yaml, AGENTS.md]
+    work: >
+      Written from new catalog entries, observable outcomes only. In process: our PDS (real pds.Server with
+      OAuth, temp state), a workload issuer (the wid plugin's issuer code over httptest TLS: discovery, JWKS,
+      token), and a third-party OAuth client shaped as atirc (client metadata, PAR, private_key_jwt, DPoP,
+      callback, a session cookie, then a createRecord of com.fedfork.irc.agents through the session).
+      Cases: allowed -> the app has a session for the account and its write lands; sub of another workload ->
+      exchange refused; iss not the role's -> refused; client_id or a scope outside the record -> approve
+      refused and the PAR not consumed; PDS token replayed with another DPoP key or after use -> refused;
+      record deleted -> refresh refused and the session revoked; the session writes a collection outside its
+      scope -> 403 (S1). The ingress relay (internal/atproto/ingress server) runs in process too, with an
+      ephemeral Exposure key (D7), so OAuth crosses the same forwarding the live run uses. AGENTS.md records the
+      owner's authorization next to the policy engine exception. The live acceptance (S9) is the same test file
+      behind SWC_LIVE_WORKLOAD_OAUTH=1.
+    status: done
+  - id: S9-ACCEPTANCE
+    title: "Acceptance 0014: a workload mints an atirc session at irc.fedfork.com and an atirc pub writes a scrobble through it, both flows"
+    files: [docs/acceptance/0014-workload-oauth.md, docs/acceptance/README.md, test/integration/workloadoauth_live_test.go]
+    atirc: >
+      Read from atirc f2f2dca (tangled.org/johnandersen777.bsky.social/atirc, cli/src/server/oauth.rs,
+      scrobble.rs, xrpc.rs). The session is minted and exercised so: GET https://irc.fedfork.com/login?handle=<h>
+      answers 302 to our PDS authorize URL (request_uri, client_id) and sets the state cookie; the workload
+      runs exchangeToken and approveAuthorization; GET of the returned callback with the cookie jar sets the
+      atirc session cookie; POST /scrobble {did, on=1} turns the owner's vibescrobble switch on; POST
+      /agent/link {did} creates the account's link and GET / shows /u/<uuid>; GET /u/<uuid> answers a long
+      atirc token; `ATIRC_TOKEN=<token> atirc pub -c '#<channel>' '<text whose first character is an emoji>'`
+      posts (chat.atirc.post); atirc's scrobble writer then does createRecord com.vibescrobble.scrobble in the
+      account's repo on our PDS with the OAuth session it holds (DPoP, scope
+      repo:com.vibescrobble.scrobble?action=create), which is the OAuth use S1 checks. Pass: that record
+      appears in the account's repo (read from our PDS's own commit stream), and a pub whose first character is
+      not an emoji writes none. GET /logout at the end; the DID is tombstoned.
+    work: >
+      Preconditions: an account on our PDS whose DID is on https://plc.directory and whose PDS is public
+      through the xrpc.fedproxy.com IngressProxy and an ephemeral ingress Exposure (D7), handle = that host, no
+      key on disk; probe first that /oauth/par, /oauth/authorize and /oauth/token pass through the
+      ingress with form bodies and DPoP headers, before any other step. Flow 2: `run request --identity <id>
+      --allow-oauth https://irc.fedfork.com/oauth/client-metadata.json=atproto,repo:com.fedfork.irc.agents?action=create&action=update
+      --hold --guest-tools socialweb-computer`; in the guest `socialweb-computer oauth approve --account <handle>
+      --role <vm role> --login https://irc.fedfork.com/login`. Flow 1: `--associate guest`, start R2, R2 runs
+      `oauth allow` for the guest's iss and sub on its own PDS, a second process (the agent user) runs `oauth
+      approve --account <R2 DID>`. Expected: irc.fedfork.com answers an authenticated request with the
+      session cookie as that DID (atirc-dev confirms the request to use), the PDS logs one exchange and one
+      approve per flow, no token in any log, release deletes the flow 2 record and revokes its sessions, and a
+      run with the record deleted first is refused at approve.
+    status: done
+  - id: S11-EPHEMERAL-INGRESS
+    title: "An ingress Exposure with an ephemeral key, and a Pds whose URL, handle and account follow it"
+    files: [api/exposure, api/v1alpha1, internal/atproto/ingress/ephemeral.go, internal/exposure/registrar.go, internal/app/compose/exposures.go, internal/services/pds, internal/atproto/pds/files/memory.go, internal/atproto/pds/wellknown.go, internal/atproto/pds/plcsubmit, internal/stack/ephemeralpds]
+    work: >
+      D7: Exposure spec.ingressKey Ephemeral (ingress.EphemeralKeypair in memory, never written; the reported
+      status.ingress host and url are <did:key label>.<ingress host>, new on every registration);
+      IngressXrpcConfig.ephemeralKey makes compose.IngressExposure ephemeral. The composed apps already read the
+      Pds's public URL from its ingress Exposure status and re-apply the Pds with it (port 0 rule), and a Pds
+      spec change restarts it through its controller. PdsSpec.ephemeral keeps the session secret, PLC rotation
+      key, OAuth signer and repo keys in memory (files.MemoryRepoKeyStore), keeps its data in a fresh dir
+      removed at stop and tombstones every DID it created when it stops (plcsubmit Tombstone).
+      /.well-known/atproto-did answers the account whose handle is the request host, so handle = run-time host
+      resolves. The in-process form for test/integration and the live acceptance is
+      internal/stack/ephemeralpds.Start: a pds.Server behind an ingress subscriber with an ephemeral key, the
+      account (handle = host, did:plc genesis at the run-time URL) created once registered, Close tombstones.
+      Read live 2026-11-01 against xrpc.fedproxy.com and plc.directory: registered in 1.1 s, atproto-did,
+      _health and oauth-authorization-server answered 200 through the ingress, the PLC document named the
+      run-time URL, and after Close plc.directory answered 404 "DID not available". Left: the composed
+      MarketRequester does not yet derive its handle from the ephemeral host or set PdsSpec.ephemeral.
+    status: done
+  - id: S10-PROTOCOL-NOTE
+    title: "The protocol written for discussion outside this repository"
+    files: [docs/protocol/workload-oauth.md]
+    work: >
+      The record, the two XRPCs, the token shapes, the mapping to RFC 8693 (token exchange), RFC 9449 (DPoP)
+      and RFC 9126 (PAR), the trust model and the security considerations (issuer trust from the account's own
+      record, single role per record, PDS-built policy input, no listRecords), written without kcp terms, as a
+      draft for the IETF atproto working group.
+    status: done
+order: "S1 and S2 first (independent), then S3, S4 and S11, then S5, S6, S7, then S8 with S5 and S6, S9 last; S10 alongside."
+future_work:
+  - "iOS app: the Allow OAuth apps field and spec.oauthClients."
+  - "The same exchange as the RFC 8693 grant type at /oauth/token, once the XRPC shape settled."
+  - "Other PDS implementations, after the protocol note is discussed."
+risks:
+  - "S1 changes behavior for every OAuth client of our PDS; a client that asked for a narrow scope and relied on full access breaks."
+  - "OAuth over the did:key ingress (form bodies, DPoP nonce headers, redirects) is not read live yet; S9 probes it first."
+  - "D2 lets a guest mint a token for any audience; safe only while every relying party checks iss, sub and aud, which S4 makes the rule for getSecrets and the node join."
+  - "atirc must accept a PDS behind xrpc.fedproxy.com and the account's handle; the plan 0039 D4 limits apply (did:plc on plc.directory, public https PDS, handle on a domain we control)."

@@ -163,6 +163,7 @@ apps:
       - {name: ingress-public-host, to: spec.ingress.publicHost}
       - {name: ingress-xrpc-host, to: spec.ingress.xrpc.ingressProxyHost}
       - {name: ingress-relay-url, to: spec.ingress.xrpc.relayURL}
+      - {name: ingress-ephemeral-key, to: spec.ingress.xrpc.ephemeralKey}
       - {name: ingress-opentunnel-command, to: spec.ingress.opentunnel.command}
       - {name: ingress-opentunnel-route-name, to: spec.ingress.opentunnel.routeName}
       - {name: ingress-opentunnel-local-host, to: spec.ingress.opentunnel.localHost}
@@ -226,9 +227,12 @@ apps:
       - {name: secrets, to: contract.secretsRef}
       - {name: agent, to: contract.agent}
       - {name: guest-tools, to: contract.guestTools}
+      - {name: allow-oauth, to: contract.oauthClients}
       - {name: associate, to: contract.association}
       - {name: association-ref, to: spec.identity.associationRef}
       - {name: secrets-fallback, to: spec.secretsFallback}
+      - {name: oauth-grants-file, to: spec.oauthGrants}
+      - {name: oauth-self, to: spec.oauthGrants}
       - {name: tunnel, to: contract.tunnels}
       - {name: guest-host-aliases, to: options}
       - {name: guest-ca-file, to: profile}

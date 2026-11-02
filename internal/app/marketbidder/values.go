@@ -24,7 +24,7 @@ import (
 const (
 	oidcRotationPath = "oidc-rotation/"
 	GuestOIDCKey     = "guest"
-	guestOIDCKeyPath = "identity/oidc/key/" + GuestOIDCKey
+	guestOIDCKeyPath = "auth/" + computevm.GuestLoginDefaultMount + "/wid"
 )
 
 type BidderKcp struct {
@@ -207,10 +207,10 @@ func (p *pass) rotateSigningKey(ctx context.Context, mount string) error {
 	if err != nil {
 		return err
 	}
-	if err := keys.RotateKey(ctx, mount, GuestOIDCKey); err != nil {
+	if err := keys.RotateKey(ctx, mount, guestOIDCKeyPath); err != nil {
 		var re *openbao.ResponseError
 		if errors.As(err, &re) && (re.Status == http.StatusNotFound || re.Status == http.StatusBadRequest) {
-			c.Log().Info("no OIDC signing key to rotate yet; the server makes it from its declaration", "name", o.Name, "key", GuestOIDCKey)
+			c.Log().Info("no workload identity issuer to rotate yet; the sshsig plugin is not mounted", "name", o.Name, "key", guestOIDCKeyPath)
 			p.ctl.setRotated(r, want)
 			return nil
 		}
@@ -220,8 +220,8 @@ func (p *pass) rotateSigningKey(ctx context.Context, mount string) error {
 		return err
 	}
 	p.ctl.setRotated(r, want)
-	c.Log().Info("rotated the bidder's OIDC signing key in its OpenBao; the issuer URL stays and the old key stays published for the key's verification ttl",
-		"name", o.Name, "key", GuestOIDCKey, "rotation", want)
+	c.Log().Info("rotated the bidder's workload identity signing key; the issuer URL stays and the old key stays published for 48h",
+		"name", o.Name, "key", guestOIDCKeyPath, "rotation", want)
 	return nil
 }
 

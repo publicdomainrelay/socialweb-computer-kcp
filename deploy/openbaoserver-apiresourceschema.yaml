@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-11.openbaoservers.socialweb.computer
+  name: v1alpha1-12.openbaoservers.socialweb.computer
   labels:
     contracts.socialweb.computer/vaults: v1alpha1
 spec:
@@ -363,21 +363,6 @@ spec:
                           type: string
                       required:
                         - mount
-                  identityOIDC:
-                    type: object
-                    properties:
-                      key:
-                        type: string
-                      algorithm:
-                        type: string
-                      rotationPeriod:
-                        type: string
-                      verificationTTL:
-                        type: string
-                      tokenTTL:
-                        type: string
-                    required:
-                      - key
               plugins:
                 type: array
                 items:

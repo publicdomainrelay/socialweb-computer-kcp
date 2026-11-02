@@ -195,8 +195,6 @@ type GuestControlPlaneSettings struct {
 
 	Role string `json:"role,omitempty"`
 
-	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty"`
-
 	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty"`
 
 	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty"`
@@ -503,8 +501,6 @@ type GuestControlPlaneSpec struct {
 
 	Role string `json:"role,omitempty" apigen:"default=kcp"`
 
-	GrantSyncSeconds *int32 `json:"grantSyncSeconds,omitempty" apigen:"default=30,minimum=1"`
-
 	IssuerRetrySeconds *int32 `json:"issuerRetrySeconds,omitempty" apigen:"default=30,minimum=1"`
 
 	HostKeyAttempts *int32 `json:"hostKeyAttempts,omitempty" apigen:"minimum=1"`
@@ -571,6 +567,8 @@ type PdsSpec struct {
 	ContactEmail string `json:"contactEmail,omitempty"`
 
 	OAuth *PdsOAuth `json:"oauth,omitempty"`
+
+	Ephemeral bool `json:"ephemeral,omitempty"`
 }
 
 type PdsOAuth struct {
@@ -585,6 +583,20 @@ type PdsOAuth struct {
 	DisableLocalhostClients bool `json:"disableLocalhostClients,omitempty"`
 
 	Scopes []string `json:"scopes,omitempty"`
+
+	DisableWorkloadSignIn bool `json:"disableWorkloadSignIn,omitempty"`
+
+	WorkloadIssuers []string `json:"workloadIssuers,omitempty" apigen:"listType=set"`
+}
+
+type RequesterOAuthGrant struct {
+	Role string `json:"role" apigen:"pattern=^[A-Za-z0-9._:~-]{1,512}$"`
+
+	Issuer string `json:"issuer" apigen:"userEndpoint"`
+
+	Subject string `json:"subject"`
+
+	Clients []ComputeContractOAuthClient `json:"clients"`
 }
 
 type Requester struct {
@@ -672,6 +684,8 @@ type RequesterSpec struct {
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
 
 	AtircMintedRef *commonv1.SecretRef `json:"atircMintedRef,omitempty"`
+
+	OAuthGrants []RequesterOAuthGrant `json:"oauthGrants,omitempty"`
 
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 
