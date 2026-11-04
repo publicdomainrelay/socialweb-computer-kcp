@@ -13,7 +13,143 @@ One binary, `socialweb-computer`, runs every part. Each application is a kcp of 
 - Example objects: [`examples/infra/`](examples/infra/)
 - Working rules for agents: [`AGENTS.md`](AGENTS.md)
 
-## Quick start (local)
+## Production Releases and Release Candidates
+
+Install via:
+
+```bash
+BUCKET=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
+V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags \
+  | jq -r '.[].name' | grep '^v' | sort -V | tail -1)
+ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+cd $(mktemp -d)
+curl -fLO "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
+curl -fLO "$BUCKET/releases/$V/binaries/SHA256SUMS"
+grep " socialweb-computer-$ARCH$" SHA256SUMS | sha256sum -c -
+sudo install -m 0755 "socialweb-computer-$ARCH" /usr/local/bin/socialweb-computer
+```
+
+### Vouches
+
+Both policies read `sh.tangled.graph.vouch` records (rkey = the subject DID). On prod they live in people's own repos:
+
+| record | written by | how |
+| --- | --- | --- |
+| bidder operator -> you | the bidder operator | `goat record create` from the operator account, or [`vouch-bidder-operator.yaml`](examples/infra/vouch-bidder-operator.yaml) in the bidder kcp of a bidder installed with `--bidder-operator-signin` |
+| you -> bidder (or its operator) | you | [`vouch.yaml`](examples/infra/vouch.yaml) applied to your requester, or `goat record create` |
+
+Verdicts are cached for 5 minutes, denials too: write both records before the first apply. `vouch.yaml` writes through
+your OAuth session only when it was granted the optional scope `repo:sh.tangled.graph.vouch`; otherwise use `goat`.
+
+### Provide Compute: Run Bidder
+
+```bash
+sudo socialweb-computer install bidder --handle <bidder handle> --compute-kinds vm,deno --bidder-operator-signin <operator handle>
+```
+
+The bidder runs `bidder-tangled-vouch`, gets a DID and waits for its association. Install from a release, identity,
+association, upgrade and the foreground form (`run bidder --host-backend proc --fg`): [`docs/bidder.md`](docs/bidder.md),
+[`CONTRIBUTING.md`](CONTRIBUTING.md#install-a-release-bidder).
+
+### Request Compute: Run Requester
+
+In the foreground, signed in by OAuth QR:
+
+```bash
+SWC=socialweb-computer ST=~/.tmp/lr; mkdir -p "$ST"; chmod 700 "$ST"
+$SWC run requester --name me --state-dir "$ST" -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
+# sign in from the pendingAction url in the log (scan the QR, or scripts/oauth-signin.ts); never paste it anywhere
+until [ -s "$ST/requesters/me/ready.json" ]; do sleep 1; done
+eval "$($SWC run requester env me --state-dir "$ST")"
+```
+
+- identity options after `--`: `--atproto-oauth-qr`, `--atproto-oauth` (browser), or an existing account with an app
+  password (`--atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`); with none it is a
+  local PDS (`localRepo`). Contract options are refused: contracts are kubectl objects here
+- a restart with the same command (nothing after `--` needed) keeps the DID, the vault and every Held contract (the
+  resume waits for its own policy engine, then runs the policy; since rc158)
+
+As a systemd user unit of its own account, in `socialweb.slice` (root, once). The account `swc-requester` is created,
+or an existing one is taken over with `--adopt-account`:
+
+```bash
+sudo socialweb-computer install requester --name me --dry-run      # prints every step, writes nothing
+sudo socialweb-computer install requester --name me                # unit socialweb-computer-requester@me, identity --atproto-oauth-qr
+sudo socialweb-computer run requester signin me \
+  --state-dir /var/lib/socialweb-computer/swc-requester            # the sign-in URL (prints nothing once Ready)
+```
+
+- the ready file is `/var/lib/socialweb-computer/swc-requester/requesters/me/ready.json`; an app password goes in once
+  through `run requester password me` on stdin (into the requester's own OpenBao), never in a flag, `config.json` or
+  the unit; `upgrade`, `rollback` and
+  `uninstall requester` as for a bidder
+- an account that already runs a core needs no root and no new account: apply
+  [`requester-hostprocess.yaml`](examples/infra/requester-hostprocess.yaml) into that core's kcp, and the core places
+  `run requester` as one more unit ([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 7b)
+
+### IaC: Infra and EphemeralInfra
+
+This is useful for IaC when you want to sync state of atproto `Infra` record to real state.
+
+The same objects against prod bidders, with your own atproto account. Prod means prod bidders (each runs
+`bidder-tangled-vouch`), plc.directory, the did:key ingress relay xrpc.fedproxy.com and irc.fedfork.com for atirc.
+Never set `policy: open`. Long form: [`docs/quickstart-prod.md`](docs/quickstart-prod.md); end to end runbook:
+[`docs/acceptance/0013-mixed-prod.md`](docs/acceptance/0013-mixed-prod.md).
+
+```bash
+R=$ST/requesters/me/ready.json
+sed -e "s/REPLACE-REQUESTER-REPO/repo-$(jq -r .did "$R" | tr : -)/" -e "s/REPLACE-BIDDER-DID/<bidder did>/g" \
+  examples/infra/vouch.yaml | kubectl apply -f -
+sed -e "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat "$(jq -r .sshPublicKey "$R")")|" \
+  -e "s/REPLACE-BIDDER-DID/<bidder did>/" examples/infra/mixed-prod.yaml | kubectl apply -f -
+kubectl wait ephemeralinfras.socialweb.computer/mixedprod --for=jsonpath='{.status.phase}'=Deployed --timeout=5m
+$SWC run requester ssh me --state-dir "$ST" --contract einfra-mixedprod-vm1 --exec 'cat /root/mixedprod'
+kubectl get computecontracts.socialweb.computer einfra-mixedprod-sbx1 -o jsonpath='{.status.contract.sandbox.stdout}'
+```
+
+- [`mixed-prod.yaml`](examples/infra/mixed-prod.yaml) pins a VM, a Deno sandbox and an agent VM to one bidder with
+  `bidderDids`; [`vm.yaml`](examples/infra/vm.yaml) and [`deno-sandbox.yaml`](examples/infra/deno-sandbox.yaml) work
+  the same way
+- a Deno sandbox needs a bidder that serves deno: its operator runs
+  `install bidder --compute-kinds vm,deno` (or `run bidder --compute-kinds vm,deno`)
+- release: `kubectl delete` the object, or set a contract's `state: Released`
+
+### Agents
+
+A contract with `spec.agent` ([`agent-vm.yaml`](examples/infra/agent-vm.yaml), `agent1` of `mixed-prod.yaml`) gets a
+leased atirc token after the receipt; the guest has `atirc-agent.service` installed and stopped, and a
+[`agent-start.yaml`](examples/infra/agent-start.yaml) ContractEvent (`guest.agentStart`) starts it. The agent joins
+atirc as `<label>-<rfp rkey>.<your handle>`; release revokes the token before the VM is deleted.
+
+```bash
+kubectl apply -f examples/infra/agent-start.yaml                 # for agent-vm.yaml; for agent1 of mixed-prod.yaml:
+sed -e 's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e 's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/' \
+  examples/infra/agent-start.yaml | kubectl apply -f -
+```
+
+The mint needs a requester identity irc.fedfork.com resolves: an OAuth sign-in (signs with the session), an app
+password account (`pdsAccount`, signs through that account's PDS), or a local PDS on plc.directory behind its ingress
+with `--atproto-handle <a domain you control>` (signs with its own Pds). A `.local` handle is refused before the RFP.
+Details: [`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 5, runbook
+[`docs/acceptance/0004-vm-atirc-agent.md`](docs/acceptance/0004-vm-atirc-agent.md).
+
+### Kubernetes
+
+```bash
+$SWC run requester --name mk --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/mk.log" 2>&1 &
+until jq -e .gateway "$ST/requesters/mk/ready.json" >/dev/null 2>&1; do sleep 1; done
+$SWC run requester cluster mk --cluster c1 --state-dir "$ST"
+until TK=$($SWC run requester kubeconfig mk --cluster c1 --state-dir "$ST" 2>/dev/null); do sleep 2; done
+kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml
+```
+
+`--with-gateway` composes the gateway into the requester's own kcp: one identity, no second sign-in, nodes rented
+under your DID. `requester.json` records it at the first start of a name, so a restart keeps the gateway and the
+clusters; give it at that first start ([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 8). The hosted
+gateway `https://k8s.socialweb.computer` serves tenant clusters too, over XRPC with service auth from your account
+([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 6, [`docs/gateway.md`](docs/gateway.md)).
+
+## Dev Mode: Local Full Market one Process Tree
 
 Your own market network on one Linux host: one kcp with its own PLC, relay, PDSes and a bidder. Nothing here touches
 prod. Run as a normal user that owns a subordinate uid range and can open `/dev/kvm` (`dev up` refuses root), with
@@ -93,126 +229,6 @@ kubectl delete ephemeralinfras.socialweb.computer --all
 kill -INT "$(jq -r .pid "$ST/requesters/qs/ready.json")"                # Ctrl-C: stops the requester, keeps its state
 $SWC dev down --instance $I --state-dir "$ST"                           # releases every VM, removes the state
 ```
-
-## Prod: a long-lived requester
-
-The same objects against prod bidders, with your own atproto account. Prod means prod bidders (each runs
-`bidder-tangled-vouch`), plc.directory, the did:key ingress relay xrpc.fedproxy.com and irc.fedfork.com for atirc.
-Never set `policy: open`. Long form: [`docs/quickstart-prod.md`](docs/quickstart-prod.md); end to end runbook:
-[`docs/acceptance/0013-mixed-prod.md`](docs/acceptance/0013-mixed-prod.md).
-
-### Run or install the requester
-
-In the foreground, signed in by OAuth QR:
-
-```bash
-SWC=socialweb-computer ST=~/.tmp/lr; mkdir -p "$ST"; chmod 700 "$ST"
-$SWC run requester --name me --state-dir "$ST" -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
-# sign in from the pendingAction url in the log (scan the QR, or scripts/oauth-signin.ts); never paste it anywhere
-until [ -s "$ST/requesters/me/ready.json" ]; do sleep 1; done
-eval "$($SWC run requester env me --state-dir "$ST")"
-```
-
-- identity options after `--`: `--atproto-oauth-qr`, `--atproto-oauth` (browser), or an existing account with an app
-  password (`--atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`); with none it is a
-  local PDS (`localRepo`). Contract options are refused: contracts are kubectl objects here
-- a restart with the same command (nothing after `--` needed) keeps the DID, the vault and every Held contract (the
-  resume waits for its own policy engine, then runs the policy; since rc158)
-
-As a systemd user unit of its own account, in `socialweb.slice` (root, once). The account `swc-requester` is created,
-or an existing one is taken over with `--adopt-account`:
-
-```bash
-sudo socialweb-computer install requester --name me --dry-run      # prints every step, writes nothing
-sudo socialweb-computer install requester --name me                # unit socialweb-computer-requester@me, identity --atproto-oauth-qr
-sudo socialweb-computer run requester signin me \
-  --state-dir /var/lib/socialweb-computer/swc-requester            # the sign-in URL (prints nothing once Ready)
-```
-
-- the ready file is `/var/lib/socialweb-computer/swc-requester/requesters/me/ready.json`; an app password goes in once
-  through `run requester password me` on stdin (into the requester's own OpenBao), never in a flag, `config.json` or
-  the unit; `upgrade`, `rollback` and
-  `uninstall requester` as for a bidder
-- an account that already runs a core needs no root and no new account: apply
-  [`requester-hostprocess.yaml`](examples/infra/requester-hostprocess.yaml) into that core's kcp, and the core places
-  `run requester` as one more unit ([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 7b)
-
-### Vouches
-
-Both policies read `sh.tangled.graph.vouch` records (rkey = the subject DID). On prod they live in people's own repos:
-
-| record | written by | how |
-| --- | --- | --- |
-| bidder operator -> you | the bidder operator | `goat record create` from the operator account, or [`vouch-bidder-operator.yaml`](examples/infra/vouch-bidder-operator.yaml) in the bidder kcp of a bidder installed with `--bidder-operator-signin` |
-| you -> bidder (or its operator) | you | [`vouch.yaml`](examples/infra/vouch.yaml) applied to your requester, or `goat record create` |
-
-Verdicts are cached for 5 minutes, denials too: write both records before the first apply. `vouch.yaml` writes through
-your OAuth session only when it was granted the optional scope `repo:sh.tangled.graph.vouch`; otherwise use `goat`.
-
-### Apply Infra and EphemeralInfra
-
-```bash
-R=$ST/requesters/me/ready.json
-sed -e "s/REPLACE-REQUESTER-REPO/repo-$(jq -r .did "$R" | tr : -)/" -e "s/REPLACE-BIDDER-DID/<bidder did>/g" \
-  examples/infra/vouch.yaml | kubectl apply -f -
-sed -e "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat "$(jq -r .sshPublicKey "$R")")|" \
-  -e "s/REPLACE-BIDDER-DID/<bidder did>/" examples/infra/mixed-prod.yaml | kubectl apply -f -
-kubectl wait ephemeralinfras.socialweb.computer/mixedprod --for=jsonpath='{.status.phase}'=Deployed --timeout=5m
-$SWC run requester ssh me --state-dir "$ST" --contract einfra-mixedprod-vm1 --exec 'cat /root/mixedprod'
-kubectl get computecontracts.socialweb.computer einfra-mixedprod-sbx1 -o jsonpath='{.status.contract.sandbox.stdout}'
-```
-
-- [`mixed-prod.yaml`](examples/infra/mixed-prod.yaml) pins a VM, a Deno sandbox and an agent VM to one bidder with
-  `bidderDids`; [`vm.yaml`](examples/infra/vm.yaml) and [`deno-sandbox.yaml`](examples/infra/deno-sandbox.yaml) work
-  the same way
-- a Deno sandbox needs a bidder that serves deno: its operator runs
-  `install bidder --compute-kinds vm,deno` (or `run bidder --compute-kinds vm,deno`)
-- release: `kubectl delete` the object, or set a contract's `state: Released`
-
-### Agents over atirc
-
-A contract with `spec.agent` ([`agent-vm.yaml`](examples/infra/agent-vm.yaml), `agent1` of `mixed-prod.yaml`) gets a
-leased atirc token after the receipt; the guest has `atirc-agent.service` installed and stopped, and a
-[`agent-start.yaml`](examples/infra/agent-start.yaml) ContractEvent (`guest.agentStart`) starts it. The agent joins
-atirc as `<label>-<rfp rkey>.<your handle>`; release revokes the token before the VM is deleted.
-
-```bash
-kubectl apply -f examples/infra/agent-start.yaml                 # for agent-vm.yaml; for agent1 of mixed-prod.yaml:
-sed -e 's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e 's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/' \
-  examples/infra/agent-start.yaml | kubectl apply -f -
-```
-
-The mint needs a requester identity irc.fedfork.com resolves: an OAuth sign-in (signs with the session), an app
-password account (`pdsAccount`, signs through that account's PDS), or a local PDS on plc.directory behind its ingress
-with `--atproto-handle <a domain you control>` (signs with its own Pds). A `.local` handle is refused before the RFP.
-Details: [`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 5, runbook
-[`docs/acceptance/0004-vm-atirc-agent.md`](docs/acceptance/0004-vm-atirc-agent.md).
-
-### Tenant clusters
-
-```bash
-$SWC run requester --name mk --state-dir "$ST" --with-gateway -- --atproto-oauth-qr > "$ST/mk.log" 2>&1 &
-until jq -e .gateway "$ST/requesters/mk/ready.json" >/dev/null 2>&1; do sleep 1; done
-$SWC run requester cluster mk --cluster c1 --state-dir "$ST"
-until TK=$($SWC run requester kubeconfig mk --cluster c1 --state-dir "$ST" 2>/dev/null); do sleep 2; done
-kubectl --kubeconfig "$TK" apply -f examples/infra/k8s-cluster.yaml
-```
-
-`--with-gateway` composes the gateway into the requester's own kcp: one identity, no second sign-in, nodes rented
-under your DID. `requester.json` records it at the first start of a name, so a restart keeps the gateway and the
-clusters; give it at that first start ([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 8). The hosted
-gateway `https://k8s.socialweb.computer` serves tenant clusters too, over XRPC with service auth from your account
-([`docs/quickstart-prod.md`](docs/quickstart-prod.md) section 6, [`docs/gateway.md`](docs/gateway.md)).
-
-### Run a bidder
-
-```bash
-sudo socialweb-computer install bidder --handle <bidder handle> --compute-kinds vm,deno --bidder-operator-signin <operator handle>
-```
-
-The bidder runs `bidder-tangled-vouch`, gets a DID and waits for its association. Install from a release, identity,
-association, upgrade and the foreground form (`run bidder --host-backend proc --fg`): [`docs/bidder.md`](docs/bidder.md),
-[`CONTRIBUTING.md`](CONTRIBUTING.md#install-a-release-bidder).
 
 ### Open items
 
