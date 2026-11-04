@@ -56,11 +56,18 @@ association, upgrade and the foreground form (`run bidder --host-backend proc --
 In the foreground, signed in by OAuth QR:
 
 ```bash
-SWC=socialweb-computer ST=~/.tmp/lr; mkdir -p "$ST"; chmod 700 "$ST"
-$SWC run requester --name me --state-dir "$ST" -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
+cd $(mktemp -d)
+ST=${PWD}/requester;
+mkdir -p "$ST"
+chmod 700 "$ST"
+socialweb-computer run requester --name me --state-dir "$ST" -- --atproto-oauth-qr > "$ST/me.log" 2>&1 &
+tail -F $ST/me.log &
+tail_pid=$1
 # sign in from the pendingAction url in the log (scan the QR, or scripts/oauth-signin.ts); never paste it anywhere
+while [ grep -v "$ST/requesters/me.log" ]; do sleep 1; done
+kill $tail_pid
 until [ -s "$ST/requesters/me/ready.json" ]; do sleep 1; done
-eval "$($SWC run requester env me --state-dir "$ST")"
+eval "$(socialweb-computer run requester env me --state-dir "$ST")"
 ```
 
 - identity options after `--`: `--atproto-oauth-qr`, `--atproto-oauth` (browser), or an existing account with an app
