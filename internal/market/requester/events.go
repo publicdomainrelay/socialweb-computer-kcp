@@ -249,11 +249,14 @@ func (q *Requester) reportedHostKeys(value map[string]any) ([]v1alpha1.ComputeVM
 		if !ok {
 			return nil, errors.New("requester: a host key is not an object")
 		}
-		raw = append(raw, v1alpha1.ComputeVMHostKey{
-			Type:        stringOf(entry["type"]),
-			PublicKey:   stringOf(entry["publicKey"]),
-			Fingerprint: stringOf(entry["fingerprint"]),
-		})
+		keyType, publicKey := stringOf(entry["type"]), stringOf(entry["publicKey"])
+		if fields := strings.Fields(publicKey); len(fields) >= 2 {
+			if fields[0] != keyType {
+				return nil, fmt.Errorf("requester: the %s host key line names type %s", keyType, fields[0])
+			}
+			publicKey = fields[1]
+		}
+		raw = append(raw, v1alpha1.ComputeVMHostKey{Type: keyType, PublicKey: publicKey, Fingerprint: stringOf(entry["fingerprint"])})
 	}
 	return q.deps.Guests.CheckHostKeys(raw)
 }
