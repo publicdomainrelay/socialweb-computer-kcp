@@ -154,7 +154,7 @@ func (c *Core) registerLocal(ctx context.Context, mgr *ctlruntime.Manager, clien
 		_, err = infracollection.Register(mgr, infracollection.Options{Bus: c.handlers, Dynamic: cfg.DynamicFactory, Scope: local, Log: cfg.Log})
 		warn("InfraCollection, EphemeralInfraCollection", err)
 	}
-	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.handlers.Client()}),
+	_, err = marketpresencectl.Register(mgr, marketpresencectl.Options{Heartbeats: presence.New(presence.Config{HTTPClient: c.busOrNetworkClient()}),
 		Bidders: bidders{clients: clients}, Scope: local, Log: cfg.Log})
 	warn("MarketPresence", err)
 	warn("leases", c.registerLeases(ctx, mgr, local, base))
