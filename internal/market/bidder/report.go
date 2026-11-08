@@ -41,7 +41,7 @@ func (b *Bidder) report(ctx context.Context, vm *v1alpha1.ComputeVM) {
 	if len(held.HostKeys) > 0 && published.HostKeysURI == "" {
 		keys := make([]market.HostKey, 0, len(held.HostKeys))
 		for _, key := range held.HostKeys {
-			keys = append(keys, market.HostKey{Type: key.Type, PublicKey: key.PublicKey, Fingerprint: key.Fingerprint})
+			keys = append(keys, market.HostKey{Type: key.Type, PublicKey: key.Type + " " + key.PublicKey, Fingerprint: key.Fingerprint})
 		}
 		record := market.ComputeEventsVMHostKeys{Keys: keys, ObservedAt: firstOf(held.ReportedAt, now), CreatedAt: now}
 		b.publishReport(ctx, vm, record, published)
