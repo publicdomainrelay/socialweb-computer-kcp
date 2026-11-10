@@ -332,6 +332,12 @@ func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.Node
 		return
 	}
 	r.log().Warn("requester_contract_failed", "err", err)
+	if state == nil || state.Receipt == nil {
+		if state != nil {
+			r.setState(state)
+		}
+		r.deleteContractRecords(ctx)
+	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "the contract flow failed: "+err.Error(), state, r.currentBids(), r.currentChosen(), "failed", attempts)
 	if state != nil && state.Receipt != nil && state.Termination == nil {
 		if waitErr := r.waitForRelease(ctx, state, state.Receipt.URI, winnerDID(state)); waitErr != nil {

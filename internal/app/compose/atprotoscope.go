@@ -63,7 +63,7 @@ var clusterScope = []string{
 
 func GatewayAtprotoScope() string {
 	var out []string
-	for _, scope := range append(slices.Clone(requesterScope), clusterScope...) {
+	for _, scope := range slices.Concat(requesterScope, atprotooauth.RequesterRecordsDelete, clusterScope) {
 		if !slices.Contains(out, scope) {
 			out = append(out, scope)
 		}
@@ -74,7 +74,7 @@ func GatewayAtprotoScope() string {
 var sshAtircScope = []string{atprotooauth.RPCAtircMint, atprotooauth.RPCAtircRevoke}
 
 func SshGatewayAtprotoScope() string {
-	return strings.Join(slices.Concat(requesterScope, sshAtircScope), " ")
+	return strings.Join(slices.Concat(requesterScope, atprotooauth.RequesterRecordsDelete, sshAtircScope), " ")
 }
 
 func OptionValue(opts []v1alpha1.ApplicationOption, name string) string {

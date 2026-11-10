@@ -87,6 +87,7 @@ var (
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint, RPCAtircRevoke},
 		[]string{RepoTangledVouchWrite},
+		RequesterRecordsDelete,
 	)
 
 	BidderOAuthScope = dedupeScopes(
@@ -146,7 +147,9 @@ var (
 	)
 )
 
-var OptionalScopes = []string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}
+var RequesterRecordsDelete = collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete)
+
+var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterRecordsDelete)
 
 func RequiredScopes(requested []string) []string {
 	out := make([]string, 0, len(requested))

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -532,16 +533,25 @@ func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
 	deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	deleted := 0
+	var unscoped []string
 	for _, ref := range refs {
 		aturi, err := syntax.ParseATURI(ref.URI)
 		if err != nil || aturi.Authority().String() != q.repoDID {
 			continue
 		}
 		if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, aturi.Collection().String(), aturi.RecordKey().String()); err != nil && !errors.Is(err, market.ErrNotFound) {
+			if strings.Contains(err.Error(), "ScopeMissingError") {
+				unscoped = append(unscoped, aturi.Collection().String())
+				continue
+			}
 			r.log().Warn("requester_record_delete_failed", "record", ref.URI, "err", err)
 			continue
 		}
 		deleted++
+	}
+	if len(unscoped) > 0 {
+		r.log().Info("requester_record_delete_skipped", "reason", "the session was not granted delete on these collections; sign in again to grant it",
+			"collections", slices.Compact(slices.Sorted(slices.Values(unscoped))))
 	}
 	r.log().Info("requester_contract_records_deleted", "deleted", deleted, "of", len(refs))
 }
