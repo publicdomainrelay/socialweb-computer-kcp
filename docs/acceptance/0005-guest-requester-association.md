@@ -100,6 +100,13 @@ RecordNotFound x3. Steps 1-3 and 5 on kcp 69aa8b0f (hat-7): crawl ok, both peer 
 `deleted_on_request`) both are unassociated within 7 s, and R2's nested ComputeVM carries `spec.associationExpiresAt`
 from the chain (the bidder backstop). That run found the requester kept its contract records after a bidder termination
 (fixed: the termination path deletes them before Released).
+2026-11-10 14:41-14:46Z, bidders on kcp 4ccc3bd6, owner bob: parts A and B pass in one round (outer and R2's nested VM on
+hat-9): the R2 association and `r2-<accept rkey>.bobvmbuilder.bsky.social` token, the agents mesh-keyed
+(`requester_agent_mesh_key_written`, no agent token), R2 Held and up, part B records, crawl and chain as above; the
+outer-only release cascades (R2 Released first, `atircRevokes` Done), both DIDs `plc_tombstone`, and none of bob's
+contract records since the round remain. 15:47-15:50Z, bidders on kcp 2d367fe8: `run request r2 <name> --r2-name r2
+--agent --hold` with no manual `run request agent`: the guest requester logs `agentStart is out` when Held, the hat-9
+bidder queues the guest event for R2's nested VM, and the release again leaves no records.
 
 ## Pass criteria
 
