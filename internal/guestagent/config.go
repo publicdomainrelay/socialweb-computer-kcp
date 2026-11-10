@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -20,6 +21,10 @@ const (
 	DefaultLoginHelper = "/usr/local/bin/guest-login.sh"
 
 	TunnelsFile = "tunnels.json"
+
+	ServicesFile = "services.json"
+
+	ShellService = "shell"
 
 	SecretsFile = "secrets.json"
 
@@ -73,7 +78,11 @@ type Tunnel struct {
 
 	Port int `json:"port"`
 
-	MCP bool `json:"mcp,omitempty"`
+	Unix string `json:"unix,omitempty"`
+}
+
+type Service struct {
+	Unix string `json:"unix"`
 }
 
 type Bidder struct {
@@ -111,6 +120,8 @@ type AcceptRef struct {
 type Config struct {
 	Tunnels []Tunnel
 
+	Shell string
+
 	Secrets *Secrets
 
 	AgentUnit string
@@ -135,8 +146,11 @@ func (c Config) Tunnel(tag string) (Tunnel, bool) {
 	return Tunnel{}, false
 }
 
-func (c Config) MCP() bool {
-	return slices.ContainsFunc(c.Tunnels, func(t Tunnel) bool { return t.MCP })
+func (t Tunnel) Endpoint() (network, address string) {
+	if t.Unix != "" {
+		return "unix", t.Unix
+	}
+	return "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(t.Port))
 }
 
 func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
@@ -146,6 +160,19 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 	}
 	if err := readOptionalJSON(filepath.Join(configDir, TunnelsFile), &tunnels); err != nil {
 		return cfg, err
+	}
+	var services map[string]Service
+	if err := readOptionalJSON(filepath.Join(configDir, ServicesFile), &services); err != nil {
+		return cfg, err
+	}
+	for name, svc := range services {
+		if name != ShellService {
+			return cfg, fmt.Errorf("%w: %s names service %q; the one service is %s", ErrConfig, ServicesFile, name, ShellService)
+		}
+		if !cleanAbsolute(svc.Unix) || filepath.Dir(svc.Unix) != filepath.Clean(stateDir) {
+			return cfg, fmt.Errorf("%w: %s %s unix %q is not a socket path directly in the state dir %s", ErrConfig, ServicesFile, name, svc.Unix, stateDir)
+		}
+		cfg.Shell = svc.Unix
 	}
 	var secrets Secrets
 	switch err := readOptionalJSON(filepath.Join(configDir, SecretsFile), &secrets); {
@@ -180,9 +207,9 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		switch {
 		case t.Tag == "" || len(t.Tag) > maxTag || !printable(t.Tag):
 			return cfg, fmt.Errorf("%w: tunnel tag %q is not 1 to %d printable ASCII bytes", ErrConfig, t.Tag, maxTag)
-		case t.MCP && t.Port != 0:
-			return cfg, fmt.Errorf("%w: tunnel %s is mcp and names port %d; an mcp tunnel has no port", ErrConfig, t.Tag, t.Port)
-		case !t.MCP && (t.Port < 1 || t.Port > 65535):
+		case t.Unix != "" && (t.Port != 0 || !cleanAbsolute(t.Unix)):
+			return cfg, fmt.Errorf("%w: tunnel %s unix %q is not a clean absolute path, or it names a port too", ErrConfig, t.Tag, t.Unix)
+		case t.Unix == "" && (t.Port < 1 || t.Port > 65535):
 			return cfg, fmt.Errorf("%w: tunnel %s port %d is not a TCP port", ErrConfig, t.Tag, t.Port)
 		case seen[t.Tag]:
 			return cfg, fmt.Errorf("%w: tunnel tag %s appears twice", ErrConfig, t.Tag)
@@ -192,9 +219,9 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		seen[t.Tag] = true
 		cfg.Tunnels = append(cfg.Tunnels, t)
 	}
-	if len(cfg.Tunnels) == 0 && cfg.Secrets == nil && cfg.AgentUnit == "" && cfg.Association == nil {
-		return cfg, fmt.Errorf("%w: %s names no tunnel, %s asks for no sealed secrets fallback, %s names no unit and %s names no ref file", ErrConfig,
-			TunnelsFile, SecretsFile, AgentFile, AssociationFile)
+	if len(cfg.Tunnels) == 0 && cfg.Shell == "" && cfg.Secrets == nil && cfg.AgentUnit == "" && cfg.Association == nil {
+		return cfg, fmt.Errorf("%w: %s names no tunnel, %s no service, %s asks for no sealed secrets fallback, %s names no unit and %s names no ref file", ErrConfig,
+			TunnelsFile, ServicesFile, SecretsFile, AgentFile, AssociationFile)
 	}
 	if err := readJSON(filepath.Join(configDir, BidderFile), &cfg.Bidder); err != nil {
 		return cfg, err
@@ -256,6 +283,10 @@ func readJSON(path string, into any) error {
 		return fmt.Errorf("%w: %s: %v", ErrConfig, path, err)
 	}
 	return nil
+}
+
+func cleanAbsolute(p string) bool {
+	return strings.HasPrefix(p, "/") && filepath.Clean(p) == p
 }
 
 func printable(s string) bool {

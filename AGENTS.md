@@ -246,14 +246,15 @@ requester's own kcp, and `install` prints both. A password never goes into reque
     side is `run request proxy <name> --tag <tag>` (`internal/webrtcproxy`), and `run request ssh
     --transport webrtc` uses it as the ssh ProxyCommand; `run request --tunnel <tag>:<port>[:<transport>]`
     asks for tunnels. STUN is `stun:stun.cloudflare.com:3478` only; no TURN (plan 0034).
-    A tunnels.json entry `{"tag": "<tag>", "mcp": true}` (no port) is the guest agent's own MCP shell
-    server (`internal/guestagent/mcp.go`, `jobs.go`: tools exec, start, read, write, kill, list, as root):
-    the daemon serves MCP Streamable HTTP (POST /mcp, JSON, stateless) on the root-only unix socket
-    `/run/socialweb-guest-agent/mcp.sock` and on loopback `127.0.0.1:7801` (the iroh path: the
-    requester's user_data runs `dumbpipe listen-tcp --host 127.0.0.1:7801`), that tag's datachannels
-    are bridged to the socket, and `socialweb-guest-agent mcp --stdio` proxies newline-delimited
-    JSON-RPC to it; jobs live in the daemon and outlive a connection. The loopback port accepts only a
-    peer socket owned by root (`/proc/net/tcp`), so no other guest user gets the root shell.
+    A tunnels.json entry maps its tag to `"port": <n>` (127.0.0.1) or `"unix": "<socket path>"`; each
+    datachannel is one connection to it. The guest agent's shell service (an MCP server:
+    `internal/guestagent/mcp.go`, `jobs.go`; tools exec, start, read, write, kill, list, as root) is
+    `/etc/socialweb-guest-agent/services.json` `{"shell": {"unix": "/run/socialweb-guest-agent/shell.sock"}}`
+    (the socket directly in the state dir): HTTP (POST /mcp, JSON, stateless) on that unix socket only,
+    root:root 0600 in a 0700 dir, never TCP; a services.json makes the bidder install the agent too. Reach
+    it over webrtc with `{"tag": "shell", "unix": "/run/socialweb-guest-agent/shell.sock"}`, over iroh with
+    `ssh root@guest socialweb-guest-agent relay /run/socialweb-guest-agent/shell.sock` (stdin and stdout
+    to any unix socket, raw bytes) or ssh streamlocal forwarding. Jobs outlive a connection.
   - The browser shell: ssh over webrtc comes first; wootty is the fallback. An opentunnel entry with
     `shell {envFile}` (default `/etc/wootty/wootty.env`) runs `wootty-<tag>.service` on
     `127.0.0.1:<port>` behind that tag's https URL; a shell on transport webrtc is invalid. The shell

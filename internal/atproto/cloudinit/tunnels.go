@@ -33,6 +33,8 @@ const (
 
 	GuestAgentTunnelsPath = GuestAgentConfigDir + "/tunnels.json"
 
+	GuestAgentServicesPath = GuestAgentConfigDir + "/services.json"
+
 	TunnelTransportOpenTunnel = "opentunnel"
 
 	TunnelTransportWebRTC = "webrtc"

@@ -1,8 +1,6 @@
 package guestagent
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,26 +10,18 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
-	"sync"
 	"time"
 )
 
 const (
-	MCPSocketFile = "mcp.sock"
-
 	MCPPath = "/mcp"
-
-	MCPLoopbackAddr = "127.0.0.1:7801"
 
 	MCPServerName = "socialweb-guest-agent"
 
 	mcpProtocolLatest = "2025-11-25"
 
 	mcpMaxBody = 8 << 20
-
-	mcpMaxLine = 16 << 20
 )
 
 var mcpProtocols = []string{mcpProtocolLatest, "2025-06-18", "2025-03-26"}
@@ -113,7 +103,7 @@ func (m *mcpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 		return
 	}
-	reply, status := m.handle(r.Context(), body)
+	reply, status := m.handle(context.WithoutCancel(r.Context()), body)
 	if reply == nil {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -267,19 +257,16 @@ func (m *mcpServer) tool(ctx context.Context, name string, args json.RawMessage)
 	}
 }
 
-func (a *Agent) mcpSocket() string { return filepath.Join(a.cfg.StateDir, MCPSocketFile) }
-
-func (a *Agent) runMCP(ctx context.Context) {
-	path := a.mcpSocket()
+func (a *Agent) serveShell(ctx context.Context, path string) {
 	_ = os.Remove(path)
-	unix, err := net.Listen("unix", path)
+	ln, err := net.Listen("unix", path)
 	if err == nil {
 		err = os.Chmod(path, 0o600)
 	}
 	if err != nil {
-		a.log.Error("the mcp socket does not listen", "path", path, "err", err.Error())
-		if unix != nil {
-			_ = unix.Close()
+		a.log.Error("the shell service socket does not listen", "path", path, "err", err.Error())
+		if ln != nil {
+			_ = ln.Close()
 		}
 		return
 	}
@@ -288,103 +275,25 @@ func (a *Agent) runMCP(ctx context.Context) {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
-	if tcp, err := net.Listen("tcp4", MCPLoopbackAddr); err != nil {
-		a.log.Error("the mcp loopback port does not listen", "addr", MCPLoopbackAddr, "err", err.Error())
-	} else {
-		a.log.Info("the mcp server listens", "addr", MCPLoopbackAddr, "peers", "root only")
-		go a.serveMCP(srv, rootOnly{Listener: tcp, log: a.log})
+	a.log.Info("the shell service listens", "path", path)
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		a.log.Error("the shell service stopped", "err", err.Error())
 	}
-	a.log.Info("the mcp server listens", "path", path)
-	a.serveMCP(srv, unix)
 	_ = os.Remove(path)
 }
 
-func (a *Agent) serveMCP(srv *http.Server, ln net.Listener) {
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		a.log.Error("the mcp server stopped", "addr", ln.Addr().String(), "err", err.Error())
-	}
-}
-
-type rootOnly struct {
-	net.Listener
-
-	log *slog.Logger
-}
-
-func (l rootOnly) Accept() (net.Conn, error) {
-	for {
-		c, err := l.Listener.Accept()
-		if err != nil {
-			return nil, err
-		}
-		if loopbackPeerIsRoot(c) {
-			return c, nil
-		}
-		l.log.Warn("refused an mcp loopback connection whose socket is not root's", "remote", c.RemoteAddr().String())
-		_ = c.Close()
-	}
-}
-
-func MCPStdio(ctx context.Context, socket string, in io.Reader, out io.Writer) error {
-	client := &http.Client{Transport: &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-		},
-	}}
-	var mu sync.Mutex
-	emit := func(line []byte) {
-		mu.Lock()
-		defer mu.Unlock()
-		_, _ = out.Write(append(bytes.TrimSpace(line), '\n'))
-	}
-	var wg sync.WaitGroup
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64<<10), mcpMaxLine)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		msg := slices.Clone(line)
-		wg.Go(func() {
-			reply, err := mcpPost(ctx, client, msg)
-			if err != nil {
-				var req rpcRequest
-				if json.Unmarshal(msg, &req) == nil && len(req.ID) > 0 && req.Method != "" {
-					emit(mustJSON(rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{-32603, "the guest agent daemon at " + socket + ": " + err.Error()}}))
-				}
-				return
-			}
-			if len(bytes.TrimSpace(reply)) > 0 {
-				emit(reply)
-			}
-		})
-	}
-	wg.Wait()
-	return scanner.Err()
-}
-
-func mcpPost(ctx context.Context, client *http.Client, msg []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://guest"+MCPPath, bytes.NewReader(msg))
+func Relay(socket string, in io.Reader, out io.Writer) error {
+	conn, err := net.Dial("unix", socket)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	switch {
-	case err != nil:
-		return nil, err
-	case resp.StatusCode == http.StatusAccepted:
-		return nil, nil
-	case resp.Header.Get("Content-Type") != "application/json":
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(body))
-	}
-	return body, nil
+	defer conn.Close()
+	go func() {
+		_, _ = io.Copy(conn, in)
+		if u, ok := conn.(*net.UnixConn); ok {
+			_ = u.CloseWrite()
+		}
+	}()
+	_, err = io.Copy(out, conn)
+	return err
 }

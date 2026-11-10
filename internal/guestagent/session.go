@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,10 +81,7 @@ func (a *Agent) offer(seq int64, tag, ciphertext string) {
 		return
 	}
 	t, _ := a.cfg.Tunnel(tag)
-	network, address := "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(t.Port))
-	if t.MCP {
-		network, address = "unix", a.mcpSocket()
-	}
+	network, address := t.Endpoint()
 	s, err := a.newSession(tag, network, address)
 	if err != nil {
 		a.log.Warn("no session for an offer", "seq", seq, "tag", tag, "err", err.Error())
