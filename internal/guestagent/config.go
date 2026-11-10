@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -71,6 +72,8 @@ type Tunnel struct {
 	Tag string `json:"tag"`
 
 	Port int `json:"port"`
+
+	MCP bool `json:"mcp,omitempty"`
 }
 
 type Bidder struct {
@@ -123,13 +126,17 @@ type Config struct {
 	LoginHelper string
 }
 
-func (c Config) Port(tag string) (int, bool) {
+func (c Config) Tunnel(tag string) (Tunnel, bool) {
 	for _, t := range c.Tunnels {
 		if t.Tag == tag {
-			return t.Port, true
+			return t, true
 		}
 	}
-	return 0, false
+	return Tunnel{}, false
+}
+
+func (c Config) MCP() bool {
+	return slices.ContainsFunc(c.Tunnels, func(t Tunnel) bool { return t.MCP })
 }
 
 func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
@@ -173,7 +180,9 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		switch {
 		case t.Tag == "" || len(t.Tag) > maxTag || !printable(t.Tag):
 			return cfg, fmt.Errorf("%w: tunnel tag %q is not 1 to %d printable ASCII bytes", ErrConfig, t.Tag, maxTag)
-		case t.Port < 1 || t.Port > 65535:
+		case t.MCP && t.Port != 0:
+			return cfg, fmt.Errorf("%w: tunnel %s is mcp and names port %d; an mcp tunnel has no port", ErrConfig, t.Tag, t.Port)
+		case !t.MCP && (t.Port < 1 || t.Port > 65535):
 			return cfg, fmt.Errorf("%w: tunnel %s port %d is not a TCP port", ErrConfig, t.Tag, t.Port)
 		case seen[t.Tag]:
 			return cfg, fmt.Errorf("%w: tunnel tag %s appears twice", ErrConfig, t.Tag)

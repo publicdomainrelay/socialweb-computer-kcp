@@ -27,7 +27,9 @@ const (
 type bridge struct {
 	dc *webrtc.DataChannel
 
-	port int
+	network string
+
+	address string
 
 	log *slog.Logger
 
@@ -56,12 +58,13 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 		return
 	}
 	b := &bridge{
-		dc:    dc,
-		port:  s.port,
-		log:   log,
-		ready: make(chan struct{}),
-		low:   make(chan struct{}, 1),
-		done:  make(chan struct{}),
+		dc:      dc,
+		network: s.network,
+		address: s.address,
+		log:     log,
+		ready:   make(chan struct{}),
+		low:     make(chan struct{}, 1),
+		done:    make(chan struct{}),
 	}
 	dc.SetBufferedAmountLowThreshold(bridgeLowWater)
 	dc.OnBufferedAmountLow(func() {
@@ -84,9 +87,9 @@ func channelID(dc *webrtc.DataChannel) string {
 }
 
 func (b *bridge) dial() {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(b.port)), bridgeDialTimeout)
+	conn, err := net.DialTimeout(b.network, b.address, bridgeDialTimeout)
 	if err != nil {
-		b.log.Warn("dialing the tunnel port failed", "port", b.port, "err", err.Error())
+		b.log.Warn("dialing the tunnel port failed", "network", b.network, "address", b.address, "err", err.Error())
 		close(b.ready)
 		b.finish("the tunnel port is not reachable")
 		return
@@ -95,7 +98,7 @@ func (b *bridge) dial() {
 	b.conn = conn
 	b.mu.Unlock()
 	close(b.ready)
-	b.log.Info("a datachannel is bridged to the tunnel port", "port", b.port)
+	b.log.Info("a datachannel is bridged to the tunnel port", "network", b.network, "address", b.address)
 	select {
 	case <-b.done:
 		_ = conn.Close()

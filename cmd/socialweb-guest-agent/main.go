@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -22,6 +23,9 @@ func main() {
 func run(args []string) int {
 	if len(args) > 0 && args[0] == "wait-secrets" {
 		return waitSecrets(args[1:])
+	}
+	if len(args) > 0 && args[0] == "mcp" {
+		return mcp(args[1:])
 	}
 	fs := flag.NewFlagSet("socialweb-guest-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -83,5 +87,29 @@ func waitSecrets(args []string) int {
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "socialweb-guest-agent: the secrets are written\n")
+	return 0
+}
+
+func mcp(args []string) int {
+	fs := flag.NewFlagSet("socialweb-guest-agent mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stdio := fs.Bool("stdio", false, "speak MCP over stdin and stdout (newline-delimited JSON-RPC), proxied to the running guest agent")
+	stateDir := fs.String("state-dir", guestagent.DefaultStateDir, "the directory of the guest agent's "+guestagent.MCPSocketFile)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if !*stdio {
+		fmt.Fprintf(os.Stderr, "socialweb-guest-agent mcp: only --stdio is a transport here; the datachannel transport is served by the running agent\n")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := guestagent.MCPStdio(ctx, filepath.Join(*stateDir, guestagent.MCPSocketFile), os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "socialweb-guest-agent mcp: %v\n", err)
+		return 1
+	}
 	return 0
 }

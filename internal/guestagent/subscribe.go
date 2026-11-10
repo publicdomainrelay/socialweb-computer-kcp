@@ -164,7 +164,7 @@ func (a *Agent) receive(frame eventFrame) {
 		return
 	}
 	a.seen[id] = true
-	_, known := a.cfg.Port(record.Tag)
+	_, known := a.cfg.Tunnel(record.Tag)
 	switch {
 	case record.Type == SecretsNSID:
 		a.sealedSecrets(a.ctx, frame.Seq, record.Ciphertext)

@@ -157,6 +157,9 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	for _, t := range a.cfg.Tunnels {
 		a.wg.Go(func() { a.announce(ctx, t.Tag) })
 	}
+	if a.cfg.MCP() {
+		a.wg.Go(func() { a.runMCP(ctx) })
+	}
 	if a.cfg.Secrets != nil {
 		a.wg.Go(func() { a.runSecrets(ctx) })
 	}

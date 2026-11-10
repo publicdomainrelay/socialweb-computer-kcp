@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +43,9 @@ type session struct {
 
 	tag string
 
-	port int
+	network string
+
+	address string
 
 	pc *webrtc.PeerConnection
 
@@ -78,8 +82,12 @@ func (a *Agent) offer(seq int64, tag, ciphertext string) {
 		a.log.Warn("an offer names no age X25519 replyTo", "seq", seq, "tag", tag, "bytes", len(offer.ReplyTo))
 		return
 	}
-	port, _ := a.cfg.Port(tag)
-	s, err := a.newSession(tag, port)
+	t, _ := a.cfg.Tunnel(tag)
+	network, address := "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(t.Port))
+	if t.MCP {
+		network, address = "unix", a.mcpSocket()
+	}
+	s, err := a.newSession(tag, network, address)
 	if err != nil {
 		a.log.Warn("no session for an offer", "seq", seq, "tag", tag, "err", err.Error())
 		return
@@ -88,7 +96,7 @@ func (a *Agent) offer(seq int64, tag, ciphertext string) {
 	a.wg.Go(func() { a.answer(s, offer.SDP, replyTo) })
 }
 
-func (a *Agent) newSession(tag string, port int) (*session, error) {
+func (a *Agent) newSession(tag, network, address string) (*session, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed {
@@ -108,7 +116,8 @@ func (a *Agent) newSession(tag string, port int) (*session, error) {
 	s := &session{
 		id:        id,
 		tag:       tag,
-		port:      port,
+		network:   network,
+		address:   address,
 		pc:        pc,
 		log:       a.log.With("session", id, "tag", tag),
 		connected: make(chan struct{}),
