@@ -441,6 +441,9 @@ func (r *contractRunner) deleteAssociation(ctx context.Context) {
 	if subject := associationSubject(r.snapshot(), state); subject != "" {
 		rkeys[ContractAssociationRKey(subject, accept)] = true
 	}
+	if r.snapshot().Spec.Agent != nil {
+		rkeys[ContractAssociationRKey(r.q.repoDID, accept)] = true
+	}
 	r.mu.Lock()
 	if r.association != nil {
 		rkeys[r.association.rkey] = true
@@ -496,6 +499,7 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, rkey strin
 
 func (r *contractRunner) deleteContractRecords(ctx context.Context) {
 	r.deleteRBAC(ctx)
+	r.deleteAgentPeer(ctx)
 	r.deleteAssociation(ctx)
 }
 

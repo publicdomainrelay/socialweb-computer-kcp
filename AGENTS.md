@@ -262,24 +262,31 @@ requester's own kcp, and `install` prints both. A password never goes into reque
     comes only in the secrets bundle, and the unit waits for `setup-guest-binaries.service` and the
     secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
     older `<tag>:<port>:<envFile>`) asks for one.
-  - The atirc agent (plan 0035): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`) needs
-    `spec.secretsRef`. The requester mints a long atirc token after the receipt is verified (only for
-    spec.agent), leased to the contract (chat.atirc.mint `lease`: the receipt and the bidder's
-    vm.terminated at-uri, plus the association for the r2 token), and writes `ATIRC_TOKEN` into the
-    bundle entry at envFile; getSecrets and the sealed fallback serve the bundle without that entry
-    until it is minted, and every fresh mint publishes guest.secretsUpdated so the guest fetches
-    again; user_data installs `atirc-agent.service`
+  - The atirc agent (plan 0035; peer to peer, no token): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`)
+    needs `spec.secretsRef`. After the receipt is verified the requester (`internal/market/requester/agentpeer.go`)
+    generates the agent's iroh key (a 32-byte ed25519 seed) into the bundle at `/etc/atirc/iroh_key.hex` (hex, 0600),
+    writes envFile `ATP_USERNAME=<its handle>`, `ATIRC_NICK=<label>-<rfp rkey>` (0600; the
+    channel is atirc's default, the owner-graph root's), then, in its own repo, a contract-scoped market.association whose subject is its own DID
+    (expiresAt 24 h, rewritten at a receipt or restart when under 1 h is left) and `computer.socialweb.peer/<nick>.<handle>`
+    {iroh: the key's short ticket, lease: that association}; release deletes both, best effort, and the
+    expiry ends the binding without it. getSecrets and the sealed fallback serve the bundle without those two entries
+    until they are written, and the first write publishes guest.secretsUpdated so the guest fetches
+again; user_data installs `atirc-agent.service`
     and `/etc/socialweb-guest-agent/agent.json` but never starts the unit; it enables `atirc-agent-env.path`
     on the envFile, which runs `systemctl try-restart --no-block atirc-agent.service` (never a start)
     when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
-    `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`.
-    `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
-    linux/amd64 only. The mint signs with `atircSigning` of the `requester_service_auth` log (atirc only; the market
+    `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`; its run script
+    copies the key to the agent user's `~/.config/atirc/iroh_key` (0600) and runs `atirc mesh run --no-publish` beside
+    `atirc agent run`. `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
+    linux/amd64 only on guests; it is the pinned source build `assets.atirc` (fetch kind cargosrc,
+    `scripts/build-cargosrc.sh`), also embedded for the host, where an `AtircNode` (export hostprocesses,
+    `internal/controllers/atircnode`, `examples/infra/atircnode.yaml`) runs `atirc mesh run` as a HostProcess (secrets
+    only in `spec.passwordEnvFile`, never argv; the key at `<configDir>/iroh_key`, 0600). The ssh session mints below sign with `atircSigning` of the `requester_service_auth` log (atirc only; the market
     callbacks keep `signing`): the OAuth session, the owner MarketIdentity for pdsAccount (`owner-identity`), or for
     localRepo its own Pds component (`local-pds`, a `pds.serviceauth` ComponentLink Requester -> Pds the MarketRequester
     composes only when the DID is on `https://plc.directory` and the Pds is public through its ingress,
     `role.LocalPdsSignsAtirc`); else `none` with `atircReason`. Before the RFP of a spec.agent contract (no
-    `spec.atircParentRef`) the requester writes the placeholder bundle (one entry at envFile, `ATIRC_TOKEN=`, 0600) when
+    `spec.atircParentRef`) the requester writes the placeholder bundle (one empty entry at envFile, 0600) when
     the secretsRef path holds none (`requester_agent_bundle_placeholder`), then refuses the contract (Failed `refused:
     ... --atproto-handle ...`, no record) when its handle has a disallowed TLD (`.local`) or does not resolve to its DID. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
     command starts with `atirc`, or whose client sends `LC_ATIRC=1` (`LC_ATIRC=0` turns it off), gets,

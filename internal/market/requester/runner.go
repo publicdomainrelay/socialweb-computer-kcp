@@ -900,7 +900,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Termination != nil {
 		return nil
 	}
-	r.ensureAtircToken(ctx, r.snapshot(), state)
+	r.ensureAgentPeer(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receipt.URI, winnerDID(state))
 }
 
@@ -958,7 +958,7 @@ func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.Node
 	if state.Timestamps.Receipt == "" {
 		state.Timestamps.Receipt = r.q.nowISO()
 	}
-	r.ensureAtircToken(ctx, r.snapshot(), state)
+	r.ensureAgentPeer(ctx, r.snapshot(), state)
 	return r.runGuestAndHold(ctx, state, receiptRef.URI, bidderDID)
 }
 

@@ -451,8 +451,8 @@ func (r *contractRunner) ensureSecrets(ctx context.Context, contract v1alpha1.Co
 	}
 	state := newSecretsState(r.name, r.q.log)
 	state.addEntries(entries...)
-	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" && !liveAtircEntry(entries, envFile, r.q.now()) {
-		state.withholdUnminted(envFile)
+	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" && !agentPeerReady(entries, envFile) {
+		state.withholdUnminted(envFile, cloudinit.AgentIrohKeyFile)
 	}
 	url := ""
 	if inbound {

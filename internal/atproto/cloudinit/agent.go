@@ -27,6 +27,8 @@ const (
 const (
 	DefaultAgentEnvFile = "/etc/atirc/atirc.env"
 
+	AgentIrohKeyFile = "/etc/atirc/iroh_key.hex"
+
 	AssociationRefDir = "/etc/socialweb-computer"
 
 	DefaultAssociationRefFile = AssociationRefDir + "/association-ref"
@@ -205,19 +207,33 @@ if [ ! -x "` + AtircBinary + `" ]; then
   echo "atirc-agent: ` + AtircBinary + ` is not installed yet (` + GuestBinariesUnit + `); the agent waits" >&2
   exit 1
 fi
-if [ -z "${ATIRC_TOKEN:-}" ]; then
-  echo "atirc-agent: ATIRC_TOKEN from the secrets bundle is empty (mint failed or pending); the agent waits" >&2
+if [ -z "${ATP_USERNAME:-}" ] || [ -z "${ATIRC_NICK:-}" ] || [ ! -s "` + AgentIrohKeyFile + `" ]; then
+  echo "atirc-agent: the mesh identity (ATP_USERNAME, ATIRC_NICK, ` + AgentIrohKeyFile + `) is not in the secrets bundle yet; the agent waits" >&2
   exit 1
 fi
-export ATIRC_TOKEN
+hex="$(tr -d '[:space:]' < "` + AgentIrohKeyFile + `")"
+if ! [[ "${hex}" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "atirc-agent: ` + AgentIrohKeyFile + ` is not 32 bytes of hex" >&2
+  exit 1
+fi
+export ATP_USERNAME ATIRC_NICK
 nick="$(` + AgentUserPath + `)"
 uid="$(id -u "${nick}")"
-exec runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ` + AtircBinary + ` agent run
+home="$(getent passwd "${nick}" | cut -d: -f6)"
+dir="${home}/.config/atirc"
+install -d -m 0700 -o "${nick}" -g "${nick}" "${home}/.config" "${dir}"
+(umask 077; printf '%b' "$(printf '%s' "${hex}" | sed 's/../\\x&/g')" > "${dir}/iroh_key.tmp")
+chown "${nick}:${nick}" "${dir}/iroh_key.tmp"
+chmod 0600 "${dir}/iroh_key.tmp"
+mv -f "${dir}/iroh_key.tmp" "${dir}/iroh_key"
+run=(runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ATIRC_CONFIG_DIR="${dir}")
+"${run[@]}" ` + AtircBinary + ` agent run &
+exec "${run[@]}" ` + AtircBinary + ` mesh run --no-publish
 `
 
 const agentUserScript = `#!/usr/bin/env bash
 set -euo pipefail
-nick="$(` + AtircBinary + ` nick)"
+nick="${ATIRC_NICK:-$(` + AtircBinary + ` nick)}"
 if ! [[ "${nick}" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
   echo "atirc-agent: atirc nick printed ${nick@Q}, not a user name" >&2
   exit 1

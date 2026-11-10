@@ -167,34 +167,6 @@ func checkLeaseChain(got, parent []atircLease, own *atircLease) error {
 
 var errAtircLeaseMissing = errors.New("the atirc endpoint answered a leased mint with a token that carries no leases claim")
 
-func agentMintFailReason(err error) string {
-	if errors.Is(err, errAtircLeaseMissing) {
-		return "LeaseClaimMissing"
-	}
-	return "MintFailed"
-}
-
-func agentMintFailMessage(attempt int, err error) string {
-	if errors.Is(err, errAtircLeaseMissing) {
-		return fmt.Sprintf("attempt %d, not retried: %s", attempt, err.Error())
-	}
-	return fmt.Sprintf("attempt %d of %d: %s", attempt, associationRetryAttempts, err.Error())
-}
-
-func liveAtircEntry(entries []SecretEntry, path string, now time.Time) bool {
-	for _, e := range entries {
-		if e.Path != path {
-			continue
-		}
-		if token := atircToken(e.Value); token != "" {
-			if exp, ok := atircTokenExp(token, e.Value); ok && now.Before(exp) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 type atircRevokeInput struct {
 	Subhandle string `json:"subhandle"`
 }
@@ -285,59 +257,6 @@ func atircChild(label, rkey, base string) string {
 
 func uriRKey(uri string) string {
 	return uri[strings.LastIndex(uri, "/")+1:]
-}
-
-func (r *contractRunner) ensureAtircToken(ctx context.Context, contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) {
-	envFile, err := agentEnvFile(contract)
-	if err != nil || envFile == "" || r.released() {
-		return
-	}
-	rfpURI := ""
-	if state != nil {
-		rfpURI = state.RFPURI
-	}
-	reason := ""
-	lease, err := contractLease(state, nil)
-	if err == nil {
-		reason, err = r.writeAtircToken(ctx, contract, envFile, "", rfpURI, time.Time{}, lease)
-	}
-	if err == nil {
-		r.noteAgentMint(ctx, true, reason, "the atirc agent token is in the bundle ("+reason+")")
-		return
-	}
-	r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", 1, "err", err.Error())
-	r.noteAgentMint(ctx, false, agentMintFailReason(err), agentMintFailMessage(1, err))
-	if lease == nil || errors.Is(err, errAtircLeaseMissing) {
-		return
-	}
-	if _, retrying := r.q.atircMintRetrying.LoadOrStore(contract.Name, true); retrying {
-		return
-	}
-	r.q.wg.Go(func() {
-		defer r.q.atircMintRetrying.Delete(contract.Name)
-		for attempt := 2; attempt <= associationRetryAttempts; attempt++ {
-			if !sleepRetry(ctx, attempt-1) {
-				return
-			}
-			current := r.snapshot()
-			if current.Status.AtircRevokes != "" || r.released() {
-				return
-			}
-			reason, err := r.writeAtircToken(ctx, current, envFile, "", rfpURI, time.Time{}, lease)
-			if err == nil {
-				r.log().Info("requester_atirc_minted_after_retry", "envFile", envFile, "attempt", attempt)
-				r.noteAgentMint(ctx, true, reason, fmt.Sprintf("the atirc agent token is in the bundle (%s, attempt %d)", reason, attempt))
-				return
-			}
-			r.log().Warn("requester_atirc_mint_failed", "envFile", envFile, "attempt", attempt, "err", err.Error())
-			r.noteAgentMint(ctx, false, agentMintFailReason(err), agentMintFailMessage(attempt, err))
-			if errors.Is(err, errAtircLeaseMissing) {
-				return
-			}
-		}
-		r.log().Warn("requester_atirc_mint_gave_up", "envFile", envFile, "attempts", associationRetryAttempts)
-		r.noteAgentMint(ctx, false, "GaveUp", fmt.Sprintf("no atirc agent token after %d attempts", associationRetryAttempts))
-	})
 }
 
 type atircMintOutcome struct {
@@ -635,14 +554,10 @@ func atircTokenExp(token, env string) (time.Time, bool) {
 }
 
 func releaseTokenPaths(contract v1alpha1.ComputeContract) []string {
-	var paths []string
-	if envFile, err := agentEnvFile(contract); err == nil && envFile != "" {
-		paths = append(paths, envFile)
-	}
 	if fromGuest(contract) {
-		paths = append([]string{cloudinit.GuestRequesterAtircEnvFile}, paths...)
+		return []string{cloudinit.GuestRequesterAtircEnvFile}
 	}
-	return paths
+	return nil
 }
 
 func sameVault(a, b *commonv1.ObjectRef) bool {

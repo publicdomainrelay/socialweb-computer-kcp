@@ -13,7 +13,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 )
 
-const atircTokenPlaceholder = "ATIRC_TOKEN=\n"
+const atircEnvPlaceholder = ""
 
 func agentOf(value string) *v1alpha1.ComputeContractAgent {
 	switch envFile := strings.TrimSpace(value); envFile {
@@ -43,7 +43,7 @@ func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {
 	if !strings.HasPrefix(envFile, "/") || strings.Contains(envFile, "/../") {
 		return nil, fmt.Errorf("the agent envFile %q is not an absolute path", envFile)
 	}
-	return withPlaceholder(bundle, envFile, atircTokenPlaceholder)
+	return withPlaceholder(bundle, envFile, atircEnvPlaceholder)
 }
 
 func bundlePaths(bundle []byte) ([]string, error) {

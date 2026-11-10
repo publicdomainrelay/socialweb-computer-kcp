@@ -604,7 +604,7 @@
     "agent": {
       "type": "string",
       "bare": "/etc/atirc/atirc.env",
-      "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an ATIRC_TOKEN= entry at envFile (mode 0600, merged into --secrets or alone), the requester mints a long atirc token into it after the RFP, and run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
+      "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an empty entry at envFile (mode 0600, merged into --secrets or alone); after the receipt the requester writes the agent's atirc mesh identity into it and its iroh key beside it, and publishes computer.socialweb.peer/<nick>.<handle> in its repo (no token); run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
     "guest-tools": {
       "type": "string",

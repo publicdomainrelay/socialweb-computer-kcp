@@ -20,7 +20,7 @@ import (
 
 const PublicPLCDirectoryURL = "https://plc.directory"
 
-var errAgentWithoutSecrets = errors.New("an agent needs its token in spec.secretsRef: the secrets bundle writes the agent's envFile on the guest")
+var errAgentWithoutSecrets = errors.New("an agent needs spec.secretsRef: the secrets bundle writes the agent's envFile and mesh key on the guest")
 
 func LocalPdsSignsAtirc(plcURL, pdsURL string) (bool, string) {
 	if strings.TrimRight(strings.ToLower(strings.TrimSpace(plcURL)), "/") != PublicPLCDirectoryURL {
@@ -103,7 +103,7 @@ func (r *contractRunner) ensureAgentBundle(ctx context.Context, contract v1alpha
 	if text, _ := data["bundle"].(string); strings.TrimSpace(text) != "" {
 		return nil
 	}
-	raw, err := json.Marshal([]SecretEntry{{Path: envFile, Value: AtircTokenEnv + "=\n", Mode: "0600"}})
+	raw, err := json.Marshal([]SecretEntry{{Path: envFile, Value: "", Mode: "0600"}})
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,8 @@ func CheckTokenPaths(contract v1alpha1.ComputeContract, bundlePaths []string) er
 		if owner, ok := tokens[envFile]; ok {
 			return fmt.Errorf("%w: the agent envFile %s is %s", ErrTokenPathConflict, envFile, owner)
 		}
-		tokens[envFile] = "the agent's atirc token"
+		tokens[envFile] = "the agent's atirc mesh env"
+		tokens[cloudinit.AgentIrohKeyFile] = "the agent's atirc mesh key"
 	}
 	check := func(what, p string) error {
 		if owner, ok := tokens[path.Clean(p)]; ok {
@@ -173,5 +174,5 @@ func tokenFile(contract v1alpha1.ComputeContract, p string) bool {
 		return true
 	}
 	agent := contract.Spec.Agent
-	return agent != nil && path.Clean(cmp.Or(strings.TrimSpace(agent.EnvFile), cloudinit.DefaultAgentEnvFile)) == p
+	return agent != nil && (p == cloudinit.AgentIrohKeyFile || path.Clean(cmp.Or(strings.TrimSpace(agent.EnvFile), cloudinit.DefaultAgentEnvFile)) == p)
 }

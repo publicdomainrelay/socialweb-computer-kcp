@@ -83,7 +83,7 @@
 | `market.relays` | record | `self` | no Go writer here | S3 (discovery) |
 | `market.association` | record | `market.ContractScopedRKey` | requester | S5, S8 |
 | `market.associationRequest` | record | `market.ContractScopedRKey` | guest requester | S8 |
-| `computer.socialweb.peer` | record | the subhandle | guest requester (its own and each co-located account's) | S8 |
+| `computer.socialweb.peer` | record | the subhandle | guest requester (its own and each co-located account's); requester (each spec.agent contract's atirc agent) | S8 |
 | `market.submitRfp` | procedure | - | served by bidder | S3 |
 | `market.submitBid` | procedure | - | served by requester | S4 |
 | `market.submitAccept` | procedure | - | served by bidder | S5 |
@@ -296,10 +296,11 @@
 | file | `computer/socialweb/peer.json` |
 | type | record, key any |
 | key fields | `createdAt`*, `iroh` (short ticket), `webrtc` (the DID answering ingress offers), `channels`, `lease` (-> the market.association naming the account) |
-| rkey | the subhandle: the guest requester's atirc subhandle (`r2-<accept rkey>.<owner handle>`, its handle without one); `<name>.<that>` for a co-located account |
-| written by | the guest requester (`run request --guest-requester [--colocated a,b]`): AtprotoRecord objects of `internal/app/compose/peer.go` in its own repo and each co-located account's, present only while its association ref verifies |
+| rkey | the subhandle: the guest requester's atirc subhandle (`r2-<accept rkey>.<owner handle>`, its handle without one); `<name>.<that>` for a co-located account; `<label>-<rfp rkey>.<handle>` for a contract's atirc agent (label: the handle's first label, at most 14 characters) |
+| iroh | the short ticket of the node that is that identity: for an account a PDS hosts, the PDS's XRPC endpoint (ingress-iroh); for an atirc agent identity, its `atirc mesh run` daemon (ALPN `atirc/mesh/1`). One identity, one node; the dialer picks the protocol by ALPN |
+| written by | the guest requester (`run request --guest-requester [--colocated a,b]`): AtprotoRecord objects of `internal/app/compose/peer.go` in its own repo and each co-located account's, present only while its association ref verifies; the requester of a spec.agent contract (`internal/market/requester/agentpeer.go`) after the verified receipt, in its own repo: `iroh` the ticket (no addresses) of the 32-byte ed25519 seed it generated into the bundle (`/etc/atirc/iroh_key.hex`, 0600), `lease` a contract-scoped market.association in its own repo whose `subject` is its own DID (`service` requester_associate, `contract` the accept, `expiresAt` 24 h after the write, rewritten when under 1 h is left at a receipt or restart) |
 | read by | mesh peers: one `getRecord(DID, computer.socialweb.peer, subhandle)`, never listRecords; trusted only while `lease` verifies as a chain |
-| release | the guest requester's `run request release` sets `spec.peer.retire`: the peer, association and keys-mirror records are deleted, each local account deactivated and its did:plc tombstoned (best effort; expiry covers a skipped cleanup) |
+| release | the guest requester's `run request release` sets `spec.peer.retire`: the peer, association and keys-mirror records are deleted, each local account deactivated and its did:plc tombstoned (best effort; expiry covers a skipped cleanup); a spec.agent contract's release deletes its agent peer record and its lease association, best effort (the lease's `expiresAt` ends the binding without it) |
 
 ## market.submitRfp
 

@@ -10,7 +10,7 @@ release everything you rent.
 | [0001](0001-auth-modes.md) | k8s: account modes, pause, one VM per host | localRepo + oauthQr bidders, per-component suspend, tenant k3s 0 -> 3 -> 0 nodes, one VM per host, typed settings, ACC34 | gateway, local, hat-9, hat-7 | ~45 min | rc159, 2026-11-01 (hat-7, local, hat-9 nodes) |
 | [0002](0002-ssh-gateway.md) | ssh gateway, per-user OAuth | `ssh <handle>@socialweb.computer atirc agent run <name>` rents as the user, agent joins, revoke before release on disconnect / cap, restart survival | gateway (ssh gw), any bidder | ~3 min + session | rc158, 2026-11-01 (revoke before terminate) |
 | [0003](0003-cli-webrtc-ssh.md) | CLI ssh over WebRTC (ACC34) | CLI requester rents per host, ssh over WebRTC fresh + restarted kcp, no plaintext signaling | local, hat-9, hat-7 | ~3 min / host | rc158, 2026-11-01 (all hosts) |
-| [0004](0004-vm-atirc-agent.md) | atirc agent in a VM (plan 0035) | leased mint at RFP, `guest.agentStart` starts the unit, nick joins, revoke before `vm.terminated` | any bidder, atirc | ~3 min | rc158 CLI, 2026-11-01 (alice) |
+| [0004](0004-vm-atirc-agent.md) | atirc agent in a VM (plan 0035, p2p) | iroh key in the bundle, leased `computer.socialweb.peer` in the requester repo, `guest.agentStart` starts `atirc mesh run`, an owner node reaches it, release deletes the records | any bidder, an owner mesh node | ~3 min | 2026-11-10 CLI (alice, two workarounds until bidder rollout) |
 | [0005](0005-guest-requester-association.md) | guest requester R2, association (plan 0036) | contract-scoped association lets R2 rent a nested VM, grandchild agent, outer release cascades, all tokens revoked, record deleted | 2 bidders, atirc | ~10 min | rc159, 2026-11-01 (tree revoked in order) |
 | [0006](0006-rollout-compat.md) | rc rollout checks + compat smoke | every component on rcN, Ready / SignedIn / 0 ERROR / host empty, unchanged page + CLI still work | all | ~5-15 min | rc158, 2026-11-01 |
 | [0007](0007-bidder-termination.md) | bidder-side VM termination (ops) | operator delete ends an orphan cleanly: released, `vm.terminated` pinned, leased tokens dead, host empty | one bidder | ~1 min | rc158, 2026-11-01 |
@@ -41,7 +41,7 @@ release everything you rent.
 | any rc to prod | 0006, 0008 (watchers), then the runbooks of the changed area |
 | bidder market / policy code | 0003 on all hosts, 0006 compat, 0001 before a milestone |
 | ssh gateway / per-user requester | 0002 (side port first, then 22) |
-| requester mint / revoke / lease | 0004, 0011 section 3, 0009 A3 |
+| requester mint / revoke / lease, agent peer records | 0004, 0011 section 3, 0009 A3 |
 | association / guest requester | 0005 |
 | page build | 0009 A1-A6 on dev, then A3 + A6 on prod |
 | Infra / EphemeralInfra, examples, quickstart-local / quickstart-prod | 0012 |
