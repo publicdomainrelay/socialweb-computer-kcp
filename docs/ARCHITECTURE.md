@@ -4522,6 +4522,16 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **Every bidder VM has an end: accept + 24 h when no association proof bounds it (2026-11-10).** Before:
+  the bidder's association-expiry backstop covered only requesters whose badgeBlueKeys mirror names a
+  contract-scoped association (guest and R2 requesters). A plain requester (the iOS app, the CLI, the page) got
+  `bidder_association_expiry_skipped` and nothing ended its VM, so 8 VMs the iOS app leaked from killed launches
+  (it had saved its infra snapshot before the receipt) ran on hat-9 until an operator delete. Now every skip or
+  refuse path sets `spec.associationExpiresAt` to accept + `market.ContractAssociationLifetime` (24 h, log
+  `bidder_lifetime_capped`). The existing observer releases the VM 10 min after it (`AssociationExpiryGrace`).
+  No market record carries a requested lifetime (compute.vm, rfp, accept and the bid and accept payloads have
+  none), so there is no longer-hold option yet; a CLI `--hold` VM ends after 24 h 10 min.
+
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app
   launches stalled with `Workspace [app] in root for Ready after 1m0s (last error: Workspace app

@@ -14,6 +14,20 @@ import (
 const AssociationExpiryGrace = 10 * time.Minute
 
 func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt string) string {
+	start := b.now()
+	if at, err := market.ParseTime(acceptedAt); err == nil && at.Before(start) {
+		start = at
+	}
+	bound := start.Add(market.ContractAssociationLifetime)
+	if out := b.proofExpiry(ctx, requesterDID, bound); out != "" {
+		return out
+	}
+	out := market.FormatTime(bound)
+	b.log.Info("bidder_lifetime_capped", "requester", requesterDID, "expiresAt", out, "lifetime", market.ContractAssociationLifetime.String())
+	return out
+}
+
+func (b *Bidder) proofExpiry(ctx context.Context, requesterDID string, bound time.Time) string {
 	if b.records == nil || requesterDID == "" {
 		return ""
 	}
@@ -98,11 +112,7 @@ func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt
 		return refuse("the proof's contract is not an accept of an authority of the chain", "proof", uri, "contract", contract.URI)
 	}
 	authority = authorities[len(authorities)-1]
-	start := b.now()
-	if at, err := market.ParseTime(acceptedAt); err == nil && at.Before(start) {
-		start = at
-	}
-	if bound := start.Add(market.ContractAssociationLifetime); bound.Before(expiresAt) {
+	if bound.Before(expiresAt) {
 		b.log.Info("bidder_association_expiry_capped", "requester", requesterDID, "proof", uri, "expiresAt", market.FormatTime(expiresAt), "cap", market.FormatTime(bound))
 		expiresAt = bound
 	}
