@@ -6,6 +6,10 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
 
 - Author: the `atirc-ios-client-dev` peer agent; folded here by the docs agent (device ids replaced by placeholders)
 - Plan: [0038](../plans/0038-ios-embedded-kcp.yaml)
+- Final pass: simulator 2026-11-10, alice, final code (kcp 5e6c4e3d, app a8d1678, rollout 8 bidders + gateway): A1
+  19:52Z (13 scopes, Ready after relaunch); A2/A3 forced to webrtc 20:01-20:06Z (3 bidders connected in 1.5-1.8 s,
+  won by did:plc:2l2wdr..., peer record published, released, peer and association deleted, 14 of 14 records deleted).
+  One launch before it sat after `requester_started` with no discovery for 6 min; a relaunch went through
 - Last pass: simulator 2026-11-10, alice, bidders reached over WebRTC only (kcp aaab79d0, app 37c9b0f, rollout 6
   bidders): A1 16:24Z (41 scopes granted), A2 hat-9 Held 16:27Z, A3 Released 16:31:34Z (14 of 14 records deleted),
   A4 cross-restart release 16:37:37Z. A5/A6 not re-run (no change since 2026-10-31)
@@ -21,8 +25,8 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
 | --- | --- |
 | App repo | `~/src/atirc-client-ios/AT-IRC` (local only; no remote) |
 | Framework | `GoLib/AtircGo.xcframework`, built by `GoLib/build.sh` from `SOCIALWEB_COMMIT` of `SOCIALWEB_SRC` (a socialweb-computer-kcp clone); it seeds the patched apiserver module under /tmp itself |
-| Framework target | socialweb-computer-kcp `c770a887` (`2b6b998`); A1-A4 accepted on `aaab79d0` (`37c9b0f`), A1-A3 again on the c770a887 scope set |
-| App build | `2b6b998` (client_id scope = `RequesterOAuthScope`, 13 tokens; presence `2c23c1f`, perf `a43e389`) |
+| Framework target | socialweb-computer-kcp `5e6c4e3d` (`a8d1678`, final); A1-A4 accepted on `aaab79d0` (`37c9b0f`), A1-A3 again on `c770a887` and `5e6c4e3d` |
+| App build | `a8d1678` (client_id scope = `RequesterOAuthScope`, 13 tokens; presence `2c23c1f`, perf `a43e389`) |
 | Simulator | iPhone 17e (`<simulator udid>`) |
 | Device | owner iPhone (`<device udid>`) |
 | Bundle id | `com.fedfork.irc.AT-IRC` |

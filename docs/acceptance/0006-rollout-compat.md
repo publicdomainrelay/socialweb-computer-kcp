@@ -19,6 +19,12 @@ Run after every rollout; it is the gate before "tests may resume".
   to watch ... context canceled` at a createCluster; 6745dd6f and e4cff4ae fix them), k8s, root, ssh, ssh /healthz,
   atlibs and shell 200, kcp 403; caddy sites unchanged. Rollout 7 (c770a887, 18:00Z) brought hat-8 `swc-bidder` from rc159
   (an `endpointUrl`-only offering) to the same release as the hats.
+- Compat smoke on rollout 8 (5e6c4e3d), alice, 2026-11-10: CLI of the previous build (41319a3a, hat-8) `run request
+  --hold --exec id` 19:45Z: Held in 65 s, `uid=0(root)`, Released. Prod page https://shell.socialweb.computer (unchanged,
+  OAuth through its form, `contract` via webrtc to hat-9) 19:50Z: signed in, receipt, shell `Linux ... uid=0` over the
+  guest datachannel, release, 7 records deleted, 0 errors, 46 s, hat-9 empty. The run before it (19:46Z) got the
+  receipt, released and deleted its 5 records but ended `the guest did not report what via "webrtc" needs` after 176 s
+  (no guest webrtc fingerprint seen in its watch): one flake in two
 - Previous pass: 2026-11-10. Bidders hat-7 + hat-9 on rollout 6 (2d367fe8) 15:47Z: version, bidder.json ready, MarketIdentity
   Ready, `bidder-tangled-vouch`, 0 ERROR / 0 unsupported since restart, hosts empty. Gateway + ssh gateway on rollout 5
   (438ca0fa) 15:31Z: SshGateway Ready, 12 min with 0 restarts, 0 ERROR from start, endpoints 200. Compat smoke (bob, rollout 5
