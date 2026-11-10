@@ -72,6 +72,30 @@ Guest / R2: `socialweb-r2.service: active` (started by `guest.r2Start`), `associ
 
 Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid on R2 RFP 17:16:09 -> R2 joined channel 17:16:38. Cascade revoke ~32 s after outer release.
 
+## Part B: co-located accounts, peer records, retire, out-of-band loss
+
+1. Start R2 with a co-located account: as root in the outer guest (`run request ssh "$NAME" --exec ...`) write
+   `/run/socialweb-r2/r2-start.env` (`R2_NAME=r2`, `R2_HOLD=1`, `R2_COLOCATED=mesh1`, root:socialweb-r2 0640), then
+   `systemctl start --no-block socialweb-r2.service`. R2 stays in the foreground while Held.
+2. R2's core log: AtprotoRecords `peer`, `colocated-mesh1-association`, `colocated-mesh1-mirror`,
+   `colocated-mesh1-peer` written; `ingressproxy_iroh_dumbpipe_listening` exposure `svc-pds-pds-iroh`;
+   `participant_request_crawl` relay `https://relay.mini-cloud-0002.chadig.com` ok true.
+3. From any host: `getRecord(<R2 DID>, computer.socialweb.peer, r2-<accept rkey>.<owner handle>)` and
+   `getRecord(<mesh1 DID>, computer.socialweb.peer, mesh1.r2-<accept rkey>.<owner handle>)` carry `iroh` and `lease`;
+   `socialweb-computer internal association <mesh1 DID>` exits 0 with `operator` the owner's DID (chain mesh1 -> R2 -> owner).
+4. Release the outer contract: plc.directory `/<did>/log/last` is `plc_tombstone` for R2 and mesh1, the owner's
+   association record is RecordNotFound (3 reads).
+5. Out-of-band loss (a second round): delete the outer ComputeVM on its bidder (0007) without a release;
+   `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated`. With the bidder down
+   instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). No cleanup runs in either case.
+
+Last pass: 2026-11-10. Steps 1, 2 (records) and 4 on kcp cef6a0ca (hat-9): both DIDs `plc_tombstone`, association
+RecordNotFound x3. Steps 1-3 and 5 on kcp 69aa8b0f (hat-7): crawl ok, both peer records by getRecord over https and over
+`dumbpipe connect <ticket>`, mesh1 and R2 resolve to bob; after the out-of-band delete (vm.terminated
+`deleted_on_request`) both are unassociated within 7 s, and R2's nested ComputeVM carries `spec.associationExpiresAt`
+from the chain (the bidder backstop). That run found the requester kept its contract records after a bidder termination
+(fixed: the termination path deletes them before Released).
+
 ## Pass criteria
 
 - Bidder policy allows R2's RFP **only** via the association (forged self-claim by R2 denied; a DID not named by alice denied)

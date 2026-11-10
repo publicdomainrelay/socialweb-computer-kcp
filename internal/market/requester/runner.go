@@ -906,6 +906,7 @@ func (r *contractRunner) acceptReceipt(ctx context.Context, state *v1alpha1.Node
 
 func (r *contractRunner) resumeReceipt(ctx context.Context, state *v1alpha1.NodeClaimContract) error {
 	if r.refreshTermination(ctx, state) {
+		r.deleteContractRecords(ctx)
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 		return nil
 	}
@@ -969,6 +970,7 @@ func (r *contractRunner) resumeReleased(ctx context.Context, state *v1alpha1.Nod
 	if terminated {
 		message = terminationMessage(state.Termination)
 		step = "terminated"
+		r.deleteContractRecords(ctx)
 		r.log().Info("requester_contract_termination_resumed", "receipt", state.Receipt.URI, "event", state.Termination.Event.URI, "reason", state.Termination.Reason)
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), step, 1)
@@ -1204,6 +1206,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			r.log().Info("requester_guest_host_keys", "keys", len(parsed.HostKeys))
 		case market.ComputeEventsVMTerminatedNSID:
 			applyTermination(state, parsed.Termination, r.q.nowISO())
+			r.deleteContractRecords(ctx)
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 			return true
 		case market.ComputeEventsVMSandboxNSID:
@@ -1327,6 +1330,7 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			return false
 		}
 		applyTermination(state, parsed.Termination, r.q.nowISO())
+		r.deleteContractRecords(ctx)
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 		return true
 	}
