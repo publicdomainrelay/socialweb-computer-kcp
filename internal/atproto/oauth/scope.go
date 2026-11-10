@@ -153,7 +153,7 @@ var (
 
 var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 	CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets, CollectionGuestAgentStart,
-	CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release),
+	CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 	[]string{RepoIngressOfferWrite, RepoPeerWrite})
 
 var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)

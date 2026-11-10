@@ -516,7 +516,7 @@ func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
 		if state.Release != nil {
 			refs = append(refs, state.Release.Event, state.Release.Payload)
 		}
-		for _, ref := range []*commonv1.StrongRef{state.Accept, state.RFP, state.Payload} {
+		for _, ref := range []*commonv1.StrongRef{state.Accept, state.RFP, state.Payload, state.Policy} {
 			if ref != nil {
 				refs = append(refs, *ref)
 			}
