@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -101,6 +102,32 @@ type guestRecord struct {
 	log *slog.Logger
 
 	now func() time.Time
+
+	// mu serializes the guest report's read-modify-write; written is the last
+	// report this recorder wrote per VM. The ComputeVM read can be a cache that
+	// lags that write, so two reports a few ms apart (onNetwork ssh and shell)
+	// otherwise both build on the old report and the second drops the first.
+	// ponytail: one lock and one map entry per VM for the process lifetime.
+	mu      sync.Mutex
+	written map[string]v1alpha1.ComputeVMGuestReport
+}
+
+func (g *guestRecord) heldReport(name string, o *v1alpha1.ComputeVM) *v1alpha1.ComputeVMGuestReport {
+	if w, ok := g.written[name]; ok {
+		return w.DeepCopy()
+	}
+	return GuestReportOf(o)
+}
+
+func (g *guestRecord) record(ctx context.Context, name string, next v1alpha1.ComputeVMGuestReport) error {
+	if err := g.store.RecordGuest(ctx, name, next); err != nil {
+		return err
+	}
+	if g.written == nil {
+		g.written = map[string]v1alpha1.ComputeVMGuestReport{}
+	}
+	g.written[name] = *next.DeepCopy()
+	return nil
 }
 
 func (g *guestRecord) Live(ctx context.Context, name string) (*v1alpha1.ComputeVM, error) {
@@ -145,6 +172,8 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetwo
 	if err := checkNetworkKind(strings.TrimSpace(report.Kind), tag, address); err != nil {
 		return err
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	o, err := g.Live(ctx, name)
 	if err != nil {
 		return err
@@ -152,7 +181,7 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetwo
 	if c := o.Spec.Contract; c != nil && c.Accept.URI != "" && (c.Accept.URI != acceptURI || c.Accept.CID != acceptCID) {
 		return ErrUnknownAccept
 	}
-	held := GuestReportOf(o)
+	held := g.heldReport(name, o)
 	reportedAt := strings.TrimSpace(createdAt)
 	if reportedAt == "" {
 		reportedAt = g.now().UTC().Format(time.RFC3339)
@@ -177,7 +206,7 @@ func (g *guestRecord) OnNetwork(ctx context.Context, name string, report OnNetwo
 			next.Networks = append(next.Networks, v1alpha1.ComputeVMGuestNetwork{Tag: tag, Address: address, ReportedAt: reportedAt})
 		}
 	}
-	if err := g.store.RecordGuest(ctx, name, next); err != nil {
+	if err := g.record(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ErrUnknownGuest
 		}
@@ -240,6 +269,8 @@ func (g *guestRecord) Accept(ctx context.Context, name, acceptURI, acceptCID str
 }
 
 func (g *guestRecord) HostKeys(ctx context.Context, name string, keys []v1alpha1.ComputeVMHostKey) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	o, err := g.Live(ctx, name)
 	if err != nil {
 		return err
@@ -251,7 +282,7 @@ func (g *guestRecord) HostKeys(ctx context.Context, name string, keys []v1alpha1
 	if err := RequireEd25519(checked); err != nil {
 		return fmt.Errorf("%w: %v", ErrReportRefused, err)
 	}
-	held := GuestReportOf(o)
+	held := g.heldReport(name, o)
 	if held != nil && len(held.HostKeys) > 0 {
 		if SameHostKeys(held.HostKeys, checked) {
 			return nil
@@ -263,7 +294,7 @@ func (g *guestRecord) HostKeys(ctx context.Context, name string, keys []v1alpha1
 		next.Address, next.ReportedAt = held.Address, held.ReportedAt
 		next.Networks = append([]v1alpha1.ComputeVMGuestNetwork(nil), held.Networks...)
 	}
-	if err := g.store.RecordGuest(ctx, name, next); err != nil {
+	if err := g.record(ctx, name, next); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ErrUnknownGuest
 		}

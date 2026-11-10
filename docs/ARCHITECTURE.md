@@ -4522,6 +4522,15 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **The guest report's read-modify-write is serialized per bidder and builds on the last report written
+  (2026-11-10).** Before: the guest reports `vm.onNetwork` for ssh and shell a few ms apart, and the bidder's
+  guest recorder (`internal/guestidentity/guestrecord.go` `OnNetwork`, also `HostKeys`) read the ComputeVM
+  from the guest control plane's cache, added the tag and wrote the whole report back. Two concurrent calls
+  built on the same stale report, so only one tag's network (and one onNetwork record) was published. A page
+  round waiting for the ssh fingerprint failed at 176 s (19:46Z and 21:06Z on hat-9). Now one lock covers the
+  read-modify-write, and the base is the last report this recorder wrote for that VM, or the live one when
+  there is none yet. The requester module also accepts any tag's webrtc fingerprint (requester 84ffaf9).
+
 - **Every bidder VM has an end: accept + 24 h when no association proof bounds it (2026-11-10).** Before:
   the bidder's association-expiry backstop covered only requesters whose badgeBlueKeys mirror names a
   contract-scoped association (guest and R2 requesters). A plain requester (the iOS app, the CLI, the page) got
