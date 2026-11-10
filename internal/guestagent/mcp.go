@@ -1,6 +1,7 @@
 package guestagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +12,17 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"time"
 )
 
 const (
 	MCPPath = "/mcp"
+
+	// ProcessPrefix is the process contract over plain HTTP, the same tools /mcp serves agents:
+	// POST /xrpc/computer.socialweb.cicd.process.<exec|start|read|write|kill|list> with the tool's
+	// arguments as the JSON body, its result the JSON answer, an XRPC error body on failure.
+	ProcessPrefix = "/xrpc/computer.socialweb.cicd.process."
 
 	MCPServerName = "socialweb-guest-agent"
 
@@ -85,6 +92,10 @@ func newMCPServer(log *slog.Logger) *mcpServer {
 }
 
 func (m *mcpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if name, ok := strings.CutPrefix(r.URL.Path, ProcessPrefix); ok {
+		m.serveProcess(w, r, name)
+		return
+	}
 	if r.URL.Path != MCPPath {
 		http.NotFound(w, r)
 		return
@@ -296,4 +307,35 @@ func Relay(socket string, in io.Reader, out io.Writer) error {
 	}()
 	_, err = io.Copy(out, conn)
 	return err
+}
+
+// serveProcess answers one process-contract procedure: the tool `name` with the body as its arguments.
+func (m *mcpServer) serveProcess(w http.ResponseWriter, r *http.Request, name string) {
+	reply := func(status int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(v)
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		reply(http.StatusMethodNotAllowed, map[string]string{"error": "InvalidRequest", "message": "POST the arguments"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, mcpMaxBody))
+	if err != nil {
+		reply(http.StatusRequestEntityTooLarge, map[string]string{"error": "InvalidRequest", "message": err.Error()})
+		return
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		body = []byte("{}")
+	}
+	out, err := m.tool(context.WithoutCancel(r.Context()), name, body)
+	switch {
+	case errors.Is(err, errUnknownTool):
+		reply(http.StatusNotFound, map[string]string{"error": "MethodNotImplemented", "message": err.Error()})
+	case err != nil:
+		reply(http.StatusBadRequest, map[string]string{"error": "InvalidRequest", "message": err.Error()})
+	default:
+		reply(http.StatusOK, out)
+	}
 }
