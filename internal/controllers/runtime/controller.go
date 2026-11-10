@@ -465,7 +465,11 @@ func (a *adapter[T]) Reconcile(ctx context.Context, mcreq mcreconcile.Request) (
 }
 
 func (a *adapter[T]) reconcile(ctx context.Context, mcreq mcreconcile.Request) (reconcile.Result, error) {
-	_, lc := splitCluster(string(mcreq.ClusterName))
+	export, lc := splitCluster(string(mcreq.ClusterName))
+	if _, ok := a.m.providers.GetProvider(export); export != "" && !ok {
+		a.log.Debug("the reconcile waits for its APIExport provider", "export", export, "cluster", lc, "name", mcreq.Name)
+		return reconcile.Result{RequeueAfter: time.Second}, nil
+	}
 	cl, err := a.m.mgr.GetCluster(ctx, mcreq.ClusterName)
 	if err != nil {
 		return reconcile.Result{}, err
