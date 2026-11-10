@@ -18,12 +18,12 @@ usage() {
   echo "  where one is published), repacks it as internal/assets/blobs/<goos>_<goarch>/<asset>.tar.zst and" >&2
   echo "  checks the unpacked tree against its treeSha256 pin. --print-pins prints the measured pins and" >&2
   echo "  stages even when a tree pin differs. --update-pins does the same for the assets built from this" >&2
-  echo "  repository (fetch kind go or script) or built here from pinned upstream source (fetch kind gosrc)" >&2
+  echo "  repository (fetch kind go or script) or built here from pinned upstream source (fetch kind gosrc or cargosrc)" >&2
   echo "  and writes their new pins into versions.json; pins of" >&2
   echo "  downloaded assets are never changed. --cache keeps" >&2
   echo "  the downloads (keyed by sha256) in DIR instead of internal/assets/blobs/.cache. --blobs writes" >&2
   echo "  <goos>_<goarch>/<asset>.tar.zst under DIR instead of internal/assets/blobs (the --dev build's cache)." >&2
-  echo "  --blob-cache keeps every zstd blob in DIR: an asset of pinned inputs (kind file, oci, debs, gosrc) by" >&2
+  echo "  --blob-cache keeps every zstd blob in DIR: an asset of pinned inputs (kind file, oci, debs, gosrc, cargosrc) by" >&2
   echo "  the sha256 of its versions.json entry, this script, assetpack and the zstd version and flags (a hit" >&2
   echo "  skips its download or build, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
   echo "  and checked against its pin every time, and only its zstd step is reused, keyed by the sha256 of" >&2
@@ -261,6 +261,14 @@ stage_gosrc() {
   copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
 }
 
+stage_cargosrc() {
+  local asset="$1" spec="$2" tree="$3" x="$4" plat="$5" arch out
+  case "$plat" in linux/amd64) arch=x86_64 ;; linux/arm64) arch=aarch64 ;; *) die "$asset: no cargosrc target for $plat" ;; esac
+  out="$x/u/$(echo "$spec" | jq -r '.members | keys[0]')"
+  "$root/scripts/build-cargosrc.sh" --asset "$asset" --arch "$arch" --out "$out" >&2
+  copy_members "$x/u" "$tree" "$(echo "$spec" | jq -c .members)"
+}
+
 deb_arch() { case "$1" in linux/amd64) echo amd64 ;; linux/arm64) echo arm64 ;; *) die "no deb arch for $1" ;; esac; }
 
 fetch_index() {
@@ -407,7 +415,7 @@ stage_one() {
   spec="$(jq -c --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p]' "$versions")"
   [ "$spec" != "null" ] || die "$asset has no fetch spec for $plat"
   kind="$(echo "$spec" | jq -r .kind)"
-  case "$kind" in go|script|gosrc) owned=1 ;; esac
+  case "$kind" in go|script|gosrc|cargosrc) owned=1 ;; esac
   pin="$(jq -r --arg a "$asset" --arg p "$plat" '.assets[$a].platforms[$p].treeSha256 // ""' "$versions")"
   x="$work/$asset-${plat/\//_}"
   tree="$x/tree"
@@ -416,7 +424,7 @@ stage_one() {
   mkdir -m 0700 "$GNUPGHOME"
   if [ -n "$blob_cache" ] && [ -n "$pin" ] && [ "$print_pins" != 1 ]; then
     case "$kind" in
-      file|oci|debs|gosrc)
+      file|oci|debs|gosrc|cargosrc)
         in_key="in-$(printf '%s\n' "$plat" "$asset" "$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")" "$script_sha" "$pack_id" | sha256sum | cut -d' ' -f1)"
         if cache_get "$in_key" "$pdir/$asset.tar.zst"; then
           chmod -R u+w "$x" && rm -rf "$x"
@@ -434,6 +442,7 @@ stage_one() {
     script) stage_script "$spec" "$tree" "$x" ;;
     go) stage_go "$spec" "$tree" "$x" "$plat" ;;
     gosrc) stage_gosrc "$asset" "$spec" "$tree" "$x" "$plat" ;;
+    cargosrc) stage_cargosrc "$asset" "$spec" "$tree" "$x" "$plat" ;;
     *) die "$asset: unknown fetch kind" ;;
   esac
   digest="$("$work/assetpack" digest "$tree")"
