@@ -327,6 +327,10 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 		return fmt.Errorf("runtime: the controller %s: %w", name, err)
 	}
 	m.addExport(o.export)
+	m.addKind(o.export, proto)
+	for _, owned := range o.owns {
+		m.addKind(o.export, owned)
+	}
 	inExport := exportFilter(o.export)
 	limiter := newBackoff(o.backoffBase, o.backoffMax)
 	log := m.log.With("controller", name)
@@ -339,6 +343,11 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	}
 	for _, w := range o.watches {
 		source := inExport
+		kindExport := o.export
+		if w.export != "" {
+			kindExport = w.export
+		}
+		m.addKind(kindExport, w.object)
 		if w.export != "" && w.export != o.export {
 			m.addExport(w.export)
 			source = exportFilter(w.export)

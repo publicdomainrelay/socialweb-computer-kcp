@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -47,6 +48,8 @@ type Config struct {
 
 	Workspaces func(workspace string) bool
 
+	BoundIn []string
+
 	Log *slog.Logger
 }
 
@@ -70,6 +73,10 @@ type Manager struct {
 	mu sync.Mutex
 
 	exports map[string]bool
+
+	kinds map[string]map[schema.GroupKind]bool
+
+	boundIn []string
 
 	ctx context.Context
 
@@ -122,7 +129,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("runtime: the multicluster manager: %w", err)
 	}
 	return &Manager{base: base, exportWorkspace: exportWorkspace, workspaces: cfg.Workspaces, scheme: scheme, log: log, logr: logger,
-		providers: providers, mgr: mgr, exports: map[string]bool{}}, nil
+		providers: providers, mgr: mgr, exports: map[string]bool{}, kinds: map[string]map[schema.GroupKind]bool{}, boundIn: cfg.BoundIn}, nil
 }
 
 func (m *Manager) AddToScheme(adders ...func(*kruntime.Scheme) error) error {
@@ -183,6 +190,7 @@ func (m *Manager) addExport(name string) {
 
 func (m *Manager) serveExport(ctx context.Context, name string) {
 	logger := m.logr.WithValues("export", name)
+	m.awaitKinds(ctx, name)
 	retry := newBackoff(ExportRetryFirst, DefaultBackoffMax)
 	for failures := 0; ctx.Err() == nil; failures++ {
 		p, err := apiexport.New(clusterConfig(m.base, m.exportWorkspace), name, apiexport.Options{Scheme: m.scheme, Log: &logger})
