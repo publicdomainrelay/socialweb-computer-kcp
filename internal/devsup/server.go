@@ -775,7 +775,7 @@ func (s *server) openOutput(path string) (*os.File, error) {
 
 func (s *server) unitEnv(u *unit, inv string) []string {
 	var env []string
-	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "XDG_RUNTIME_DIR"} {
+	for _, k := range []string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "XDG_RUNTIME_DIR", "SOCIALWEB_REQUESTER_BIDDER_ENDPOINTS"} {
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)
 		}

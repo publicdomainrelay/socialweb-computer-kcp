@@ -149,6 +149,13 @@ Every record also reaches the other side two ways. The XRPC call is the fast pat
   in its own repo, the bidder (offers reach it on its Jetstream and relay streams, collection filter) answers once at
   `computer.socialweb.ingress.answer/<offerer DID>.<tid>` (sealed `{sdp}`, deleted after 5 min) and serves HTTP/1.1 on each
   datachannel (keep-alive) to its market XRPC; offers older than 2 min are ignored
+- the Go requester (`run request`, `pkg/embedded`) takes a bidder's first endpoint in the order iroh (only with a dumbpipe
+  on PATH), webrtc, https; `SOCIALWEB_REQUESTER_BIDDER_ENDPOINTS` (comma list, passed through devsup) replaces the order.
+  Over webrtc it keeps one PeerConnection per bidder: a createRecord of the offer `{ciphertext, subhandle: requester, to:
+  <listen>}`, getRecord of the answer every 1 s for up to 45 s, the answer's `a=fingerprint` checked against the listen
+  record, the offer deleted once answered (needs the optional scope
+  `repo:computer.socialweb.ingress.offer?action=create&action=delete`), then one datachannel labelled `market` per HTTP/1.1
+  connection
 - `ingress[]` on the records and calls: `ingress.webRTC` listen/offer/answer records for a party whose HTTP endpoint is not reachable ([lexicons-market.md](lexicons-market.md#ingresswebrtc))
 
 ## Bid Window And Selection

@@ -243,7 +243,7 @@ type HTTPMarket struct {
 
 	HTTPClient *http.Client
 
-	Iroh bool
+	EndpointKinds []string
 
 	Timeout time.Duration
 
@@ -385,18 +385,15 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	if !market.OfferingApplies(offering, market.ComputeVMNSID) {
 		return nil, dropNoOffering
 	}
-	bidder, ok := BidderFor(did, offering.Endpoints, m.Iroh)
+	bidder, ok := BidderFor(did, offering.Endpoints, m.EndpointKinds)
 	if !ok {
 		return nil, dropNoEndpoint
 	}
 	return []Bidder{bidder}, dropNoOffering
 }
 
-func BidderFor(did string, endpoints []market.Endpoint, iroh bool) (Bidder, bool) {
-	for _, kind := range []string{market.EndpointIroh, market.EndpointHTTPS} {
-		if kind == market.EndpointIroh && !iroh {
-			continue
-		}
+func BidderFor(did string, endpoints []market.Endpoint, kinds []string) (Bidder, bool) {
+	for _, kind := range kinds {
 		for _, endpoint := range endpoints {
 			if endpoint.Kind == kind && endpoint.Validate() == nil {
 				return Bidder{DID: did, Endpoint: endpoint.URL(), Audience: did + "#" + market.DefaultMarketServiceID}, true

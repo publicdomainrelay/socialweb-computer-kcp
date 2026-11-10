@@ -42,6 +42,7 @@ const (
 	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
 	CollectionIngressListen         = "computer.socialweb.ingress.listen"
 	CollectionIngressAnswer         = "computer.socialweb.ingress.answer"
+	CollectionIngressOffer          = "computer.socialweb.ingress.offer"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
 	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
@@ -55,6 +56,7 @@ const (
 	RepoTangledVouchWrite   = "repo:" + CollectionTangledVouch + "?action=create&action=update"
 	RepoIngressListenWrite  = "repo:" + CollectionIngressListen + "?action=create&action=update"
 	RepoIngressAnswerWrite  = "repo:" + CollectionIngressAnswer + "?action=create&action=delete"
+	RepoIngressOfferWrite   = "repo:" + CollectionIngressOffer + "?action=create&action=delete"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -87,7 +89,7 @@ var (
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint, RPCAtircRevoke},
 		[]string{RepoTangledVouchWrite},
-		RequesterRecordsDelete,
+		RequesterOptionalScopes,
 	)
 
 	BidderOAuthScope = dedupeScopes(
@@ -147,9 +149,10 @@ var (
 	)
 )
 
-var RequesterRecordsDelete = collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete)
+var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete),
+	[]string{RepoIngressOfferWrite})
 
-var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterRecordsDelete)
+var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)
 
 func RequiredScopes(requested []string) []string {
 	out := make([]string, 0, len(requested))

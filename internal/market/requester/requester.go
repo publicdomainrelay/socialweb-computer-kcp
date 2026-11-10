@@ -205,7 +205,7 @@ type Deps struct {
 
 	HTTP *http.Client
 
-	Iroh bool
+	EndpointKinds []string
 
 	Now func() time.Time
 
@@ -674,8 +674,8 @@ func (q *Requester) Start(ctx context.Context) error {
 		IngressRef:      q.ingressDescriptor,
 		IngressWritable: q.ingressWritable,
 		IngressSTUN:     q.cfg.WebRTCSTUN(),
-		HTTPClient:      q.deps.HTTP,
-		Iroh:            q.deps.Iroh,
+		HTTPClient:      q.marketHTTP(),
+		EndpointKinds:   q.deps.EndpointKinds,
 		Timeout:         q.cfg.BidWindow,
 		Log:             q.log,
 		StartedAt:       startedAt,

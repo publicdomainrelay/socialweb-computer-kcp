@@ -1,6 +1,7 @@
 package requester
 
 import (
+	"os"
 	"os/exec"
 
 	"cmp"
@@ -16,6 +17,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
@@ -124,7 +126,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		Ingress:        s.ingress,
 		Directory:      s.directory,
 		HTTP:           httpClient,
-		Iroh:           dumbpipe != "",
+		EndpointKinds:  endpointKinds(dumbpipe != ""),
 		Now:            time.Now,
 		Log:            s.deps.Log,
 	})
@@ -275,4 +277,20 @@ func (g guests) Verifier(issuer string, keys func(ctx context.Context) ([]byte, 
 
 func (g guests) CheckHostKeys(keys []v1alpha1.ComputeVMHostKey) ([]v1alpha1.ComputeVMHostKey, error) {
 	return computevm.CheckHostKeys(keys)
+}
+
+const EndpointKindsEnv = "SOCIALWEB_REQUESTER_BIDDER_ENDPOINTS"
+
+func endpointKinds(iroh bool) []string {
+	kinds := role.DefaultEndpointKinds
+	if forced := strings.TrimSpace(os.Getenv(EndpointKindsEnv)); forced != "" {
+		kinds = strings.Split(forced, ",")
+	}
+	out := []string{}
+	for _, kind := range kinds {
+		if kind = strings.TrimSpace(kind); kind != "" && (kind != market.EndpointIroh || iroh) {
+			out = append(out, kind)
+		}
+	}
+	return out
 }
