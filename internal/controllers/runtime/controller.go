@@ -358,11 +358,15 @@ func For[T Object](m *Manager, name string, r Reconciler[T], opts ...Option) err
 	return nil
 }
 
+const mapPathTimeout = 10 * time.Second
+
 func (m *Manager) mapHandler(export string, mapFunc func(ctx context.Context, src Request, obj client.Object) []Request) mchandler.TypedEventHandlerFunc[client.Object, mcreconcile.Request] {
 	return func(cn multicluster.ClusterName, _ cluster.Cluster) handler.TypedEventHandler[client.Object, mcreconcile.Request] {
 		_, lc := splitCluster(string(cn))
 		return handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []mcreconcile.Request {
-			workspace, err := m.path(ctx, lc)
+			pathCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mapPathTimeout)
+			workspace, err := m.path(pathCtx, lc)
+			cancel()
 			if err != nil {
 				m.log.Warn("a watched object is not mapped: its workspace path does not resolve", "export", export, "cluster", lc,
 					"name", obj.GetName(), "err", err.Error())
