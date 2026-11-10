@@ -332,6 +332,20 @@ func (s *Server) UpdateService(ctx context.Context, did syntax.DID, service stri
 	return s.plc.UpdateService(ctx, did, service)
 }
 
+func (s *Server) Retire(ctx context.Context, did syntax.DID) error {
+	if s.store == nil {
+		return ErrUnsupported
+	}
+	if _, err := s.store.GetAccount(ctx, did); err != nil {
+		return err
+	}
+	var tombstone error
+	if s.plc != nil && did.Method() == "plc" {
+		tombstone = s.plc.Tombstone(ctx, did)
+	}
+	return errors.Join(tombstone, s.store.DeactivateAccount(ctx, did))
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	version := s.cfg.Version
 	version = cmp.Or(version, "socialweb-pds")

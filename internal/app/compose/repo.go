@@ -58,12 +58,15 @@ func LocalAccountLinks(ws string, acct LocalAccount) []Link {
 	return links
 }
 
-func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, keep LocalAccount) error {
+func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, keep ...LocalAccount) error {
 	ws = workspaceOr(ws, r.Workspace)
-	keepRepo, keepAccount, keepSession, keepPLC := "", "", "", ""
-	if strings.TrimSpace(keep.DID) != "" {
-		keepRepo, keepAccount, keepSession = localAccountNames(keep)
-		keepPLC = ObjectName("plc", keep.DID)
+	keepRepo, keepAccount, keepSession, keepPLC := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, acct := range keep {
+		if strings.TrimSpace(acct.DID) == "" {
+			continue
+		}
+		repo, account, session := localAccountNames(acct)
+		keepRepo[repo], keepAccount[account], keepSession[session], keepPLC[ObjectName("plc", acct.DID)] = true, true, true, true
 	}
 	selector := func(kind string) string { return OwnerLabel + "=" + r.Owner() + "," + ComponentLabel + "=" + kind }
 	repos, err := c.Client(ws, v1alpha1.LocalRepoGVR)
@@ -76,7 +79,7 @@ func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, ke
 	}
 	abstract := map[string]bool{}
 	for i := range items {
-		if items[i].Name != keepRepo {
+		if !keepRepo[items[i].Name] {
 			abstract[items[i].Name] = true
 		}
 	}
@@ -94,27 +97,36 @@ func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, ke
 	for _, p := range []struct {
 		gvr  schema.GroupVersionResource
 		kind string
-		keep string
+		keep map[string]bool
 	}{
 		{v1alpha1.LocalRepoGVR, KindLocalRepo, keepRepo},
 		{v1alpha1.PdsAccountGVR, "PdsAccount", keepAccount},
 		{v1alpha1.AtprotoSessionGVR, "AtprotoSession", keepSession},
 		{v1alpha1.PlcIdentityGVR, "PlcIdentity", keepPLC},
 	} {
-		if err := c.Prune(ctx, ws, p.gvr, selector(p.kind), map[string]bool{p.keep: p.keep != ""}); err != nil {
+		if err := c.Prune(ctx, ws, p.gvr, selector(p.kind), p.keep); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *Composer) ApplyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount) error {
+func (c *Composer) ApplyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount, colocated ...LocalAccount) error {
 	if strings.TrimSpace(acct.DID) == "" {
 		return nil
 	}
-	if err := c.PruneLocalAccounts(ctx, r, ws, acct); err != nil {
+	if err := c.PruneLocalAccounts(ctx, r, ws, append([]LocalAccount{acct}, colocated...)...); err != nil {
 		return err
 	}
+	for _, other := range colocated {
+		if err := c.applyLocalAccount(ctx, r, ws, other); err != nil {
+			return err
+		}
+	}
+	return c.applyLocalAccount(ctx, r, ws, acct)
+}
+
+func (c *Composer) applyLocalAccount(ctx context.Context, r Root, ws string, acct LocalAccount) error {
 	pdsRef := commonv1.ObjectRef{Kind: ComponentKindPds, Name: PdsComponent}
 	name, accountName, sessionName := localAccountNames(acct)
 	local := &v1alpha1.LocalRepo{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.LocalRepoSpec{DID: acct.DID, PdsRef: pdsRef}}

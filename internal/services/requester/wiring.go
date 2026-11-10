@@ -134,10 +134,13 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	if _, err := events.SubscribeContractEvents(ctx, core); err != nil {
 		return core, fmt.Errorf("requester: subscribing to the contract events: %w", err)
 	}
-	if relays := s.cfg.Relays(); len(relays) > 0 {
-		crawl := participant.Crawl{Relays: relays, Address: func() string { return inputs.Address(role.PDSExposure) }, Period: participant.CrawlPeriod, Log: s.log}
-		s.wg.Go(func() { crawl.Run(ctx) })
+	address := func() string { return inputs.Address(role.PDSExposure) }
+	crawl := participant.Crawl{Relays: s.cfg.Relays(), Address: address, Period: participant.CrawlPeriod, Log: s.log}
+	if len(crawl.Relays) == 0 {
+		crawl.PublicRelays = []string{v1alpha1.DefaultMarketRelayURL}
+		crawl.PublicAddress = func(context.Context) string { return address() }
 	}
+	s.wg.Go(func() { crawl.Run(ctx) })
 	return core, nil
 }
 

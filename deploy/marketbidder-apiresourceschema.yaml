@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-43.marketbidders.socialweb.computer
+  name: v1alpha1-44.marketbidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -432,7 +432,7 @@ spec:
                     type: integer
                     format: int32
                     minimum: 1
-                    maximum: 1
+                    maximum: 100
                   requireContract:
                     type: boolean
               guestNetwork:

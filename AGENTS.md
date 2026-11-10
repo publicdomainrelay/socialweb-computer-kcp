@@ -485,8 +485,21 @@ requester's own kcp, and `install` prints both. A password never goes into reque
     `run request release` waits the cascade plus `--contract-timeout`; the outcome is
     `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose
     requester's contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`,
-    at most 24 h after the accept, only from a proof in another repo than the requester's that names
-    the requester as subject and the authority's own accept as contract; each skip is logged).
+    at most 24 h after the accept, the earliest `expiresAt` of the proof's `parent` chain, only from a proof
+    in another repo than the requester's that names the requester as subject and an accept of a repo of the
+    chain as contract; each skip is logged). The guest requester's PDS requestCrawls our relay only
+    (`DefaultMarketRelayURL`, when its spec names no network relay). `run request --guest-requester
+    --colocated a,b` (the r2 unit passes `R2_COLOCATED` from `/run/socialweb-r2/r2-start.env`) makes
+    each `<label>.<its handle>` an account on its own PDS (`spec.peer.colocated` of the MarketRequester),
+    associated by a market.association in the guest requester's repo whose `parent` is the owner's
+    association of the guest requester (same contract and expiresAt), plus the account's keys mirror;
+    every verifier follows `parent` (maxDepth 1 to 100, default 100) with the expiry and contract checks at
+    each link, and `socialweb-computer internal association <did>` prints that verdict. It also writes
+    `computer.socialweb.peer/<subhandle>` {lease, iroh, webrtc, channels} in its own repo and each
+    co-located one (`docs/protocol/lexicons-market.md`). Its `run request release` sets `spec.peer.retire`
+    before its kcp goes: those records are deleted, every local account deactivated and its did:plc
+    tombstoned, best effort; trust never depends on that cleanup (vm.delete, vm.terminated and expiresAt
+    end every link).
 - The bidder installs the guest binaries, never the requester and never the internet. The requester's
   tunnel module carries config only; the bidder adds `setup-guest-binaries.service`
   (`internal/guestseed`), which fetches opentunnel, wootty, atirc or socialweb-guest-agent from its own

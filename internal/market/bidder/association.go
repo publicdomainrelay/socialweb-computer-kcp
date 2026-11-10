@@ -3,6 +3,7 @@ package bidder
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -44,36 +45,65 @@ func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt
 	if authority == "" || authority == requesterDID {
 		return refuse("the proof is not in an authority's repo", "proof", uri)
 	}
-	record, err := b.records.Resolve(ctx, market.RecordRef{URI: uri, CID: cid})
-	if err != nil {
-		return refuse("the proof is unread", "proof", uri, "err", err.Error())
+	authorities := []string{authority}
+	subject := requesterDID
+	var expiresAt time.Time
+	var contract *market.StrongRef
+	for depth := 0; ; depth++ {
+		record, err := b.records.Resolve(ctx, market.RecordRef{URI: uri, CID: cid})
+		if err != nil {
+			return refuse("the proof is unread", "proof", uri, "err", err.Error())
+		}
+		if record.CID != cid {
+			return refuse("the proof cid changed", "proof", uri)
+		}
+		assoc, err := market.ParseAssociation(record.Value)
+		if err != nil {
+			return refuse("the proof is no association", "proof", uri, "err", err.Error())
+		}
+		if assoc.Contract == nil {
+			if depth == 0 {
+				return skip("the proof is not contract-scoped", "proof", uri)
+			}
+			return refuse("a link of the association chain is not contract-scoped", "proof", uri)
+		}
+		if assoc.Subject != subject {
+			return refuse("the proof names another subject", "proof", uri, "subject", assoc.Subject)
+		}
+		at, err := market.ParseTime(assoc.ExpiresAt)
+		if err != nil {
+			return refuse("the proof expiresAt is no datetime", "proof", uri, "expiresAt", assoc.ExpiresAt)
+		}
+		if expiresAt.IsZero() || at.Before(expiresAt) {
+			expiresAt = at
+		}
+		if contract == nil {
+			contract = assoc.Contract
+		}
+		if assoc.Parent == nil {
+			break
+		}
+		if depth+1 >= trust.MaxChainDepth {
+			return refuse("the association chain is deeper than its bound", "proof", uri)
+		}
+		subject = market.ATURIAuthority(uri)
+		uri, cid = assoc.Parent.URI, assoc.Parent.CID
+		parent := market.ATURIAuthority(uri)
+		if market.NSIDFromURI(uri) != market.AssociationNSID || parent == "" || parent == requesterDID || slices.Contains(authorities, parent) {
+			return refuse("the parent is no association of a repo outside the chain", "proof", uri)
+		}
+		authorities = append(authorities, parent)
 	}
-	if record.CID != cid {
-		return refuse("the proof cid changed", "proof", uri)
+	if !slices.Contains(authorities, market.ATURIAuthority(contract.URI)) {
+		return refuse("the proof's contract is not an accept of an authority of the chain", "proof", uri, "contract", contract.URI)
 	}
-	assoc, err := market.ParseAssociation(record.Value)
-	if err != nil {
-		return refuse("the proof is no association", "proof", uri, "err", err.Error())
-	}
-	if assoc.Contract == nil {
-		return skip("the proof is not contract-scoped", "proof", uri)
-	}
-	if assoc.Subject != requesterDID {
-		return refuse("the proof names another subject", "proof", uri, "subject", assoc.Subject)
-	}
-	if market.ATURIAuthority(assoc.Contract.URI) != authority {
-		return refuse("the proof's contract is not the authority's accept", "proof", uri, "contract", assoc.Contract.URI)
-	}
-	expiresAt, err := market.ParseTime(assoc.ExpiresAt)
-	if err != nil {
-		return refuse("the proof expiresAt is no datetime", "proof", uri, "expiresAt", assoc.ExpiresAt)
-	}
+	authority = authorities[len(authorities)-1]
 	start := b.now()
 	if at, err := market.ParseTime(acceptedAt); err == nil && at.Before(start) {
 		start = at
 	}
 	if bound := start.Add(market.ContractAssociationLifetime); bound.Before(expiresAt) {
-		b.log.Info("bidder_association_expiry_capped", "requester", requesterDID, "proof", uri, "expiresAt", assoc.ExpiresAt, "cap", market.FormatTime(bound))
+		b.log.Info("bidder_association_expiry_capped", "requester", requesterDID, "proof", uri, "expiresAt", market.FormatTime(expiresAt), "cap", market.FormatTime(bound))
 		expiresAt = bound
 	}
 	out := market.FormatTime(expiresAt)

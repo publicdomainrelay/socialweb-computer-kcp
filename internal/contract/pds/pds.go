@@ -113,6 +113,8 @@ type Accounts interface {
 	CreateAccount(ctx context.Context, req AccountRequest) (Account, error)
 
 	Account(ctx context.Context, did string) (Account, error)
+
+	Retire(ctx context.Context, did string) error
 }
 
 type Sessions interface {

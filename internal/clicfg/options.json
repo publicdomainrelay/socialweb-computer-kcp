@@ -660,6 +660,10 @@
       "type": "boolean",
       "description": "run request, as the agent user inside a guest of a spec.association.fromGuest contract: run this requester as the guest requester in one command. It implies --association-ref (the shared /run/socialweb-r2 files the guest agent mirrors), --skip-ssh and its parent atirc token from /run/socialweb-r2/r2-atirc.env, (its token is only the parent for minting its own agents' tokens; it does not join the atirc channel itself); standalone only"
     },
+    "colocated": {
+      "type": "string",
+      "description": "run request --guest-requester: comma-separated DNS labels; each is an account <label>.<the requester's handle> on the guest requester's own PDS, associated by a contract-scoped market.association in the guest requester's repo whose parent is the owner's association of the guest requester (a chain the verifiers follow), with its computer.socialweb.peer record; release deactivates every such account and tombstones its did:plc"
+    },
     "skip-ssh": {
       "type": "boolean",
       "description": "run request, resume: do not open an ssh session once the guest is on the network"

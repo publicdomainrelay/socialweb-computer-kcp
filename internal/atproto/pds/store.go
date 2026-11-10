@@ -223,6 +223,13 @@ func (s *Store) DeleteAccount(ctx context.Context, did syntax.DID) error {
 	return nil
 }
 
+func (s *Store) DeactivateAccount(ctx context.Context, did syntax.DID) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE pds_accounts SET active = 0 WHERE did = ?`, did.String()); err != nil {
+		return fmt.Errorf("pds: deactivating account: %w", err)
+	}
+	return nil
+}
+
 func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 	var didRaw, handle, email string
 	var active int

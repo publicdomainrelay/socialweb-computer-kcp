@@ -11,12 +11,12 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: marketbidders
-      schema: v1alpha1-43.marketbidders.socialweb.computer
+      schema: v1alpha1-44.marketbidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
       name: marketrequesters
-      schema: v1alpha1-37.marketrequesters.socialweb.computer
+      schema: v1alpha1-38.marketrequesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
@@ -31,7 +31,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: bidders
-      schema: v1alpha1-24.bidders.socialweb.computer
+      schema: v1alpha1-25.bidders.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer
@@ -46,7 +46,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: requesters
-      schema: v1alpha1-29.requesters.socialweb.computer
+      schema: v1alpha1-30.requesters.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

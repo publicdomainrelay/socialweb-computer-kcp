@@ -36,6 +36,7 @@
 | `market/relays.json` | [market.relays](#marketrelays) | x |
 | `market/association.json` | [market.association](#marketassociation) | x |
 | `market/associationRequest.json` | [market.associationRequest](#marketassociationrequest) | x |
+| `computer/socialweb/peer.json` | [computer.socialweb.peer](#computersocialwebpeer) | x |
 | `market/submitRfp.json` | [market.submitRfp](#marketsubmitrfp) | x |
 | `market/submitBid.json` | [market.submitBid](#marketsubmitbid) | x |
 | `market/submitAccept.json` | [market.submitAccept](#marketsubmitaccept) | x |
@@ -82,6 +83,7 @@
 | `market.relays` | record | `self` | no Go writer here | S3 (discovery) |
 | `market.association` | record | `market.ContractScopedRKey` | requester | S5, S8 |
 | `market.associationRequest` | record | `market.ContractScopedRKey` | guest requester | S8 |
+| `computer.socialweb.peer` | record | the subhandle | guest requester (its own and each co-located account's) | S8 |
 | `market.submitRfp` | procedure | - | served by bidder | S3 |
 | `market.submitBid` | procedure | - | served by requester | S4 |
 | `market.submitAccept` | procedure | - | served by bidder | S5 |
@@ -270,8 +272,9 @@
 | type | record, key any |
 | key fields | `subject`*, `service`* (`requester_associate`, `bidder_associate`), `createdAt`*, `contract` (-> `market.accept`, needs `expiresAt`), `expiresAt`, `parent`, `note` |
 | rkey | standing: `<service>-<subject with : replaced by ->`; contract-scoped: `market.ContractScopedRKey(service, subject, acceptURI)` = `<service>-<32 hex of sha256(subject)>-<accept rkey>` (`ContractAssociationRKey` in `internal/market/requester/association.go`) |
-| written by | requester (contract-scoped, `association.go`); standing ones: [identity.md](identity.md#associations-plan-0036) |
-| read by | bidder (`internal/market/bidder/association.go`, ComputeVM `spec.associationExpiresAt`), policy trust (`internal/policyengine/trust/association.go`) |
+| written by | requester (contract-scoped, `association.go`); standing ones: [identity.md](identity.md#associations-plan-0036); the guest requester for each co-located account (`internal/app/compose/peer.go`: subject the co-located DID, `contract` and `expiresAt` copied from its own association, `parent` its own association) |
+| read by | bidder (`internal/market/bidder/association.go`, ComputeVM `spec.associationExpiresAt`: the earliest `expiresAt` of the chain, the contract an accept of a repo of the chain), policy trust (`internal/policyengine/trust/association.go`) |
+| chain | a verifier follows `parent` (a strongRef to the market.association that names this record's repo) up to `maxDepth` links (AssociationPolicy `maxDepth`, 1 to 100, default 100); every link of a chain is contract-scoped, unexpired, names the next link's repo as its subject, and its contract is a Held `market.accept` of its own repo or of a repo above it; the operator is the top repo. Nothing relies on a cleanup: the owner's release (vm.delete), the bidder's vm.terminated or the first `expiresAt` ends the whole chain. `socialweb-computer internal association <did>` prints the verdict |
 | step | [S5](README.md#step-s5), [S8](README.md#step-s8); release deletes only its own |
 
 ## market.associationRequest
@@ -285,6 +288,18 @@
 | written by | the guest requester: an AtprotoRecord object from `internal/app/compose/records.go` |
 | read by | the authority requester: one `getRecord` in the DID the guest reported (`internal/market/requester/association.go`); `cmd/socialweb-computer/requestassociation.go` |
 | step | [S8](README.md#step-s8); flow: [identity.md](identity.md#associations-plan-0036) |
+
+## computer.socialweb.peer
+
+| item | value |
+|---|---|
+| file | `computer/socialweb/peer.json` |
+| type | record, key any |
+| key fields | `createdAt`*, `iroh` (short ticket), `webrtc` (the DID answering ingress offers), `channels`, `lease` (-> the market.association naming the account) |
+| rkey | the subhandle: the guest requester's atirc subhandle (`r2-<accept rkey>.<owner handle>`, its handle without one); `<name>.<that>` for a co-located account |
+| written by | the guest requester (`run request --guest-requester [--colocated a,b]`): AtprotoRecord objects of `internal/app/compose/peer.go` in its own repo and each co-located account's, present only while its association ref verifies |
+| read by | mesh peers: one `getRecord(DID, computer.socialweb.peer, subhandle)`, never listRecords; trusted only while `lease` verifies as a chain |
+| release | the guest requester's `run request release` sets `spec.peer.retire`: the peer, association and keys-mirror records are deleted, each local account deactivated and its did:plc tombstoned (best effort; expiry covers a skipped cleanup) |
 
 ## market.submitRfp
 

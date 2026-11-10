@@ -44,6 +44,7 @@ const (
 	requestAttachProbe  = 10 * time.Second
 
 	requestOwnerExitWait = 5 * time.Minute
+	requestRetireWait    = 2 * time.Minute
 	requestSSHRetryRun   = 20 * time.Second
 	transportIroh        = "iroh"
 	transportWebRTC      = "webrtc"
@@ -54,7 +55,7 @@ const (
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
-var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester")
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated")
 
 type requestRun struct {
 	a                 *app
@@ -87,6 +88,7 @@ type requestRun struct {
 	expectedPDSURL    string
 	awaitRefFile      string
 	guestRequester    bool
+	peerSubhandle     string
 	handshakeStarted  bool
 	homeDir           string
 	verb              string
@@ -661,6 +663,9 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 			r.a.log.Warn("stopping the invocation", "err", err.Error())
 		}
 	default:
+		if remove && r.inv.GuestRequester && r.kcp != nil {
+			r.retire(ctx)
+		}
 		l := r.standalone
 		if l.ID == "" {
 			vals := r.vals.With("instance", r.inv.Name).With("state-dir", r.home())
@@ -677,6 +682,18 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 	}
 	r.summary.KcpRunning = false
 	r.log("the invocation's kcp is stopped", "stateKept", !remove)
+}
+
+func (r *requestRun) retire(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, requestRetireWait)
+	defer cancel()
+	r.log("retiring the guest requester's local accounts: peer and association records deleted, accounts deactivated, did:plc tombstoned")
+	message, err := r.kcp.Retire(ctx, requestRetireWait)
+	if err != nil {
+		r.a.log.Warn("the local accounts did not retire; their association expiry and contract checks still end their trust", "err", err.Error(), "last", message)
+		return
+	}
+	r.log("the local accounts are retired", "message", message)
 }
 
 func (r *requestRun) writeSummary(ctx context.Context, c *v1alpha1.ComputeContract) {
@@ -1165,6 +1182,18 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 			return a.fail(exitRefused, "run request: --guest-requester is for a standalone invocation")
 		}
 		r.guestRequester, r.skipSSH = true, true
+		colocated := []string{}
+		for _, name := range strings.Split(vals.String("colocated"), ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				colocated = append(colocated, name)
+			}
+		}
+		if err := compose.CheckColocated(colocated); err != nil {
+			return a.fail(exitRefused, "run request: --colocated: %v", err)
+		}
+		r.root.Peer = &v1alpha1.RequesterPeer{Colocated: colocated}
+	} else if vals.String("colocated") != "" {
+		return a.fail(exitRefused, "run request: --colocated is for a --guest-requester invocation")
 	}
 	if err := r.associationRef(network != ""); err != nil {
 		return a.fail(exitRefused, "run request: --association-ref: %v", err)
@@ -1204,7 +1233,8 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	if err := requester.CheckTokenPaths(v1alpha1.ComputeContract{Spec: r.contract}, userPaths); err != nil {
 		return a.fail(exitRefused, "run request: %v", err)
 	}
-	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC()}
+	r.inv = request.Invocation{Name: name, Mode: request.ModeStandalone, Network: network, StateRoot: r.stateRoot, CreatedAt: time.Now().UTC(),
+		GuestRequester: r.guestRequester}
 	if network != "" {
 		r.inv.Mode = request.ModeNetwork
 	}

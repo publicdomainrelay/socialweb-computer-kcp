@@ -18,6 +18,8 @@ const (
 	KindDelvePost   = "delvePost"
 
 	DefaultPostTemplate = "associate {did}"
+
+	MaxChainDepth = 100
 )
 
 var DefaultKinds = []string{KindClaim, KindAssociation}
@@ -36,6 +38,7 @@ type associationKey struct {
 	delvePost       bool
 	template        string
 	requireContract bool
+	maxDepth        int
 }
 
 func (a Association) key() associationKey {
@@ -47,6 +50,10 @@ func (a Association) key() associationKey {
 	if strings.TrimSpace(template) == "" {
 		template = DefaultPostTemplate
 	}
+	depth := MaxChainDepth
+	if a.MaxDepth > 0 {
+		depth = min(a.MaxDepth, MaxChainDepth)
+	}
 	return associationKey{
 		claim:           slices.Contains(kinds, KindClaim),
 		association:     slices.Contains(kinds, KindAssociation),
@@ -54,6 +61,7 @@ func (a Association) key() associationKey {
 		delvePost:       slices.Contains(kinds, KindDelvePost),
 		template:        template,
 		requireContract: a.RequireContract,
+		maxDepth:        depth,
 	}
 }
 
@@ -183,47 +191,105 @@ func (r *Resolver) deny(reason string, want claim, meta map[string]any) (bool, e
 	return false, nil
 }
 
-func (r *Resolver) proofHeld(ctx context.Context, want claim, proof atproto.StrongRef, assoc associationKey) (bool, error) {
+func (r *Resolver) proofHeld(ctx context.Context, want claim, proof atproto.StrongRef, assoc associationKey) (string, bool, error) {
 	repo, collection, _ := atproto.SplitURI(proof.URI)
 	kind := KindOfCollection(collection)
 	meta := map[string]any{"proof": proof.URI, "cid": proof.CID}
 	switch {
 	case repo != want.operator:
-		return r.deny("the proof is not in the authority repo", want, meta)
+		return r.refuse("the proof is not in the authority repo", want, meta)
 	case kind == "" || !assoc.allows(kind):
-		return r.deny("the proof kind is not accepted", want, meta)
+		return r.refuse("the proof kind is not accepted", want, meta)
 	}
 	value, reason, err := r.pinnedRecord(ctx, proof)
 	if err != nil || reason != "" {
 		if err != nil {
-			return false, err
+			return "", false, err
 		}
-		return r.deny("proof: "+reason, want, meta)
+		return r.refuse("proof: "+reason, want, meta)
 	}
 	if !Matches(kind, value, want.operator, want.subject, want.service, assoc.template) {
-		return r.deny("the proof does not match", want, meta)
+		return r.refuse("the proof does not match", want, meta)
 	}
 	if kind == KindBskyPost || kind == KindDelvePost {
 		if assoc.requireContract {
-			return r.deny("a post carries no contract", want, meta)
+			return r.refuse("a post carries no contract", want, meta)
 		}
-		return true, nil
+		return want.operator, true, nil
 	}
-	return r.scopeHeld(ctx, value, want, assoc)
+	return r.chainHeld(ctx, value, want, assoc)
 }
 
-func (r *Resolver) associationHeld(ctx context.Context, want claim, assoc associationKey) (bool, error) {
+func (r *Resolver) associationHeld(ctx context.Context, want claim, assoc associationKey) (string, bool, error) {
 	value, err := r.getRecord(ctx, want.operator, AssociationNSID, ClaimRKey(want.service, want.subject))
 	if err != nil || value == nil {
-		return false, err
+		return "", false, err
 	}
 	if !Matches(KindAssociation, value, want.operator, want.subject, want.service, assoc.template) {
-		return r.deny("the association record does not match", want, nil)
+		return r.refuse("the association record does not match", want, nil)
 	}
-	return r.scopeHeld(ctx, value, want, assoc)
+	return r.chainHeld(ctx, value, want, assoc)
 }
 
-func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey) (bool, error) {
+func (r *Resolver) refuse(reason string, want claim, meta map[string]any) (string, bool, error) {
+	_, err := r.deny(reason, want, meta)
+	return "", false, err
+}
+
+type chainLink struct {
+	claim
+	value map[string]any
+}
+
+func (r *Resolver) chainHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey) (string, bool, error) {
+	chain := []chainLink{{claim: want, value: value}}
+	for {
+		link := chain[len(chain)-1]
+		rawParent, chained := link.value["parent"]
+		if !chained {
+			break
+		}
+		if len(chain) >= assoc.maxDepth {
+			return r.refuse("the association chain is deeper than maxDepth", want, map[string]any{"maxDepth": assoc.maxDepth})
+		}
+		parent, ok := strongRefOf(rawParent)
+		if !ok {
+			return r.refuse("the parent is not a strongRef", want, map[string]any{"link": link.operator})
+		}
+		meta := map[string]any{"parent": parent.URI, "cid": parent.CID}
+		repo, collection, _ := atproto.SplitURI(parent.URI)
+		if collection != AssociationNSID || !strings.HasPrefix(repo, "did:") || slices.ContainsFunc(chain, func(l chainLink) bool { return l.operator == repo || l.subject == repo }) {
+			return r.refuse("the parent is not a market.association of a repo outside the chain", want, meta)
+		}
+		parentValue, reason, err := r.pinnedRecord(ctx, *parent)
+		if err != nil || reason != "" {
+			if err != nil {
+				return "", false, err
+			}
+			return r.refuse("parent: "+reason, want, meta)
+		}
+		next := claim{operator: repo, subject: link.operator, service: link.service}
+		if !Matches(KindAssociation, parentValue, next.operator, next.subject, next.service, assoc.template) {
+			return r.refuse("the parent does not name the link's authority", want, meta)
+		}
+		chain = append(chain, chainLink{claim: next, value: parentValue})
+	}
+	held := map[atproto.StrongRef]bool{}
+	for i, link := range chain {
+		var authorities []string
+		for _, above := range chain[i:] {
+			authorities = append(authorities, above.operator)
+		}
+		ok, err := r.scopeHeld(ctx, link.value, link.claim, assoc, len(chain) > 1, authorities, held)
+		if err != nil || !ok {
+			return "", false, err
+		}
+	}
+	return chain[len(chain)-1].operator, true, nil
+}
+
+func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want claim, assoc associationKey, chained bool,
+	authorities []string, held map[atproto.StrongRef]bool) (bool, error) {
 	rawContract, scoped := value["contract"]
 	rawExpires, expiring := value["expiresAt"]
 	expiresAt, _ := rawExpires.(string)
@@ -232,6 +298,8 @@ func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want cla
 		return r.deny("a contract-scoped association has no expiresAt", want, nil)
 	case assoc.requireContract && !scoped:
 		return r.deny("the verifier requires a contract-scoped association", want, nil)
+	case chained && !scoped:
+		return r.deny("every link of an association chain must be contract-scoped", want, nil)
 	}
 	if expiring {
 		deadline, err := time.Parse(time.RFC3339Nano, expiresAt)
@@ -249,14 +317,21 @@ func (r *Resolver) scopeHeld(ctx context.Context, value map[string]any, want cla
 	if !ok {
 		return r.deny("the contract is not a strongRef", want, nil)
 	}
-	return r.contractHeld(ctx, *contract, want)
+	if held[*contract] {
+		return true, nil
+	}
+	ok, err := r.contractHeld(ctx, *contract, authorities, want)
+	if ok {
+		held[*contract] = true
+	}
+	return ok, err
 }
 
-func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef, want claim) (bool, error) {
+func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef, authorities []string, want claim) (bool, error) {
 	meta := map[string]any{"contract": contract.URI, "cid": contract.CID}
 	repo, collection, _ := atproto.SplitURI(contract.URI)
-	if repo != want.operator || collection != market.AcceptNSID {
-		return r.deny("the contract is not a market.accept of the authority", want, meta)
+	if !slices.Contains(authorities, repo) || collection != market.AcceptNSID {
+		return r.deny("the contract is not a market.accept of the authority or of an authority above it", want, meta)
 	}
 	accept, reason, err := r.pinnedRecord(ctx, contract)
 	if err != nil || reason != "" {
@@ -287,7 +362,7 @@ func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef,
 	if answered, ok := strongRefOf(receipt.Value["accept"]); !ok || *answered != contract {
 		return r.deny("the receipt does not answer the contract", want, meta)
 	}
-	released, err := r.getRecord(ctx, want.operator, market.ComputeEventsVMDeleteNSID, market.ReleasePayloadRKey(receiptURI))
+	released, err := r.getRecord(ctx, repo, market.ComputeEventsVMDeleteNSID, market.ReleasePayloadRKey(receiptURI))
 	if err != nil {
 		return false, err
 	}

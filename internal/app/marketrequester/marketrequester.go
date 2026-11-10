@@ -14,6 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	role "github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
@@ -530,8 +531,19 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.retry("its app Pds account", err)
 	}
 	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
+	colocated, err := p.colocated(ctx, plan, pdsHandle, acct.PLC)
+	if err != nil {
+		return p.retry("its co-located accounts", err)
+	}
+	if peer := o.Spec.Peer; peer != nil && peer.Retire {
+		return p.retire(ctx, acct, colocated)
+	}
 	repoLinks := append(compose.LocalAccountLinks(ws, acct), compose.RepoWriteLink(p.self(), compose.RepoRefIn(did, ws), compose.ScopeAll),
 		compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(did, ws), compose.ScopeAll))
+	for _, other := range colocated {
+		repoLinks = append(repoLinks, compose.LocalAccountLinks(ws, other.Account)...)
+		repoLinks = append(repoLinks, compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(other.Account.DID, ws), compose.ScopeAll))
+	}
 	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(did, ws))...)
 	if requireIngress && localPdsSignsAtirc(o.Spec.Network, pdsPublicURL) {
 		repoLinks = append(repoLinks, compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
@@ -539,7 +551,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if err := c.ApplyLocalAccount(ctx, r, ws, acct); err != nil {
+	colocatedAccounts := make([]compose.LocalAccount, 0, len(colocated))
+	for _, other := range colocated {
+		colocatedAccounts = append(colocatedAccounts, other.Account)
+	}
+	if err := c.ApplyLocalAccount(ctx, r, ws, acct, colocatedAccounts...); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if plan.Identity.AssociationRef != nil {
@@ -560,6 +576,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if changed {
 		if err := c.RestartComponent(ctx, r, ws, compose.ComponentKindRequester, RequesterComponent); err != nil && !apierrors.IsNotFound(err) {
 			return p.retry("restarting the requester", err)
+		}
+	}
+	if peer := o.Spec.Peer; peer != nil {
+		if err := c.ApplyPeerRecords(ctx, r, ws, RequesterIdentity, id, acct, peer.Subhandle, colocated); err != nil {
+			return ctlruntime.Result{}, err
 		}
 	}
 	identity := plan.Identity
@@ -599,6 +620,48 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.wait("waiting for the requester's MarketIdentity to sign in")
 	}
 	return p.wait("waiting for every component to be ready")
+}
+
+func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandle string, plc bool) ([]compose.Colocated, error) {
+	peer := p.o.Spec.Peer
+	if peer == nil {
+		return nil, nil
+	}
+	if err := compose.CheckColocated(peer.Colocated); err != nil {
+		return nil, err
+	}
+	out := make([]compose.Colocated, 0, len(peer.Colocated))
+	for _, name := range peer.Colocated {
+		handle := compose.ColocatedHandle(name, pdsHandle)
+		account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.ColocatedSessionPath(name),
+			Handle: handle, Sync: true}
+		did, err := p.c.EnsurePdsAccount(ctx, p.r, account)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		out = append(out, compose.Colocated{Name: name, Account: compose.LocalAccount{DID: did, Handle: handle, PLC: plc}})
+	}
+	return out, nil
+}
+
+func (p *pass) retire(ctx context.Context, self compose.LocalAccount, colocated []compose.Colocated) (ctlruntime.Result, error) {
+	dids := []string{}
+	for _, other := range colocated {
+		dids = append(dids, other.Account.DID)
+	}
+	dids = append(dids, self.DID)
+	done, err := p.c.RetireLocalAccounts(ctx, p.r, p.r.Workspace, dids)
+	switch {
+	case err != nil:
+		conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, false, "RetireFailed", err.Error())
+		return p.retry("retiring its local accounts", err)
+	case !done:
+		conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, false, "DeletingRecords", "deleting the peer, association and mirror records")
+		return p.wait("retiring: deleting the peer, association and mirror records")
+	}
+	conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, true, "Retired",
+		fmt.Sprintf("%d local accounts deactivated and their did:plc tombstoned: %s", len(dids), strings.Join(dids, " ")))
+	return p.write(v1alpha1.ApplicationPhaseProvisioning, "retired: the local accounts are deactivated and tombstoned")
 }
 
 func localPdsSignsAtirc(network *v1alpha1.MarketNetworkValue, pdsPublicURL string) bool {

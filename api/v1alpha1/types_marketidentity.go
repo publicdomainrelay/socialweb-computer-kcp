@@ -160,6 +160,8 @@ type MarketIdentityStatus struct {
 
 	AssociationRef *commonv1.StrongRef `json:"associationRef,omitempty"`
 
+	AssociationScope *AssociationScope `json:"associationScope,omitempty"`
+
 	SessionRef *commonv1.SecretRef `json:"sessionRef,omitempty"`
 
 	OAuthClientID string `json:"oauthClientID,omitempty"`
@@ -173,6 +175,12 @@ type MarketIdentityStatus struct {
 	SignedOutAt string `json:"signedOutAt,omitempty"`
 
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+type AssociationScope struct {
+	Contract commonv1.StrongRef `json:"contract"`
+
+	ExpiresAt string `json:"expiresAt"`
 }
 
 const (

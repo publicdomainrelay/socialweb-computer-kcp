@@ -204,6 +204,11 @@ func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Wa
 			r.a.log.Warn("the guest requester's atirc token is not usable for its own agents", "file", guestPaths().atirc, "err", err.Error())
 		} else if parent != nil {
 			next.AtircParentRef = parent
+			if next.Peer != nil {
+				peer := *next.Peer
+				peer.Subhandle = r.peerSubhandle
+				next.Peer = &peer
+			}
 		}
 		if err := r.kcp.ApplyRoot(ctx, next); err != nil {
 			r.a.log.Warn("applying the association ref to the MarketRequester", "err", err.Error())
@@ -349,6 +354,7 @@ func (r *requestRun) atircParent(ctx context.Context) (*commonv1.SecretRef, erro
 	if err != nil {
 		return nil, err
 	}
+	r.peerSubhandle = subhandle
 	r.log("this requester mints its own agents' atirc tokens below its token", "subhandle", subhandle, "file", atircFile)
 	return &ref, nil
 }

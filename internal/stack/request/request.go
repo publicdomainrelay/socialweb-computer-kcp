@@ -16,6 +16,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,6 +48,7 @@ const (
 	FieldManager                 = "socialweb-computer-run-request"
 	ReleaseFieldManager          = "socialweb.computer/run-request"
 	AssociateFieldManager        = "socialweb.computer/run-request-associate"
+	RetireFieldManager           = "socialweb.computer/run-request-retire"
 	NetworkAppFieldManager       = "socialweb.computer/network-app"
 	ContractTTLSeconds     int32 = 8 * 24 * 60 * 60
 	SecretsPath                  = "contracts/" + marketrequester.RequesterContract + "/secrets"
@@ -79,6 +81,8 @@ type Invocation struct {
 	Identity  string    `json:"identity,omitempty"`
 	StateRoot string    `json:"stateRoot"`
 	CreatedAt time.Time `json:"createdAt"`
+
+	GuestRequester bool `json:"guestRequester,omitempty"`
 }
 
 type ContractSummary struct {
@@ -400,6 +404,25 @@ func (k *Kcp) Release(ctx context.Context, requestedAt string) error {
 		"metadata": map[string]any{"name": marketrequester.RequesterContract}, "spec": map[string]any{"release": true, "releaseRequestedAt": requestedAt}}
 	_, err := kube.Apply[kube.Doc](ctx, contracts, doc, kube.ApplyOptions{FieldManager: ReleaseFieldManager, Force: true})
 	return err
+}
+
+func (k *Kcp) Retire(ctx context.Context, timeout time.Duration) (string, error) {
+	roots := k.dyn.Resource(compose.MarketRequesterGVR)
+	doc := kube.Doc{"apiVersion": v1alpha1.GroupVersion.String(), "kind": "MarketRequester",
+		"metadata": map[string]any{"name": RootName}, "spec": map[string]any{"peer": map[string]any{"retire": true}}}
+	if _, err := kube.Apply[kube.Doc](ctx, roots, doc, kube.ApplyOptions{FieldManager: RetireFieldManager, Force: true}); err != nil {
+		return "", err
+	}
+	message := ""
+	err := await(ctx, roots, compose.MarketRequesterGVR.GroupResource(), RootName, timeout, "waiting for the local accounts to retire",
+		func(o *v1alpha1.MarketRequester) bool {
+			c := meta.FindStatusCondition(o.Status.Conditions, compose.ConditionRetired)
+			if c != nil {
+				message = c.Reason + ": " + c.Message
+			}
+			return c != nil && c.Status == metav1.ConditionTrue
+		})
+	return message, err
 }
 
 func (k *Kcp) Associate(ctx context.Context, subject string) error {

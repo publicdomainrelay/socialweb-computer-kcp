@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-37.marketrequesters.socialweb.computer
+  name: v1alpha1-38.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -342,6 +342,19 @@ spec:
                 required:
                   - mount
                   - path
+              peer:
+                type: object
+                properties:
+                  subhandle:
+                    type: string
+                    maxLength: 253
+                  colocated:
+                    type: array
+                    items:
+                      type: string
+                    x-kubernetes-list-type: set
+                  retire:
+                    type: boolean
               ingress:
                 type: object
                 properties:
@@ -569,7 +582,7 @@ spec:
                     type: integer
                     format: int32
                     minimum: 1
-                    maximum: 1
+                    maximum: 100
                   requireContract:
                     type: boolean
               options:

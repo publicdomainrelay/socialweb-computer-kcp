@@ -313,6 +313,7 @@ set -euo pipefail
 ` + guestRequesterEnv + `args=(run request --name "${R2_NAME}" --guest-requester)
 [ "${R2_AGENT:-}" = 1 ] && args+=(--agent)
 [ "${R2_HOLD:-}" = 1 ] && args+=(--hold)
+[ -n "${R2_COLOCATED:-}" ] && args+=(--colocated "${R2_COLOCATED}")
 socialweb-computer "${args[@]}"
 if [ "${R2_AGENT:-}" = 1 ] && [ "${R2_HOLD:-}" = 1 ]; then
   exec socialweb-computer run request agent "${R2_NAME}"

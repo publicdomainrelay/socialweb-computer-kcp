@@ -14,7 +14,7 @@ type AssociationPolicy struct {
 
 	PostTemplate string `json:"postTemplate,omitempty"`
 
-	MaxDepth int32 `json:"maxDepth,omitempty" apigen:"minimum=1,maximum=1"`
+	MaxDepth int32 `json:"maxDepth,omitempty" apigen:"minimum=1,maximum=100"`
 
 	RequireContract bool `json:"requireContract,omitempty"`
 }

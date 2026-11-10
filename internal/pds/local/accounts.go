@@ -96,6 +96,21 @@ func (a *Accounts) CreateAccount(ctx context.Context, req pds.AccountRequest) (p
 	return account(ctx, a.srv, did)
 }
 
+func (a *Accounts) Retire(ctx context.Context, raw string) error {
+	if !inScope(a.scope, raw) {
+		return fmt.Errorf("pds: the account %s is outside the granted scope %v", raw, a.scope)
+	}
+	did, err := syntax.ParseDID(raw)
+	if err != nil {
+		return fmt.Errorf("pds: the account did %q: %w", raw, err)
+	}
+	err = a.srv.Retire(ctx, did)
+	if errors.Is(err, atpds.ErrAccountNotFound) {
+		return fmt.Errorf("%w: %s: %v", pds.ErrNotFound, did, err)
+	}
+	return err
+}
+
 type Sessions struct {
 	srv *atpds.Server
 

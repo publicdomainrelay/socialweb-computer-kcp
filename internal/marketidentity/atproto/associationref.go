@@ -42,6 +42,8 @@ type refVerdict struct {
 	message string
 
 	expiresAt time.Time
+
+	contract *commonv1.StrongRef
 }
 
 func newRefCache() *ttlcache.Cache[refKey, refVerdict] {
@@ -82,7 +84,7 @@ func (a *Accounts) dropAssociationRef(id *v1alpha1.MarketIdentity, status *v1alp
 	if did := recordclient.RepoFromURI(previous.URI); !slices.Contains(uniqueDIDs(id.Spec.ApprovedAssociations), did) {
 		status.Associations = slices.DeleteFunc(status.Associations, func(have string) bool { return have == did })
 	}
-	status.AssociationRef = nil
+	status.AssociationRef, status.AssociationScope = nil, nil
 	setAssociated(status, id.Generation, id.Spec.Association)
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo && strings.TrimSpace(status.Did) != "" &&
 		(status.Phase == v1alpha1.MarketIdentityPhaseReady || status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval) {
@@ -138,7 +140,7 @@ func (a *Accounts) ApplyAssociationRef(ctx context.Context, id *v1alpha1.MarketI
 	if verdict.reason != ReasonAssociationRefVerified {
 		a.verified.Delete(key)
 		drop(recordclient.RepoFromURI(want.URI))
-		status.AssociationRef = nil
+		status.AssociationRef, status.AssociationScope = nil, nil
 		conds.Set(&status.Conditions, id.Generation, v1alpha1.ConditionAssociated, false, verdict.reason, verdict.message)
 		a.settleRef(id, status)
 		if verdict.reason == ReasonAssociationRefPending {
@@ -149,7 +151,10 @@ func (a *Accounts) ApplyAssociationRef(ctx context.Context, id *v1alpha1.MarketI
 	}
 	a.verified.Set(key, verdict)
 	status.Associations = uniqueDIDs(append([]string{verdict.authority}, status.Associations...))
-	status.AssociationRef = &want
+	status.AssociationRef, status.AssociationScope = &want, nil
+	if verdict.contract != nil {
+		status.AssociationScope = &v1alpha1.AssociationScope{Contract: *verdict.contract, ExpiresAt: verdict.expiresAt.UTC().Format(time.RFC3339Nano)}
+	}
 	message := "the association record " + want.URI + " of " + verdict.authority + " names " + subject + " for " + service
 	if !verdict.expiresAt.IsZero() {
 		message += " until " + verdict.expiresAt.UTC().Format(time.RFC3339)
@@ -203,7 +208,16 @@ func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.Strong
 		return invalid("the association record %s does not name %s for %s", ref.URI, subject, service)
 	}
 	verdict := refVerdict{reason: ReasonAssociationRefVerified, authority: authority}
-	_, scoped := record.Value["contract"]
+	rawContract, scoped := record.Value["contract"]
+	if scoped {
+		fields, _ := rawContract.(map[string]any)
+		uri, _ := fields["uri"].(string)
+		cid, _ := fields["cid"].(string)
+		if !strings.HasPrefix(uri, "at://") || cid == "" {
+			return invalid("the contract of the association record %s is not a strongRef", ref.URI)
+		}
+		verdict.contract = &commonv1.StrongRef{URI: uri, CID: cid}
+	}
 	rawExpires, expiring := record.Value["expiresAt"]
 	expiresAt, _ := rawExpires.(string)
 	if scoped && expiresAt == "" {

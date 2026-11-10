@@ -172,19 +172,15 @@ func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc as
 			_, err := r.deny("the mirror proof is not a strongRef", mirror.claim, nil)
 			return "", false, err
 		}
-		held, err := r.proofHeld(ctx, mirror.claim, *mirror.proof, assoc)
-		if err != nil || !held {
-			return "", false, err
-		}
-		return mirror.operator, true, nil
+		return r.proofHeld(ctx, mirror.claim, *mirror.proof, assoc)
 	}
 	if assoc.association {
-		held, err := r.associationHeld(ctx, mirror.claim, assoc)
+		root, held, err := r.associationHeld(ctx, mirror.claim, assoc)
 		if err != nil {
 			return "", false, err
 		}
 		if held {
-			return mirror.operator, true, nil
+			return root, true, nil
 		}
 	}
 	if assoc.claim && !assoc.requireContract {

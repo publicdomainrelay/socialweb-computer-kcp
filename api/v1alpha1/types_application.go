@@ -699,6 +699,8 @@ type MarketRequesterSpec struct {
 
 	AtircParentRef *commonv1.SecretRef `json:"atircParentRef,omitempty"`
 
+	Peer *RequesterPeer `json:"peer,omitempty"`
+
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	RequesterIngress *IngressConfig `json:"requesterIngress,omitempty"`
@@ -712,6 +714,14 @@ type MarketRequesterSpec struct {
 	Quota *ApplicationQuota `json:"quota,omitempty"`
 
 	Components ComponentOverrides `json:"components,omitempty"`
+}
+
+type RequesterPeer struct {
+	Subhandle string `json:"subhandle,omitempty" apigen:"maxLength=253"`
+
+	Colocated []string `json:"colocated,omitempty" apigen:"listType=set"`
+
+	Retire bool `json:"retire,omitempty"`
 }
 
 type Gateway struct {
