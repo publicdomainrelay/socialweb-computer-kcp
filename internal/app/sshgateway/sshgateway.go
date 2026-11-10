@@ -760,6 +760,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if perUser {
 		desired = withoutSharedRequester(desired)
 	}
+	gateway := slices.Clone(desired)
 	desired = append(desired, accounts...)
 	if err := c.ApplyLinks(ctx, r, "accounts", accountLinks); err != nil {
 		return ctlruntime.Result{}, err
@@ -812,8 +813,12 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	switch {
-	case snap.Satisfied(desired) && exposuresReady(snap, desired) && dialer && (perUser || ident.Did != ""):
-		p.st = compose.Ready(p.st, "the ssh gateway listens, its iroh dialer runs and its owner identity is known")
+	case snap.Satisfied(gateway) && exposuresReady(snap, desired) && dialer && (perUser || ident.Did != ""):
+		msg := "the ssh gateway listens, its iroh dialer runs and its owner identity is known"
+		if n := unreadyAccounts(snap, accounts); n > 0 {
+			msg += fmt.Sprintf("; %d signed-in account requesters are not ready", n)
+		}
+		p.st = compose.Ready(p.st, msg)
 		return ctlruntime.Result{}, c.WriteStatus(ctx, r, compose.SshGatewayGVR, p.st)
 	case ident.Did == "" && !perUser:
 		return p.wait("waiting for the owner's atproto identity")
@@ -844,6 +849,16 @@ func (p *pass) hostProcesses(ctx context.Context) (bool, error) {
 		dialer = dialer || (h.Name == SshGatewayIrohDial && running)
 	}
 	return dialer, nil
+}
+
+func unreadyAccounts(snap compose.Snapshot, accounts []compose.Desired) int {
+	n := 0
+	for _, d := range accounts {
+		if d.Kind == compose.ComponentKindRequester && !snap.Ready(d.Kind, d.Name) {
+			n++
+		}
+	}
+	return n
 }
 
 func exposuresReady(snap compose.Snapshot, desired []compose.Desired) bool {
