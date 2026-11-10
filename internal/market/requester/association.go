@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -529,7 +530,9 @@ func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
 				refs = append(refs, *ref)
 			}
 		}
+		refs = append(refs, q.contractEventRefs(event)...)
 	}
+	refs = uniqueRefs(refs)
 	deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	deleted := 0
@@ -554,6 +557,39 @@ func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
 			"collections", slices.Compact(slices.Sorted(slices.Values(unscoped))))
 	}
 	r.log().Info("requester_contract_records_deleted", "deleted", deleted, "of", len(refs))
+}
+
+// The payload and market.event an outbound ContractEvent was published at (publishContractEvent's rkeys, every
+// generation up to its current one): found even when its status never recorded them (the invocation that published
+// it stopped first).
+func (q *Requester) contractEventRefs(event v1alpha1.ContractEvent) []commonv1.StrongRef {
+	if event.UID == "" {
+		return nil
+	}
+	var out []commonv1.StrongRef
+	for g := int64(1); g <= max(event.Generation, 1); g++ {
+		uid := string(event.UID)
+		if g > 1 {
+			uid += "-g" + strconv.FormatInt(g, 10)
+		}
+		if nsid := event.Spec.NSID; nsid != "" {
+			out = append(out, commonv1.StrongRef{URI: "at://" + q.repoDID + "/" + nsid + "/" + sessionRKey("contract-event", uid)})
+		}
+		out = append(out, commonv1.StrongRef{URI: "at://" + q.repoDID + "/" + market.EventNSID + "/" + sessionRKey("contract-event-envelope", uid)})
+	}
+	return out
+}
+
+func uniqueRefs(in []commonv1.StrongRef) []commonv1.StrongRef {
+	seen := map[string]bool{}
+	out := in[:0]
+	for _, ref := range in {
+		if !seen[ref.URI] {
+			seen[ref.URI] = true
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 func SecretsUpdatedEventName(contract string, ref commonv1.StrongRef) string {
