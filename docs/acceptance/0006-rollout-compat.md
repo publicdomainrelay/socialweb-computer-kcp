@@ -39,7 +39,7 @@ Per-bidder check (run as root on the host, or read the watcher post):
 
 ```bash
 STATE=/var/lib/socialweb-computer/swc-bidder
-K=$(sudo -n -u swc-bidder sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig | head -1")
+K=$(sudo -n -u swc-bidder sh -c "ls -t $STATE/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,")
 kb() { sudo -n -u swc-bidder env HOME=$STATE KUBECONFIG="$K" kubectl "$@"; }
 sudo "$STATE/bin/current/socialweb-computer" version --json | jq -r '.version,.commit'
 kb get marketidentities.socialweb.computer bidder -o jsonpath='{.status.phase} {.status.conditions[?(@.type=="SignedIn")].status} {.status.pendingAction}{"\n"}'

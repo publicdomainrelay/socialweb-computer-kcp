@@ -51,9 +51,9 @@ chmod 700 "$W"
 
 PROD_K=/var/lib/socialweb-computer/socialweb/kcp/admin.kubeconfig
 PROD_ACCOUNT=2wjeqtgx
-H7_K=$(ssh hat-7 'sudo -n -u swc-bidder sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1"')
-H9_K=$(ssh hat-9 'sudo -n -u swc-bidder sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1"')
-LOCAL_K=$(sudo -n -u swc-bidder sh -c "ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1")
+H7_K=$(ssh hat-7 'sudo -n -u swc-bidder sh -c "ls -t /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,"')
+H9_K=$(ssh hat-9 'sudo -n -u swc-bidder sh -c "ls -t /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,"')
+LOCAL_K=$(sudo -n -u swc-bidder sh -c "ls -t /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,")
 ```
 
 The gateway account workspace name (`PROD_ACCOUNT`) appears in the cluster

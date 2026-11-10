@@ -33,7 +33,7 @@ sequenceDiagram
 ## Steps
 
 ```bash
-K=$(sudo -n -u swc-bidder sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1')
+K=$(sudo -n -u swc-bidder sh -c 'ls -t /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,')
 kb() { sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG="$K" kubectl "$@"; }
 kb get computevms.socialweb.computer -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,CREATED:.metadata.creationTimestamp
 # name = fc-<first 12 chars of requester DID after did:plc:>-<hash>; match DID prefix AND creation time

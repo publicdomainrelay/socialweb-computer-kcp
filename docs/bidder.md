@@ -88,7 +88,7 @@ HANDLE=bobvmbuilder.bsky.social
 ACCOUNT=BOB
 CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+K=$(sudo sh -c "ls -t $STATE/handles/*/kcp/front.json" | head -1 | sed s,front.json,admin.kubeconfig,)
 BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
 deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
 ```
@@ -101,7 +101,7 @@ Non-association mode: patch the root object and let the controller reconcile it.
 
 ```bash
 STATE=/var/lib/socialweb-computer/swc-bidder
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+K=$(sudo sh -c "ls -t $STATE/handles/*/kcp/front.json" | head -1 | sed s,front.json,admin.kubeconfig,)
 sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
   -p '{"spec":{"identity":{"association":"Skip"}}}'
 ```
@@ -138,7 +138,7 @@ change. The operator account should be the bidder's associated operator (`Market
 
 ```bash
 STATE=/var/lib/socialweb-computer/swc-bidder
-K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
+K=$(sudo sh -c "ls -t $STATE/handles/*/kcp/front.json" | head -1 | sed s,front.json,admin.kubeconfig,)
 kb() { sudo kubectl --kubeconfig "$K" "$@"; }
 URL=$(kb get marketidentity operator -o jsonpath='{.status.pendingAction.url}')
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.bobvmbuilder_bsky_social_source --account BOB --url "$URL"
@@ -196,7 +196,7 @@ cannot release the contract (the tab or app that holds it is gone) or when the o
 freed. It is the same path a requester's `vm.delete` takes, so nothing is left behind.
 
 ```bash
-K=$(sudo -n -u swc-bidder sh -c 'ls /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/admin.kubeconfig | head -1')
+K=$(sudo -n -u swc-bidder sh -c 'ls -t /var/lib/socialweb-computer/swc-bidder/handles/*/kcp/front.json | head -1 | sed s,front.json,admin.kubeconfig,')
 kb() { sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG="$K" kubectl "$@"; }
 kb get computevms.socialweb.computer -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,CREATED:.metadata.creationTimestamp
 kb delete computevms.socialweb.computer <name> --wait=false
