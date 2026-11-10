@@ -521,6 +521,9 @@ func (c *Composer) AccountRepo(ctx context.Context, r Root, ws, identityName str
 	if err := c.ApplyRepo(ctx, r, ws, name, KindRemoteRepo, v1alpha1.RemoteRepoGVR, &v1alpha1.RemoteRepo{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}); err != nil {
 		return nil, err
 	}
+	if err := c.PruneAccountRepos(ctx, r, ws, identityName, name); err != nil {
+		return nil, err
+	}
 	remote := AppRef(KindRemoteRepo, name, ws)
 	links := []Link{RepoBackendLink(AppRef(KindAtprotoRepo, name, ws), remote)}
 	links = append(links, RemoteRepoLinks(remote, RemotePDSRefIn(binding.PDSRef.Name, ws), identity, binding.DID)...)

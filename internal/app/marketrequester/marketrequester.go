@@ -575,6 +575,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := c.ApplyLocalAccount(ctx, r, ws, acct, colocatedAccounts...); err != nil {
 		return ctlruntime.Result{}, err
 	}
+	if err := c.PruneAccountRepos(ctx, r, ws, RequesterIdentity, compose.RepoRefIn(did, ws).Name); err != nil {
+		return ctlruntime.Result{}, err
+	}
 	if plan.Identity.AssociationRef != nil {
 		if err := c.ApplyAssociationRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate); err != nil {
 			return ctlruntime.Result{}, err

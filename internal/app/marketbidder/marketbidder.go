@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
+	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 )
 
 const (
@@ -73,7 +74,7 @@ func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) err
 	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
 	opts = append(opts, compose.ComputeVMWatch(c, compose.ExportComputeVMs, Kind),
 		compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind),
-		compose.OperatorRecordWatch(c, compose.ExportMarketIdentities, Kind))
+		compose.OperatorRecordWatch(c, compose.ExportMarketIdentities, Kind), compose.VaultBindWatch(c, Kind))
 	if err := ctlruntime.For[*v1alpha1.MarketBidder](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketbidder: registering the MarketBidder controller: %w", err)
 	}
@@ -170,6 +171,10 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		return ctlruntime.Result{}, nil
 	}
 	res, err := p.reconcile(ctx)
+	if errors.Is(err, vaultctl.ErrUnbound) {
+		p.log().Info("the bidder waits for its vault to bind; the bind wakes it", "err", err.Error())
+		return p.wait("waiting for its vault to bind: " + err.Error())
+	}
 	if err == nil {
 		if reason := compose.ParkReason("", p.identityPhase); reason != "" && !r.Suspend {
 			c.Park(ctx, r, "", reason)
@@ -683,6 +688,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return ctlruntime.Result{}, err
 	}
 	if err := c.ApplyLocalAccount(ctx, r, ws, acct); err != nil {
+		return ctlruntime.Result{}, err
+	}
+	if err := c.PruneAccountRepos(ctx, r, ws, BidderIdentity, compose.RepoRefIn(did, ws).Name); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	if err := c.ApplyAssociationRecord(ctx, r, ws, repo, BidderIdentity, compose.BidderAssociate); err != nil {

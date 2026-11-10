@@ -58,6 +58,37 @@ func LocalAccountLinks(ws string, acct LocalAccount) []Link {
 	return links
 }
 
+func (c *Composer) PruneAccountRepos(ctx context.Context, r Root, ws, identityName, keep string) error {
+	ws = workspaceOr(ws, r.Workspace)
+	remotes, err := c.Client(ws, v1alpha1.RemoteRepoGVR)
+	if err != nil {
+		return err
+	}
+	items, err := kube.List[v1alpha1.RemoteRepo](ctx, remotes, metav1.ListOptions{LabelSelector: OwnerLabel + "=" + r.Owner() + "," + ComponentLabel + "=" + KindRemoteRepo})
+	if apierrors.IsNotFound(err) || apierrors.IsForbidden(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	repos, err := c.Client(ws, v1alpha1.AtprotoRepoGVR)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		ref := items[i].Spec.CredentialsRef
+		if items[i].Name == keep || ref.Kind != KindMarketIdentity || ref.Name != identityName {
+			continue
+		}
+		for _, ri := range []kube.Resource{repos, remotes} {
+			if err := ri.Delete(ctx, items[i].Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Composer) PruneLocalAccounts(ctx context.Context, r Root, ws string, keep ...LocalAccount) error {
 	ws = workspaceOr(ws, r.Workspace)
 	keepRepo, keepAccount, keepSession, keepPLC := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
