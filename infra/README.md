@@ -50,7 +50,7 @@ its host; the environment overrides them.
 
 | Host script | Target | Components |
 | --- | --- | --- |
-| `hosts/fedproxy-com.sh` | `root@fedproxy.com`, `~/.ssh/id_ed25519_no_password` | ingress-relay, fedproxy-legacy |
+| `hosts/fedproxy-com.sh` | `root@fedproxy.com`, `~/.ssh/id_ed25519_no_password` (else `~/.ssh/id_ed25519`) | ingress-relay, fedproxy-legacy |
 | `hosts/mini-cloud-0002-chadig-com.sh` | `root@mini-cloud-0002.chadig.com`, same key | atproto-relay, hono-jsr, org-root-git-pull, oidc-issuer |
 | `hosts/mini-cloud-0001-chadig-com.sh` | `root@mini-cloud-0001.chadig.com:1997`, same key | legacy-poc, fluent-bit, oidc-issuer |
 | `hosts/qr-fedfork-com.sh` | `root@qr.fedfork.com`, same key | did-key-associator |
@@ -63,16 +63,16 @@ its host; the environment overrides them.
 
 | Component | State | Deploy | Rollback | Env |
 | --- | --- | --- | --- | --- |
-| `ingress-relay` | wired: the port of `scripts/deploy-xrpc-relay.sh` | build `socialweb-computer` linux/amd64 (CGO off), ship to `/opt/xrpc-relay-go/<version>/`, flip `current`, write the `30-go.conf` drop-in, restart, wait for the socket, check `_health` carries the commit and `did.json` answers 200; a failed check rolls back | remove `30-go.conf` (back to the deno drop-in). Not yet ported: the ask and custom-domain steps of `scripts/deploy-xrpc-relay.sh` (`--rollback` starts `caddy-check-dns-from-config`, runs `infra/fedproxy-legacy/xrpc-custom-domains.sh remove`, ask -> 5555; a deploy sets ask -> 5556 and runs `apply`), so roll back with that script | `INGRESS_RELAY_HOSTNAME`, `INGRESS_RELAY_SOCKET`, `INGRESS_RELAY_ASK_LISTEN`, `INGRESS_RELAY_CADDY_ADMIN_SOCKET`, `INGRESS_RELAY_BASE`, `INGRESS_RELAY_OUT_ROOT`, `INGRESS_RELAY_NO_AUTO_ROLLBACK=1` |
+| `ingress-relay` | wired: wraps `scripts/deploy-xrpc-relay.sh` (one copy of the deploy) | that script: build `socialweb-computer` linux/amd64 (CGO off), ship to `/opt/xrpc-relay-go/<version>/`, flip `current`, write the `30-go.conf` drop-in (with `--ingress-relay-caddy-custom-domains` unless `CUSTOM_DOMAINS=0`), restart, check `_health` carries the commit and `did.json` answers 200, then the ask -> 5556; a failed check rolls back | that script `--rollback`: `caddy-check-dns-from-config` up, ask -> 5555, remove `30-go.conf` (back to the deno drop-in), `xrpc-custom-domains.sh remove` | `CUSTOM_DOMAINS`, `NO_AUTO_ROLLBACK=1`, and the script's own (`scripts/deploy-xrpc-relay.sh --help`) |
 | `did-key-associator` | wired: wraps `~/src/kcp/did-key-associator/scripts/deploy.sh` | its deploy (backup, upload, caddy validate, restore on failure), then the health of `/` (200) and `/xrpc/com.fedfork.atprotoOauthQR` (401) | its latest `/root/qr-backup/<ts>/restore.sh` | `DID_KEY_ASSOCIATOR_REPO`, `DID_KEY_ASSOCIATOR_MODE=full\|static`, `DID_KEY_ASSOCIATOR_BACKUP_TS`, `DID_KEY_ASSOCIATOR_DEEP_DRY_RUN=1` |
 | `bidder` | wired: the release install and upgrade of CONTRIBUTING | ship the release binary to `/var/tmp/swc-release/socialweb-computer-<sha12>`, then `upgrade --binary --sha256` as `swc-bidder` and, with a handle, `install bidder` again; the first install needs `BIDDER_HANDLE` | `socialweb-computer rollback` as the account | `BIDDER_BINARY`, `BIDDER_SHA256`, `BIDDER_HANDLE`, `BIDDER_ALLOW_DEV_BINARY=1`, `BIDDER_ACCOUNT`, `BIDDER_STATE`, `BIDDER_PLATFORM`, `INFRA_COMMIT` |
 | `gateway` | wired: wraps `scripts/deploy.sh` | the release binary of HEAD (built when missing), `GATEWAY_ENV_FILE` and `GATEWAY_SPEC_FILE` from `~/.tmp/deploy` by path; then the health of `https://k8s.socialweb.computer/api/config` | `socialweb-computer rollback` as `socialweb` | `GATEWAY_BINARY`, `GATEWAY_SHA256`, `GATEWAY_ENV_FILE`, `GATEWAY_SPEC_FILE`, `ALLOW_DEV_BINARY=1`, `GATEWAY_DOMAIN`, `INFRA_COMMIT` |
 | `atproto-relay` | stub: delegates to `scripts/deploy-atproto-relay.sh` once it lands; status is read-only probes of the deno relay | that script | that script `--rollback` | `ATPROTO_RELAY_SCRIPT`, `ATPROTO_RELAY_HOSTNAME` |
 | `fedproxy-legacy`, `hono-jsr`, `org-root-git-pull`, `fluent-bit`, `legacy-poc`, `oidc-issuer`, `tray` | stubs: `--status` works; deploy and rollback print what is left to port and refuse `--apply` | - | - | - |
 
-`scripts/deploy-xrpc-relay.sh` stays as it is (AGENTS.md names it). After the lead has run
-`infra/hosts/fedproxy-com.sh --only ingress-relay --apply` once, it can become
-`exec "$(dirname "$0")/../infra/ingress-relay/deploy.sh" --apply` (and `--rollback --apply`, `--status`).
+`scripts/deploy-xrpc-relay.sh` is the one deploy of the ingress relay (AGENTS.md names it);
+`infra/ingress-relay/deploy.sh` only adds the infra flags (dry-run by default) around it.
+What runs on fedproxy.com and what depends on it: [docs/infra/FEDPROXY.md](../docs/infra/FEDPROXY.md).
 `infra/atproto-relay` folds in `scripts/deploy-atproto-relay.sh` the same way once that script lands.
 
 ## The functions in lib/common.sh

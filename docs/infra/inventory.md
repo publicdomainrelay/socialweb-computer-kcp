@@ -27,12 +27,13 @@ State: `go` replaced by Go and live, `wired` deployed by an `infra/` script that
 
 | Host | Component | Unit | Listen | Public name | Source | Deployed by (old) | infra/ owner | State |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| fedproxy.com | ingress-relay | `xrpc-relay-server.service` + drop-in `30-go.conf` | unix `/opt/caddy/xrpc-relay-server.sock` | xrpc.fedproxy.com, *.xrpc.fedproxy.com | `/opt/xrpc-relay-go/current` -> 64491ad29931 (previous d33616e310c3) | `scripts/deploy-xrpc-relay.sh` | `infra/ingress-relay` | go, wired |
+| fedproxy.com | ingress-relay | `xrpc-relay-server.service` + drop-in `30-go.conf` | unix `/opt/caddy/xrpc-relay-server.sock` | xrpc.fedproxy.com, *.xrpc.fedproxy.com | `/opt/xrpc-relay-go/current` -> 39d519ea1747 (previous 544ec6c514ca; read 2026-11-10); also custom domains (mush.at) and the on_demand ask 127.0.0.1:5556 | `scripts/deploy-xrpc-relay.sh` | `infra/ingress-relay` (wraps that script) | go, wired |
 | fedproxy.com | deno did-key ingress (fallback) | drop-in `20-socialweb-computer-kcp.conf` (overridden by 30-go) | same socket | same | `/opt/xrpc-relay-kcp/src` 0b7b0af, deno `/opt/xrpc-relay-kcp/deno-2.9.3` | by hand | `infra/ingress-relay --rollback` falls back to it | go (fallback kept) |
-| fedproxy.com | caddy (xcaddy, cloudflare dns) | `caddy.service` (`/usr/lib/systemd/system`) | 80, 443, admin unix `/opt/caddy/caddy-admin.sock` | fedproxy.com (`/var/www/html`), rp, xrpc, *.xrpc, xrpc-test, *.xrpc-test | `/etc/caddy/Caddyfile` | `atproto-reverse-proxy/scripts/deploy.sh` (prints CF_API_TOKEN; never run) | `infra/fedproxy-legacy` | legacy |
+| fedproxy.com | caddy (xcaddy, cloudflare dns) | `caddy.service` (`/usr/lib/systemd/system`) | 80, 443, admin unix `/opt/caddy/caddy-admin.sock` | fedproxy.com (`/var/www/html`), rp, xrpc, *.xrpc, xrpc-test, *.xrpc-test, irc.fedfork.com; dynamic: tunnels and the catch-all (atprp-ssh-relay), custom domains (the Go relay); map: [FEDPROXY.md](FEDPROXY.md) | `/etc/caddy/Caddyfile` | `atproto-reverse-proxy/scripts/deploy.sh` (prints CF_API_TOKEN; never run) | `infra/fedproxy-legacy` | legacy |
 | fedproxy.com | atprp-ssh-relay | `atprp-ssh-relay.service` | 2222, 127.0.0.1:6060 | ssh relay of fedproxy | `/usr/bin/atprp-ssh-relay` (Go, atproto-reverse-proxy) | same | `infra/fedproxy-legacy` | legacy |
 | fedproxy.com | oauth-client-webapp | `oauth-client-webapp.service` | unix `/opt/caddy/web-ui.sock` | rp.fedproxy.com | `/usr/bin/oauth-client-webapp` | same | `infra/fedproxy-legacy` | legacy |
 | fedproxy.com | caddy-check-dns-from-config | `caddy-check-dns-from-config.service` | 127.0.0.1:5555 | none (the on-demand TLS ask of the deno relay era; the Go relay's 127.0.0.1:5556 answers it now) | `/usr/bin/caddy-check-dns-from-config` | same; `scripts/deploy-xrpc-relay.sh --rollback` starts it | `infra/fedproxy-legacy` | legacy, installed but disabled |
+| fedproxy.com | atirc | `atirc.service` (socket-activated: `atirc-irc.socket` 127.0.0.1:6667, `atirc-xrpc.socket` 127.0.0.1:8080, `atirc-ops.socket` 127.0.0.1:6670) + `atirc-iroh.service` | 127.0.0.1:6667, 8080, 6670 | irc.fedfork.com | `/usr/local/bin/atirc` (atirc 0.1.0), state `/root/.local/state/atirc/serve` | the atirc repo's CONTRIBUTING (`atirc server --install` / `--upgrade`) | none | legacy (not in infra/) |
 | fedproxy.com | xrpc-test relay | none | `/opt/caddy/xrpc-relay-server-test.sock` missing | xrpc-test.fedproxy.com (502) | none | none | none | dead (caddy block left) |
 | fedproxy.com | pre-iroh relay checkout | none | none | none | `/opt/xrpc-relay` ee6e4a8 (branch pre-iroh) | old deploy.sh `git clone` | none | dead (files left) |
 | mini-cloud-0002.chadig.com | atproto-relay (deno) | `atproto-relay.service` (User johnandersen777) | 127.0.0.1:2584 | relay.mini-cloud-0002.chadig.com | `~/prod-org-root/atproto-relay` 9c26e76 | by hand from the prod-org-root checkout | `infra/atproto-relay` (stub until `scripts/deploy-atproto-relay.sh` lands) | in progress (Go `internal atproto-relay`) |
@@ -94,7 +95,7 @@ it moves to OpenBao behind a SecretRef; `infra/` never carries it.
 | `.github/workflows/deploy.yml` (opkssh, user `deploy`, six hosts) | old org-root, `atproto-reverse-proxy` | fedproxy, compute, qr, tray, plc, reg.market, jsr | removed ("ci: remove the Deploy workflow"); CI never deploys |
 | `git-pull.timer` (pull every 5 min, `reset --hard`, submodules, compute-spa rebuild) | mini-cloud-0002 | itself | failing on the `atproto-relay` submodule checkout; `infra/org-root-git-pull` stub |
 | `gitlab-runner.service` (user unit, `~/bin/gitlab-runner`) | old org-root `gitlab-autoscale-socialweb-computer` | the gitlab host (ssh alias `gitlab`) | not a deploy target here |
-| `scripts/deploy-xrpc-relay.sh` | this tree | fedproxy.com | kept as is; `infra/ingress-relay` is its port |
+| `scripts/deploy-xrpc-relay.sh` | this tree | fedproxy.com | the one deploy of the ingress relay; `infra/ingress-relay` wraps it |
 | `scripts/deploy.sh` + `~/.tmp/deploy` (gateway.env, gateway-spec.yaml) | this tree, orphan branch `swc-deploy` | socialweb.computer | wrapped by `infra/gateway` |
 | `install bidder` / `upgrade --binary --sha256` / `rollback` over ssh | this tree (CONTRIBUTING, docs/deploy.md) | hat-7, hat-9, local | `infra/bidder` |
 | `scripts/deploy-atproto-relay.sh` (being written) | this tree | mini-cloud-0002 | `infra/atproto-relay` delegates to it once it lands |
@@ -107,8 +108,8 @@ it moves to OpenBao behind a SecretRef; `infra/` never carries it.
 - Caddy blocks with no upstream: xrpc-test.fedproxy.com, mini-cloud-0002.fedfork.com (also NXDOMAIN),
   mini-cloud-0001.fedfork.com, jsr.publicdomainrelay.com, knot1.fedfork.com, tangled.fedcicd.com.
 - fedproxy.com keeps the deno relay drop-in `20-socialweb-computer-kcp.conf` under `30-go.conf`; that
-  is the rollback target of `infra/ingress-relay --rollback`. `/opt/xrpc-relay` (pre-iroh) is unused.
-- `/opt/xrpc-relay-go` holds four versions (64491ad29931 current, d33616e310c3 previous, b0a0710162b3,
-  d7800c7668c2); nothing prunes them.
+  is the rollback target of `scripts/deploy-xrpc-relay.sh --rollback`. `/opt/xrpc-relay` (pre-iroh) is unused.
+- `/opt/xrpc-relay-go` keeps every shipped version (39d519ea1747 current, 544ec6c514ca previous on
+  2026-11-10); nothing prunes them.
 - The prod-org-root checkouts on mini-cloud-0002 point at `org-root-dispatcher-typescript`, the
   org-root's older repository name.
