@@ -354,11 +354,15 @@ func (r *outboxRun) reconcileDelete(ctx context.Context) error {
 
 func (r *outboxRun) fail(ctx context.Context, retryMax int, cause error) (time.Duration, error) {
 	r.status.Attempts++
+	prev := r.status.LastError
 	r.status.LastError = cause.Error()
 	if r.status.LastAttemptAt == "" {
 		r.status.LastAttemptAt = r.stamp()
 	}
 	if reason := terminalReason(cause); reason != "" {
+		if prev != "" && prev != r.status.LastError {
+			r.status.LastError += "; the attempt before failed: " + prev
+		}
 		r.status.Attempts = retryMax
 		r.status.Phase = v1alpha1.StateSyncPhaseFailed
 		r.set(v1alpha1.StateSyncConditionAcked, false, reason, cause.Error())

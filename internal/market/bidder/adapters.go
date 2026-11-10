@@ -443,11 +443,22 @@ func (b *Bidder) observeProvision(_ context.Context, request participant.OutboxR
 }
 
 func (b *Bidder) applyProvision(ctx context.Context, request participant.OutboxRequest) (participant.Observation, error) {
+	observation, err := b.provisionAccept(ctx, request)
+	if err != nil {
+		b.log.Warn("the provision of an accept failed", "stateSync", request.Key, "err", err.Error())
+	}
+	return observation, err
+}
+
+func (b *Bidder) provisionAccept(ctx context.Context, request participant.OutboxRequest) (participant.Observation, error) {
 	payload, err := decodeProvisionPayload(request.Payload)
 	if err != nil {
 		return participant.Observation{}, err
 	}
 	acceptResolved, err := b.records.Resolve(ctx, market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID})
+	if errors.Is(err, market.ErrNotFound) && b.bidForAcceptStatus(payload.Accept.URI, payload.Accept.CID) != nil {
+		return participant.Observation{}, fmt.Errorf("bidder: the accept was resolved before and is gone now: %w: %w", err, participant.ErrObsolete)
+	}
 	if err != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: resolving the accept: %w", err)
 	}

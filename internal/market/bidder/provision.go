@@ -24,6 +24,7 @@ import (
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
 
 const abandonTimeout = 30 * time.Second
@@ -111,7 +112,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	}
 	record, err := parseVMRecord(req.vmPayload.Value)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", err, participant.ErrRejected)
 	}
 	if record.Kind == string(v1alpha1.ComputeKindDeno) {
 		return b.provisionSandbox(ctx, req, record)
