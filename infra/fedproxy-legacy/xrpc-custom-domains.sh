@@ -13,15 +13,18 @@
 #   3. ask    on_demand permission -> the relay's ask listener (5556; /etc/caddy/Caddyfile says the same).
 # A Caddy restart drops 1 and 2 (atprp re-creates its policy without the fallback): run apply again.
 #
+# remove drops 1 and 2 only. The ask stays on 5556: it answers every fedproxy.com host as the old
+# caddy-check-dns-from-config (5555) did, so turning custom domains off never needs that checker. Only a
+# relay rollback (scripts/deploy-xrpc-relay.sh --rollback: the deno relay has no ask listener) moves the
+# ask back to 5555, and that script does it, after it has run remove.
+#
 # usage: infra/fedproxy-legacy/xrpc-custom-domains.sh apply|remove|status
-# env: SSH_TARGET (root@fedproxy.com), SSH_KEY (~/.ssh/id_ed25519), ASK (http://127.0.0.1:5556/check),
-#      LEGACY_ASK (http://127.0.0.1:5555/check, what remove restores)
+# env: SSH_TARGET (root@fedproxy.com), SSH_KEY (~/.ssh/id_ed25519), ASK (http://127.0.0.1:5556/check)
 set -euo pipefail
 
 SSH_TARGET="${SSH_TARGET:-root@fedproxy.com}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 ASK="${ASK:-http://127.0.0.1:5556/check}"
-LEGACY_ASK="${LEGACY_ASK:-http://127.0.0.1:5555/check}"
 ROUTE_ID=route-xrpc-custom-domains
 POLICY_ID=tls-policy-wildcard-fedproxy.com
 
@@ -37,7 +40,7 @@ api() { curl -sS --fail-with-body --unix-socket /opt/caddy/caddy-admin.sock "$@"
 C=http://127.0.0.1
 issuers() { api "$C/id/'$POLICY_ID'/issuers" | jq -c "[.[] | {module, dns: (.challenges.dns.provider.name // null)}]"; }
 status() {
-  echo "route:   $(api -o /dev/null -w "%{http_code}" "$C/id/'$ROUTE_ID'" || true)"
+  echo "route:   $(api -o /dev/null -w "%{http_code}" "$C/id/'$ROUTE_ID'" 2>/dev/null || true)"
   echo "issuers: $(issuers)"
   echo "ask:     $(api "$C/config/apps/tls/automation/on_demand/permission/endpoint")"
 }
@@ -48,7 +51,6 @@ apply)
   [ "$(api "$C/config/apps/tls/automation/on_demand/permission/endpoint")" = "\"'"$ASK"'\"" ] || api -X PATCH -H "Content-Type: application/json" -d "\"'"$ASK"'\"" "$C/config/apps/tls/automation/on_demand/permission/endpoint"
   ;;
 remove)
-  api -X PATCH -H "Content-Type: application/json" -d "\"'"$LEGACY_ASK"'\"" "$C/config/apps/tls/automation/on_demand/permission/endpoint"
   [ "$(api "$C/id/'$POLICY_ID'/issuers" | jq length)" -lt 2 ] || api -X DELETE "$C/id/'$POLICY_ID'/issuers/1"
   api -o /dev/null "$C/id/'$ROUTE_ID'" 2>/dev/null && api -X DELETE "$C/id/'$ROUTE_ID'"
   ;;

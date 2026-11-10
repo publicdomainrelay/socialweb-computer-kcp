@@ -633,8 +633,12 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 - The did:key ingress relay at xrpc.fedproxy.com is the Go relay `socialweb-computer internal
   ingress-relay` (`internal/atproto/ingress`), behind caddy on a unix socket as the
   `30-go.conf` drop-in of `xrpc-relay-server.service`. Deploy it only with
-  `scripts/deploy-xrpc-relay.sh` (build, ship, restart, health check, rollback on a failed check);
-  `--rollback` removes the drop-in and goes back to the deno relay, `--status` only reads. Never run
+  `scripts/deploy-xrpc-relay.sh` (build, ship, restart, health check, rollback on a failed check;
+  once healthy it points Caddy's on_demand ask at the relay's 127.0.0.1:5556, live and in
+  /etc/caddy/Caddyfile, and runs `xrpc-custom-domains.sh apply`); `--rollback` goes back to the deno
+  relay, which has no ask listener: it starts `caddy-check-dns-from-config` (127.0.0.1:5555, installed
+  but disabled otherwise), runs `xrpc-custom-domains.sh remove`, points the ask (live and Caddyfile,
+  backup kept) at 5555, then removes the drop-in; `--status` only reads. Never run
   `atproto-reverse-proxy/scripts/deploy.sh`: it prints `CF_API_TOKEN`. A change to the ingress
   protocol (`internal/atproto/ingress`) ships to both ends: the core and this relay.
   Custom domains: a host whose `_xrpc.<host>` TXT holds a live subscriber's did:key (or its
@@ -642,7 +646,9 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `com.fedproxy.temp.xrpc.alias {hosts}` (answered `#result {accepted, rejected}`, 16 per subscriber,
   gone on disconnect). Caddy reaches it through `infra/fedproxy-legacy/xrpc-custom-domains.sh apply`
   (admin API only: a hostless Caddyfile site block would shadow atprp-ssh-relay's appended tunnel
-  routes; run it again after a Caddy restart) and the relay's ask listener 127.0.0.1:5556. A response
+  routes; run it again after a Caddy restart) and the relay's ask listener 127.0.0.1:5556; `remove`
+  drops only the route and the fallback issuer and leaves the ask on 5556 (it answers every
+  fedproxy.com host as the old checker did). A response
   frame's optional `headers` (name -> string, or -> [string] for Set-Cookie) reach the caller; the relay
   drops hop-by-hop, Content-Length, Strict-Transport-Security, Alt-Svc, Proxy-*, Set-Cookie with a
   Domain, invalid names or values (CR, LF, NUL), and past 64 values or 32 KiB; `contentType` wins over
