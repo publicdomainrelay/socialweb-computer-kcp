@@ -88,14 +88,23 @@ fi
 
 command -v unshare >/dev/null || die "unshare not found"
 command -v rustup >/dev/null || die "rustup not found"
-rustup toolchain list | grep -q "^$toolchain-" || rustup toolchain install --profile minimal "$toolchain" >&2
+command -v flock >/dev/null || die "flock not found"
+mkdir -p "$rustup_home"
+(
+  flock 9
+  if ! rustup run "$toolchain" rustc -V >/dev/null 2>&1; then
+    rustup toolchain uninstall "$toolchain" >/dev/null 2>&1 || true
+    rustup toolchain install --profile minimal "$toolchain" >&2
+  fi
+  sysroot="$(rustup run "$toolchain" rustc --print sysroot)"
+  [ -d "$sysroot/lib/rustlib/$triple" ] || rustup target add --toolchain "$toolchain" "$triple" >&2
+) 9>"$rustup_home/.socialweb-cargosrc.lock" || die "cannot install rust $toolchain with target $triple"
 sysroot="$(rustup run "$toolchain" rustc --print sysroot)"
 host="$(rustup run "$toolchain" rustc -vV | sed -n 's/^host: //p')"
 case "$sysroot" in
   "$rustup_home"/toolchains/*) ;;
   *) die "rustc sysroot $sysroot is not under RUSTUP_HOME $rustup_home" ;;
 esac
-[ -d "$sysroot/lib/rustlib/$triple" ] || rustup target add --toolchain "$toolchain" "$triple" >&2
 ns_sysroot="/mnt/rustup/${sysroot#"$rustup_home"/}"
 
 zig_dir="${MESHD_ZIG_CACHE:-$HOME/.cache/socialweb-meshd-zig}/$zig_sha256"
