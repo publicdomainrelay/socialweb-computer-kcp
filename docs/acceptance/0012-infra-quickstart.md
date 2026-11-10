@@ -136,17 +136,20 @@ vouches; its readings (VM 19 s, Deno 5 s) match the default-policy pass. That ov
 
 ## Prod Step For The Agent Join
 
-The mint needs a requester identity irc.fedfork.com resolves. Run on prod by the lead (0004 preconditions). The winner
+The agent needs a requester account whose handle resolves to its DID (a real OAuth account, or pdsAccount on
+bsky.social); since the token-less mesh agents (0004) no atirc token is minted. Run on prod by the lead (0004
+preconditions); the owner mesh node checks of 0004 are not repeated here. The winner
 may be hat-9, which offers iroh and webrtc but no https: `dumbpipe` must be on PATH on the requester host.
 
 ```bash
 SWC=socialweb-computer; R=~/.tmp/acc12; mkdir -p "$R"; chmod 700 "$R"
 NAME=qs-agent-$(date +%s)
 $SWC run request --state-dir "$R" --name "$NAME" --hold --agent -- --atproto-oauth-qr > "$R/$NAME.log" 2>&1 &
-# sign in from the pendingAction url, wait for Held + requester_atirc_minted
+# sign in from the pendingAction url, wait for Held + requester_agent_peer_published
 $SWC run request agent "$NAME" --state-dir "$R"
-# watch the channel for the JOIN of aliceoa-<rkey>; prompt once: "aliceoa-<rkey>: uname -m"
+# in the guest: atirc-agent.service active, `atirc mesh run --no-publish` as the nick user <handle-label>-<rfp rkey>
 $SWC run request release "$NAME" --state-dir "$R"
+# getRecord computer.socialweb.peer/<nick>.<handle> and its lease market.association: RecordNotFound
 ```
 
 or, from the browser page terminal (page-rc142 and later), `kubectl apply -f agent-vm.yaml`, then the Agent button,
@@ -161,6 +164,13 @@ contract.
 | page terminal, kubectl EphemeralInfra `qsprod` | hat | created 04:10:19, Held 04:11:00, local bidder | `hat-3mz7wtwqt2c2r` joined; ssh `uname -a` from the page terminal | revoked, then Released 04:12:55 |
 
 No token or key material in any log (plaintext check 0 on every log file).
+
+2026-11-10 15:53-15:56Z, bob (pdsAccount, `--agent=/etc/atirc/atirc.env`), bidders on kcp 2d367fe8, CLI on the same
+commit: Held 15:53:36; `requester_agent_mesh_key_written`, `requester_agent_lease_written` (a contract-scoped
+market.association), `requester_agent_peer_published` `computer.socialweb.peer/bobvmbuilder-<rfp rkey>.bobvmbuilder.bsky.social`
+(iroh ticket and lease); `run request agent`: the bidder took agentStart, `atirc-agent.service` active running `atirc
+mesh run --no-publish` as `bobvmbuilder-<rfp rkey>`; release: the peer record, its lease and the accept are
+RecordNotFound; hosts empty.
 
 ## Cleanup
 
