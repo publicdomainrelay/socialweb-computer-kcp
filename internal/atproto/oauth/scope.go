@@ -53,6 +53,8 @@ const (
 
 	RepoIngressWebRTCCreate = "repo:" + CollectionIngressWebRTC + "?action=create"
 	RepoTangledVouchWrite   = "repo:" + CollectionTangledVouch + "?action=create&action=update"
+	RepoIngressListenWrite  = "repo:" + CollectionIngressListen + "?action=create&action=update"
+	RepoIngressAnswerWrite  = "repo:" + CollectionIngressAnswer + "?action=create&action=delete"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -98,8 +100,7 @@ var (
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
-		[]string{collectionScope(CollectionIngressListen, "create", "update")},
-		[]string{collectionScope(CollectionIngressAnswer, "create", "delete")},
+		[]string{RepoIngressListenWrite, RepoIngressAnswerWrite},
 		[]string{collectionScope(CollectionHeartbeat, "create", "update")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
@@ -145,7 +146,7 @@ var (
 	)
 )
 
-var OptionalScopes = []string{RPCAtircRevoke, RepoTangledVouchWrite}
+var OptionalScopes = []string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}
 
 func RequiredScopes(requested []string) []string {
 	out := make([]string, 0, len(requested))
