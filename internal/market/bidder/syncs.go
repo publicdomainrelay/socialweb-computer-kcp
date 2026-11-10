@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,8 +131,12 @@ func guestEventSyncName(uid, collection, tag, kind, recordSum string) string {
 	return guestEventSyncPrefix + hex.EncodeToString(sum[:8])
 }
 
-func guestEventSyncKey(collection, tag, kind, recordSum, receiptURI string) string {
-	return guestEventSyncKeyPrefix + collection + ":" + tag + ":" + kind + ":" + recordSum + ":" + receiptURI
+func guestEventSyncKey(collection, tag, kind string, seq int, receiptURI string) string {
+	return guestEventStream(collection, tag, kind) + strconv.Itoa(seq) + ":" + receiptURI
+}
+
+func guestEventStream(collection, tag, kind string) string {
+	return guestEventSyncKeyPrefix + collection + ":" + tag + ":" + kind + ":"
 }
 
 func (b *Bidder) ensureGuestEventSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection, tag, kind string, record map[string]any) (string, error) {
@@ -140,10 +145,27 @@ func (b *Bidder) ensureGuestEventSync(ctx context.Context, vm *v1alpha1.ComputeV
 		return "", err
 	}
 	sum := sha256.Sum256(raw)
-	recordSum := hex.EncodeToString(sum[:])
-	name := guestEventSyncName(string(vm.UID), collection, tag, kind, recordSum)
-	key := func(receiptURI string) string { return guestEventSyncKey(collection, tag, kind, recordSum, receiptURI) }
-	return name, b.ensureEventSync(ctx, vm, name, key, collection, record, "guest event")
+	name := guestEventSyncName(string(vm.UID), collection, tag, kind, hex.EncodeToString(sum[:]))
+	b.guestSeqMu.Lock()
+	defer b.guestSeqMu.Unlock()
+	if _, ok := b.syncs.Get(name); ok || b.guestSeq[name] > 0 {
+		return name, nil
+	}
+	stream := string(vm.UID) + "\x00" + guestEventStream(collection, tag, kind)
+	seq, seeded := b.guestSeq[stream]
+	if !seeded {
+		for _, sync := range b.syncs.List() {
+			if b.guests.SyncVM(&sync) == vm.Name && strings.HasPrefix(sync.Spec.IdempotencyKey, guestEventStream(collection, tag, kind)) {
+				seq++
+			}
+		}
+	}
+	key := func(receiptURI string) string { return guestEventSyncKey(collection, tag, kind, seq, receiptURI) }
+	err = b.ensureEventSync(ctx, vm, name, key, collection, record, "guest event")
+	if err == nil {
+		b.guestSeq[stream], b.guestSeq[name] = seq+1, 1
+	}
+	return name, err
 }
 
 func (b *Bidder) ensureReportSync(ctx context.Context, vm *v1alpha1.ComputeVM, collection, tag string, record map[string]any) (string, error) {

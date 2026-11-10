@@ -281,6 +281,10 @@ type Bidder struct {
 
 	sandboxes map[string]*sandboxRun
 
+	guestSeqMu sync.Mutex
+
+	guestSeq map[string]int
+
 	scopeGrants func(ctx context.Context) ([]string, bool, error)
 
 	ingressScopeSkipped atomic.Bool
@@ -402,6 +406,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		bids:        participant.NewIndex[v1alpha1.Bid](),
 		vms:         participant.NewIndex[v1alpha1.ComputeVM](),
 		sandboxes:   map[string]*sandboxRun{},
+		guestSeq:    map[string]int{},
 		syncs:       participant.NewIndex[v1alpha1.StateSync](),
 		locks:       map[string]*sync.Mutex{},
 		retryAt:     map[string]time.Time{},

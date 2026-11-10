@@ -54,7 +54,8 @@ Stable rkeys make every write idempotent and every read one `getRecord`. A resta
 | requester `ingress.webRTC` listen | `webrtc` | `ingressDescriptor` | `internal/market/requester/requester.go` |
 | contract-scoped `market.association`, `market.associationRequest` | `<service>-<first 32 hex of sha256(did)>-<accept rkey>` | `market.ContractScopedRKey` | `internal/atproto/market/guest.go` |
 
-- the bidder's event idempotency keys (`internal/market/bidder/syncs.go`): `onNetwork:<receipt>`, `onNetwork:<tag>:<receipt>`, `hostKeys:<receipt>`, `terminated:<receipt>`, `guest:<nsid>:<tag>:<kind>:<record sha256>:<receipt>`, else `<nsid>:<receipt>`
+- the bidder's event idempotency keys (`internal/market/bidder/syncs.go`): `onNetwork:<receipt>`, `onNetwork:<tag>:<receipt>`, `hostKeys:<receipt>`, `terminated:<receipt>`, `guest:<nsid>:<tag>:<kind>:<n>:<receipt>` (n = 0, 1, ... per VM, nsid, tag and kind: a guest's n-th event of that stream), else `<nsid>:<receipt>`
+- so a requester reads a guest's events send/recv style, one `getRecord` each: n = 0, 1, ... until one is not found (never `listRecords`)
 - so anyone can find the bidder's `vm.terminated` of a receipt with one `getRecord`: `market.EventRKeys(market.TerminationKey(receiptURI))` (`FindTermination` in `internal/market/requester/market.go`; the atirc lease in `internal/market/requester/atirc.go` `contractLease`)
 - the requester finds a receipt with one `getRecord` at `ReceiptRKey(acceptURI, acceptCID)` (`FindReceipt`) and a missed bid at `BidRKey` (`catchUpBids` in `internal/market/requester/bidcatchup.go`)
 
