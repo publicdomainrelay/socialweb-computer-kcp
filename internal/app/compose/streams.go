@@ -250,10 +250,23 @@ type marketStreamRef struct {
 	bound bool
 
 	resume eventsv1alpha1.EventStreamResume
+
+	collections []string
+}
+
+func (r marketStreamRef) streamCollections(role string) []string {
+	if len(r.collections) > 0 {
+		return slices.Clone(r.collections)
+	}
+	return MarketStreamCollections(role)
 }
 
 func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (MarketStreams, error) {
 	ws := workspaceOr(s.Workspace, r.Workspace)
+	offersOnly := s.Role == BidderStreamRole && streamMode(s) != v1alpha1.MarketCommsModeFirehose && streamMode(s) != v1alpha1.MarketCommsModeBoth
+	if offersOnly {
+		s.Public = PublicSources{Relays: s.Comms.FirehoseRelays(s.Sources.Network), Jetstreams: s.Comms.FirehoseJetstreams()}
+	}
 	links, err := c.applyRootSources(ctx, r, ws, s.Sources)
 	if err != nil {
 		return MarketStreams{}, err
@@ -290,6 +303,16 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 			return MarketStreams{}, fmt.Errorf("compose: comms mode %s names no event source (spec.comms.eventSourceRefs) and the network has no relay; it fails closed instead of using XRPC", mode)
 		}
 	}
+	if offersOnly {
+		offer := []string{market.IngressOfferNSID}
+		for _, ref := range publicRefs {
+			refs = append(refs, marketStreamRef{ref: ref, bound: true, resume: eventsv1alpha1.EventStreamResumeLive, collections: offer})
+		}
+		if s.Sources.Network.RelayURL() != "" {
+			refs = append(refs, marketStreamRef{ref: EventSourceRefIn(eventsv1alpha1.EventSourceKind, NetworkRelaySourceName, ws), bound: true,
+				resume: eventsv1alpha1.EventStreamResumeLive, collections: offer})
+		}
+	}
 	var requesterStreams []string
 	for _, ref := range requesterRefs {
 		refs = append(refs, marketStreamRef{ref: ref, dids: requesters, bound: true, resume: eventsv1alpha1.EventStreamResumeRecent})
@@ -314,7 +337,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 		stream := &eventsv1alpha1.EventStream{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: streamLabels},
 			Spec: eventsv1alpha1.EventStreamSpec{
 				SourceRef: sourceRef,
-				Filter:    eventsv1alpha1.EventStreamFilter{Collections: MarketStreamCollections(s.Role), DIDs: slices.Clone(entry.dids)},
+				Filter:    eventsv1alpha1.EventStreamFilter{Collections: entry.streamCollections(s.Role), DIDs: slices.Clone(entry.dids)},
 				Resume:    entry.resume,
 				Sink:      eventsv1alpha1.EventStreamSink{Kind: eventsv1alpha1.EventStreamSinkHandler, Name: sink},
 			}}
@@ -335,7 +358,7 @@ func (c *Composer) ApplyMarketStreams(ctx context.Context, r Root, s Streams) (M
 			links = append(links, user...)
 		}
 		links = append(links, SelectorLink(eventLinkName(s.Role, "subscribe", ref.Workspace, ref.Name), streamSelector(ws, streamLabels, nil), ref,
-			Cap(events.CapabilitySubscribe, append(MarketStreamCollections(s.Role), entry.dids...)...)))
+			Cap(events.CapabilitySubscribe, append(entry.streamCollections(s.Role), entry.dids...)...)))
 	}
 	links = append(links, SelectorLink(eventLinkName(s.Role, "deliver", ws, sink), streamSelector(ws, streamLabels, nil),
 		commonv1.ObjectRef{Group: eventsv1alpha1.GroupName, Kind: events.HandlerKind, Name: sink, Workspace: ws},

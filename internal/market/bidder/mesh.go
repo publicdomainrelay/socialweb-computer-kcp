@@ -70,6 +70,10 @@ func (b *Bidder) answerOffer(ctx context.Context, requesterDID, uri string, reco
 		drop("not addressed to this bidder")
 		return
 	}
+	if _, seen := b.offersSeen.LoadOrStore(uri, true); seen {
+		return
+	}
+	time.AfterFunc(2*MeshOfferWindow, func() { b.offersSeen.Delete(uri) })
 	created, _ := record["createdAt"].(string)
 	if at, err := market.ParseTime(created); err != nil || time.Since(at) > MeshOfferWindow || time.Until(at) > MeshOfferWindow {
 		drop("stale or undated")

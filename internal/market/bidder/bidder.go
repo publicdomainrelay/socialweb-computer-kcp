@@ -281,6 +281,8 @@ type Bidder struct {
 
 	sandboxes map[string]*sandboxRun
 
+	offersSeen sync.Map
+
 	guestSeqMu sync.Mutex
 
 	guestSeq map[string]int
