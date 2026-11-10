@@ -4,7 +4,7 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
-- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 14:26Z, atirc 2898af3
+- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 15:23Z, atirc 2898af3, prompt answered
 
 ## 1. Repo-level gates (run before every deploy)
 

@@ -10,7 +10,7 @@ reaches the agent and the agent answers on the mesh, and release deletes the pee
 
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: mesh part 2026-11-10 14:26Z CLI, alice (pdsAccount) on prod bidder did:plc:4vcig7s4... (rollout 3, atirc 2898af3), owner node an AtircNode of an own market network, no workarounds: binding verified, messages both ways. Harness (`--agent-config`) not yet run
+- Last pass: 2026-11-10 15:23Z CLI, alice (pdsAccount) on a prod bidder, rollout 5 (kcp 438ca0fa, atirc 2898af3), `--agent-config` (claude on the deepseek model), owner node an AtircNode of an own market network, no workarounds: no mint, binding verified, messages both ways, prompt `uname -m` answered `x86_64` 25 s after it was posted
 
 ```mermaid
 sequenceDiagram
@@ -76,7 +76,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | `Held`, condition `AtircTokenMinted=True reason=PeerPublished` | contract | 29-45 s after request |
 | `guest_agent_start unit=atirc-agent.service` | guest agent journal | ~1 s after agentStart |
 | `atirc mesh run` running as the nick user, `~/.config/atirc/iroh_key` and `config.toml` 0600, owned by it | guest | after agentStart |
-| the harness starts (claude installs first when missing, ~1 min) and answers a mesh prompt | owner node `atirc mesh sub` | 1-2 min after agentStart |
+| the harness starts (claude installs first when missing, ~1 min), posts `<nick> online` and answers a mesh prompt | owner node `atirc mesh sub` | online ~30 s after agentStart; an answer ~25 s after the prompt |
 | the owner node verifies and reaches `<label>-<rkey>.<handle>` | mesh node log | seconds |
 | `requester_agent_peer_deleted`, `requester_association_deleted` | requester log | at release |
 
