@@ -1117,6 +1117,13 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 	}
 	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld && r.inv.GuestRequester {
 		r.log("the guest requester keeps its kcp, its PDS and its records up while its contract is Held; a stop keeps its state")
+		if c.Spec.Agent != nil {
+			if name, err := r.kcp.Signaling().PublishAgentStart(ctx); err != nil {
+				r.a.log.Warn("the guest's agentStart was not published; run request agent starts it", "err", err.Error())
+			} else {
+				r.log("agentStart is out; the guest agent starts atirc-agent.service", "contractEvent", name)
+			}
+		}
 		if fc, err := r.kcp.WaitContract(ctx, requester.ContractAssociationLifetime, func(c *v1alpha1.ComputeContract) bool {
 			return c.Status.Phase != v1alpha1.ComputeContractHeld || c.Spec.Release
 		}, r.progress); err == nil && fc != nil {
