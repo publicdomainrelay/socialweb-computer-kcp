@@ -23,6 +23,8 @@ const (
 
 	MCPPath = "/mcp"
 
+	MCPLoopbackAddr = "127.0.0.1:7801"
+
 	MCPServerName = "socialweb-guest-agent"
 
 	mcpProtocolLatest = "2025-11-25"
@@ -270,14 +272,15 @@ func (a *Agent) mcpSocket() string { return filepath.Join(a.cfg.StateDir, MCPSoc
 func (a *Agent) runMCP(ctx context.Context) {
 	path := a.mcpSocket()
 	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
+	unix, err := net.Listen("unix", path)
+	if err == nil {
+		err = os.Chmod(path, 0o600)
+	}
 	if err != nil {
 		a.log.Error("the mcp socket does not listen", "path", path, "err", err.Error())
-		return
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = ln.Close()
-		a.log.Error("the mcp socket mode", "path", path, "err", err.Error())
+		if unix != nil {
+			_ = unix.Close()
+		}
 		return
 	}
 	srv := &http.Server{Handler: newMCPServer(a.log), ReadHeaderTimeout: 30 * time.Second}
@@ -285,11 +288,41 @@ func (a *Agent) runMCP(ctx context.Context) {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
-	a.log.Info("the mcp server listens", "path", path)
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		a.log.Error("the mcp server stopped", "err", err.Error())
+	if tcp, err := net.Listen("tcp4", MCPLoopbackAddr); err != nil {
+		a.log.Error("the mcp loopback port does not listen", "addr", MCPLoopbackAddr, "err", err.Error())
+	} else {
+		a.log.Info("the mcp server listens", "addr", MCPLoopbackAddr, "peers", "root only")
+		go a.serveMCP(srv, rootOnly{Listener: tcp, log: a.log})
 	}
+	a.log.Info("the mcp server listens", "path", path)
+	a.serveMCP(srv, unix)
 	_ = os.Remove(path)
+}
+
+func (a *Agent) serveMCP(srv *http.Server, ln net.Listener) {
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		a.log.Error("the mcp server stopped", "addr", ln.Addr().String(), "err", err.Error())
+	}
+}
+
+type rootOnly struct {
+	net.Listener
+
+	log *slog.Logger
+}
+
+func (l rootOnly) Accept() (net.Conn, error) {
+	for {
+		c, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if loopbackPeerIsRoot(c) {
+			return c, nil
+		}
+		l.log.Warn("refused an mcp loopback connection whose socket is not root's", "remote", c.RemoteAddr().String())
+		_ = c.Close()
+	}
 }
 
 func MCPStdio(ctx context.Context, socket string, in io.Reader, out io.Writer) error {
