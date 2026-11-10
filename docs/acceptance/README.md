@@ -22,7 +22,7 @@ release everything you rent.
 | [0013](0013-mixed-prod.md) | Mixed prod on a user-configured bidder | `run requester` / `install requester` with a real account, `mixed-prod.yaml` pinned to one bidder under the default policies and both vouches: VM ssh, Deno stdout, agent join, restart keeps Held, delete revokes before `vm.terminated`; the gateway part waits on plan 0039 C | a user-configured bidder, irc.fedfork.com | ~20 min | rc159 (A, C) and rc160 CLI (B), 2026-11-01; needs a re-run on 2026-11-10 main |
 
 0011 is a copy; the source is the atirc repo (`git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`,
-`docs/acceptance/0001-atirc.md` @ `ec0d088`).
+`docs/acceptance/0001-atirc.md` @ `2f9e8a2`).
 
 ## Shared rules
 

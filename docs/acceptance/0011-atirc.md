@@ -3,9 +3,8 @@
 How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
-- Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `ec0d088` (author: `atirc-dev`). This is a copy; edit upstream first
+- Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
 - Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 14:26Z, atirc 2898af3
-- kcp edits not yet upstream: section 3 scope and the mesh subsection of section 4 (kcp P6: VM agents are token-less)
 
 ## 1. Repo-level gates (run before every deploy)
 
@@ -61,6 +60,12 @@ Every smoke that mints must show, from server logs and
 - Release: the peer record and the lease answer RecordNotFound; a skipped
   delete ends at the lease's expiresAt.
 - Restored tab (snapshot) repeat must publish and delete the same way.
+
+### Mesh (repo-level, every mesh change)
+- `.githooks/pre-commit` green: loopback iroh (`mesh::` tests), the binaries
+  end to end (`tests/test_mesh_loopback.py`: send/recv, two daemons, headless
+  WeeChat on mesh IRC) and headless Chrome over WebRTC
+  (`tests/webrtc_loopback.ts`).
 
 ### ssh gateway agent
 - `ssh <handle>@socialweb.computer atirc agent run <name>` rents a VM as that
