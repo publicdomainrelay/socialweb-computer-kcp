@@ -8,6 +8,11 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
 - Plan: [0038](../plans/0038-ios-embedded-kcp.yaml)
 - Last pass: simulator 2026-10-31 (A2 agent joined 02:36Z, A3 revoke 02:39:36Z before Released, A4 cross-restart 02:33Z)
 - Related: [0004](0004-vm-atirc-agent.md) (agent path), [0008](0008-host-observer.md) (host evidence)
+- Since the p2p ingress cut-over bidders advertise iroh and webrtc endpoints, https only on hat-7 while
+  `market-https=true` lasts. The embedded Go requester dials iroh (the dumbpipe binary: not on iOS) or https, so
+  A2-A4 need either an https bidder or the Go WebRTC endpoint dialer (`internal/ingress/webrtc` MeshDialer, in
+  progress 2026-11-10); hat-7 keeps https until A2 passes over webrtc. 2026-11-10: the app still builds for the
+  simulator (`xcodebuild ... build`, iPhone 17e, existing framework)
 
 ## Artifacts
 

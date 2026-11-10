@@ -1,109 +1,102 @@
-# Acceptance 0009: wasm browser page (shell.socialweb.computer)
+# Acceptance 0009: browser requester page (shell.socialweb.computer)
 
-Real kcp + socialweb control plane compiled to js/wasm, running in a browser tab. The
-tab is a requester: it rents a VM on the market, holds it, opens a shell on it,
-releases it.
+The requester page in a browser tab: it signs in with OAuth, rents a VM on the market through the requester
+wasm module, opens a shell on it over a WebRTC datachannel, releases it and deletes what it wrote. Every
+market call reaches the bidder over the bidder's offering `webrtc` endpoint (offer and answer as
+`computer.socialweb.ingress.offer` / `.answer` records); a browser cannot dial iroh, and bidders advertise https
+only with `market-https=true` (the hat-7 transition, removed once this runbook passes against iroh/webrtc-only
+bidders).
 
-- Author: the `wasm` peer agent (page owner); folded here by the docs agent
-- Last pass: page-rc141 prod compat vs rc153 bidders, 2026-11-01 01:17Z (A3/A6)
-
-## Scope
-
-- **Page** = `johnandersen777/kcp` fork, branch `kcp-wasm-memory-storage-1`, host hat-8, path `~/src/kcp/kcp-wasm-mac`
-- **Prod** = `https://shell.socialweb.computer` (static files, `.gz` only, no `/debug/*`)
-- **Dev** = `scripts/kubectl_wasm_web.ts` on :8090, behind the fedproxy tunnel, with `/debug/*` (log stream + control)
-- **Release** = tag `page-rcNNN`; log of every release in `docs/plans/0037-fenced-browser-sandbox.md` (page repo)
+- Since 2026-11-10 the page is the atlibs requester page (repo atlibs-socialweb-computer-requester, `web/webrtc`),
+  deployed by its `scripts/deploy-page.sh`. It replaced the kcp-wasm page (kcp compiled to js/wasm, branch
+  `kcp-wasm-memory-storage-1`), whose Go requester dials only https endpoints; that page's snapshot-restore (old
+  A4) and schema-upgrade (old A5) checks retired with it (cut-over, no backcompat)
+- Last pass: 2026-11-10 15:10-15:12Z, prod https://shell.socialweb.computer/ (requester repo 5a49bd6, requester record bafyreiee4x, atlibs 0.2.3, atlibs-webrtc 0.2.1) vs hat-9 on kcp 438ca0fa: A2 OAuth sign-in through the page's form (bsky.social, consent) and A3 in 50 s, alice
 
 ```mermaid
 flowchart LR
-  tab[browser tab<br/>kcp.wasm + socialweb] -- OAuth --> pds[(user PDS)]
-  tab -- RFP / accept / release<br/>atproto records --> market((market relays<br/>jetstream))
-  market --> bidders[bidders<br/>local, hat-9, hat-7]
-  bidders -- VM --> vm[firecracker guest]
-  tab -- ssh over WebRTC --> vm
-  tab -- mint / revoke<br/>leased token --> atirc[atirc<br/>irc.fedfork.com]
-  vm -- agent joins --> atirc
+  tab[browser tab<br/>requester module + atlibs-webrtc] -- OAuth --> pds[(user PDS)]
+  tab -- offer record --> pds
+  bidder[bidder hat-9 / hat-7] -- notices the offer: Jetstream, relay --> bidder
+  bidder -- answer record --> bpds[(bidder PDS)]
+  tab -- submitRfp / submitAccept / submitEvent<br/>HTTP over the WebRTC datachannel --> bidder
+  bidder -- VM --> vm[firecracker guest]
+  tab -- ssh over WebRTC<br/>guest.signalWebRTC streams --> vm
 ```
 
 ## Accounts
 
-- `hat.dplc.rip` (PDS pds.rip): default test requester; creds file local, mode 0600, never printed
-- `aliceoa.bsky.social`: second requester, use when hat is busy; own creds file
-- Bidders deny unvouched requesters (`bidder-tangled-vouch`); requesters deny bidders whose operator they do not vouch (`requester-tangled-vouch`)
-- One driver per account at a time; announce runs on atirc first
+- `aliceoa.bsky.social`: test requester; creds file local, mode 0600, never printed
+- Bidders deny unvouched requesters (`bidder-tangled-vouch`); the page's bid policy (`policy-requester-tangled-vouch`)
+  denies bidders whose operator the requester does not vouch
+- One driver per account at a time
 
 ## Tools
 
-- `scripts/browser-demo.ts`: full VM run recorded to `demos/` (needs dev server)
-- `page-hold.ts` (lead host scratch): headless Chrome, signs in, holds the tab (dev page + `phone.sh` control)
-- `page-check.ts <creds> <PREFIX> <url> [holdSeconds]` (wasm scratch): prod check on a fresh profile; reads the `#log` panel (prod has no debug stream). `SIGNIN_ONLY=1` stops before Request VM
-- `webchat-check.ts` (wasm scratch): signed-in atirc `/chat` check, no VMs
-- Unit + policy: `cd scripts/browser && deno test --allow-read --allow-net`; `scripts/browser-dev/policy-suite.sh`
+- `scripts/deploy-page.sh [--build-only] [<handle>/requester[@pin]]` (requester repo): `atlibs add` the published
+  requester and its hook defaults, `atlibs stage --target spa --origin https://shell.socialweb.computer/`, the
+  page files, then tar to `/var/www/shell.socialweb.computer` (the old tree and Caddy site saved in `/var/backups`)
+- Unit: `node --test web/webrtc/*.test.mjs modules/requester/test.mjs` (requester repo, after `cargo build --release
+  --target wasm32-unknown-unknown`)
+- Headless round (the page's `WebrtcCubit` in headless Chrome, an app-password session in place of the OAuth
+  popup, real RTCPeerConnection): `scripts/page-round.mjs <bidder DID> [command]` (requester repo) with `ALICE_ATPROTO_HANDLE` /
+  `ALICE_ATPROTO_PASSWORD` in its environment; prints the contract result, the ingress offers written, whether any
+  `submit*` went over https, and a getRecord of every record the run deleted
 
 ## Tests
 
-### A1 - Unit + policy suite (every build)
+### A1 - Unit (every build)
 
-- Deno browser tests all pass (278/0 at page-rc141)
-- Policy suite: page half of `always-run/page/...`, headless fence check, js/wasm browsersandbox Go tests
-- **Pass** = 0 failures
+- **Pass** = 0 failures (requester module 35, web/webrtc 8, 2026-11-10)
 
 ### A2 - Boot + sign-in
 
-1. Load page (dev or prod), fresh profile
-2. Wait `kcp ready in` / `kcp cold boot (Ns)`
-3. Sign in (two taps: prepare, then "Continue sign-in" opens PDS popup)
-4. **Pass** = identity shows `Signed in as <handle>`, MarketIdentity Ready
+1. Load https://shell.socialweb.computer/ on a fresh profile
+2. Sign in with the handle; the PDS authorization page lists the requester scopes (the `ingress` group, WebRTC
+   offers, is optional for a session signed in before it existed)
+3. **Pass** = the page shows `<handle> (<did>)`
 
-### A3 - VM lifecycle (core)
+### A3 - VM lifecycle over WebRTC (core)
 
-1. Tap Request VM (`#compute-request`)
-2. Wait ComputeContract `Held: held: the guest is on the network`
-3. `ssh <vm>` in the page terminal (WebRTC datachannel), run `uname -a`, exit
-4. Release
-5. **Pass**
-   - Held in ~40-60 s
-   - row shows `agent token: leased` while Held
-   - after release: row shows `tokens: revoked` and `released`
-   - atirc: revoke via=account BEFORE bidder's `vm.terminated`
-   - bidder host empty after (watcher confirms, [0008](0008-host-observer.md))
+1. `contract {bidders: [<bidder DID>], webrtc_ssh: true, via: webrtc, tag: ssh, command: "uname -a; id"}` (the
+   page's actions, or `scripts/page-round.mjs`)
+2. **Pass**
+   - offers written > 0, https `submit*` calls 0 (the bidder was reached over its webrtc endpoint)
+   - receipt, then the shell output (`Linux`, `uid=0`) over the guest's datachannel
+   - release with the bidder's `vm.terminated`; every record the run wrote answers getRecord 400 afterwards
+   - no `computer.socialweb.ingress.offer` left in the requester's repo
+   - bidder host empty after ([0008](0008-host-observer.md))
 
-### A4 - Held-reload snapshot restore
+Evidence, 2026-11-10 (headless Chrome on the bidder's LAN; `scripts/page-round.mjs` at 15:08Z and the prod URL with
+OAuth at 15:11Z): offer `computer.socialweb.ingress.offer/<hat-9>.<tid>` written, hat-9 answered from its offer
+stream, ICE connected on 192.168.0.106:31001 (host), RFP / bid / accept / receipt over the datachannel (https
+`submit*` 0), offer deleted after the answer; shell `Linux fc-lpfuqerea3de-91f1fd3f ... uid=0(root)`; release; 7
+records deleted (rfp, vm, accept, two market.event, vm.delete, guest.signalWebRTC), none left; hat-9 empty.
 
-1. Signed-in profile (handle already in boot config), Request VM, Held
-2. Stay idle >= 5 min (past the 5-min watch verify)
-3. Reload
-4. **Pass** = `kcp snapshot: restored (snapshot Ns old ...)`, restore ~2-3 s (cold boot ~15-19 s)
-5. Capture-wait reasons in the log explain any miss (`persisted state is still changing`, `within Ns of the last capture`)
-6. Known: first reload after a FIRST sign-in on a fresh profile cold-boots (`changed since the capture: boot configuration (handle)`), expected
-
-### A5 - Upgrade load (schema change releases)
-
-1. Profile last run on the previous prod release
-2. Load the new release
-3. **Pass** = page re-applies manifests (kcp.wasm ETag changed), no `field not declared in schema`, VM lifecycle A3 passes on that profile
+The test hosts share the bidder's NAT, so this proves the host-candidate path only. A browser elsewhere pairs
+srflx with srflx: the bidder's answerer keeps one UDP port (31001, the bidder's `bidder-mesh` lease in
+`spec.guestNetwork.webrtcUDPPorts`) and gathers its srflx from stun.cloudflare.com on it, so a NAT with
+endpoint-independent mapping lets the browser's checks in once the bidder has sent its own; a symmetric NAT on
+either side fails (no TURN, by design).
 
 ### A6 - Compat smoke vs new bidders/gateway (after server-side rollouts)
 
-- Run when bidders change bid/market code or bump a shared schema (ComputeContract, Requester ...)
-- `page-check.ts` as hat on prod, hold 60 s
-- **Pass** = A3 pass criteria on the unchanged prod page
-- Done: rc148 (22:24Z 2026-10-31), rc153 (01:17Z 2026-11-01); see also [0006](0006-rollout-compat.md)
+- Run A3 against each prod bidder after a bidder rollout or a shared schema bump
+- 2026-11-10 13:57Z: the retired kcp-wasm page (unchanged prod) passed against hat-7 over https (Held, tokens
+  revoked, Released) before the cut-over; it left a market.event and a vm.delete in the requester's repo
 
 ### A7 - Signed-in atirc /chat (web chat client)
 
 - `webchat-check.ts` as hat, optional second identity (bob) in a separate browser context
-- **Pass**
-  - `/chat` injects `__ATIRC_SESSION__` (handle, channel)
-  - ws `?format=json`, text frames only
-  - member list with "you" marker
-  - second identity open/close renders `-- nick joined` / `-- nick left`
-  - post lands with nick = handle-shaped nick
+- **Pass**: `/chat` injects `__ATIRC_SESSION__`; ws `?format=json`; member list; join/leave lines; posts land
+
+## Known gaps
+
+- The kcp iOS app (pkg/embedded Go requester) dials only iroh (needs dumbpipe, not on iOS) or https: after the
+  hat-7 cut-over it reaches no bidder until the Go requester gains a webrtc endpoint client (followups)
 
 ## Rules
 
 - Release every test VM; never touch other people's VMs
-- Gate any skip/stop mode in a driver BEFORE the Request VM code; never close a tab holding a VM
 - Never print creds, tokens, cookies, sign-in URLs
-- Prod deploy only with lead OK; build release candidates from `refs/tags/page-rc<deployed>`
-- Workarounds are stopgaps: report as such, root-cause, fix
+- Prod deploy only with lead OK

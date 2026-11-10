@@ -7,7 +7,8 @@ end revokes the token before the contract is released.
 - Gateway: Go `SshServer` + one per-user `Requester` per signed-in DID (`requester-<stamp(did)>`)
 - Port 22 on `socialweb.computer` = Go ssh gateway (legacy deno gateway disabled, kept for rollback)
 - Web half: `https://ssh.socialweb.computer` (sign-in + `/keys`)
-- Last pass: rc152, 2026-11-01 (owner account, port 22); rc154 restart check 2026-11-01
+- Last pass: kcp 69aa8b0f (bin 5b8682fd, p2p rollout 2), 2026-11-10 13:33Z: alice, web sign-in + a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 62 s (the bidder reached over its offering endpoints); earlier: rc152 2026-11-01 (owner account, atirc agent), rc154 restart check
+- The port-22 gateway is its own unit, `swc-ssh-gateway.service` (`run gateway ssh --instance sg`, state `/var/lib/socialweb-computer/socialweb/sg`): `infra/hosts/socialweb-computer.sh --apply` upgrades `bin/current` but does not restart it; restart it after (it runs `bin/current`)
 
 ```mermaid
 sequenceDiagram
@@ -125,6 +126,9 @@ Gateway restart check (rollout):
 | `atirc agent run x` -> `Forbidden` | child subhandle not below the session token; fixed rc150 (gateway mints `<name>.<handle>` directly) |
 | harness refuses `--dangerously-skip-permissions` as root | fixed rc151: agent runs as guest user `<name>` |
 | key accepted on old TID rkey, refused by new check | copy the key claim to its stable rkey (nothing deleted) |
+| `run gateway ssh: ... the SshGateway was not Ready within 10m0s`, the unit restarts every ~10 min | one per-user Requester never gets Ready (2026-11-10: an account whose repo was deleted, RemoteRepo RepoNotFound); remove that account's per-user objects |
+| per-user requesters `vault: the Vault is not bound to a ready backend` after a restart | HostProcess `bao-ssh-gateway` stayed Lost (the OpenBaoServer missed the update at startup); restarting the unit once more re-placed it (2026-11-10) |
+| `requester_record_delete_skipped` / records left in the user's repo after release | the user's session predates the optional delete scopes (kcp 3e1796d5): sign in again at ssh.socialweb.computer to grant them |
 | token alive after session end | rc151 gap (no end-of-command revoke); fixed rc152; lease kills it anyway once `vm.terminated` exists |
 | host key warning on 22 | expected once after the deno -> Go switch: `ssh-keygen -R socialweb.computer` |
 | Go gateway rented every VM as one identity | design regression caught 2026-10-31; per-user OAuth is the rule, never a shared requester |

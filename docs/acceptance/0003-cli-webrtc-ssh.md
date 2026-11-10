@@ -6,8 +6,8 @@ invocation kcp and after that kcp restarts from its state dir.
 
 - Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
   [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
-- One run per host: only `$HOST` bids, the other two bidders suspended
-- Last pass: rc142, 2026-10-31 18:13-18:24Z, all 3 hosts
+- One run per host: only `$HOST` bids: `-- --allow-bidder-dids <$HOST bidder DID>` (or the other two bidders suspended)
+- Last pass: kcp 69aa8b0f bidders (p2p rollout 2), CLI 69aa8b0f on hat-8, 2026-11-10 13:49-13:56Z, hat-9 and hat-7, alice pdsAccount
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +17,7 @@ sequenceDiagram
   participant G as guest VM
   C->>C: pendingAction scanQr url (stderr)
   Q-->>C: session transfer (signed in as alice)
-  C->>B: RFP -> bid -> accept
+  C->>B: RFP -> bid -> accept, over the bidder's offering endpoints (iroh; https only if advertised)
   B->>G: boot, hostKeys, publicKey, onNetwork
   C->>G: WebRTC offer/answer (signalWebRTC events), STUN only
   C->>G: ssh (StrictHostKeyChecking=yes) uname -a; id
@@ -29,8 +29,8 @@ sequenceDiagram
 | Item | Need |
 | --- | --- |
 | Hosts | ssh to `hat-7`, `hat-9`; local bidder on this host; kubeconfigs as in 0001 Variables |
-| Bidders | all three `bidder-tangled-vouch`, Ready, same rc as the CLI |
-| Requester | alice signed in by QR (`-- --atproto-oauth-qr`); default localRepo makes an unassociated DID and gets no bids |
+| Bidders | all three `bidder-tangled-vouch`, Ready, same rc as the CLI; each advertises its ingress in `market.offering/self` `endpoints` (iroh by default; webrtc once its `computer.socialweb.ingress.listen/market` record is written, at once for a localRepo bidder, for an OAuth one after a sign-in grants the optional ingress listen/answer scopes; https only with `market-https=true`, the hat-7 transition): the requester calls the first it reaches, service auth aud `<bidder DID>#pdr_temp_market` (no `endpointUrl`, no fedproxy hostname) |
+| Requester | alice signed in by QR (`-- --atproto-oauth-qr`), or with an app password (`-- --atproto-identity-mode pdsAccount --atproto-handle aliceoa.bsky.social`, the password in `ATPROTO_PASSWORD` of that one command); default localRepo makes an unassociated DID and gets no bids |
 | Vouches | bob + john vouch alice; alice vouches bob + john |
 | Signer | a second shell (or the drives-oauth agent) opens the newest `pendingAction` url and signs alice in; creds file never printed |
 | hat-7 | oauthQr bidder: after a role-scope change re-sign bob first (0001 section 9) |
@@ -81,6 +81,7 @@ Request log phases (`"phase":` lines), rc142 runs:
 - `{"msg":"ssh returned","transport":"webrtc","exit":0,"seconds":N}` in both logs
 - output contains `Linux` and `uid=`
 - whole host run (pause -> resume) ~3 min; all three ~10 min
+- 2026-11-10 (p2p, offering endpoints, alice pdsAccount, `--ready-timeout 10m`): hat-9 start -> Held + first ssh 63 s, ssh 3.8 s fresh / 10.5 s restarted; hat-7 62 s, 5.2 s / 3.5 s; plaintext 0/0, both Released
 - earlier baselines: 2026-10-24 local 2.16 s fresh / ~7 s restarted; rc118 CLI run RFP -> Held 29 s, ssh 4.4 s
 
 ## Pass criteria
@@ -107,4 +108,5 @@ Request log phases (`"phase":` lines), rc142 runs:
 | timeout waiting for guest publicKey on hat-7 | bob's oauthQr session predates a scope change; re-sign bob (0001 section 9) |
 | no bids | alice not signed in by QR (localRepo DID waits in `AwaitingApproval`), or a vouch missing |
 | every canary lands on the old rc | other bidders not paused; suspend them as above |
+| `this host reaches none of <did>'s endpoints` / no submitRfp | the bidder's offering has no endpoint the CLI dials (iroh needs dumbpipe on the CLI host; https only when advertised) |
 | guest publicKey / answer timeout | read the winning bidder journal for `the requester refused the market event` / `submitting the market event to the requester failed` |
