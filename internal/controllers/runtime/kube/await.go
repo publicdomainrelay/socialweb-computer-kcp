@@ -41,7 +41,11 @@ func (r Resource) ListWatch(opts metav1.ListOptions) cache.ListerWatcher {
 				return nil, err
 			}
 			o.LabelSelector, o.FieldSelector = opts.LabelSelector, opts.FieldSelector
-			return ri.Watch(ctx, o)
+			w, err := ri.Watch(ctx, o)
+			if err != nil && ctx.Err() != nil {
+				return watch.NewEmptyWatch(), nil
+			}
+			return w, err
 		},
 	}
 }
