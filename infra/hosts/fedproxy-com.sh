@@ -7,7 +7,10 @@ set -euo pipefail
 INFRA_HOST=fedproxy-com
 INFRA_COMPONENTS=(ingress-relay fedproxy-legacy)
 SSH_TARGET="${SSH_TARGET:-root@fedproxy.com}"
-SSH_KEY="${SSH_KEY-$HOME/.ssh/id_ed25519_no_password}"
+if [ -z "${SSH_KEY+x}" ]; then
+  SSH_KEY="$HOME/.ssh/id_ed25519_no_password"
+  [ -f "$SSH_KEY" ] || SSH_KEY="$HOME/.ssh/id_ed25519"
+fi
 SSH_PORT="${SSH_PORT-}"
 INFRA_SUDO="${INFRA_SUDO-}"
 

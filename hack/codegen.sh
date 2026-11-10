@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+export GOTOOLCHAIN="go$(awk '$1 == "go" { print $2; exit }' go.mod)"
 
 go mod download k8s.io/code-generator
 codegen_dir="$(go list -m -f '{{.Dir}}' k8s.io/code-generator)"

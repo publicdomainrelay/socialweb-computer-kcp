@@ -19,35 +19,37 @@ import (
 )
 
 const (
-	DefaultHostname   = "xrpc.fedproxy.com"
-	DefaultListen     = "0.0.0.0:8080"
-	LoopbackHost      = "127.0.0.1"
-	SocketMode        = 0o755
-	MaxSocketPath     = 107
-	ShutdownGrace     = 5 * time.Second
-	readHeaderTimeout = 10 * time.Second
+	DefaultHostname     = "xrpc.fedproxy.com"
+	DefaultListen       = "0.0.0.0:8080"
+	LoopbackHost        = "127.0.0.1"
+	SocketMode          = 0o755
+	MaxSocketPath       = 107
+	ShutdownGrace       = 5 * time.Second
+	readHeaderTimeout   = 10 * time.Second
+	CaddyReconcileEvery = 30 * time.Second
 )
 
 type Config struct {
-	Hostname          string
-	ServiceID         string
-	Listen            string
-	UnixSocket        string
-	AskListen         string
-	TLSCertFile       string
-	TLSKeyFile        string
-	PLCURL            string
-	AdditionalHosts   []string
-	AllowedDIDs       []string
-	CaddyAdminSocket  string
-	RelayTimeout      time.Duration
-	KeepaliveInterval time.Duration
-	KeepaliveTimeout  time.Duration
-	NonceTTL          time.Duration
-	MaxBodyBytes      int64
-	ExpireSessions    bool
-	Version           string
-	Log               *slog.Logger
+	Hostname           string
+	ServiceID          string
+	Listen             string
+	UnixSocket         string
+	AskListen          string
+	TLSCertFile        string
+	TLSKeyFile         string
+	PLCURL             string
+	AdditionalHosts    []string
+	AllowedDIDs        []string
+	CaddyAdminSocket   string
+	CaddyCustomDomains bool
+	RelayTimeout       time.Duration
+	KeepaliveInterval  time.Duration
+	KeepaliveTimeout   time.Duration
+	NonceTTL           time.Duration
+	MaxBodyBytes       int64
+	ExpireSessions     bool
+	Version            string
+	Log                *slog.Logger
 }
 
 func SplitList(raw string) []string {
@@ -84,6 +86,10 @@ func Run(ctx context.Context, cfg Config) error {
 	hostname := strings.TrimSpace(cfg.Hostname)
 	if hostname == "" {
 		hostname = DefaultHostname
+	}
+	_, zone, _ := strings.Cut(hostname, ".")
+	if cfg.CaddyCustomDomains && (cfg.CaddyAdminSocket == "" || cfg.UnixSocket == "" || !strings.Contains(zone, ".")) {
+		return errors.New("ingress relay: caddy-custom-domains needs caddy-admin-socket, unix-socket and a hostname under a zone (xrpc.<zone>)")
 	}
 	additional := AdditionalHosts(cfg.AdditionalHosts)
 	server, err := ingress.NewServer(ingress.Config{
@@ -143,6 +149,14 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := notify.Ready(); err != nil {
 		log.Warn("sd_notify ready failed", "err", err)
 	}
+	reconcileCtx, stopReconcile := context.WithCancel(ctx)
+	defer stopReconcile()
+	if cfg.CaddyCustomDomains {
+		wg.Go(func() {
+			server.KeepCaddyCustomDomains(reconcileCtx, zone, cfg.UnixSocket, CaddyReconcileEvery)
+		})
+		log.Info("caddy custom domains kept", "zone", zone, "every", CaddyReconcileEvery.String())
+	}
 
 	var runErr error
 	select {
@@ -157,6 +171,7 @@ func Run(ctx context.Context, cfg Config) error {
 			runErr = fmt.Errorf("ingress relay: serving ask: %w", err)
 		}
 	}
+	stopReconcile()
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)

@@ -14,6 +14,7 @@ var ingressRelayOptions = []string{
 	"ingress-relay-service-id", "ingress-relay-timeout", "ingress-relay-keepalive", "ingress-relay-keepalive-timeout",
 	"ingress-relay-nonce-ttl", "ingress-relay-additional-hosts", "ingress-relay-allowed-dids", "ingress-relay-plc-url",
 	"ingress-relay-max-body-mib", "ingress-relay-expire-sessions", "ingress-relay-ask-listen", "ingress-relay-caddy-admin-socket",
+	"ingress-relay-caddy-custom-domains",
 }
 
 func runIngressRelay(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
@@ -35,25 +36,26 @@ func runIngressRelay(ctx context.Context, a *app, vals clicfg.Values, rest []str
 		version += " " + v.Revision
 	}
 	err := ingressrelaymain.Run(ctx, ingressrelaymain.Config{
-		Hostname:          vals.String("hostname"),
-		ServiceID:         vals.String("ingress-relay-service-id"),
-		Listen:            vals.String("listen"),
-		UnixSocket:        vals.String("unix-socket"),
-		AskListen:         vals.String("ingress-relay-ask-listen"),
-		TLSCertFile:       vals.String("tls-cert-file"),
-		TLSKeyFile:        vals.String("tls-key-file"),
-		PLCURL:            vals.String("ingress-relay-plc-url"),
-		AdditionalHosts:   ingressrelaymain.SplitList(vals.String("ingress-relay-additional-hosts")),
-		AllowedDIDs:       ingressrelaymain.SplitList(vals.String("ingress-relay-allowed-dids")),
-		CaddyAdminSocket:  vals.String("ingress-relay-caddy-admin-socket"),
-		RelayTimeout:      durations["ingress-relay-timeout"],
-		KeepaliveInterval: durations["ingress-relay-keepalive"],
-		KeepaliveTimeout:  durations["ingress-relay-keepalive-timeout"],
-		NonceTTL:          durations["ingress-relay-nonce-ttl"],
-		MaxBodyBytes:      int64(vals.Int("ingress-relay-max-body-mib")) << 20,
-		ExpireSessions:    vals.Bool("ingress-relay-expire-sessions"),
-		Version:           version,
-		Log:               a.log.With("component", "ingress-relay"),
+		Hostname:           vals.String("hostname"),
+		ServiceID:          vals.String("ingress-relay-service-id"),
+		Listen:             vals.String("listen"),
+		UnixSocket:         vals.String("unix-socket"),
+		AskListen:          vals.String("ingress-relay-ask-listen"),
+		TLSCertFile:        vals.String("tls-cert-file"),
+		TLSKeyFile:         vals.String("tls-key-file"),
+		PLCURL:             vals.String("ingress-relay-plc-url"),
+		AdditionalHosts:    ingressrelaymain.SplitList(vals.String("ingress-relay-additional-hosts")),
+		AllowedDIDs:        ingressrelaymain.SplitList(vals.String("ingress-relay-allowed-dids")),
+		CaddyAdminSocket:   vals.String("ingress-relay-caddy-admin-socket"),
+		CaddyCustomDomains: vals.Bool("ingress-relay-caddy-custom-domains"),
+		RelayTimeout:       durations["ingress-relay-timeout"],
+		KeepaliveInterval:  durations["ingress-relay-keepalive"],
+		KeepaliveTimeout:   durations["ingress-relay-keepalive-timeout"],
+		NonceTTL:           durations["ingress-relay-nonce-ttl"],
+		MaxBodyBytes:       int64(vals.Int("ingress-relay-max-body-mib")) << 20,
+		ExpireSessions:     vals.Bool("ingress-relay-expire-sessions"),
+		Version:            version,
+		Log:                a.log.With("component", "ingress-relay"),
 	})
 	if err != nil {
 		return a.fail(exitFailed, "%s: %v", verb, err)

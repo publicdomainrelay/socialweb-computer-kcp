@@ -4,14 +4,18 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 SSH_TARGET="${SSH_TARGET:-root@fedproxy.com}"
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519_no_password}"
+if [ -z "${SSH_KEY:-}" ]; then
+  SSH_KEY="$HOME/.ssh/id_ed25519_no_password"
+  [ -f "$SSH_KEY" ] || SSH_KEY="$HOME/.ssh/id_ed25519"
+fi
+CUSTOM_DOMAINS="${CUSTOM_DOMAINS:-1}"
 RELAY_HOSTNAME="${RELAY_HOSTNAME:-xrpc.fedproxy.com}"
 SOCKET="${SOCKET:-/opt/caddy/xrpc-relay-server.sock}"
 ASK_LISTEN="${ASK_LISTEN:-127.0.0.1:5556}"
 LEGACY_ASK_LISTEN="${LEGACY_ASK_LISTEN:-127.0.0.1:5555}"
 CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
 CHECKER=caddy-check-dns-from-config.service
-CUSTOM_DOMAINS="$REPO/infra/fedproxy-legacy/xrpc-custom-domains.sh"
+CUSTOM_DOMAINS_SCRIPT="$REPO/infra/fedproxy-legacy/xrpc-custom-domains.sh"
 CADDY_ADMIN_SOCKET="${CADDY_ADMIN_SOCKET:-/opt/caddy/caddy-admin.sock}"
 BASE="${BASE:-/opt/xrpc-relay-go}"
 OUT_ROOT="${OUT_ROOT:-$HOME/.tmp/xrpc-relay-deploy}"
@@ -29,17 +33,22 @@ usage: scripts/deploy-xrpc-relay.sh [--rollback | --status]
               $SSH_TARGET:$BASE/<version>/, point $BASE/current at it, write $DROPIN
               (the Go relay: internal ingress-relay --unix-socket $SOCKET --hostname $RELAY_HOSTNAME),
               restart $UNIT and check it through https://$RELAY_HOSTNAME; a failed check rolls back.
-              Once it passes: Caddy's on_demand ask -> http://$ASK_LISTEN/check (the Go relay's ask
-              listener), live and in $CADDYFILE, and infra/fedproxy-legacy/xrpc-custom-domains.sh apply.
+              With CUSTOM_DOMAINS=1 the relay runs with --ingress-relay-caddy-custom-domains: on start
+              and every 30 s it adds what a Caddy restart dropped (the custom-domain route and the
+              HTTP-01 fallback issuer). Once the check passes: Caddy's on_demand ask ->
+              http://$ASK_LISTEN/check (the Go relay's ask listener), live and in $CADDYFILE, then
+              infra/fedproxy-legacy/xrpc-custom-domains.sh status (CUSTOM_DOMAINS=0: remove).
               It never needs $CHECKER ($LEGACY_ASK_LISTEN); it leaves that unit as it is
   --rollback  the deno relay has no ask listener, so first: systemctl enable --now $CHECKER and wait
-              for http://$LEGACY_ASK_LISTEN/healthz, xrpc-custom-domains.sh remove (the custom domains
-              need the Go relay), the ask -> http://$LEGACY_ASK_LISTEN/check live and in $CADDYFILE
-              (the old file kept as $CADDYFILE.bak-<ts>-pre-<port>); then remove $DROPIN and restart
-              $UNIT (back to the deno relay of the lower drop-ins)
+              for http://$LEGACY_ASK_LISTEN/healthz, the ask -> http://$LEGACY_ASK_LISTEN/check live and
+              in $CADDYFILE (the old file kept as $CADDYFILE.bak-<ts>-pre-<port>); then remove $DROPIN
+              and restart $UNIT (back to the deno relay of the lower drop-ins, which stops the Go
+              relay's reconcile), then xrpc-custom-domains.sh remove (the custom domains need the Go
+              relay)
   --status    print which relay serves $UNIT and the health of https://$RELAY_HOSTNAME; changes nothing
 
-env: SSH_TARGET (root@fedproxy.com), SSH_KEY (~/.ssh/id_ed25519_no_password), RELAY_HOSTNAME,
+env: SSH_TARGET (root@fedproxy.com), SSH_KEY (~/.ssh/id_ed25519_no_password, else ~/.ssh/id_ed25519),
+     CUSTOM_DOMAINS (1), RELAY_HOSTNAME,
      SOCKET, ASK_LISTEN (127.0.0.1:5556), LEGACY_ASK_LISTEN (127.0.0.1:5555),
      CADDY_ADMIN_SOCKET (/opt/caddy/caddy-admin.sock), CADDYFILE (/etc/caddy/Caddyfile),
      BASE (/opt/xrpc-relay-go), OUT_ROOT (~/.tmp/xrpc-relay-deploy), NO_AUTO_ROLLBACK=1
@@ -110,18 +119,13 @@ echo "ask: $(api $E); $caddyfile: $(grep -E "^[[:space:]]*ask " "$caddyfile" | x
 }
 
 custom_domains() {
-  SSH_TARGET="$SSH_TARGET" SSH_KEY="$SSH_KEY" ASK="http://$ASK_LISTEN/check" "$CUSTOM_DOMAINS" "$1"
+  SSH_TARGET="$SSH_TARGET" SSH_KEY="$SSH_KEY" "$CUSTOM_DOMAINS_SCRIPT" "$1"
 }
 
 rollback() {
   say "starting $CHECKER: the deno relay has no ask listener"
   if ! remote "systemctl enable --now $CHECKER && for i in \$(seq 1 40); do curl -fsS --max-time 2 http://$LEGACY_ASK_LISTEN/healthz >/dev/null 2>&1 && exit 0; sleep 0.5; done; exit 1"; then
     say "rollback: $CHECKER does not answer http://$LEGACY_ASK_LISTEN/healthz; stopped before Caddy or $UNIT changed"
-    exit 1
-  fi
-  say "removing the custom domains (route + fallback issuer): they need the Go relay"
-  if ! custom_domains remove | sed 's/^/  /'; then
-    say "rollback: xrpc-custom-domains.sh remove failed; stopped before the ask or $UNIT changed"
     exit 1
   fi
   say "pointing the ask at $LEGACY_ASK_LISTEN"
@@ -137,6 +141,8 @@ rollback() {
     report
     exit 1
   fi
+  say "removing the custom domains (route + fallback issuer): they need the Go relay"
+  custom_domains remove | sed 's/^/  /' || say "rollback: xrpc-custom-domains.sh remove failed; run it again"
   local did
   did="$(fetch /.well-known/did.json)"
   report
@@ -214,6 +220,8 @@ remote "$(q "$dest/$BIN_NAME") internal ingress-relay --help >/dev/null 2>&1" ||
   exit 1
 }
 
+custom_flag=""
+[ "$CUSTOM_DOMAINS" = 1 ] && custom_flag=" --ingress-relay-caddy-custom-domains"
 say "pointing $BASE/current at $version and writing $DROPIN"
 remote "set -e
 prev=\$(readlink $(q "$BASE/current") || true)
@@ -227,7 +235,7 @@ Type=notify
 NotifyAccess=main
 WorkingDirectory=$BASE
 ExecStart=
-ExecStart=$BASE/current/$BIN_NAME internal ingress-relay --unix-socket $SOCKET --hostname $RELAY_HOSTNAME --ingress-relay-ask-listen $ASK_LISTEN --ingress-relay-caddy-admin-socket $CADDY_ADMIN_SOCKET
+ExecStart=$BASE/current/$BIN_NAME internal ingress-relay --unix-socket $SOCKET --hostname $RELAY_HOSTNAME --ingress-relay-ask-listen $ASK_LISTEN --ingress-relay-caddy-admin-socket $CADDY_ADMIN_SOCKET$custom_flag
 TimeoutStopSec=20
 UNIT
 mv $(q "$DROPIN.partial") $(q "$DROPIN")"
@@ -254,8 +262,10 @@ case "$health" in
   case "$did" in
   200*)
     say "deployed: $version ($sha) serves https://$RELAY_HOSTNAME"
-    say "pointing the ask at $ASK_LISTEN and applying the custom domains"
-    if ! point_ask "$ASK_LISTEN" "$LEGACY_ASK_LISTEN" | sed 's/^/  /' || ! custom_domains apply | sed 's/^/  /'; then
+    custom_action=status
+    [ "$CUSTOM_DOMAINS" = 1 ] || custom_action=remove
+    say "pointing the ask at $ASK_LISTEN; custom domains: $custom_action"
+    if ! point_ask "$ASK_LISTEN" "$LEGACY_ASK_LISTEN" | sed 's/^/  /' || ! custom_domains "$custom_action" | sed 's/^/  /'; then
       say "the ask or the custom domains failed (the relay stays deployed): run infra/fedproxy-legacy/xrpc-custom-domains.sh status"
       exit 1
     fi

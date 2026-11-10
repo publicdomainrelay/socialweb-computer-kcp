@@ -757,6 +757,11 @@
       "description": "internal ingress-relay: the Caddy admin unix socket the ask endpoint reads to also approve hostnames Caddy already routes (exact match and single-label *.suffix; unset: alias check only)",
       "env": "SOCIALWEB_INGRESS_RELAY_CADDY_ADMIN_SOCKET"
     },
+    "ingress-relay-caddy-custom-domains": {
+      "type": "boolean",
+      "description": "internal ingress-relay: keep Caddy serving custom domains through this relay: on start and every 30s, over --ingress-relay-caddy-admin-socket, add what is missing of the route of every host outside the parent zone of --hostname to --unix-socket and of a plain ACME issuer after the DNS-01 one on atprp-ssh-relay's tls-policy-wildcard-<zone> (a Caddy restart drops both); needs both flags",
+      "env": "SOCIALWEB_INGRESS_RELAY_CADDY_CUSTOM_DOMAINS"
+    },
     "atproto-relay-listen": {
       "type": "string",
       "description": "internal atproto-relay: the TCP listen address of the atproto relay",
