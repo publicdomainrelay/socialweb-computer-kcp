@@ -43,6 +43,7 @@ const (
 	CollectionIngressListen         = "computer.socialweb.ingress.listen"
 	CollectionIngressAnswer         = "computer.socialweb.ingress.answer"
 	CollectionIngressOffer          = "computer.socialweb.ingress.offer"
+	CollectionPeer                  = "computer.socialweb.peer"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
 	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
@@ -57,6 +58,7 @@ const (
 	RepoIngressListenWrite  = "repo:" + CollectionIngressListen + "?action=create&action=update"
 	RepoIngressAnswerWrite  = "repo:" + CollectionIngressAnswer + "?action=create&action=delete"
 	RepoIngressOfferWrite   = "repo:" + CollectionIngressOffer + "?action=create&action=delete"
+	RepoPeerWrite           = "repo:" + CollectionPeer + "?action=create&action=update&action=delete"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
@@ -149,8 +151,10 @@ var (
 	)
 )
 
-var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete),
-	[]string{RepoIngressOfferWrite})
+var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
+	CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets, CollectionGuestAgentStart,
+	CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release),
+	[]string{RepoIngressOfferWrite, RepoPeerWrite})
 
 var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)
 
