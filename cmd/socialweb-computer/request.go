@@ -1115,6 +1115,14 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 			code = exitFailed
 		}
 	}
+	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld && r.inv.GuestRequester {
+		r.log("the guest requester keeps its kcp, its PDS and its records up while its contract is Held; a stop keeps its state")
+		if fc, err := r.kcp.WaitContract(ctx, requester.ContractAssociationLifetime, func(c *v1alpha1.ComputeContract) bool {
+			return c.Status.Phase != v1alpha1.ComputeContractHeld || c.Spec.Release
+		}, r.progress); err == nil && fc != nil {
+			c = fc
+		}
+	}
 	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld {
 		if fc, ok := r.followRelease(ctx); ok {
 			c = fc

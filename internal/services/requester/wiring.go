@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
@@ -147,10 +148,25 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	crawl := participant.Crawl{Relays: s.cfg.Relays(), Address: address, Period: participant.CrawlPeriod, Log: s.log}
 	if len(crawl.Relays) == 0 {
 		crawl.PublicRelays = []string{v1alpha1.DefaultMarketRelayURL}
-		crawl.PublicAddress = func(context.Context) string { return address() }
+		crawl.PublicAddress = func(ctx context.Context) string { return s.publicPDS(ctx, address(), core.DID()) }
 	}
 	s.wg.Go(func() { crawl.Run(ctx) })
 	return core, nil
+}
+
+func (s *Service) publicPDS(ctx context.Context, local, raw string) string {
+	did, err := syntax.ParseDID(raw)
+	if local == "" || err != nil || s.directory == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ident, err := s.directory.LookupDID(ctx, did)
+	if err != nil || ident == nil {
+		s.log.Warn("participant_request_crawl_unresolved", "did", raw, "err", err)
+		return ""
+	}
+	return ident.PDSEndpoint()
 }
 
 func (s *Service) identityRef() bool {
