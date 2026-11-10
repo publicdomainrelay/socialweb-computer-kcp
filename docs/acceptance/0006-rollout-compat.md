@@ -5,7 +5,9 @@ Proves a release candidate is live and healthy on every prod component and that 
 Run after every rollout; it is the gate before "tests may resume".
 
 - Components: gateway (`socialweb.computer`), ssh gateway, bidders local (hat-8) / hat-9 / hat-7, page (`shell.socialweb.computer`)
-- Build: local tag `v0.0.0-rcN` off local main, local build with pin check (no GitHub push, no CI deploy key; installs run from the lead host over ssh)
+- Build: the CI build of a main commit: `main/<commit>/binaries/socialweb-computer-linux-amd64` in the public bucket once the run's
+  `publish` job succeeded, else the run's `binaries` artifact (`gh run download <run> -n binaries`); check it against that run's
+  `SHA256SUMS`. A local tag build is the fallback. Installs run from the lead host over ssh (no CI deploy key)
 - Last pass: rc154, 2026-11-01 02:22-02:25Z (all components, 0 restarts); page compat vs rc153 01:17Z
 
 ```mermaid
@@ -66,9 +68,10 @@ Compat smoke (unchanged clients vs new servers):
 | policy | `bidder-tangled-vouch` (never `open`) |
 | startup | 0 `"level":"ERROR"`, 0 `unsupported type: source.TypedFunc` since restart |
 | host | 0 computevms / 0 firecrackervms / 0 firecracker procs / `vms/` empty (sudo), or only owner-held VMs |
-| gateway | `Gateway gateway phase=Ready comps=5/5`, `SshGateway app phase=Ready comps=4/4`, `SshServer ssh-server phase=Ready` |
-| ssh gateway users | every `owner-<hash>` MarketIdentity `Ready ready=SignedIn` |
-| restarts | SshServer + per-user requesters 0 (rc154+) |
+| gateway | `Gateway gateway phase=Ready comps=5/5`, `SshGateway app phase=Ready comps=4/4`, `SshServer ssh-server phase=Ready`; the SshGateway Ready message carries no `signed-in account requesters are not ready` (per-user requesters do not gate it, 554bb104) |
+| ssh gateway users | every `owner-<hash>` MarketIdentity `Ready ready=SignedIn`; an owner who must sign in again is `SessionExpired` with one WARN `a MarketIdentity needs its owner to sign in again`, never a Reconciler ERROR (3b65b44e); a new optional scope never expires a session (07c5d797) |
+| restarts | SshServer + per-user requesters 0 (rc154+); `swc-ssh-gateway.service` NRestarts unchanged for 12 min after its restart (its startup gate is 10 min) |
+| ssh gateway HostProcesses | `bao-ssh-gateway`, `iroh-dial` Running after the restart (a Lost one is placed again, 77f52875) |
 | page compat | Held 50-55 s, `tokens: revoked` + `released`, revoke ~8-9 s before release |
 
 Timings: one bidder restart ~2 min (VMs survive the upgrade); rc154 whole rollout 02:22:05 -> 02:24:37 (no scope change). Watcher CONFIRMED lines land within ~30 s of the restart.
@@ -98,3 +101,9 @@ Timings: one bidder restart ~2 min (VMs survive the upgrade); rc154 whole rollou
 | 7 min gateway outage, schema rev burned (rc146) | record burned revs; root-cause restart churn before next rc |
 | peer phone run confounded | rollout restarted bidders mid-contract; wait for a gap |
 | `version` prints the old rc | upgrade staged but `install bidder` not re-run, or wrong handle instance |
+| `run gateway ssh: the SshGateway was not Ready within 10m0s`, restart every 10 min (2026-11-10) | a per-user requester could not start (its account deleted at its PDS: RemoteRepo RepoNotFound); fixed in 554bb104. Mitigation: back up `sg/`, delete that account's `owner-<hash>` MarketIdentity and `requester-<hash>` (and its Service/Exposure) on the ssh gateway kcp |
+| every ssh gateway user `SessionExpired` right after a redeploy (2026-11-10, 3e1796d5) | a new optional OAuth scope was counted as required for oauthSessionProxy identities; fixed in 07c5d797. Users sign in again |
+| ERROR `get informer failed: no matches for kind "AtircNode"` for ~20 s after the restart that adds a kind | the export served before the set apply added the kind; fixed in 8c613c21 (the provider waits for its kinds) |
+| bidder ERROR `vault: the Vault is not bound to a ready backend` at start; ssh gateway the same from the marketidentity controller | the reconcile ran before the provider bind; fixed in 1c01bcbb (MarketBidder) and 07c5d797 (MarketIdentity) |
+| bidder ERROR `bus: no accepted ComponentLink allows root:RemoteRepo...` every 5 min | an account RemoteRepo left behind by a pdsAccount -> localRepo switch; fixed in 1c01bcbb (pruned) |
+| kubectl `connection refused` on a bidder host | the snippet picked a stale handle's kubeconfig; pick the handle with the newest `front.json` (381a186f) |

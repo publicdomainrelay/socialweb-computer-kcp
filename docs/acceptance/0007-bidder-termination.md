@@ -7,7 +7,7 @@ token leased to the contract dies.
 
 - Procedure: [bidder.md, Terminate a VM from the bidder](../bidder.md#terminate-a-vm-from-the-bidder)
 - Used on prod: R2 orphan (hat-7, 2026-10-30), iOS cross-restart retry VM (hat-7, 2026-10-31 02:07Z), stray debug VM (hat-7, 2026-10-31 18:11Z)
-- Last pass: 2026-10-31 (hat-7)
+- Last pass: 2026-11-10 15:14Z (hat-7, rollout 5 438ca0fa): bob's held contract, delete -> gone in ~1 s, `vm.terminated` pinned (`termination-payload-19e3b1b5db974dc15cff4d61429bbeb2`, `deleted_on_request`, no `request` ref), requester `release` -> Released "the bidder ended the contract: deleted_on_request"
 
 ```mermaid
 sequenceDiagram
@@ -57,7 +57,11 @@ Bidder journal, in order (hat-7 example, 2026-10-31 22:51Z):
 | `a released bid is marked terminated` | |
 | `vm.terminated` record pinned, reason `deleted_on_request` | |
 
-- Requester side: `vm.terminated` delivery may 404 (requester gone): record in the bidder repo still stands
+- Requester side: `vm.terminated` delivery may 404 (requester gone): record in the bidder repo still stands; the
+  termination StateSync then ends `Failed` with `the ComputeVM is released; the market event is no longer sent: HTTP 404`
+  (expected; pin the record, not the StateSync phase)
+- An operator delete always pins `vm.terminated`, also when an earlier inbound requester delete was refused or its
+  StateSync stalled (648384c1); an unsigned inbound `vm.delete` is refused at submitEvent with 400 and creates no StateSync
 - atirc: next use of any token leased on the contract -> 401 `lease is not alive`, latched (no revival if the record later disappears)
 
 ## Pass criteria

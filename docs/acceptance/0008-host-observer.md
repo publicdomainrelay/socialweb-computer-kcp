@@ -5,9 +5,12 @@ and every VM: the bidder is healthy, each VM's lifetime is captured, the
 `vm.terminated` record is pinned, and the host is empty afterwards. Every other
 acceptance (0001-0006, 0009, 0010) uses these posts as its host-side evidence.
 
-- Watchers: `bobvmbuilder-48bbeb14` (hat-7, bidder `did:plc:ocnuqjlzgohypj3zoznermms`), `bobvmbuilder-hat9-watch` (hat-9), lead (local), gateway agent (gateway kcps)
+- Bidders (2026-11-10): hat-7 `johnandersen777.bsky.social`, bidder `did:plc:7q5lnitxv4meizdon5fmhzrq` (localRepo, handle dir
+  `855d5a9904`); hat-9 `bobvmbuilder.bsky.social`, bidder `did:plc:4vcig7s43z3nyqrnepmcfzqt` (localRepo, handle dir `53eff7074d`).
+  hat-7's old bob handle `53eff7074d` is archived in `/var/lib/socialweb-computer/handle-53eff7074d-*.tgz`
+- Watchers: the host watcher agent per host, lead (local), gateway agent (gateway kcps)
 - Adapted from the hat-7 watcher's observer protocol
-- Last pass: rc154, 2026-11-01 02:25Z (hat-7 CONFIRMED + host empty)
+- Last pass: 2026-11-10 15:14Z, rollout 5 438ca0fa: hat-7 and hat-9 CONFIRMED + host empty; hat-9 VM timeline + pin, orphan check 0/0/0
 
 ```mermaid
 stateDiagram-v2
@@ -41,6 +44,11 @@ stateDiagram-v2
 
 `vms/` is mode 0700: always count it with sudo; a non-sudo count reads 0 while a VM runs.
 
+A localRepo MarketIdentity (both prod bidders now) has no `SignedIn` condition: `Ready=True` and no `pendingAction` pass.
+Expected WARN at start: one `no ComputeVM PolicyTrigger action handler is registered`. Not anomalies: a Bid `Failed
+InvalidPayload` (an RFP whose compute.vm does not parse is refused before any bid, fc56b5fb), WARN `the provision of an
+accept failed` ending `Obsolete` when the requester deleted its accept, WARN `an inbound vm delete event is refused`.
+
 Post: `hat-7 rcN CONFIRMED: v0.0.0-rcN <commit> live; bidder.json ready=true; MarketIdentity Ready, SignedIn=True, pendingAction absent; startup clean (0 unsupported-type, 0 ERROR since restart).` then `hat-7 host empty: 0 computevms / 0 firecrackervms / 0 firecracker procs, vms dir empty.`
 
 ## During a VM lifetime (per ComputeVM)
@@ -55,6 +63,7 @@ and/or the kcp watch (`kubectl get computevms.socialweb.computer -w -o json`). C
 
 Typical (hat-7, ssh gateway VM, 2026-10-31): bid 22:50:56.18 -> accept 22:51:16.49 -> prepared 1.32 s -> Running 22:51:21.38 -> hostKeys 22:51:30.79 -> onNetwork 22:51:33.43; term 22:51:38.49 -> released 22:51:39.75 -> finalizer 22:51:39.81.
 Tenant node (acceptance 0001, rc154): accept -> Running 3 s, Running -> onNetwork ~10 s.
+hat-9, bob CLI VM, rollout 5 (2026-11-10): accept 15:14:10.38 -> prepared 1.27 s -> Running 15:14:13.58 -> hostKeys 15:14:23.51 -> onNetwork 15:14:26.19; term 15:14:33.33 -> released 15:14:34.34 -> finalizer 15:14:34.41; pinned `termination-payload-812eba60d84956819e88b4d0639f5fcf` (cid `bafyreicqol5x2sfqpv76cshnd4xhlgksbdzikglkncqm5uko3llhamso6q`, `deleted_on_request`, with a `vm.delete` request ref).
 
 ## Pinning the vm.terminated record
 
