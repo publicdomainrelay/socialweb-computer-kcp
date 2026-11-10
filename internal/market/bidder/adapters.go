@@ -332,8 +332,12 @@ func (b *Bidder) verifyInboundDelete(ctx context.Context, event marketEventReque
 		return nil, errors.New("bidder: the inbound event names another receipt")
 	}
 	resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID})
+	if errors.Is(err, market.ErrNotFound) {
+		b.log.Info("the vm delete payload of a signed inbound event is gone; the signed event stands for it", "event", uri, "payload", parsed.Payload.URI)
+		return parsed, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("bidder: resolving the inbound event payload: %w", err)
+		return nil, fmt.Errorf("%w: %w", errInboundUnresolved, err)
 	}
 	if kind, _ := resolved.Value["$type"].(string); kind != market.ComputeEventsVMDeleteNSID {
 		return nil, errors.New("bidder: the inbound event payload is not a vm delete")
@@ -344,11 +348,9 @@ func (b *Bidder) verifyInboundDelete(ctx context.Context, event marketEventReque
 	return parsed, nil
 }
 
+var errInboundUnresolved = errors.New("bidder: resolving the inbound event payload")
+
 func (b *Bidder) applyInboundEvent(ctx context.Context, request participant.OutboxRequest, payload marketEventPayload) error {
-	event, err := b.verifyInboundDelete(ctx, *payload.RequestEvent, payload.Receipt.URI, payload.Receipt.CID, payload.RequesterDID)
-	if err != nil {
-		return err
-	}
 	if request.Source == nil || strings.TrimSpace(request.Source.Name) == "" {
 		return errors.New("bidder: the inbound event names no ComputeVM")
 	}
@@ -356,6 +358,14 @@ func (b *Bidder) applyInboundEvent(ctx context.Context, request participant.Outb
 	if !ok {
 		b.log.Warn("the ComputeVM of an inbound delete event is gone", "computevm", request.Source.Name)
 		return nil
+	}
+	if vm.DeletionTimestamp != nil || b.guests.Releasing(&vm) || b.guests.Ended(&vm) {
+		b.log.Info("the ComputeVM of an inbound delete event is already released", "computevm", vm.Name)
+		return nil
+	}
+	event, err := b.verifyInboundDelete(ctx, *payload.RequestEvent, payload.Receipt.URI, payload.Receipt.CID, payload.RequesterDID)
+	if err != nil {
+		return err
 	}
 	if vm.Spec.Requester.Did != "" && vm.Spec.Requester.Did != payload.RequesterDID {
 		return errors.New("bidder: the inbound event is not from the contract requester")

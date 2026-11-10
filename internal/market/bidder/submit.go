@@ -314,6 +314,13 @@ func (b *Bidder) applyMarketEvent(ctx context.Context, uri, cid string, record m
 		return ErrEventForbidden
 	}
 	if found && vm.UID != "" {
+		if _, err := b.verifyInboundDelete(ctx, marketEventRequest{URI: uri, CID: cid, Record: record}, info.receiptURI, info.receiptCID, issuer); err != nil {
+			if errors.Is(err, errInboundUnresolved) {
+				return err
+			}
+			b.log.Warn("an inbound vm delete event is refused", "event", uri, "computevm", vm.Name, "err", err.Error())
+			return fmt.Errorf("%w: %w: %w", ErrEventInvalid, err, participant.ErrRejected)
+		}
 		request := &commonv1.StrongRef{URI: event.Payload.URI, CID: event.Payload.CID}
 		if err := b.ensureInboundTerminationSync(ctx, vm, request, issuer, uri, cid, record); err != nil {
 			return fmt.Errorf("the termination intent could not be recorded: %w", err)
