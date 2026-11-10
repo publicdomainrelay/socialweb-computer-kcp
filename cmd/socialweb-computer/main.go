@@ -109,6 +109,7 @@ func builtVerbs() map[string]builtVerb {
 		"units roll link":          {[]string{"cluster-state-dir", "service", "dumbpipe-path", "ready-timeout"}, runUnitsRoll("link")},
 		"internal ns-exec":         {[]string{"private-hostname", "bind", "inside"}, runNsExec},
 		"internal iroh-dial":       {[]string{"socket", "dumbpipe-path"}, runIrohDial},
+		"internal deno-fence":      {nil, runDenoFence},
 		"internal association":     {nil, runInternalAssociation},
 		"internal ingress-relay":   {ingressRelayOptions, runIngressRelay},
 		"internal atproto-relay":   {atprotoRelayOptions, runAtprotoRelay},

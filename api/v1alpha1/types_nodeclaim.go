@@ -207,8 +207,6 @@ const (
 
 type ContractWinner struct {
 	DID string `json:"did"`
-
-	SubmitAccept string `json:"submitAccept,omitempty"`
 }
 
 type ContractAcceptPending struct {

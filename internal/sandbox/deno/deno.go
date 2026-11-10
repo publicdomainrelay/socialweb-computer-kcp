@@ -9,8 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
@@ -36,7 +39,16 @@ type Runner struct {
 	Path string
 
 	ModuleCache string
+
+	Fence []string
+
+	version    sync.Once
+	versionErr error
 }
+
+var FenceVerb = []string{"internal", "deno-fence"}
+
+const MinPublicNetVersion = "2.9.0"
 
 func New(path string) *Runner {
 	if path == "" {
@@ -86,7 +98,7 @@ func (r *Runner) freshState(env map[string]string) (string, []string, error) {
 	return root, []string{"DENO_DIR=" + denoDir, "TMPDIR=" + tmp}, nil
 }
 
-const DenyNet = "0.0.0.0/8,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,[::1],[::],localhost,metadata.google.internal"
+const DenyNet = "0.0.0.0/8,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,192.0.0.0/24,198.18.0.0/15,224.0.0.0/3,[::1],[::],localhost,metadata.google.internal"
 
 func (r *Runner) Available() bool { return r.Path != "" }
 
@@ -108,6 +120,12 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	args := []string{"run", "--quiet", "--no-prompt", "--no-config"}
+	fenced := p.Net && p.PublicNetOnly
+	if fenced {
+		if err := r.publicNetReady(); err != nil {
+			return sandbox.Result{}, err
+		}
+	}
 	if p.Net {
 		args = append(args, "--allow-net")
 		if p.PublicNetOnly {
@@ -120,7 +138,11 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 		args = append(args, "--allow-read="+p.Dir, "--allow-write="+p.Dir)
 	}
 	args = append(args, "--deny-run", "--deny-ffi", "--ext", "ts", "-")
-	cmd := exec.CommandContext(runCtx, r.Path, args...)
+	argv := append([]string{r.Path}, args...)
+	if fenced {
+		argv = append(append(slices.Clone(r.Fence), "--"), argv...)
+	}
+	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	if p.Dir != "" {
 		cmd.Dir = p.Dir
 	}
@@ -157,6 +179,42 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	result.Stdout = out.String()
 	result.Stderr = errb.String()
 	return result, nil
+}
+
+func (r *Runner) publicNetReady() error {
+	if len(r.Fence) == 0 {
+		return errors.New("sandbox: a public-net deno program needs the IPv6 fence (socialweb-computer internal deno-fence), which this runner has not")
+	}
+	r.version.Do(func() {
+		out, err := exec.Command(r.Path, "--version").Output()
+		if err != nil {
+			r.versionErr = fmt.Errorf("sandbox: deno --version: %w", err)
+			return
+		}
+		got, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimSpace(string(out)), "deno "), " ")
+		if !versionAtLeast(got, MinPublicNetVersion) {
+			r.versionErr = fmt.Errorf("sandbox: deno %s checks a resolved address against --deny-net only from %s on, so a public-net program refuses to run", got, MinPublicNetVersion)
+		}
+	})
+	return r.versionErr
+}
+
+func versionAtLeast(got, want string) bool {
+	g, w := strings.Split(got, "."), strings.Split(want, ".")
+	for i := range w {
+		if i >= len(g) {
+			return false
+		}
+		gn, err := strconv.Atoi(g[i])
+		if err != nil {
+			return false
+		}
+		wn, _ := strconv.Atoi(w[i])
+		if gn != wn {
+			return gn > wn
+		}
+	}
+	return true
 }
 
 func envSlice(env map[string]string) []string {

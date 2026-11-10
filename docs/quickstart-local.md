@@ -301,7 +301,10 @@ kubectl --kubeconfig "$TK" logs deploy/quickstart-k8s
 ### Deno sandbox (needs a deno bidder)
 
 `computeKind: deno` runs `userData` as a Deno program on the bidder host (no VM): `deno run --no-remote --deny-net
---deny-run --deny-ffi`, read and write of its own work dir only, at most 2 minutes. The ComputeVM gets backend
+--deny-run --deny-ffi`, read and write of its own work dir only, at most 2 minutes. A program that asks for net (only
+its bidder's owner may) gets the public internet: `--allow-net --deny-net=<private, loopback, link-local, metadata
+ranges>`, which deno (2.9.0 or later, checked) applies to every resolved address too, under
+`socialweb-computer internal deno-fence`, which refuses IPv6 sockets (`--deny-net` takes no IPv6 ranges). The ComputeVM gets backend
 `DenoSandbox`. A bidder serves `deno` only when told to: `dev up --compute-kinds vm,deno` (section 2) sets it on the
 network bidders.
 

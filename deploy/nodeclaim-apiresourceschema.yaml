@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-16.nodeclaims.socialweb.computer
+  name: v1alpha1-17.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -157,8 +157,6 @@ spec:
                     type: object
                     properties:
                       did:
-                        type: string
-                      submitAccept:
                         type: string
                     required:
                       - did

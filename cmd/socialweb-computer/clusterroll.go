@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterprovider"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fswatch"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/nsexec"
+	sandboxdeno "github.com/johnandersen777/socialweb-computer-kcp/internal/sandbox/deno"
 )
 
 func runNsExec(ctx context.Context, a *app, vals clicfg.Values, rest []string) int {
@@ -34,6 +35,13 @@ func runNsExec(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 		}
 	}
 	return a.fail(exitFailed, "internal ns-exec: %v", err)
+}
+
+func runDenoFence(_ context.Context, a *app, _ clicfg.Values, rest []string) int {
+	if len(rest) > 0 && rest[0] == "--" {
+		rest = rest[1:]
+	}
+	return a.fail(exitFailed, "internal deno-fence: %v", sandboxdeno.ExecFenced(rest))
 }
 
 func rollID() string {
