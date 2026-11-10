@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
@@ -16,6 +17,8 @@ import (
 type SessionsFunc func(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (vault.AtprotoSessions, error)
 
 var ErrSignInAgain = errors.New("marketidentity: the owner must sign in to the web app again")
+
+const SessionProxyRecheck = 10 * time.Minute
 
 func (a *Accounts) sessionProxy(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, generation int64,
 	status v1alpha1.MarketIdentityStatus) (Result, error) {
@@ -29,17 +32,17 @@ func (a *Accounts) sessionProxy(ctx context.Context, workspace string, id *v1alp
 	switch {
 	case errors.Is(err, vault.ErrNoAtprotoSession):
 		return a.signInAgain(status, generation, id, "NoSession",
-			fmt.Sprintf("the web app holds no session for %s in %s; the owner must sign in to the web app again", did, ref.Mount)), ErrSignInAgain
+			fmt.Sprintf("the web app holds no session for %s in %s; the owner must sign in to the web app again", did, ref.Mount)), nil
 	case errors.Is(err, vault.ErrAtprotoSessionInactive):
 		return a.signInAgain(status, generation, id, "SessionInactive",
-			fmt.Sprintf("the web app session of %s is not active (%v); the owner must sign in to the web app again", did, err)), ErrSignInAgain
+			fmt.Sprintf("the web app session of %s is not active (%v); the owner must sign in to the web app again", did, err)), nil
 	case err != nil:
 		return pending(status, generation, "SessionProxyUnavailable", "reading the web app session of "+did+" through the vault: "+err.Error()), err
 	case session.DID != did:
 		return failed(status, generation, "SubjectMismatch", fmt.Sprintf("the web app session at %s/%s is for %s, not %s", ref.Mount, ref.Path, session.DID, did)), nil
 	case session.Status != vault.AtprotoSessionActive:
 		return a.signInAgain(status, generation, id, "SessionInactive",
-			fmt.Sprintf("the web app session of %s is %s (%s); the owner must sign in to the web app again", did, session.Status, session.StatusReason)), ErrSignInAgain
+			fmt.Sprintf("the web app session of %s is %s (%s); the owner must sign in to the web app again", did, session.Status, session.StatusReason)), nil
 	case strings.TrimSpace(session.PDS) == "":
 		return pending(status, generation, "SessionProxyUnavailable", "the web app session of "+did+" names no PDS"), nil
 	}
@@ -52,7 +55,7 @@ func (a *Accounts) sessionProxy(ctx context.Context, workspace string, id *v1alp
 		status.Did, status.PdsURL = did, strings.TrimRight(session.PDS, "/")
 		return a.signInAgain(status, generation, id, "ScopeChanged",
 			fmt.Sprintf("the web app session of %s lacks scopes the gateway web app now requests (%s); sign in to the web app again",
-				did, strings.Join(changed.subjects(), ", "))), ErrSignInAgain
+				did, strings.Join(changed.subjects(), ", "))), nil
 	}
 	status.Phase = v1alpha1.MarketIdentityPhaseReady
 	status.ObservedGeneration = generation
@@ -77,7 +80,7 @@ func (a *Accounts) signInAgain(status v1alpha1.MarketIdentityStatus, generation 
 	status.Message = message
 	conds.Set(&status.Conditions, generation, v1alpha1.ConditionSignedIn, false, reason, message)
 	setReady(&status, generation, false, reason, message)
-	return Result{Status: status}
+	return Result{Status: status, RequeueAfter: SessionProxyRecheck}
 }
 
 func (a *Accounts) proxiedSession(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity) (vault.AtprotoSession, error) {

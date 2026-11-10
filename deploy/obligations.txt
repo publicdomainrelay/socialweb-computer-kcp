@@ -46,6 +46,7 @@ internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval
 internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
 internal/marketidentity/atproto	oauth.go:Accounts.oauthQr	requeue	QRPollInterval 3s constant, only until the QR state expires (TTL 5m)	GET com.fedfork.atprotoOauthQR at the QR origin; the origin pushes nothing
 internal/marketidentity/atproto	oauth.go:signedIn	deadline	access token exp minus AccessSkew	token refresh before expiry
+internal/marketidentity/atproto	sessionproxy.go:Accounts.signInAgain	requeue	SessionProxyRecheck 10m constant, only while an oauthSessionProxy identity needs its owner to sign in again	re-read the web app session in the vault after the owner signs in again; a vault write raises no kcp event
 internal/materialiser	materialiser.go:Reconciler.bringUp	requeue	ProbeRetry 2s constant, capped at the time left before InitTimeout 3m	probe the tenant apiserver /readyz after its group is up; an HTTP endpoint has no event source
 internal/materialiser	materialiser.go:Reconciler.off	deadline	gate closed since plus PathGateGrace 10s	the shut deadline
 internal/materialiser	materialiser.go:Reconciler.pending	requeue	ProbeRetry 2s constant, capped at the time left before InitTimeout 3m	probe the tenant apiserver /readyz; an HTTP endpoint has no event source

@@ -163,6 +163,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		return ctlruntime.Result{}, errors.Join(reconcileErr, err)
 	}
 	c.remember(req, next)
+	wasExpired := held && prior.identity != nil && prior.identity.Status.Phase == v1alpha1.MarketIdentityPhaseSessionExpired
+	if !wasExpired && next.Status.Phase == v1alpha1.MarketIdentityPhaseSessionExpired {
+		c.log.Warn("a MarketIdentity needs its owner to sign in again", "workspace", req.Workspace, "identity", req.Name,
+			"reason", next.Status.Message)
+	}
 	if !wasReady && next.Status.Phase == v1alpha1.MarketIdentityPhaseReady {
 		c.log.Info("marketidentity_ready_notified", "workspace", req.Workspace, "identity", req.Name)
 		c.bus.NotifyBound(bus.Key{Workspace: req.Workspace, Kind: GroupKind.Kind, Name: req.Name})
