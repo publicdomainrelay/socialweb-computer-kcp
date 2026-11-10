@@ -637,6 +637,16 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `--rollback` removes the drop-in and goes back to the deno relay, `--status` only reads. Never run
   `atproto-reverse-proxy/scripts/deploy.sh`: it prints `CF_API_TOKEN`. A change to the ingress
   protocol (`internal/atproto/ingress`) ships to both ends: the core and this relay.
+  Custom domains: a host whose `_xrpc.<host>` TXT holds a live subscriber's did:key (or its
+  did-key host) is served as that subscriber; a subscriber may also send
+  `com.fedproxy.temp.xrpc.alias {hosts}` (answered `#result {accepted, rejected}`, 16 per subscriber,
+  gone on disconnect). Caddy reaches it through `infra/fedproxy-legacy/xrpc-custom-domains.sh apply`
+  (admin API only: a hostless Caddyfile site block would shadow atprp-ssh-relay's appended tunnel
+  routes; run it again after a Caddy restart) and the relay's ask listener 127.0.0.1:5556. A response
+  frame's optional `headers` (name -> string, or -> [string] for Set-Cookie) reach the caller; the relay
+  drops hop-by-hop, Content-Length, Strict-Transport-Security, Alt-Svc, Proxy-*, Set-Cookie with a
+  Domain, invalid names or values (CR, LF, NUL), and past 64 values or 32 KiB; `contentType` wins over
+  a Content-Type header.
 - The atproto relay at relay.mini-cloud-0002.chadig.com (bidders' requestCrawl, a firehose source) is
   the Go relay `socialweb-computer internal atproto-relay` (`internal/atprotorelaymain` on
   `internal/relay/local`), on 127.0.0.1:2584 behind caddy as the `30-go.conf` drop-in of

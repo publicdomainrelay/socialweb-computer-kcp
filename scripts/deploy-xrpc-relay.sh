@@ -7,6 +7,8 @@ SSH_TARGET="${SSH_TARGET:-root@fedproxy.com}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519_no_password}"
 RELAY_HOSTNAME="${RELAY_HOSTNAME:-xrpc.fedproxy.com}"
 SOCKET="${SOCKET:-/opt/caddy/xrpc-relay-server.sock}"
+ASK_LISTEN="${ASK_LISTEN:-127.0.0.1:5556}"
+CADDY_ADMIN_SOCKET="${CADDY_ADMIN_SOCKET:-/opt/caddy/caddy-admin.sock}"
 BASE="${BASE:-/opt/xrpc-relay-go}"
 OUT_ROOT="${OUT_ROOT:-$HOME/.tmp/xrpc-relay-deploy}"
 UNIT=xrpc-relay-server.service
@@ -27,7 +29,8 @@ usage: scripts/deploy-xrpc-relay.sh [--rollback | --status]
   --status    print which relay serves $UNIT and the health of https://$RELAY_HOSTNAME; changes nothing
 
 env: SSH_TARGET (root@fedproxy.com), SSH_KEY (~/.ssh/id_ed25519_no_password), RELAY_HOSTNAME,
-     SOCKET, BASE (/opt/xrpc-relay-go), OUT_ROOT (~/.tmp/xrpc-relay-deploy), NO_AUTO_ROLLBACK=1
+     SOCKET, ASK_LISTEN (127.0.0.1:5556), CADDY_ADMIN_SOCKET (/opt/caddy/caddy-admin.sock),
+     BASE (/opt/xrpc-relay-go), OUT_ROOT (~/.tmp/xrpc-relay-deploy), NO_AUTO_ROLLBACK=1
 EOF
 }
 
@@ -175,7 +178,7 @@ Type=notify
 NotifyAccess=main
 WorkingDirectory=$BASE
 ExecStart=
-ExecStart=$BASE/current/$BIN_NAME internal ingress-relay --unix-socket $SOCKET --hostname $RELAY_HOSTNAME
+ExecStart=$BASE/current/$BIN_NAME internal ingress-relay --unix-socket $SOCKET --hostname $RELAY_HOSTNAME --ingress-relay-ask-listen $ASK_LISTEN --ingress-relay-caddy-admin-socket $CADDY_ADMIN_SOCKET
 TimeoutStopSec=20
 UNIT
 mv $(q "$DROPIN.partial") $(q "$DROPIN")"

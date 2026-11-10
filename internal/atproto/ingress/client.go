@@ -352,7 +352,7 @@ func (s *Subscriber) handleRequest(msg frame) {
 	if params == nil {
 		params = map[string]string{}
 	}
-	headers := msg.Headers
+	headers := joinedHeaders(msg.Headers)
 	if headers == nil {
 		headers = map[string]string{}
 	}
@@ -409,14 +409,14 @@ func (s *Subscriber) handleSubscribe(msg frame) {
 	case (s.cfg.TunnelTarget != nil || s.cfg.TunnelHandler != nil) && msg.NSID == TunnelNSID:
 		s.startTunnel(msg.SubscriptionID)
 	case s.cfg.WSTarget != nil && msg.NSID != TunnelNSID && msg.NSID != "":
-		s.startWSSubscription(msg.SubscriptionID, msg.NSID, params, msg.Headers)
+		s.startWSSubscription(msg.SubscriptionID, msg.NSID, params, joinedHeaders(msg.Headers))
 	case s.cfg.DirectSubscriptionHandler != nil && msg.NSID != TunnelNSID && msg.NSID != "":
 		id := msg.SubscriptionID
 		unsub, err := s.cfg.DirectSubscriptionHandler(
 			id,
 			msg.NSID,
 			params,
-			msg.Headers,
+			joinedHeaders(msg.Headers),
 			func(event json.RawMessage) {
 				_ = s.send(map[string]any{
 					"$type":          frameType("subscriptionEvent"),

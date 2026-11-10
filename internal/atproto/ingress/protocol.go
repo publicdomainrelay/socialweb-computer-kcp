@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -14,6 +15,8 @@ import (
 const (
 	SubscribeNSID    = "com.fedproxy.temp.xrpc.subscribe"
 	GetNonceNSID     = "com.fedproxy.temp.xrpc.getRegistrationNonce"
+	AliasNSID        = "com.fedproxy.temp.xrpc.alias"
+	AliasResultType  = "com.fedproxy.temp.xrpc.alias#result"
 	TunnelNSID       = "com.fedproxy.temp.xrpc.tunnel"
 	RegistrationType = "com.fedproxy.temp.xrpc.registration"
 	KeepalivePath    = "/xrpc/com.publicdomainrelay.temp.keepalive.ping"
@@ -25,14 +28,6 @@ const (
 	callerQueueDepth    = 4096
 	maxCloseReasonBytes = 123
 )
-
-var relayedResponseHeaders = map[string]struct{}{
-	"dpop-nonce":       {},
-	"www-authenticate": {},
-	"location":         {},
-	"cache-control":    {},
-	"retry-after":      {},
-}
 
 var subscriptionHeaders = []string{"authorization", "atproto-proxy"}
 
@@ -63,30 +58,33 @@ type Response struct {
 	Body        json.RawMessage
 	ContentType string
 	Headers     map[string]string
+	// what the relay sends, from a response frame's headers (responseHeaders)
+	header http.Header
 }
 
 type frame struct {
-	Type           string            `json:"$type"`
-	RequestID      string            `json:"requestId"`
-	Method         string            `json:"method"`
-	Path           string            `json:"path"`
-	Params         map[string]string `json:"params"`
-	Body           json.RawMessage   `json:"body"`
-	RawBody        *string           `json:"rawBody"`
-	Headers        map[string]string `json:"headers"`
-	Status         int               `json:"status"`
-	ContentType    string            `json:"contentType"`
-	SubscriptionID string            `json:"subscriptionId"`
-	NSID           string            `json:"nsid"`
-	Message        json.RawMessage   `json:"message"`
-	Data           string            `json:"data"`
-	Code           int               `json:"code"`
-	Reason         string            `json:"reason"`
-	Key            string            `json:"key"`
-	Nonce          string            `json:"nonce"`
-	Signatures     []Signature       `json:"signatures"`
-	Subdomain      string            `json:"subdomain"`
-	IngressRef     string            `json:"ingressRef"`
+	Type           string                  `json:"$type"`
+	RequestID      string                  `json:"requestId"`
+	Method         string                  `json:"method"`
+	Path           string                  `json:"path"`
+	Params         map[string]string       `json:"params"`
+	Body           json.RawMessage         `json:"body"`
+	RawBody        *string                 `json:"rawBody"`
+	Headers        map[string]HeaderValues `json:"headers"`
+	Status         int                     `json:"status"`
+	ContentType    string                  `json:"contentType"`
+	SubscriptionID string                  `json:"subscriptionId"`
+	NSID           string                  `json:"nsid"`
+	Message        json.RawMessage         `json:"message"`
+	Data           string                  `json:"data"`
+	Code           int                     `json:"code"`
+	Reason         string                  `json:"reason"`
+	Key            string                  `json:"key"`
+	Nonce          string                  `json:"nonce"`
+	Signatures     []Signature             `json:"signatures"`
+	Subdomain      string                  `json:"subdomain"`
+	IngressRef     string                  `json:"ingressRef"`
+	Hosts          []string                `json:"hosts"`
 }
 
 func b64encode(b []byte) string {

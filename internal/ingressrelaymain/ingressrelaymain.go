@@ -33,11 +33,13 @@ type Config struct {
 	ServiceID         string
 	Listen            string
 	UnixSocket        string
+	AskListen         string
 	TLSCertFile       string
 	TLSKeyFile        string
 	PLCURL            string
 	AdditionalHosts   []string
 	AllowedDIDs       []string
+	CaddyAdminSocket  string
 	RelayTimeout      time.Duration
 	KeepaliveInterval time.Duration
 	KeepaliveTimeout  time.Duration
@@ -93,6 +95,7 @@ func Run(ctx context.Context, cfg Config) error {
 		NonceTTL:          cfg.NonceTTL,
 		AdditionalHosts:   additional,
 		AllowedDIDs:       cfg.AllowedDIDs,
+		CaddyAdminSocket:  cfg.CaddyAdminSocket,
 		PLCURL:            cfg.PLCURL,
 		Logger:            log,
 		Version:           cfg.Version,
@@ -109,10 +112,25 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	var askServer *http.Server
+	var askServed chan error
+	var wg sync.WaitGroup
+	if cfg.AskListen != "" {
+		askListener, err := net.Listen("tcp", cfg.AskListen)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("ingress relay: listening for ask on %s: %w", cfg.AskListen, err)
+		}
+		askServer = &http.Server{Handler: server.AskHandler(), ReadHeaderTimeout: readHeaderTimeout}
+		askServed = make(chan error, 1)
+		wg.Go(func() {
+			askServed <- askServer.Serve(askListener)
+		})
+		log.Info("ask listening", "address", askListener.Addr().String())
+	}
 	httpServer := &http.Server{Handler: server.Handler(), ReadHeaderTimeout: readHeaderTimeout}
 	tlsOn := cfg.UnixSocket == "" && cfg.TLSCertFile != ""
 	served := make(chan error, 1)
-	var wg sync.WaitGroup
 	wg.Go(func() {
 		if tlsOn {
 			served <- httpServer.ServeTLS(listener, cfg.TLSCertFile, cfg.TLSKeyFile)
@@ -134,12 +152,20 @@ func Run(ctx context.Context, cfg Config) error {
 		if !errors.Is(err, http.ErrServerClosed) {
 			runErr = fmt.Errorf("ingress relay: serving %s: %w", address, err)
 		}
+	case err := <-askServed:
+		if !errors.Is(err, http.ErrServerClosed) {
+			runErr = fmt.Errorf("ingress relay: serving ask: %w", err)
+		}
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownGrace)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 	server.Close()
 	_ = httpServer.Close()
+	if askServer != nil {
+		_ = askServer.Shutdown(shutdownCtx)
+		_ = askServer.Close()
+	}
 	wg.Wait()
 	log.Info("stopped")
 	return runErr

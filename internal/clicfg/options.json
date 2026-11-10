@@ -747,6 +747,16 @@
       "description": "internal ingress-relay: close a subscriber's registration when its subscribe service-auth token expires, as the market network's IngressProxy does (unset: a registration lives as long as its websocket)",
       "env": "SOCIALWEB_INGRESS_RELAY_EXPIRE_SESSIONS"
     },
+    "ingress-relay-ask-listen": {
+      "type": "string",
+      "description": "internal ingress-relay: serve Caddy's on_demand_tls ask endpoint (/check?domain=) on this loopback TCP address; it approves a custom hostname only when its _xrpc TXT record names a live subscriber (unset: off)",
+      "env": "SOCIALWEB_INGRESS_RELAY_ASK_LISTEN"
+    },
+    "ingress-relay-caddy-admin-socket": {
+      "type": "string",
+      "description": "internal ingress-relay: the Caddy admin unix socket the ask endpoint reads to also approve hostnames Caddy already routes (exact match and single-label *.suffix; unset: alias check only)",
+      "env": "SOCIALWEB_INGRESS_RELAY_CADDY_ADMIN_SOCKET"
+    },
     "atproto-relay-listen": {
       "type": "string",
       "description": "internal atproto-relay: the TCP listen address of the atproto relay",

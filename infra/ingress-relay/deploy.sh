@@ -6,6 +6,8 @@ fi
 ingress_relay_defaults() {
   INGRESS_RELAY_HOSTNAME="${INGRESS_RELAY_HOSTNAME:-xrpc.fedproxy.com}"
   INGRESS_RELAY_SOCKET="${INGRESS_RELAY_SOCKET:-/opt/caddy/xrpc-relay-server.sock}"
+  INGRESS_RELAY_ASK_LISTEN="${INGRESS_RELAY_ASK_LISTEN:-127.0.0.1:5556}"
+  INGRESS_RELAY_CADDY_ADMIN_SOCKET="${INGRESS_RELAY_CADDY_ADMIN_SOCKET:-/opt/caddy/caddy-admin.sock}"
   INGRESS_RELAY_BASE="${INGRESS_RELAY_BASE:-/opt/xrpc-relay-go}"
   INGRESS_RELAY_OUT_ROOT="${INGRESS_RELAY_OUT_ROOT:-$HOME/.tmp/xrpc-relay-deploy}"
   INGRESS_RELAY_NO_AUTO_ROLLBACK="${INGRESS_RELAY_NO_AUTO_ROLLBACK:-}"
@@ -123,7 +125,7 @@ Type=notify
 NotifyAccess=main
 WorkingDirectory=$INGRESS_RELAY_BASE
 ExecStart=
-ExecStart=$INGRESS_RELAY_BASE/current/$INGRESS_RELAY_BIN internal ingress-relay --unix-socket $INGRESS_RELAY_SOCKET --hostname $INGRESS_RELAY_HOSTNAME
+ExecStart=$INGRESS_RELAY_BASE/current/$INGRESS_RELAY_BIN internal ingress-relay --unix-socket $INGRESS_RELAY_SOCKET --hostname $INGRESS_RELAY_HOSTNAME --ingress-relay-ask-listen $INGRESS_RELAY_ASK_LISTEN --ingress-relay-caddy-admin-socket $INGRESS_RELAY_CADDY_ADMIN_SOCKET
 TimeoutStopSec=20"
 
   infra_log "restarting $INGRESS_RELAY_UNIT"

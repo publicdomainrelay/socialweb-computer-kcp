@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 )
 
 var (
@@ -38,6 +39,7 @@ type Config struct {
 	AdditionalHosts   []string
 	AllowedDIDs       []string
 	AllowedHosts      []string
+	CaddyAdminSocket  string
 	Directory         identity.Directory
 	PLCURL            string
 	Logger            *slog.Logger
@@ -55,10 +57,14 @@ type Server struct {
 
 	mu            sync.Mutex
 	peers         map[string]*peer
+	aliases       map[string]*peer
 	subscriptions map[string]*activeSubscription
 	pending       map[string]*pendingRequest
 	keepalives    map[string]*keepalive
 	closed        bool
+
+	aliasTXT *ttlcache.Cache[string, []string]
+	caddyAsk *http.Client
 
 	closedCh  chan struct{}
 	closeOnce sync.Once
@@ -75,6 +81,7 @@ type peer struct {
 	closeOnce    sync.Once
 	goneOnce     sync.Once
 	gone         chan struct{}
+	aliases      map[string]struct{}
 	removed      bool
 }
 
@@ -232,10 +239,15 @@ func NewServer(cfg Config) (*Server, error) {
 		dir:           dir,
 		nonces:        NewNonceStore(cfg.NonceTTL, dir),
 		peers:         map[string]*peer{},
+		aliases:       map[string]*peer{},
+		aliasTXT:      newAliasTXTCache(),
 		subscriptions: map[string]*activeSubscription{},
 		pending:       map[string]*pendingRequest{},
 		keepalives:    map[string]*keepalive{},
 		closedCh:      make(chan struct{}),
+	}
+	if cfg.CaddyAdminSocket != "" {
+		s.caddyAsk = newCaddyAskClient(cfg.CaddyAdminSocket)
 	}
 	return s, nil
 }
@@ -269,6 +281,7 @@ func (s *Server) Close() {
 		keepalives = append(keepalives, k)
 	}
 	s.peers = map[string]*peer{}
+	s.aliases = map[string]*peer{}
 	s.subscriptions = map[string]*activeSubscription{}
 	s.keepalives = map[string]*keepalive{}
 	for reqID, pr := range s.pending {
@@ -371,7 +384,14 @@ func (s *Server) route(w http.ResponseWriter, req *http.Request) {
 	}
 
 	bases := s.dataBases()
-	if _, subdomain, ok := splitDataHost(host, bases); ok {
+	subdomain, matched := "", false
+	if _, sub, ok := splitDataHost(host, bases); ok {
+		subdomain, matched = sub, true
+	}
+	if !matched && !control && validAliasHost(host) && s.hostInScope(host) {
+		subdomain, matched = s.aliasSubdomain(req.Context(), host)
+	}
+	if matched {
 		if websocket.IsWebSocketUpgrade(req) && strings.HasPrefix(path, "/xrpc/") {
 			s.handleDataWS(w, req, subdomain)
 			return
@@ -520,12 +540,15 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	p := &peer{conn: conn, did: clientDID, subdomain: subdomain, expiresAt: auth.ExpiresAt, gone: make(chan struct{}), lastResponse: time.Now()}
+	p := &peer{conn: conn, did: clientDID, subdomain: subdomain, expiresAt: auth.ExpiresAt, gone: make(chan struct{}), aliases: map[string]struct{}{}, lastResponse: time.Now()}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		p.close(1001, "server shutting down")
 		return
+	}
+	if old := s.peers[subdomain]; old != nil && old != p {
+		s.dropAliasesLocked(old)
 	}
 	s.peers[subdomain] = p
 	s.mu.Unlock()
@@ -574,6 +597,11 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) handlePeerFrame(p *peer, msg frame) {
+	if msg.Type == AliasNSID {
+		// DNS lookups: off the read loop, so keepalive responses keep flowing
+		s.spawn(func() { s.handleAliasFrame(p, msg) })
+		return
+	}
 	switch kindOf(msg.Type) {
 	case "response":
 		s.handleResponse(p, msg)
@@ -622,11 +650,9 @@ func (s *Server) handleResponse(p *peer, msg frame) {
 		return
 	}
 	pr.timer.Stop()
-	headers := map[string]string{}
-	for k, v := range msg.Headers {
-		if _, ok := relayedResponseHeaders[strings.ToLower(k)]; ok {
-			headers[strings.ToLower(k)] = v
-		}
+	header, dropped := responseHeaders(msg.Headers, msg.ContentType)
+	if len(dropped) > 0 {
+		s.log.Debug("ingress_response_headers_dropped", "subdomain", p.subdomain, "headers", dropped)
 	}
 	body := msg.Body
 	if (len(body) == 0 || string(body) == "null") && msg.RawBody != nil {
@@ -636,7 +662,7 @@ func (s *Server) handleResponse(p *peer, msg frame) {
 		Status:      msg.Status,
 		Body:        body,
 		ContentType: msg.ContentType,
-		Headers:     headers,
+		header:      header,
 	}}
 }
 
@@ -677,6 +703,7 @@ func (s *Server) dropPeer(p *peer) {
 	if current {
 		delete(s.peers, p.subdomain)
 	}
+	s.dropAliasesLocked(p)
 	var ka *keepalive
 	if current {
 		if cur, ok := s.keepalives[p.subdomain]; ok {
@@ -960,11 +987,11 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 		return
 	}
 
-	contentType := result.ContentType
-	contentType = cmp.Or(contentType, "application/json")
-	w.Header().Set("Content-Type", contentType)
-	for k, v := range result.Headers {
-		w.Header().Set(k, v)
+	for k, v := range result.header {
+		w.Header()[k] = v
+	}
+	if result.ContentType != "" || w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", cmp.Or(result.ContentType, "application/json"))
 	}
 	status := result.Status
 	status = cmp.Or(status, http.StatusOK)
