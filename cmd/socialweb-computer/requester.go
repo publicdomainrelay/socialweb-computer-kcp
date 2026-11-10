@@ -292,6 +292,9 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 		return a.fail(exitFailed, "run requester: %v", err)
 	}
 	if restarted {
+		a.log.Info("run requester resumes an existing requester: its DID and its signed-in session stay, no new sign-in; another account needs another --name or --state-dir",
+			"name", name, "createdAt", saved.CreatedAt.Format(time.RFC3339), "record", filepath.Join(dir, request.RequesterFile), "identityMode", saved.Spec.Identity.Mode,
+			"handle", saved.Spec.Identity.Handle)
 		switch {
 		case len(pass) == 0 && saved.Network == network && saved.Identity == idName:
 			rec = saved

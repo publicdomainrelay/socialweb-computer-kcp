@@ -9,8 +9,8 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: 2026-11-01 on prod: A and C on rc159 (`ec0f4849`), B on the rc160 CLI (`840f0437`; on rc159 B failed its
-  ssh step, Known Pitfalls). Prod readings below
+- Last pass: 2026-11-10 on prod as bob (bidder hat-9): A, B and C pass (readings 2026-11-10 below); earlier
+  2026-11-01: A and C on rc159 (`ec0f4849`), B on the rc160 CLI (`840f0437`). Prod readings below
 
 ```mermaid
 sequenceDiagram
@@ -50,7 +50,9 @@ sequenceDiagram
 
 ## Steps
 
-`ST` is an owner-only state dir (`ST=~/.tmp/acc13; mkdir -p "$ST"; chmod 700 "$ST"`). Write each vouch at least 5
+`ST` is a NEW owner-only state dir for each run (`ST=~/.tmp/acc13-$(date +%s); mkdir "$ST"; chmod 700 "$ST"`): a
+`run requester --name mp` on an existing dir resumes that dir's requester with its old account and session (it logs
+`run requester resumes an existing requester`), never a new sign-in. Write each vouch at least 5
 minutes before the first apply when a contract was denied before (verdicts are cached, denials too).
 
 ### A. run requester (foreground, OAuth QR)
@@ -78,10 +80,12 @@ minutes before the first apply when a contract was denied before (verdicts are c
    `mixedprod-vm-ok`; the same with `--transport webrtc --exec 'uname -m'` prints `x86_64`.
 7. sbx1: `kubectl get computecontracts.socialweb.computer einfra-mixedprod-sbx1 -o jsonpath='{.status.contract.sandbox}'`
    has `stdout` `mixedprod-deno-ok sum=10 on linux/x86_64` and `exitCode` 0.
-8. agent1: the requester log has `requester_agent_bundle_placeholder` (no bao step) and, after the receipt,
-   `requester_atirc_minted`; then `sed -e 's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e
-   's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/' examples/infra/agent-start.yaml | kubectl apply -f -`; in
-   your `atirc sub` the agent nick `<label>-<rfp rkey>` JOINs; `atirc pub '<nick>: uname -m'` gets `x86_64` back.
+8. agent1: the requester log has `requester_agent_bundle_placeholder` (no bao step) and, after the receipt, the
+   token-less mesh agent's `requester_agent_mesh_key_written`, `requester_agent_lease_written` and
+   `requester_agent_peer_published` (`computer.socialweb.peer/<label>-<rfp rkey>.<handle>`); then `sed -e
+   's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e 's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/'
+   examples/infra/agent-start.yaml | kubectl apply -f -` (ContractEvent `Submitted`). The owner mesh node's view of the
+   agent (`atirc mesh peers`, pub/sub both ways) is [0004](0004-vm-atirc-agent.md).
 9. Restart mid-run: Ctrl-C (`kill -INT` the `run requester`): the ready file is removed, the kcp stops, the state stays;
    start the same command again (the same options before `--`, such as `--network`; nothing after `--` is needed): same DID, ready file rewritten, every contract still
    Held, step 6 ssh works again, the agent still answers.
@@ -162,6 +166,21 @@ user (`check-host` reports it).
 | 11:35:41 | C5 | node reaped (hat-7 terminate 11:35:36, released 11:35:38), 0 nodes, hat-7 empty |
 
 No plaintext token, key or sign-in URL in any log (check 0 on every file).
+
+## Prod Readings (2026-11-10, bob, bidder hat-9 on kcp 2d367fe8, hat-8 requester host)
+
+| step | result |
+| --- | --- |
+| A1-A2 | `run requester --name mp` with `--atproto-oauth-qr`, signed in by `scripts/oauth-signin.ts` (creds 0600); ready file `identityMode` `oauthQr` |
+| A3 | `vouch-bidder` Applied (bob -> hat-9) |
+| A4 | not written: hat-9's operator is bob, the requester itself |
+| A5-A7 | mixedprod Deployed; vm1 `mixedprod-vm-ok` over iroh, `x86_64` over webrtc; sbx1 `mixedprod-deno-ok sum=10` |
+| A8 | mesh key, lease and peer record written; agentStart Submitted |
+| A9 | Ctrl-C removes the ready file; the restart keeps the DID; 3 contracts Held; ssh again |
+| A10 (first run) | FAIL: records kept, `requester_record_delete_skipped` (the QR session lacked every optional delete scope: qr.fedfork.com's client metadata was behind scope.go) |
+| A10 (after the QR metadata fix, fresh sign-in, main ea6935f7 CLI) | `requester_contract_records_deleted` 6/6, 6/6, 10/10 and `requester_agent_peer_deleted`; no market record of the run left (the requester's badgeBlueKeys signer key stays by rule) |
+| B | `install requester --name mp` as swc-requester, signed in; Ready, contracts Held, ssh and deno; `systemctl --user restart` keeps the kcp and kine InvocationIDs and the DID; delete releases (on the 2d367fe8 binary the policy and vm.delete records stayed: fixed in ea6935f7); `uninstall requester --purge` leaves no account, linger or state |
+| C | `run requester --name mk --with-gateway`, Cluster c1, the node `*-c1-node1` from hat-9 Ready in 50 s, `quickstart-k8s-ok`; delete Deployment: nodes 0 in 160 s; the node contract's records deleted 6/6; the Infra mirror `computer.socialweb.infra/nodes-<hex>` and `self` are kept by design and were deleted by hand |
 
 ## Local Readings (2026-11-01, own market network `mxp`, main 6497fe61 dev build)
 
