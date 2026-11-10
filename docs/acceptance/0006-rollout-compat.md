@@ -8,7 +8,18 @@ Run after every rollout; it is the gate before "tests may resume".
 - Build: the CI build of a main commit: `main/<commit>/binaries/socialweb-computer-linux-amd64` in the public bucket once the run's
   `publish` job succeeded, else the run's `binaries` artifact (`gh run download <run> -n binaries`); check it against that run's
   `SHA256SUMS`. A local tag build is the fallback. Installs run from the lead host over ssh (no CI deploy key)
-- Last pass: 2026-11-10. Bidders hat-7 + hat-9 on rollout 6 (2d367fe8) 15:47Z: version, bidder.json ready, MarketIdentity
+- Last pass: 2026-11-10, rollout 8 (5e6c4e3d, published sha256 b7b286df94b4) on every component. Bidders hat-9 19:19Z,
+  hat-7 19:20Z, hat-8 `swc-bidder` 19:21Z (`main/<commit>/binaries` checked against SHA256SUMS, `infra/hosts/hat-N.sh
+  --apply`, hat-8 `SSH_TARGET=hat-8 infra/bidder/deploy.sh --apply`): version, MarketBidder Ready 6/6, no `pendingAction`,
+  `bidder-tangled-vouch`, offering `["iroh","webrtc"]` with no `endpointUrl`, 0 ERROR / 0 unsupported from start, three
+  `computer.socialweb.ingress.offer` stream dials (two jetstream, one relay), mesh UDP in 31000-31999, hosts empty.
+  Gateway `scripts/deploy.sh` (no env or spec file) 19:23Z, then `systemctl restart swc-ssh-gateway.service`: Gateway Ready
+  5/5, SshGateway Ready, `owner-<hash>` Ready SignedIn, `bao-ssh-gateway` and `iroh-dial` Running, 12 min with 0 restarts,
+  0 ERROR from start on both units (rollout 7, c770a887, had 3 `provider not found` at the gateway start and one `Failed
+  to watch ... context canceled` at a createCluster; 6745dd6f and e4cff4ae fix them), k8s, root, ssh, ssh /healthz,
+  atlibs and shell 200, kcp 403; caddy sites unchanged. Rollout 7 (c770a887, 18:00Z) brought hat-8 `swc-bidder` from rc159
+  (an `endpointUrl`-only offering) to the same release as the hats.
+- Previous pass: 2026-11-10. Bidders hat-7 + hat-9 on rollout 6 (2d367fe8) 15:47Z: version, bidder.json ready, MarketIdentity
   Ready, `bidder-tangled-vouch`, 0 ERROR / 0 unsupported since restart, hosts empty. Gateway + ssh gateway on rollout 5
   (438ca0fa) 15:31Z: SshGateway Ready, 12 min with 0 restarts, 0 ERROR from start, endpoints 200. Compat smoke (bob, rollout 5
   bidders): CLI `run request --exec id` Held -> Released (hat-9); atlibs requester page at shell.socialweb.computer, fresh
