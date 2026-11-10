@@ -7,7 +7,7 @@ invocation kcp and after that kcp restarts from its state dir.
 - Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
   [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
 - One run per host: only `$HOST` bids: `-- --allow-bidder-dids <$HOST bidder DID>` (or the other two bidders suspended)
-- Last pass: kcp 69aa8b0f bidders (p2p rollout 2), CLI 69aa8b0f on hat-8, 2026-11-10 13:49-13:56Z, hat-9 and hat-7, alice pdsAccount
+- Last pass: kcp 438ca0fa bidders (p2p rollout 5), CLI 69aa8b0f on hat-8, 2026-11-10 15:13-15:17Z, hat-9 and hat-7, alice pdsAccount (also rollout 2, 13:49-13:56Z)
 
 ```mermaid
 sequenceDiagram
@@ -82,6 +82,7 @@ Request log phases (`"phase":` lines), rc142 runs:
 - output contains `Linux` and `uid=`
 - whole host run (pause -> resume) ~3 min; all three ~10 min
 - 2026-11-10 (p2p, offering endpoints, alice pdsAccount, `--ready-timeout 10m`): hat-9 start -> Held + first ssh 63 s, ssh 3.8 s fresh / 10.5 s restarted; hat-7 62 s, 5.2 s / 3.5 s; plaintext 0/0, both Released
+- 2026-11-10 rollout 5: hat-9 64 s, ssh 3.4 s / 2.1 s; hat-7 60 s, 3.1 s / 2.1 s; plaintext 0/0; each run left one market.event (the restarted invocation's signal) in the repo: delete it
 - earlier baselines: 2026-10-24 local 2.16 s fresh / ~7 s restarted; rc118 CLI run RFP -> Held 29 s, ssh 4.4 s
 
 ## Pass criteria
