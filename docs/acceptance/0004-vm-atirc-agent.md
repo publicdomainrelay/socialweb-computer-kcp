@@ -4,12 +4,13 @@ Proves a requester can ask for an atirc agent on its guest that joins the owner'
 with no atirc token: after the verified receipt the requester writes the agent's iroh key into the secrets
 bundle and `computer.socialweb.peer/<label>-<rfp rkey>.<handle>` (leased on a contract-scoped
 market.association) into its own repo, `atirc-agent.service` starts only on a requester-originated
-`guest.agentStart` and runs `atirc mesh run --no-publish` beside `atirc agent run`, another mesh node of
-the owner reaches the agent, and release deletes the peer record and its lease.
+`guest.agentStart` and runs `atirc mesh run --no-publish` beside `atirc agent run` (its harness and model
+settings from the requester's `--agent-config`, delivered in the same bundle), another mesh node of the owner
+reaches the agent and the agent answers on the mesh, and release deletes the peer record and its lease.
 
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-10 CLI, alice (pdsAccount) on a prod bidder from hat-8, owner node an AtircNode of an own market network; two workarounds until the bidders roll out: the pinned atirc build copied onto the guest, `--jetstream off` on both nodes (see Known pitfalls)
+- Last pass: mesh part 2026-11-10 14:26Z CLI, alice (pdsAccount) on prod bidder did:plc:4vcig7s4... (rollout 3, atirc 2898af3), owner node an AtircNode of an own market network, no workarounds: binding verified, messages both ways. Harness (`--agent-config`) not yet run
 
 ```mermaid
 sequenceDiagram
@@ -39,6 +40,7 @@ sequenceDiagram
 | Vouches | as 0003 (bidder-tangled-vouch + requester-tangled-vouch); an own market network may run `--bidder-policy open` |
 | Bidders | serve `atirc-x86_64` from `socialweb-guest-downloads` built from `assets.atirc` (a `cargosrc` pin with `atirc mesh`) |
 | Mesh node | an owner mesh node: an `AtircNode` (examples/infra/atircnode.yaml) or `atirc mesh run`, with its own `computer.socialweb.peer` record in the owner's repo |
+| Agent config | an atirc client config file on the requester host, mode 0600: `[agent] harness` (a `#!` script that starts the agent, e.g. claude, and reads its settings with `atirc agent anthropic model|base-url|api-key`), optional `addPath`, `[agent.anthropic] model, baseUrl, apiKey`; the owner's `~/.config/atirc/config.toml` is one (its harness installs claude from claude.ai when missing). Never print it |
 
 ## Steps
 
@@ -48,13 +50,15 @@ CLI:
 SWC=socialweb-computer; R=~/.tmp/acc35; mkdir -p "$R"; chmod 700 "$R"
 NAME=cli-agent-$(date +%s)
 # --agent last (or --agent=<envFile>): a bare --agent before another flag swallowed it (pre rc126)
-$SWC run request --state-dir "$R" --name "$NAME" --hold --agent=/etc/atirc/atirc.env -- --atproto-oauth-qr \
+$SWC run request --state-dir "$R" --name "$NAME" --hold --agent-config ~/.config/atirc/config.toml --agent=/etc/atirc/atirc.env -- --atproto-oauth-qr \
   > "$R/$NAME-request.log" 2>&1 &
 # sign in from the pendingAction url (as 0003), wait for Held + requester_agent_peer_published
 atirc peer show <label>-<rfp rkey>.<handle>      # the binding verifies: node, owner (the lease chain's root)
 $SWC run request agent "$NAME" --state-dir "$R"  # publishes guest.agentStart, waits Published
 # an owner node (AtircNode with spec.peers: [<label>-<rfp rkey>.<handle>]) lists the agent in `atirc mesh peers`;
-# `atirc mesh pub hello` there, then on the guest as the nick user `atirc mesh sub --cursor 0` shows it
+# `atirc mesh pub hello` there, then on the guest as the nick user `atirc mesh sub --cursor 0` shows it;
+# a guest-side `atirc mesh pub` shows up in the owner node's `atirc mesh sub --cursor 0` (both directions);
+# prompt the agent once on the mesh (`atirc mesh pub '<nick>: uname -m'` on the owner node) and see its answer
 $SWC run request release "$NAME" --state-dir "$R"
 # both records answer RecordNotFound
 ```
@@ -71,17 +75,18 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | `requester_agent_peer_published identity=<label>-<rkey>.<handle>` | requester log | same second |
 | `Held`, condition `AtircTokenMinted=True reason=PeerPublished` | contract | 29-45 s after request |
 | `guest_agent_start unit=atirc-agent.service` | guest agent journal | ~1 s after agentStart |
-| `atirc mesh run` running as the nick user, `~/.config/atirc/iroh_key` 0600 | guest | after agentStart |
+| `atirc mesh run` running as the nick user, `~/.config/atirc/iroh_key` and `config.toml` 0600, owned by it | guest | after agentStart |
+| the harness starts (claude installs first when missing, ~1 min) and answers a mesh prompt | owner node `atirc mesh sub` | 1-2 min after agentStart |
 | the owner node verifies and reaches `<label>-<rkey>.<handle>` | mesh node log | seconds |
 | `requester_agent_peer_deleted`, `requester_association_deleted` | requester log | at release |
 
 ## Pass criteria
 
 - No `chat.atirc.mint` for the agent; no token in the bundle, a kcp object, a record, a ContractEvent or a log line
-- The key never in a kcp object, a record or a log line; `/etc/atirc/iroh_key.hex` and `/etc/atirc/atirc.env` root, 0600
+- The key and the agent config (its apiKey) never in a kcp object, a record, an argument or a log line; `/etc/atirc/iroh_key.hex`, `/etc/atirc/atirc.env` and `/etc/atirc/config.toml` root, 0600
 - The peer record's `iroh` is the short ticket of the bundle key; its `lease` names the association at its CID
 - After `Held`, before agentStart: `atirc-agent.service` inactive
-- After agentStart: unit active, the owner node reaches the agent
+- After agentStart: unit active, the owner node reaches the agent, a message crosses the mesh in both directions, the agent answers one prompt
 - Release: the peer record and the lease are gone (a getRecord answers RecordNotFound); a skipped delete is harmless after the lease's `expiresAt`
 - Without `--agent`: no key, no record, no unit, no atirc binary on the guest
 - Winner host empty after release
@@ -101,8 +106,9 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | `spec.agent` contract fails before RFP | `an agent needs spec.secretsRef`: `--agent` adds a one-entry bundle; page must send one |
 | the owner node never dials the agent | the peer record's `channels` must hold the daemon's channel (the owner-graph root's, e.g. `#johnandersen777_bsky_social` for alice); the requester walks `com.fedfork.irc.agentOperator` / `com.fedfork.irc.agents` to find it |
 | `atirc mesh run` panics: `Could not automatically determine the process-level CryptoProvider` | an atirc older than a6a3f0f (both rustls providers, no default); the pinned `assets.atirc` installs ring |
-| `atirc agent run`: `no harness configured` | without a token the harness comes from the agent user's local config (`[agent] harness` in `<config dir>/config.toml`); kcp ships none, so the agent answers only once one is configured; the mesh daemon is the unit's main process and keeps running |
+| `atirc agent run`: `no harness configured` | no `--agent-config` (or no `/etc/atirc/config.toml` in a kubectl bundle): without a token the harness comes only from the agent user's `config.toml`; the mesh daemon is the unit's main process and keeps running |
+| `run request: --agent-config: ... readable by group or others` | chmod 600 the config file |
 | guest has no `atirc mesh` | the bidder serves an older socialweb-guest-downloads; roll the bidder to a build with the `assets.atirc` cargosrc pin |
 | oauthQr bidder SessionExpired after rollout | scope added to Bidder/RequesterOAuthScope: re-sign every OAuth identity (announce before tagging) |
-| harness never joins | no agent config for the owner chain (`atirc config agent`), or claude still installing (give it ~1 min) |
+| harness never answers | the harness exited (journalctl -u atirc-agent), claude still installing (give it ~1 min), or a wrong model / baseUrl / apiKey in the agent config |
 | release after page reload slow (20-38 s) | requester start after boot + release not first; fixed rc134 (release-first on resume, ~17 s click -> Released) |

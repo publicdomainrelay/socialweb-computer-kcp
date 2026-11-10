@@ -4,7 +4,8 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `ec0d088` (author: `atirc-dev`). This is a copy; edit upstream first
-- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z
+- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 14:26Z, atirc 2898af3
+- kcp edits not yet upstream: section 3 scope and the mesh subsection of section 4 (kcp P6: VM agents are token-less)
 
 ## 1. Repo-level gates (run before every deploy)
 
@@ -29,9 +30,10 @@ token-lifecycle checks every contract smoke must pass.
 - If the release changes iroh ops: `atirc-iroh.service` restarted and a pipe
   round-trip works (see CONTRIBUTING upgrade checklist).
 
-## 3. Token lifecycle gates (every page/CLI/iOS/ssh VM smoke)
+## 3. Token lifecycle gates (every smoke that mints: ssh gateway sessions, the guest requester's r2 token)
 
-Every contract smoke must show, from server logs and
+A `spec.agent` contract (page, CLI, iOS) mints no token any more: its gates are the mesh ones in section 4.
+Every smoke that mints must show, from server logs and
 `tokens/revocations.ndjson`:
 
 - `token_minted` for the smoke's subhandle at accept/provision time.
@@ -45,9 +47,20 @@ Every contract smoke must show, from server logs and
 
 ## 4. Path-specific acceptance
 
-### Page / CLI requester
-- Request VM -> Held -> release; expect mint then revoke-before-termination.
-- Restored tab (snapshot) repeat must mint/revoke the same way.
+### Page / CLI requester (token-less VM agent, kcp acceptance 0004)
+- Request VM with an agent -> Held -> release; expect NO `token_minted`: the
+  requester writes the agent's iroh key and atirc config (harness, model) into
+  the guest's secrets bundle and `computer.socialweb.peer/<label>-<rfp rkey>.<handle>`
+  leased on a contract-scoped `market.association` (subject = the requester's
+  own DID, expiresAt) into its own repo.
+- `atirc peer show <identity>` verifies (owner = the owner-graph root); the
+  guest runs `atirc mesh run --no-publish` (default Jetstream, no
+  CryptoProvider panic) and `atirc agent run` (mesh prompt, harness from its
+  `config.toml`); an owner node lists it in `atirc mesh peers`; a message
+  crosses the mesh both ways; the agent answers a prompt.
+- Release: the peer record and the lease answer RecordNotFound; a skipped
+  delete ends at the lease's expiresAt.
+- Restored tab (snapshot) repeat must publish and delete the same way.
 
 ### ssh gateway agent
 - `ssh <handle>@socialweb.computer atirc agent run <name>` rents a VM as that
@@ -84,6 +97,7 @@ sequenceDiagram
   participant Bid as bidder host
   Req->>Bid: contract (RFP, bids, accept)
   Bid-->>Req: receipt + VM on network
+  Note over Req,At: ssh gateway / r2 only; a spec.agent VM agent is token-less (peer record + mesh)
   Req->>At: chat.atirc.mint {subhandle, lease{receipt, termination}}
   At-->>Req: leased child token (token_minted)
   Req->>Bid: guest runs agent with ATIRC_TOKEN
