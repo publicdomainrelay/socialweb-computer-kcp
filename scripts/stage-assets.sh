@@ -338,7 +338,8 @@ stage_debs() {
       say "warn: $pkg $ver is no longer in the signed $repo index for $arch (superseded); verified by its pinned sha256 alone"
       local nover="${ver#*:}"
       deb="$(fetch_pinned "${bases[$repo]}$pool${pkg}_${nover}_$arch.deb" "$want" 2>/dev/null)" \
-        || deb="$(fetch_pinned "${bases[$repo]}$pool${pkg}_${nover}_all.deb" "$want")"
+        || deb="$(fetch_pinned "${bases[$repo]}$pool${pkg}_${nover}_all.deb" "$want" 2>/dev/null)" \
+        || die "$pkg $ver ($arch) is gone from ${bases[$repo]}$pool (tried ${pkg}_${nover}_$arch.deb and _all.deb): repin it in $versions to a version the signed $repo index names"
     fi
     rm -rf "$x/deb" && mkdir -p "$x/deb"
     (cd "$x/deb" && ar x "$deb")

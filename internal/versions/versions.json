@@ -1032,12 +1032,12 @@
         },
         {
           "package": "libpcre2-8-0",
-          "version": "10.39-3ubuntu0.1",
+          "version": "10.39-3ubuntu0.2",
           "repo": "ubuntu",
           "pool": "pool/main/p/pcre2/",
           "sha256": {
-            "linux/amd64": "01a5a74f3d305cad32fffffdc200c2a92fd8e5a01bff97de76ac598fb444d53e",
-            "linux/arm64": "b85beefd54108f1c34a89cb26688eb1b2eeaa099e4995091295a1d39f9c67a91"
+            "linux/amd64": "30dff428411080f04c17d3146cecff946bed94f019f912ea3aa1d2630dee610f",
+            "linux/arm64": "fe4e89a79c959dc7df5f84133490c39230ada2f2949aa20638cfecbb1a0c52c4"
           }
         },
         {
@@ -1213,14 +1213,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "1d824f885e376efd64742bff433f3ec4aeb5485722470852a2aacbae0e92473f",
+          "treeSha256": "767895a8130e030feb5cfe17cf6cf7072ef2c09e072a50a647b70558e1bd5f49",
           "rawBytes": 84341750,
-          "zstdBytes": 25252912
+          "zstdBytes": 25253186
         },
         "linux/arm64": {
-          "treeSha256": "c92089af63c7f97ae8457a378aee8aab58eaef0192d17241eb224292f5de9843",
+          "treeSha256": "110bf303619c424ac371c6d6b6f5fdff660f214c4aa64854878ba64f61149500",
           "rawBytes": 81911526,
-          "zstdBytes": 24680608
+          "zstdBytes": 24681093
         }
       }
     },
