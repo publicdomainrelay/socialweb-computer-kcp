@@ -26,20 +26,70 @@ and the bidders. Do not run it without that authority.
 - hat-9 is bob's bidder (`did:plc:4vcig7s43z3nyqrnepmcfzqt`). Its offering
   endpoints are iroh and webrtc.
 - Both serve the compute kinds `vm` and `deno`.
-- The oauthQr bidder parts (sections 2, 7 and the section 9 sign-in) run on
-  hat-8 as a temporary prod-qr bidder for bob: `socialweb-computer install
-  bidder` (or `run bidder`) with profile `prod-qr` on hat-8, joined to the prod
-  market as bob. Read `hat-8` and its kubeconfig where the steps say `hat-7`.
-  After the pass, tear it down and delete its offering and heartbeat records in
-  bob's repo with `deleteRecord`; a getRecord of each then answers
-  RecordNotFound. A step that only reads may run on the existing hat-9 bob
-  bidder instead.
+- local is hat-8's `swc-bidder` (`did:plc:2l2wdry77c7jtucbslstagkj`, localRepo,
+  associated to bob). It runs the same release as hat-7 and hat-9; a bidder on an
+  older release with an `endpointUrl`-only offering must not take part (upgrade
+  it, or keep its root `spec.suspend=true`).
+- The oauthQr bidder parts (sections 2, 4, 7 and the section 9 sign-in) run on
+  hat-8 as a temporary prod-qr bidder for bob under a fresh account (2026-11-10:
+  `swc-qr0001`), so no existing install is touched. Read it and its kubeconfig
+  where the steps say `hat-7`; hat-7 is then paused with the others in sections
+  1 and 4 and is one more host in sections 5, 6 and 9. The oauthQr mode is a
+  drop-in written before the first start, so no localRepo DID is ever created:
+
+```bash
+A=swc-qr0001; S=/var/lib/socialweb-computer/$A; H=bobvmbuilder.bsky.social
+BIN=/var/tmp/swc-release/socialweb-computer-<sha12>
+D=$S/.config/systemd/user/socialweb-computer-bidder@$H.service.d
+sudo useradd --system --user-group --no-create-home --home-dir $S --shell /usr/sbin/nologin --comment socialweb-computer $A
+sudo install -d -m 0700 -o $A -g $A $S
+sudo install -d -m 0755 -o $A -g $A $S/.config $S/.config/systemd $S/.config/systemd/user "$D"
+printf '[Service]\nExecStart=\nExecStart=%s/bin/current/socialweb-computer run bidder --handle %%i --fg -- --atproto-oauth-qr\n' "$S" |
+  sudo install -m 0644 -o $A -g $A /dev/stdin "$D/10-oauth-qr.conf"
+sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-kinds vm,deno --vm-slots 8 \
+  --guest-image-source file:///var/lib/socialweb-computer/guest-image
+```
+
+  It comes up `oauthQr AwaitingScan` with no local Pds; section 2 signs bob in.
+  After the pass: pause it, `sudo $S/bin/current/socialweb-computer uninstall
+  bidder --account $A --purge`, `sudo userdel $A`, then delete its records in
+  bob's repo with `deleteRecord`: `market.offering/self`,
+  `market.heartbeat/self` and its `computer.socialweb.ingress.listen` record. A
+  getRecord of each then answers RecordNotFound. Never delete `badgeBlueKeys`,
+  association or vouch records. A step that only reads may run on the existing
+  hat-9 bob bidder instead.
+- The runner host is hat-8 (it has `kubectl`, `dumbpipe`, `deno` and Chrome for
+  `scripts/oauth-signin.ts`, and both credential files). Without `goat` there,
+  the gateway XRPC calls take a service-auth token from alice's PDS
+  (`com.atproto.server.getServiceAuth?aud=$AUD&lxm=$N.<method>`) and call
+  `$GW/xrpc/$N.<method>` with curl; the session token stays in a mode-0600 file
+  of the scratch dir, deleted afterwards.
 - Gateway steps are lead-approved. Take a backup first and verify after.
   Coordinate them with whoever redeploys the gateway.
 - Market service auth uses a hostname-free audience: `<bidder DID>#pdr_temp_market`
   and `<bidder DID>#pdr_temp_compute_event`. The gateway cluster XRPC audience
   (`AUD` below) is unchanged.
 - Every market read is one getRecord at a computable key; no step lists records.
+
+Last pass: 2026-11-10 18:06-18:41Z, every bidder and the gateway on c770a887
+(alice requester, bob oauthQr bidder `swc-qr0001` on hat-8). Section 1: hat-9,
+hat-7 and local `Suspended`, Bidder `true Ready`. Section 2: bob signed in by QR,
+root Ready 4/4, EventStream `gateway-pds` Running, offering `["iroh","webrtc"]`.
+Section 4: the first VM landed on the oauthQr bidder 49 s after the apply; back
+to zero nodes in 2 min 34 s. Section 5: four pods on four distinct nodes, one
+market VM on each bidder (oauthQr, local, hat-7, hat-9). Section 6 (A2): all
+four winners paused, deployment deleted, every VM released (0 ComputeVMs, 0
+firecracker on every host), cluster deleted. Section 7: heartbeat frozen at
+18:21:54Z for 180 s, root Ready `{"desired":4,"notReady":0,"ready":3,"suspended":1}`,
+GuestControlPlane and `ingress-iroh` Ready, GCP healthz 200; advanced 15 s after
+resume. Section 8: override `applied:true` (generation 8), heartbeat every 5 s,
+offering cid unchanged for 60 s, all four offerings `["iroh","webrtc"]` without
+`endpointUrl`, drift reverted (`a direct edit of a composed child is reverted`),
+typo `Failed` / `InvalidKey` with no child generation change. Section 9 (ACC34,
+fresh / restarted invocation): hat-9 5.2 / 5.2 s, hat-7 21.6 / 4.8 s, local
+3.7 / 6.9 s, oauthQr 9.1 / 3.8 s; every run `Released`,
+`requester_contract_records_deleted` 12 of 12, every logged record URI
+RecordNotFound three times, 0 plaintext signaling lines, hosts empty.
 
 This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
@@ -514,8 +564,8 @@ sleep 180
 hb
 ```
 
-`createdAt` must be identical. On hat-7 the root must be Ready with
-`{"desired":3,"notReady":0,"ready":2,"suspended":1}`, the Bidder reports
+`createdAt` must be identical. On the oauthQr bidder the root must be Ready with
+`{"desired":4,"notReady":0,"ready":3,"suspended":1}` (it runs no Pds), the Bidder reports
 `spec.suspendParticipation=true` and phase `Ready`; GuestControlPlane stays
 Ready; the IngressProxy stays Ready; the GuestControlPlane ingress URL answers:
 
@@ -692,7 +742,7 @@ times. A second `run request release` of a Released invocation only removes it.
 Read `computevms.socialweb.computer -o
 wide` on `$HOST` as in section 6; no ComputeVM of this contract is left. Resume
 the two paused bidders as in section 6 and repeat for the next host. ACC34
-passes when all three hosts (local, hat-9, hat-7) pass.
+passes when every bidder host passes (2026-11-10: local, hat-9, hat-7 and the oauthQr bidder).
 
 When the requester waits for the guest's publicKey or answer and times out, read
 the winning bidder's core journal for "the requester refused the market event"
