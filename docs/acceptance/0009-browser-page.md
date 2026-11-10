@@ -11,7 +11,10 @@ iroh/webrtc-only bidders).
   deployed by its `scripts/deploy-page.sh`. It replaced the kcp-wasm page (kcp compiled to js/wasm, branch
   `kcp-wasm-memory-storage-1`), whose Go requester dials only https endpoints; that page's snapshot-restore (old
   A4) and schema-upgrade (old A5) checks retired with it (cut-over, no backcompat)
-- Last pass: 2026-11-10 15:10-15:12Z, prod https://shell.socialweb.computer/ (requester repo 5a49bd6, requester record bafyreiee4x, atlibs 0.2.3, atlibs-webrtc 0.2.1) vs hat-9 on kcp 438ca0fa: A2 OAuth sign-in through the page's form (bsky.social, consent) and A3 in 50 s, alice
+- Last pass vs hat-7 after market-https came off (offering iroh + webrtc, rollout 6): 2026-11-10 16:49Z A3 headless
+  (`scripts/page-round.mjs`, the deployed page files) in 45 s, alice: 1 ingress offer, https `submit*` 0, shell `Linux ...
+  uid=0(root)` over the guest datachannel, release, 7 records answer getRecord 400, 0 offers left, hat-7 empty
+- Last pass vs hat-9: 2026-11-10 15:10-15:12Z, prod https://shell.socialweb.computer/ (requester repo 5a49bd6, requester record bafyreiee4x, atlibs 0.2.3, atlibs-webrtc 0.2.1) vs hat-9 on kcp 438ca0fa: A2 OAuth sign-in through the page's form (bsky.social, consent) and A3 in 50 s, alice
 
 ```mermaid
 flowchart LR
@@ -92,8 +95,7 @@ either side fails (no TURN, by design).
 
 ## Known gaps
 
-- The kcp iOS app (pkg/embedded Go requester) dials only iroh (needs dumbpipe, not on iOS) or https: after the
-  hat-7 cut-over it reaches no bidder until the Go requester gains a webrtc endpoint client (followups)
+- None open for this page. (The kcp iOS app reaches webrtc-only bidders since eb018e0e; 0010 passed 2026-11-10.)
 
 ## Rules
 

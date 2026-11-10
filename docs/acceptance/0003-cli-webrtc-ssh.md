@@ -7,7 +7,12 @@ invocation kcp and after that kcp restarts from its state dir.
 - Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
   [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
 - One run per host: only `$HOST` bids: `-- --allow-bidder-dids <$HOST bidder DID>` (or the other two bidders suspended)
-- Last pass: kcp 438ca0fa bidders (p2p rollout 5), CLI 69aa8b0f on hat-8, 2026-11-10 15:13-15:17Z, hat-9 and hat-7, alice pdsAccount (also rollout 2, 13:49-13:56Z)
+- Last pass: bidders rollout 6 (2d367fe8; hat-7 iroh + webrtc only, market-https off), CLI 41319a3a on hat-8, 2026-11-10
+  16:39Z hat-9 and 16:44Z hat-7, alice pdsAccount: Held in 63 / 66 s, ssh over WebRTC exit 0 fresh (5.5 / 2.8 s) and from a
+  restarted invocation (4.8 / 2.3 s), plaintext 0 / 0, Released; every record of alice's the run logged (rfp, accept, 4
+  market.event incl. the restarted invocation's signal envelope, 2 guest.publicKey, 2 guest.signalWebRTC) answers getRecord
+  400 after release (22479e17); the bidder's own event records stay in the bidder's repo. Before: kcp 438ca0fa bidders (p2p
+  rollout 5), CLI 69aa8b0f, 15:13-15:17Z (also rollout 2, 13:49-13:56Z)
 
 ```mermaid
 sequenceDiagram

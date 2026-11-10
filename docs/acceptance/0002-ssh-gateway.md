@@ -7,7 +7,7 @@ end revokes the token before the contract is released.
 - Gateway: Go `SshServer` + one per-user `Requester` per signed-in DID (`requester-<stamp(did)>`)
 - Port 22 on `socialweb.computer` = Go ssh gateway (legacy deno gateway disabled, kept for rollback)
 - Web half: `https://ssh.socialweb.computer` (sign-in + `/keys`)
-- Last pass: kcp 69aa8b0f (bin 5b8682fd, p2p rollout 2), 2026-11-10 13:33Z: alice, web sign-in + a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 62 s (the bidder reached over its offering endpoints); earlier: rc152 2026-11-01 (owner account, atirc agent), rc154 restart check
+- Last pass: gateway kcp 438ca0fa, bidders rollout 6 (2d367fe8), 2026-11-10 16:45Z: alice signed in again on the web page (headless oauth-signin.ts, `--start-api`), a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 61 s, key removed; before: kcp 69aa8b0f (bin 5b8682fd, p2p rollout 2), 2026-11-10 13:33Z: alice, web sign-in + a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 62 s (the bidder reached over its offering endpoints); earlier: rc152 2026-11-01 (owner account, atirc agent), rc154 restart check
 - The port-22 gateway is its own unit, `swc-ssh-gateway.service` (`run gateway ssh --instance sg`, state `/var/lib/socialweb-computer/socialweb/sg`): `infra/hosts/socialweb-computer.sh --apply` upgrades `bin/current` but does not restart it; restart it after (it runs `bin/current`)
 
 ```mermaid
