@@ -35,6 +35,7 @@ internal/controllers/relaystatus	controller.go:Controller.Reconcile	requeue	Defa
 internal/controllers/remoteopenbao	controller.go:Controller.Reconcile	requeue	DefaultCheckInterval 30s (Options.CheckInterval 0 is the default, <0 none); none when spec.suspend	health probe of a remote OpenBao over HTTPS; no event stream
 internal/controllers/remotepds	controller.go:Controller.Reconcile	requeue	DefaultCheckInterval 30s (Options.CheckInterval 0 is the default, <0 none)	describeServer on a remote PDS; no health event stream
 internal/controllers/runtime	status.go:RefreshAfter	requeue	the caller's period; none when <=0	the guarded helper every RefreshAfter requeue line calls
+internal/controllers/runtime	controller.go:adapter.reconcile	requeue	1s constant while the request's export has no provider	a request reaches the adapter before its APIExport provider is added (core start-up); the multi provider offers no event for an added provider
 internal/controllers/ttl	controller.go:expiry.Reconcile	deadline	finish time plus the TTL	the object's TTL
 internal/controllers/vaultcertificate	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	lists and reads PKI certificates on OpenBao; no change stream, rotationDue is computed against the clock
 internal/controllers/vaultcredential	controller.go:Controller.Reconcile	requeue	DefaultRefresh 30s (Options.Refresh 0 is the default, <0 none)	reads KV metadata from OpenBao; no change stream, rotationDue is computed against the clock
