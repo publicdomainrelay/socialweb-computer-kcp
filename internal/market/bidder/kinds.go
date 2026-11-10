@@ -56,6 +56,17 @@ func (b *Bidder) inboxServesKind(ctx context.Context, rfpURI, rfpCID string) (st
 	return kind, b.servesKind(kind)
 }
 
+func (b *Bidder) payloadRefused(ctx context.Context, rfp *market.RFP) (string, error) {
+	payload, err := b.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
+	if err != nil {
+		return "", fmt.Errorf("bidder: resolving the RFP payload: %w", err)
+	}
+	if _, err := parseVMRecord(payload.Value); err != nil {
+		return err.Error(), nil
+	}
+	return "", nil
+}
+
 func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string, error) {
 	payload, err := b.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
 	if err != nil {

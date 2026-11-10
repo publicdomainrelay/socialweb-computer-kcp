@@ -257,7 +257,16 @@ func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time
 		b.failBid(ctx, bid, "InvalidSignature", err.Error(), now)
 		return nil, nil
 	}
-	refused, err := b.guestToolsRefused(ctx, rfp)
+	refused, err := b.payloadRefused(ctx, rfp)
+	if err != nil {
+		return nil, err
+	}
+	if refused != "" {
+		b.log.Info("bidder_payload_invalid", "rfp", bid.Spec.Rfp.URI, "requester", bid.Spec.Requester, "reason", refused)
+		b.failBid(ctx, bid, "InvalidPayload", refused, now)
+		return nil, nil
+	}
+	refused, err = b.guestToolsRefused(ctx, rfp)
 	if err != nil {
 		return nil, err
 	}
