@@ -78,16 +78,13 @@ const (
 var (
 	RequesterOAuthScope = dedupeScopes(
 		[]string{ScopeAtproto},
-		collectionScopes([]string{"create", "update"},
+		[]string{repoScope([]string{"create", "update"},
 			CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
 			CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
 			CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release,
-			CollectionPolicyGhaLite, CollectionPolicyTypeScript),
-		[]string{collectionScope(CollectionFedproxyRBAC, "create", "update", "delete")},
-		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
-		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},
-		[]string{collectionScope(CollectionAssociationRequest, "create", "update", "delete")},
-		collectionScopes([]string{"create", "update", "delete"}, CollectionInfra, CollectionEphemeralInfra),
+			CollectionPolicyGhaLite, CollectionPolicyTypeScript)},
+		[]string{repoScope([]string{"create", "update", "delete"}, CollectionFedproxyRBAC, CollectionBadgeBlueKeys,
+			CollectionAssociation, CollectionAssociationRequest, CollectionInfra, CollectionEphemeralInfra)},
 		[]string{RPCSubmitRFP, RPCSubmitAccept, RPCSubmitBid, RPCSubmitEvent},
 		[]string{RPCAtircMint, RPCAtircRevoke},
 		[]string{RepoTangledVouchWrite},
@@ -151,10 +148,10 @@ var (
 	)
 )
 
-var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
-	CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets, CollectionGuestAgentStart,
-	CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
-	[]string{RepoIngressOfferWrite, RepoPeerWrite})
+var RequesterOptionalScopes = []string{repoScope([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent,
+	CollectionVMDelete, CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
+	CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release, CollectionPolicyGhaLite,
+	CollectionPolicyTypeScript), RepoIngressOfferWrite, RepoPeerWrite}
 
 var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)
 
@@ -222,6 +219,9 @@ func KnownGrant(granted []string) bool {
 
 func ScopeSubject(scope string) string {
 	resource, subject, _ := parsePermission(scope)
+	if resource == "repo" {
+		subject = strings.Join(repoCollections(scope), ",")
+	}
 	if subject == "" || (resource != "repo" && resource != "rpc") {
 		return scope
 	}
@@ -236,31 +236,55 @@ func grantedBy(want string, granted []string, have map[string]bool) bool {
 	if have[ScopeTransitionGeneric] {
 		return true
 	}
-	needed := map[string]bool{}
-	if resource == "repo" {
+	if resource == "rpc" {
+		for _, scope := range granted {
+			gotResource, gotSubject, got := parsePermission(scope)
+			if gotResource == resource && (gotSubject == subject || gotSubject == "*") {
+				if aud := got.Get("aud"); aud == "*" || aud == params.Get("aud") {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	collections := repoCollections(want)
+	if len(collections) == 0 {
+		return false
+	}
+	for _, collection := range collections {
+		needed := map[string]bool{}
 		for _, action := range orAll(params["action"]) {
 			needed[action] = true
 		}
-	}
-	for _, scope := range granted {
-		gotResource, gotSubject, got := parsePermission(scope)
-		if gotResource != resource || (gotSubject != subject && gotSubject != "*") {
-			continue
-		}
-		if resource == "rpc" {
-			if aud := got.Get("aud"); aud == "*" || aud == params.Get("aud") {
-				return true
+		for _, scope := range granted {
+			gotResource, _, got := parsePermission(scope)
+			if gotResource != "repo" {
+				continue
 			}
-			continue
+			if gotCollections := repoCollections(scope); !slices.Contains(gotCollections, collection) && !slices.Contains(gotCollections, "*") {
+				continue
+			}
+			for _, action := range orAll(got["action"]) {
+				delete(needed, action)
+			}
 		}
-		for _, action := range orAll(got["action"]) {
-			delete(needed, action)
-		}
-		if len(needed) == 0 {
-			return true
+		if len(needed) > 0 {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func repoCollections(scope string) []string {
+	head, query, _ := strings.Cut(strings.TrimSpace(scope), "?")
+	if _, positional, ok := strings.Cut(head, ":"); ok && positional != "" {
+		return []string{positional}
+	}
+	params, err := url.ParseQuery(query)
+	if err != nil {
+		return nil
+	}
+	return params["collection"]
 }
 
 func parsePermission(scope string) (string, string, url.Values) {
@@ -290,6 +314,14 @@ func orAll(actions []string) []string {
 
 func collectionScope(nsid string, verbs ...string) string {
 	return "repo:" + nsid + "?action=" + strings.Join(verbs, "&action=")
+}
+
+func repoScope(verbs []string, nsids ...string) string {
+	if len(nsids) == 1 {
+		return collectionScope(nsids[0], verbs...)
+	}
+	query := url.Values{"collection": nsids, "action": verbs}
+	return "repo?" + query.Encode()
 }
 
 func collectionScopes(verbs []string, nsids ...string) []string {
