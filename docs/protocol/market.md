@@ -155,7 +155,7 @@ Every record also reaches the other side two ways. The XRPC call is the fast pat
   <listen>}`, getRecord of the answer every 1 s for up to 45 s, the answer's `a=fingerprint` checked against the listen
   record, the offer deleted once answered (needs the optional scope
   `repo:computer.socialweb.ingress.offer?action=create&action=delete`), then one datachannel labelled `market` per HTTP/1.1
-  connection
+  connection; a PeerConnection with no open datachannel for 5 min is closed (the next dial signals again)
 - `ingress[]` on the records and calls: `ingress.webRTC` listen/offer/answer records for a party whose HTTP endpoint is not reachable ([lexicons-market.md](lexicons-market.md#ingresswebrtc))
 
 ## Bid Window And Selection

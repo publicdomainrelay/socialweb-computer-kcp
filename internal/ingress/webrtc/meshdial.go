@@ -26,6 +26,8 @@ const (
 
 	MeshAnswerPoll = time.Second
 
+	MeshIdleClose = 5 * time.Minute
+
 	fingerprintAttribute = "a=fingerprint:"
 )
 
@@ -56,8 +58,6 @@ type MeshDialer struct {
 
 	mu sync.Mutex
 
-	// ponytail: one PeerConnection per answerer for the dialer's lifetime (until it fails);
-	// close idle ones if a long-lived requester talks to many bidders.
 	peers map[string]*meshPeer
 }
 
@@ -73,6 +73,10 @@ type meshPeer struct {
 	first *meshChannel
 
 	err error
+
+	channels int
+
+	idle *time.Timer
 }
 
 type meshChannel struct {
@@ -138,7 +142,7 @@ func (d *MeshDialer) DialContext(ctx context.Context, _, address string) (net.Co
 	d.mu.Unlock()
 	var err error
 	if channel == nil {
-		if channel, err = newMeshChannel(peer.pc); err != nil {
+		if channel, err = newMeshChannel(peer.pc, d.hold(peer)); err != nil {
 			return nil, err
 		}
 	}
@@ -221,7 +225,7 @@ func (d *MeshDialer) connect(ctx context.Context, address string, peer *meshPeer
 			peer.kill()
 		}
 	})
-	if peer.first, err = newMeshChannel(pc); err != nil {
+	if peer.first, err = newMeshChannel(pc, d.hold(peer)); err != nil {
 		return err
 	}
 	offer, err := pc.CreateOffer(nil)
@@ -305,16 +309,45 @@ func (d *MeshDialer) answer(ctx context.Context, address, session string, identi
 	}
 }
 
-func newMeshChannel(pc *webrtc.PeerConnection) (*meshChannel, error) {
+func (d *MeshDialer) hold(peer *meshPeer) func() {
+	d.mu.Lock()
+	peer.channels++
+	if peer.idle != nil {
+		peer.idle.Stop()
+	}
+	d.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if peer.channels--; peer.channels > 0 {
+				return
+			}
+			peer.idle = time.AfterFunc(MeshIdleClose, func() {
+				d.mu.Lock()
+				idle := peer.channels == 0
+				d.mu.Unlock()
+				if idle {
+					d.log.Info("webrtc_mesh_idle_closed", "idle", MeshIdleClose.String())
+					peer.kill()
+				}
+			})
+		})
+	}
+}
+
+func newMeshChannel(pc *webrtc.PeerConnection, release func()) (*meshChannel, error) {
 	ordered := true
 	dc, err := pc.CreateDataChannel(MeshLabel, &webrtc.DataChannelInit{Ordered: &ordered})
 	if err != nil {
+		release()
 		return nil, fmt.Errorf("webrtc mesh: the datachannel: %w", err)
 	}
-	out := &meshChannel{conn: channelconn.New(dc.Send, dc.Close), opened: make(chan struct{})}
+	out := &meshChannel{conn: channelconn.New(dc.Send, func() error { release(); return dc.Close() }), opened: make(chan struct{})}
 	dc.OnOpen(func() { close(out.opened) })
 	dc.OnMessage(func(message webrtc.DataChannelMessage) { out.conn.Push(message.Data) })
-	dc.OnClose(func() { out.conn.CloseWithError(io.EOF) })
+	dc.OnClose(func() { release(); out.conn.CloseWithError(io.EOF) })
 	return out, nil
 }
 
