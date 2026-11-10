@@ -29,6 +29,8 @@ const (
 
 	AgentIrohKeyFile = "/etc/atirc/iroh_key.hex"
 
+	AgentConfigFile = "/etc/atirc/config.toml"
+
 	AssociationRefDir = "/etc/socialweb-computer"
 
 	DefaultAssociationRefFile = AssociationRefDir + "/association-ref"
@@ -226,6 +228,9 @@ install -d -m 0700 -o "${nick}" -g "${nick}" "${home}/.config" "${dir}"
 chown "${nick}:${nick}" "${dir}/iroh_key.tmp"
 chmod 0600 "${dir}/iroh_key.tmp"
 mv -f "${dir}/iroh_key.tmp" "${dir}/iroh_key"
+if [ -s "` + AgentConfigFile + `" ]; then
+  install -m 0600 -o "${nick}" -g "${nick}" "` + AgentConfigFile + `" "${dir}/config.toml"
+fi
 run=(runuser -u "${nick}" -- env XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" ATIRC_CONFIG_DIR="${dir}")
 "${run[@]}" ` + AtircBinary + ` agent run &
 exec "${run[@]}" ` + AtircBinary + ` mesh run --no-publish

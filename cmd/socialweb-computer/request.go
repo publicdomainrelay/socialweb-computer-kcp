@@ -52,7 +52,7 @@ const (
 	sshConnectionFailed  = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated")
@@ -1228,6 +1228,13 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		if bundle, err = withAgentPlaceholder(bundle, r.contract.Agent.EnvFile); err != nil {
 			return a.fail(exitRefused, "run request: --agent: %v", err)
 		}
+		if file := vals.String("agent-config"); file != "" {
+			if bundle, err = withAgentConfig(bundle, file); err != nil {
+				return a.fail(exitRefused, "run request: --agent-config: %v", err)
+			}
+		}
+	} else if vals.String("agent-config") != "" {
+		return a.fail(exitRefused, "run request: --agent-config needs --agent")
 	}
 	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)

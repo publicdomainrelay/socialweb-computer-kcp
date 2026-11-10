@@ -277,7 +277,9 @@ again; user_data installs `atirc-agent.service`
     when the envFile's sha256 differs from the one the agent's run script read. A requester-originated
     `guest.agentStart` makes socialweb-guest-agent run `systemctl start --no-block atirc-agent.service`; its run script
     copies the key to the agent user's `~/.config/atirc/iroh_key` (0600) and runs `atirc mesh run --no-publish` beside
-    `atirc agent run`. `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
+    `atirc agent run`; with `/etc/atirc/config.toml` in the bundle (`run request --agent-config <file>`: an atirc client config, 0600,
+    its `[agent] harness` and `[agent.anthropic]` model, baseUrl, apiKey) it installs that as the agent user's `config.toml` (0600),
+    where `atirc agent run` takes its harness. `run request --agent[=<envFile>]` asks for one; `run request agent <name>` starts it. atirc is
     linux/amd64 only on guests; it is the pinned source build `assets.atirc` (fetch kind cargosrc,
     `scripts/build-cargosrc.sh`), also embedded for the host, where an `AtircNode` (export hostprocesses,
     `internal/controllers/atircnode`, `examples/infra/atircnode.yaml`) runs `atirc mesh run` as a HostProcess (secrets

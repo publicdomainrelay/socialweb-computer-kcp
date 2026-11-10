@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -13,7 +14,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 )
 
-const atircEnvPlaceholder = ""
+const (
+	atircEnvPlaceholder = ""
+
+	maxAgentConfigBytes = 2 << 20
+)
 
 func agentOf(value string) *v1alpha1.ComputeContractAgent {
 	switch envFile := strings.TrimSpace(value); envFile {
@@ -44,6 +49,32 @@ func withAgentPlaceholder(bundle []byte, envFile string) ([]byte, error) {
 		return nil, fmt.Errorf("the agent envFile %q is not an absolute path", envFile)
 	}
 	return withPlaceholder(bundle, envFile, atircEnvPlaceholder)
+}
+
+func withAgentConfig(bundle []byte, file string) ([]byte, error) {
+	st, err := os.Stat(file)
+	switch {
+	case err != nil:
+		return nil, err
+	case !st.Mode().IsRegular():
+		return nil, fmt.Errorf("%s is not a regular file", file)
+	case st.Mode().Perm()&0o077 != 0:
+		return nil, fmt.Errorf("%s is readable by group or others (mode %o); chmod 600 it", file, st.Mode().Perm())
+	case st.Size() == 0 || st.Size() > maxAgentConfigBytes:
+		return nil, fmt.Errorf("%s is empty or larger than %d bytes", file, maxAgentConfigBytes)
+	}
+	text, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := bundlePaths(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if slices.Contains(paths, cloudinit.AgentConfigFile) {
+		return nil, fmt.Errorf("the secrets bundle already names %s", cloudinit.AgentConfigFile)
+	}
+	return withPlaceholder(bundle, cloudinit.AgentConfigFile, string(text))
 }
 
 func bundlePaths(bundle []byte) ([]string, error) {

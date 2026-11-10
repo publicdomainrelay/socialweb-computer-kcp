@@ -606,6 +606,10 @@
       "bare": "/etc/atirc/atirc.env",
       "description": "run request: --agent[=<envFile>] asks for an atirc agent on the guest (spec.agent; envFile default /etc/atirc/atirc.env): the bundle gets an empty entry at envFile (mode 0600, merged into --secrets or alone); after the receipt the requester writes the agent's atirc mesh identity into it and its iroh key beside it, and publishes computer.socialweb.peer/<nick>.<handle> in its repo (no token); run request agent <name> starts atirc-agent.service on the held guest; linux/amd64 guests only"
     },
+    "agent-config": {
+      "type": "string",
+      "description": "run request --agent: an atirc client config file on this host ([agent] harness, addPath, [agent.anthropic] model, baseUrl, apiKey; the format `atirc config agent` writes to ~/.config/atirc/config.toml), mode 0600 and at most 2 MiB; it goes into the secrets bundle at /etc/atirc/config.toml (0600, the invocation's own OpenBao only, never a record, an argument or a log) and the guest installs it as the agent user's atirc config (0600), from which atirc agent run takes the harness and its model settings"
+    },
     "guest-tools": {
       "type": "string",
       "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"
