@@ -84,7 +84,7 @@ func recordField(name, path string) map[string]any {
 }
 
 func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity string, id *v1alpha1.MarketIdentity, self LocalAccount,
-	subhandle string, colocated []Colocated) error {
+	subhandle, iroh string, colocated []Colocated) error {
 	keep := map[string]bool{}
 	scope := id.Status.AssociationScope
 	ref := id.Status.AssociationRef
@@ -93,9 +93,16 @@ func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity st
 	}
 	ownRKey := PeerRKey(subhandle, self.Handle)
 	created := identityField(identity, "metadata.creationTimestamp")
+	peerRecord := func(lease any) map[string]any {
+		out := map[string]any{"$type": PeerNSID, "lease": lease, "createdAt": created}
+		if iroh != "" {
+			out["iroh"] = iroh
+		}
+		return out
+	}
 	keep[PeerRecordName] = true
-	if err := c.applyPeerRecord(ctx, r, ws, PeerRecordName, RepoRefIn(self.DID, ws), PeerNSID, ownRKey, map[string]any{
-		"$type": PeerNSID, "lease": map[string]any{"uri": ref.URI, "cid": ref.CID}, "createdAt": created}); err != nil {
+	if err := c.applyPeerRecord(ctx, r, ws, PeerRecordName, RepoRefIn(self.DID, ws), PeerNSID, ownRKey,
+		peerRecord(map[string]any{"uri": ref.URI, "cid": ref.CID})); err != nil {
 		return err
 	}
 	for _, other := range colocated {
@@ -114,8 +121,8 @@ func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity st
 			"createdAt": created, "proof": proof}); err != nil {
 			return err
 		}
-		if err := c.applyPeerRecord(ctx, r, ws, peer, RepoRefIn(other.Account.DID, ws), PeerNSID, other.Name+"."+ownRKey, map[string]any{
-			"$type": PeerNSID, "lease": proof, "createdAt": created}); err != nil {
+		if err := c.applyPeerRecord(ctx, r, ws, peer, RepoRefIn(other.Account.DID, ws), PeerNSID, other.Name+"."+ownRKey,
+			peerRecord(proof)); err != nil {
 			return err
 		}
 	}

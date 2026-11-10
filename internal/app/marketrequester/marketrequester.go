@@ -10,8 +10,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
@@ -34,6 +36,9 @@ const (
 	RequesterContract       = "contract"
 	RequesterProfileNetwork = "market-network"
 	RequesterProfileDefault = "default"
+	PdsIrohIngress          = "pds-iroh"
+	IrohExposureSuffix      = "-iroh"
+	DumbpipeExecutable      = "dumbpipe"
 )
 
 var Workflows = []string{"requester-tangled-vouch", "requester-only-me", "requester-mutuals", "open"}
@@ -318,6 +323,18 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, inbound)...)
 	if plan.Local {
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, ingress)...)
+		dumbpipe, err := p.dumbpipe()
+		if err != nil {
+			return nil, err
+		}
+		if o.Spec.Peer != nil && dumbpipe != "" {
+			out = append(out, compose.Desired{Kind: compose.ComponentKindIngressProxy, Name: PdsIrohIngress, Spec: v1alpha1.IngressProxySpec{
+				ComponentSpec: compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindIngressProxy, PdsIrohIngress), nil),
+				Provider:      v1alpha1.IngressProviderIroh,
+				Iroh:          &v1alpha1.IngressProxyIroh{DumbpipePath: dumbpipe},
+			}}, compose.ExposureDesired(compose.ComponentKindPds, compose.PdsComponent, IrohExposureSuffix, exposurev1alpha1.ExposureModeIngress, "", "/",
+				PdsIrohIngress, exposurev1alpha1.ExposureTLS{}))
+		}
 	}
 	return compose.ApplyOverrides(o.Spec.Components, out)
 }
@@ -579,7 +596,13 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		}
 	}
 	if peer := o.Spec.Peer; peer != nil {
-		if err := c.ApplyPeerRecords(ctx, r, ws, RequesterIdentity, id, acct, peer.Subhandle, colocated); err != nil {
+		iroh := ""
+		if raw, ok := snap.ExposureURL(compose.ServiceNameFor(compose.ComponentKindPds, compose.PdsComponent) + IrohExposureSuffix); ok {
+			if endpoint, err := market.EndpointFor(raw); err == nil && endpoint.Kind == market.EndpointIroh {
+				iroh = endpoint.Address
+			}
+		}
+		if err := c.ApplyPeerRecords(ctx, r, ws, RequesterIdentity, id, acct, peer.Subhandle, iroh, colocated); err != nil {
 			return ctlruntime.Result{}, err
 		}
 	}
@@ -620,6 +643,18 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.wait("waiting for the requester's MarketIdentity to sign in")
 	}
 	return p.wait("waiting for every component to be ready")
+}
+
+func (p *pass) dumbpipe() (string, error) {
+	record := p.c.Config().Record
+	if record == nil {
+		return "", nil
+	}
+	rec, err := record()
+	if err != nil {
+		return "", fmt.Errorf("marketrequester: reading the instance record for dumbpipe: %w", err)
+	}
+	return rec.Executables[DumbpipeExecutable].Path, nil
 }
 
 func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandle string, plc bool) ([]compose.Colocated, error) {
