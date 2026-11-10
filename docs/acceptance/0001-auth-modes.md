@@ -13,8 +13,33 @@ This is the runnable acceptance used for plans 0023 and 0024. It exercises:
   ACC34-CLI-SSH).
 
 Run it from a host with `goat`, `kubectl`, `ssh` to `socialweb.computer`, `hat-7`
-and `hat-9`, and the credential files named below. It changes the prod gateway
+and `hat-9`, `dumbpipe` on PATH, and the credential files named below. The
+requester tries iroh first when `dumbpipe` is on PATH; hat-9 offers no https, so
+a requester host without `dumbpipe` cannot reach it. It changes the prod gateway
 and the bidders. Do not run it without that authority.
+
+## Hosts for this pass (2026-11-10)
+
+- hat-7 is john's prod bidder (`did:plc:7q5lnitxv4meizdon5fmhzrq`). Its offering
+  endpoints are iroh, https and webrtc. Do not re-identity hat-7 and do not end
+  its session.
+- hat-9 is bob's bidder (`did:plc:4vcig7s43z3nyqrnepmcfzqt`). Its offering
+  endpoints are iroh and webrtc.
+- Both serve the compute kinds `vm` and `deno`.
+- The oauthQr bidder parts (sections 2, 7 and the section 9 sign-in) run on
+  hat-8 as a temporary prod-qr bidder for bob: `socialweb-computer install
+  bidder` (or `run bidder`) with profile `prod-qr` on hat-8, joined to the prod
+  market as bob. Read `hat-8` and its kubeconfig where the steps say `hat-7`.
+  After the pass, tear it down and delete its offering and heartbeat records in
+  bob's repo with `deleteRecord`; a getRecord of each then answers
+  RecordNotFound. A step that only reads may run on the existing hat-9 bob
+  bidder instead.
+- Gateway steps are lead-approved. Take a backup first and verify after.
+  Coordinate them with whoever redeploys the gateway.
+- Market service auth uses a hostname-free audience: `<bidder DID>#pdr_temp_market`
+  and `<bidder DID>#pdr_temp_compute_event`. The gateway cluster XRPC audience
+  (`AUD` below) is unchanged.
+- Every market read is one getRecord at a computable key; no step lists records.
 
 This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
@@ -184,8 +209,13 @@ keep `spec.suspend`, which stops the component. Section 7 uses it.
 ## 2. Resume hat-7 and point it at the gateway PDS firehose
 
 Read the gateway PDS ingress URL from its Exposure. Then apply it on hat-7 as a
-RelayEventSource and name it in the root's `spec.comms.eventSourceRefs`. The oauthQr Bidder advertises no inbound market endpoint; it
-receives `market.rfp` and `market.accept` from this stream.
+RelayEventSource and name it in the root's `spec.comms.eventSourceRefs`. It
+receives `market.rfp` and `market.accept` from this stream. The offering lists
+the bidder's endpoints as `endpoints: [{kind, address}]` with kind `iroh`,
+`webrtc` or `https`. A prod-qr bidder lists `https` only with the bidder option
+`market-https=true` (config.json `"bidder-options": "--market-https=true"`).
+hat-7 lists iroh, https and webrtc; hat-9 lists iroh and webrtc. The requester
+reads the winner's offering to reach it.
 
 ```bash
 PDS_URL=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K get exposures.exposure.socialweb.computer svc-pds-pds-ingress -o jsonpath='{.status.address}'")
@@ -521,6 +551,17 @@ offering record `cid` twice, 60 s apart: it must not change. A refresh re-reads
 the offering, corrects it only when it drifted and checks relay visibility; four
 refreshes of a correct offering write nothing to the PDS.
 
+Read the offering endpoints with one getRecord (`D7` and `D9` from section 4):
+
+```bash
+for D in "$D7" "$D9"; do
+  goat get "at://$D/com.publicdomainrelay.temp.market.offering/self" | jq -c '[.endpoints[].kind], has("endpointUrl")'
+done
+```
+
+hat-7 prints `["iroh","https","webrtc"]` and hat-9 `["iroh","webrtc"]` (any
+order); each prints `false`: no offering carries `endpointUrl`.
+
 A direct child edit is reverted and reported:
 
 ```bash
@@ -574,6 +615,9 @@ role scope, before this section:
 3. Sign bob in again with the commands of section 2 (read the current QR url
    right before `scripts/oauth-signin.ts`; it expires after 5 minutes), and
    wait for `Ready`.
+
+On the 2026-11-10 pass these three steps run on the hat-8 prod-qr bidder, not on
+hat-7: hat-7's session is not ended (Hosts for this pass).
 
 hat-9 and local are localRepo bidders; their records go to their own PDS and
 need no sign-in.
@@ -640,7 +684,12 @@ Release, then check the host holds no ComputeVM for it:
 $SWC run request release "$NAME" --state-dir "$R"
 ```
 
-`run request release` ends `Released`. Read `computevms.socialweb.computer -o
+`run request release` ends `Released`. The requester log has
+`requester_contract_records_deleted`: its accept, rfp, compute.vm,
+contract-scoped market.association and com.fedproxy.rbac records are gone. A
+getRecord of each at its key in alice's repo answers RecordNotFound; read it 3
+times. A second `run request release` of a Released invocation only removes it.
+Read `computevms.socialweb.computer -o
 wide` on `$HOST` as in section 6; no ComputeVM of this contract is left. Resume
 the two paused bidders as in section 6 and repeat for the next host. ACC34
 passes when all three hosts (local, hat-9, hat-7) pass.
@@ -648,4 +697,6 @@ passes when all three hosts (local, hat-9, hat-7) pass.
 When the requester waits for the guest's publicKey or answer and times out, read
 the winning bidder's core journal for "the requester refused the market event"
 and "submitting the market event to the requester failed" before retrying, and
-on hat-7 recheck the scope note above.
+on hat-7 recheck the scope note above. A bidder HTTP 400 on `market.event`
+means an unsigned event: the requester is an old build. Guest events are signed
+and stored at computed keys.

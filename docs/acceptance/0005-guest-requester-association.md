@@ -7,7 +7,7 @@ that record, R2 rents a nested VM, and releasing alice's contract cascades: R2 r
 first, every token in the chain is revoked, the association record is deleted.
 
 - Plan [0036](../plans/0036-record-association.yaml) item V1 (A4-A8)
-- Last pass: rc128 cascade 2026-10-30 20:34Z (atirc-dev confirmed server-side); rc127 V1 all 3 tokens revoked
+- Last pass: part A rc128 cascade 2026-10-30 20:34Z (atirc-dev confirmed server-side); part B 2026-11-10 (see its end)
 
 ```mermaid
 flowchart LR
@@ -28,7 +28,9 @@ flowchart LR
 | --- | --- |
 | Accounts | alice (authority) signed in by QR; R2 is created inside the VM, nothing to prepare |
 | Vouches | bob + john vouch alice; alice vouches bob + john (R2 inherits trust only through the association) |
-| Versions | **all** bidders on the same rc (>= rc128): a bidder that ignores `guestTools` can win and the guest has no `socialweb-computer` |
+| Versions | **all** bidders on the same main (>= kcp 8601013d): a bidder that ignores `guestTools` can win and the guest has no `socialweb-computer`; the guest runs the winner's binary, so part B needs it on every bidder |
+| Requester host | `dumbpipe` on PATH: an iroh-only bidder (hat-9: offering `endpoints` [iroh, webrtc]) is reached over iroh first |
+| Owner | part A as alice (QR); part B ran as bob (pdsAccount, `--atproto-pds-url https://bsky.social`); any requester whose bidders allow it works |
 | Scopes | requester `guest.secretsUpdated` c/u, `market.associationRequest` c/u/d; bidder `guest.requesterDid` c (re-sign-in after these were added) |
 | atirc | child mint below the r2 token (any depth), lease server |
 | Watchers | host watchers (both VMs may land on different hosts), atirc-dev for revocations |
@@ -87,7 +89,10 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
    association record is RecordNotFound (3 reads).
 5. Out-of-band loss (a second round): delete the outer ComputeVM on its bidder (0007) without a release;
    `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated`. With the bidder down
-   instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). No cleanup runs in either case.
+   instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). R2 never retires (its VM is
+   gone: both DIDs stay `plc_operation`), yet nothing it published is trusted. On the bidder's vm.terminated the owner's
+   requester logs `requester_contract_records_deleted`: its accept, rfp, compute.vm, contract-scoped association and
+   rbac record are RecordNotFound within seconds. A policy with `association.maxDepth: 1` denies mesh1 (one link only).
 
 Last pass: 2026-11-10. Steps 1, 2 (records) and 4 on kcp cef6a0ca (hat-9): both DIDs `plc_tombstone`, association
 RecordNotFound x3. Steps 1-3 and 5 on kcp 69aa8b0f (hat-7): crawl ok, both peer records by getRecord over https and over
@@ -102,7 +107,9 @@ from the chain (the bidder backstop). That run found the requester kept its cont
 - R2 rents a nested VM, grandchild agent joins (3 levels: alice -> r2 -> vm)
 - Outer-only release: R2 contract Released first, outer Released, exit 0
 - `revocations.ndjson` holds r2, VM agent (grandchild by suffix) before / at termination
-- Association record gone after release (`getRecord` -> RecordNotFound, checked 3 times)
+- Association record and the requester's other contract records (accept, rfp, compute.vm, rbac) gone after release or
+  a bidder termination (`getRecord` at their keys -> RecordNotFound, checked 3 times); R2 and co-located DIDs `plc_tombstone`
+  after a release
 - Both hosts empty (watchers)
 
 ## Cleanup
@@ -111,6 +118,7 @@ from the chain (the bidder backstop). That run found the requester kept its cont
 - Orphan R2 VM: [0007](0007-bidder-termination.md) on its host; token dies by lease
 - Unrevoked token: atirc-dev server-side revoke by subhandle (suffix covers children)
 - R2 runs **no** `atirc sub` (owner rule); kill any test sub
+- `run request release <name>` of an invocation that is Released, or Failed before a VM was held, only removes it
 
 ## Known pitfalls
 

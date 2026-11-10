@@ -26,7 +26,7 @@ sequenceDiagram
   B->>R: bid
   R->>R: requester-tangled-vouch: requester vouched bidder?
   R->>B: accept
-  B->>R: receipt, guest events (onNetwork, hostKeys, vm.sandbox)
+  B->>R: receipt, signed guest events at computed keys (onNetwork, hostKeys, vm.sandbox)
   R->>I: chat.atirc.mint (agent1, leased on receipt + vm.terminated)
   R->>K: ComputeContracts Held, EphemeralInfra Deployed
   U->>B: ssh vm1 (iroh, webrtc); read sbx1 stdout
@@ -40,12 +40,12 @@ sequenceDiagram
 
 | Item | Need |
 | --- | --- |
-| Bidder | a bidder the user configured: `install bidder` with the default policy (no `--bidder-policy`: `bidder-tangled-vouch`), [../bidder.md](../bidder.md); for sbx1 it must serve deno: `run bidder --compute-kinds vm,deno`, or `install bidder --compute-kinds vm,deno` (written to its `config.json`; on an already installed bidder, run the install again with the flag, which restarts the bidder unit); optional `--bidder-operator-signin <operator handle>` for the operator vouch of step A4 |
+| Bidder | a bidder the user configured: `install bidder` with the default policy (no `--bidder-policy`: `bidder-tangled-vouch`), [../bidder.md](../bidder.md); for sbx1 it must serve deno: `run bidder --compute-kinds vm,deno`, or `install bidder --compute-kinds vm,deno` (written to its `config.json`; on an already installed bidder, run the install again with the flag, which restarts the bidder unit); optional `--bidder-operator-signin <operator handle>` for the operator vouch of step A4. A `prod-qr` `install bidder` lists `https` in its offering `endpoints` only with the bidder option `market-https=true` (config.json `"bidder-options": "--market-https=true"`); without it the offering lists iroh and webrtc |
 | Bidder DID | `MarketBidder app` `status.did` in the bidder kcp (the operator reads it); it replaces `REPLACE-BIDDER-DID` in every contract of `mixed-prod.yaml` |
 | Requester account | a real atproto account (handle resolves to its DID, PDS public) signed in by OAuth QR; the creds file owner-only (mode 0600), read only by `scripts/oauth-signin.ts` |
 | Vouches | both directions: requester -> bidder by [../../examples/infra/vouch.yaml](../../examples/infra/vouch.yaml) in the requester kcp (needs the optional scope `repo:sh.tangled.graph.vouch`) or `goat`; bidder operator -> requester by [../../examples/infra/vouch-bidder-operator.yaml](../../examples/infra/vouch-bidder-operator.yaml) in the bidder kcp (operator sign-in) or `goat` from the operator account |
 | atirc | a token of your own (`atirc token <nick>`) to `atirc sub` the owner channel; never print it |
-| Host | Linux, `kubectl`, `jq`, `ssh`, the release or dev binary of the commit under test as `$SWC`; B: root on the requester host |
+| Host | Linux, `kubectl`, `jq`, `ssh`, `dumbpipe` on PATH (the requester tries iroh first; a bidder without https, such as hat-9, is reached only over iroh or webrtc), the release or dev binary of the commit under test as `$SWC`; B: root on the requester host |
 | Rules | [README.md](README.md) shared rules: announce on atirc first, one driver per account, release what you rent |
 
 ## Steps
@@ -68,7 +68,8 @@ minutes before the first apply when a contract was denied before (verdicts are c
    record with `goat record create` from the requester account instead.
 4. Bidder operator -> requester vouch: in the bidder kcp, `vouch-bidder-operator.yaml` with `REPLACE-REQUESTER-DID` (the
    operator sign-in of [../bidder.md](../bidder.md)), or `goat` from the operator account; check with `goat get
-   "at://<operator did>/sh.tangled.graph.vouch/<requester did>" | jq -r .kind` -> `vouch`.
+   "at://<operator did>/sh.tangled.graph.vouch/<requester did>" | jq -r .kind` -> `vouch`. When the write needs the
+   owner's account, it is owner-only: ask the owner to write it; an agent does not.
 5. Apply: `sed -e "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat "$(jq -r .sshPublicKey
    "$ST/requesters/mp/ready.json")")|" -e "s/REPLACE-BIDDER-DID/<bidder did>/" examples/infra/mixed-prod.yaml | kubectl
    apply -f -`; `kubectl wait ephemeralinfras.socialweb.computer/mixedprod --for=jsonpath='{.status.phase}'=Deployed
@@ -86,8 +87,10 @@ minutes before the first apply when a contract was denied before (verdicts are c
    Held, step 6 ssh works again, the agent still answers.
 10. Delete: `kubectl delete ephemeralinfras.socialweb.computer mixedprod`: each contract releases first; agent1
     `status.atircRevokes` is Done before the bidder's `vm.terminated`; the EphemeralInfra and its ComputeContracts are
-    gone; the bidder host is empty ([0008](0008-host-observer.md) watcher: no VM unit, no sandbox); the two vouch records
-    are still in the repos (`deletionPolicy: Retain`; `goat get` both).
+    gone; the bidder host is empty ([0008](0008-host-observer.md) watcher: no VM unit, no sandbox); the requester log has
+    `requester_contract_records_deleted`, and a getRecord of each contract record (accept, rfp, compute.vm,
+    contract-scoped market.association, com.fedproxy.rbac) at its key answers RecordNotFound (read 3 times); the two
+    vouch records are still in the repos (`deletionPolicy: Retain`; `goat get` both).
 11. Stop: Ctrl-C the `run requester`.
 
 ### B. install requester (systemd user unit)
@@ -135,6 +138,7 @@ user (`check-host` reports it).
 | agent1: `requester_agent_bundle_placeholder`, `requester_service_auth` `atircSigning` `oauth`, `requester_atirc_minted`, nick JOIN after agent-start | requester log, atirc channel | Held ~20 s, JOIN within a minute of agent-start (0012 prod readings) |
 | restart: same DID, ready file rewritten, contracts Held | ready file, ComputeContracts | ready again in seconds (quickstart-prod section 7: 1.4 s) |
 | delete: `requester_atirc_revoked`, `status.atircRevokes` Done, then vm.delete, `vm.terminated`, contracts gone | requester log, bidder repo, kcp | under a minute |
+| contract records deleted: `requester_contract_records_deleted`; accept, rfp, compute.vm, association, rbac RecordNotFound at their keys | requester log, getRecord in the requester repo | seconds after the release |
 | bidder host empty, vouch records present | 0008 watcher, `goat get` | right after the delete |
 
 ## Prod Readings (2026-11-01, rc159 `ec0f4849`, account alice)
@@ -174,6 +178,9 @@ No plaintext token, key or sign-in URL in any log (check 0 on every file).
 | 08:39:30 | restart without `--network` | refused: "created with other options (network "mxp" ...)" (the network is part of the same command) |
 | 08:39:39 | restart with `--network mxp` | ready in 1.6 s, same DID; 08:39:44 vm1 and sbx1 Failed `the held contract is not resumed: the policy run for the recorded winner ... the policy engine is not running`, then `infra_ephemeral_complete`, both released, the EphemeralInfra deleted |
 
+On today's main a `run request release` of an invocation that Failed before a VM was held, or is Released, only removes
+it; no second release is needed.
+
 ## Pass Criteria
 
 - `kubectl apply --dry-run=server -f examples/infra/mixed-prod.yaml` passes against the requester (A and B)
@@ -182,8 +189,8 @@ No plaintext token, key or sign-in URL in any log (check 0 on every file).
 - every contract lands on the pinned bidder (`status.contract.winner.did` is the DID put in for `REPLACE-BIDDER-DID`)
 - vm1 ssh over iroh and webrtc, sbx1 stdout, agent1 JOIN and answer, all on the same requester
 - a Ctrl-C (A) or unit restart (B) mid-run keeps the DID and every Held contract Held
-- delete: every agent token revoked before `vm.terminated` (0004 pass criteria), the bidder host empty, both vouch
-  records still present
+- delete: every agent token revoked before `vm.terminated` (0004 pass criteria), the bidder host empty, every contract
+  record of the requester RecordNotFound at its key, both vouch records still present
 - no token, password, key, cookie or sign-in URL on any terminal or in any log (plaintext check 0 on every log file)
 
 ## Cleanup
@@ -209,3 +216,5 @@ No plaintext token, key or sign-in URL in any log (check 0 on every file).
 | agent1 Failed `secrets need the requester ingress (getSecrets) or secretsFallback: Sealed` | `--comms-mode Firehose` has no inbound endpoint: add `--secrets-fallback Sealed` after `--`, or keep the default comms `Both` |
 | a restart is refused | the options after `--` differ from `requester.json` of the first start: give the same ones or none, or start a new name |
 | contracts land on another bidder | `REPLACE-BIDDER-DID` left in one contract or a wrong DID: every contract of the file carries its own `bidderDids` |
+| Held never reached after the accept | the winner's offering `endpoints` hold nothing the requester can use: no `dumbpipe` on PATH for iroh, and no https endpoint |
+| HTTP 400 on `market.event` at the bidder | the event is unsigned: the requester is an old build |

@@ -62,8 +62,14 @@ The record URI is what matters; the cid is what a counterparty must cite.
 
 1. Take the rkey from the journal (`termination-payload-<hash>`) and `com.atproto.repo.getRecord` it on the bidder PDS
    (repo = bidder DID, collection `com.publicdomainrelay.temp.compute.events.vm.terminated`). One getRecord, no scan
-2. Only if the rkey is unknown: page `listRecords` to the end; it is ordered by rkey, not time, so filter on `value.createdAt` for the release window (allow a minute of skew)
+2. If the journal line is gone, compute the rkey. It is `market.EventRKeys(market.TerminationKey(<receipt uri>))`:
+   `termination-payload-` and the first 32 hex chars of sha256 of `terminated:<receipt uri>`. Take the receipt uri
+   from the bidder journal line of the termination StateSync. Then do the one getRecord of step 1. Never list records
 3. Pin: uri, cid, `createdAt`, `reason`, `request.uri` or its absence
+
+```bash
+RK=termination-payload-$(printf 'terminated:%s' "$RECEIPT_URI" | sha256sum | cut -c1-32)
+```
 
 Caveat: releases over the ssh-gateway session path produced records with **no `request` field**
 (keys `$type`, `createdAt`, `observedAt`, `reason`, `signatures`); page-path releases carry a `vm.delete`

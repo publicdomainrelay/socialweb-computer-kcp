@@ -84,7 +84,7 @@ Run every command as `test-0001` (`sudo -n -u test-0001 env HOME=/home/test-0001
 | ComputeVM backend `DenoSandbox`; `sandbox.stdout` `quickstart-deno-ok sum=10 on linux/x86_64`, exit 0 | `root:bidder-1`, contract status | 6 s to Held (03:46:01 -> 03:46:07) |
 | agent contract: placeholder bundle, then refused before the RFP | requester core log, contract status | at once: `requester_agent_bundle_placeholder` (`/etc/atirc/atirc.env`, 0600), `requester_contract_refused`, Failed `refused: ... root-qs.requester.local is a .local handle that nobody resolves; start the requester with --atproto-handle ...`; no RFP, no record (before main 2ea66d62: Held 19 s, `requester_atirc_mint_failed` every retry) |
 | tenant scale to zero: Deployment deleted 03:47:03, pod gone 03:47:35, Infra entry Releasing 03:49:35 (2 min idle), Infra and node gone 03:49:39 | `root:gateway`, tenant k3s | ~2.5 min |
-| state Released -> contract Released | Infra status | VM and Deno Released 1 s after the patch; agent EphemeralInfra delete: `requester_atirc_release_revoke left=0`, `infra_released` 0.1 s |
+| state Released -> contract Released | Infra status, requester core log | VM and Deno Released 1 s after the patch; `requester_contract_records_deleted` (accept, rfp, compute.vm, association, rbac records RecordNotFound by getRecord at their keys); agent EphemeralInfra delete: `requester_atirc_release_revoke left=0`, `infra_released` 0.1 s |
 
 ## Pass Criteria
 
@@ -129,7 +129,8 @@ vouches; its readings (VM 19 s, Deno 5 s) match the default-policy pass. That ov
 
 ## Prod Step For The Agent Join
 
-The mint needs a requester identity irc.fedfork.com resolves. Run on prod by the lead (0004 preconditions):
+The mint needs a requester identity irc.fedfork.com resolves. Run on prod by the lead (0004 preconditions). The winner
+may be hat-9, which offers iroh and webrtc but no https: `dumbpipe` must be on PATH on the requester host.
 
 ```bash
 SWC=socialweb-computer; R=~/.tmp/acc12; mkdir -p "$R"; chmod 700 "$R"
@@ -149,7 +150,7 @@ contract.
 
 | Path | Account | Held | Agent | Release |
 | --- | --- | --- | --- | --- |
-| CLI `run request --hold --agent` | alice | 04:05Z, local bidder | `aliceoa-3mz7vzp2j2v2b` joined; answered `x86_64 fc-lpfuqerea3de-1a35a0de` over atirc | token revoked 04:09:57 before vm.delete; the `--hold` process stopped the invocation kcp 130 ms into the release, so the first `release` failed while Releasing and a second `release` finished it (fixed after rc156: one owner per invocation kcp) |
+| CLI `run request --hold --agent` | alice | 04:05Z, local bidder | `aliceoa-3mz7vzp2j2v2b` joined; answered `x86_64 fc-lpfuqerea3de-1a35a0de` over atirc | token revoked 04:09:57 before vm.delete; the `--hold` process stopped the invocation kcp 130 ms into the release, so the first `release` failed while Releasing and a second `release` finished it (fixed after rc156: one owner per invocation kcp; on today's main a second `release` of a Released invocation only removes it) |
 | page terminal, kubectl EphemeralInfra `qsprod` | hat | created 04:10:19, Held 04:11:00, local bidder | `hat-3mz7wtwqt2c2r` joined; ssh `uname -a` from the page terminal | revoked, then Released 04:12:55 |
 
 No token or key material in any log (plaintext check 0 on every log file).
@@ -176,4 +177,4 @@ No token or key material in any log (plaintext check 0 on every log file).
 | `Using secret key ...` on the terminal | dumbpipe's own ephemeral key on stderr: `2>/dev/null` in the ProxyCommand |
 | EphemeralInfra `endWhen: Complete` stays `Released` until its ttl | fixed in rc156: it ends in the pass that sees every contract Released or Failed (released 04:02:28, gone 04:02:30) |
 | released DenoSandbox ComputeVM stays `Running` with `spec.release` set | fixed in rc156: the bidder terminates and deletes it like a VM (released 04:01:45, gone 04:01:47) |
-| `run request release` beside a running `--hold` fails while `Releasing`, the VM keeps running | rc156 and earlier: the `--hold` process stopped the shared kcp when the contract left Held; fixed after rc156 (`requests/<name>/owner.lock`); on an older build run `run request release` again |
+| `run request release` beside a running `--hold` fails while `Releasing`, the VM keeps running | rc156 and earlier: the `--hold` process stopped the shared kcp when the contract left Held; fixed after rc156 (`requests/<name>/owner.lock`); on an older build run `run request release` again. On today's main a `release` of an invocation that is Released, or Failed before a VM was held, only removes it |
