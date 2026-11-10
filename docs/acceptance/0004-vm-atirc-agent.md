@@ -100,8 +100,8 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | CLI release, token alive | requester exited before the termination POST (pre rc132); now revoke first |
 | `spec.agent` contract fails before RFP | `an agent needs spec.secretsRef`: `--agent` adds a one-entry bundle; page must send one |
 | the owner node never dials the agent | the peer record's `channels` must hold the daemon's channel (the owner-graph root's, e.g. `#johnandersen777_bsky_social` for alice); the requester walks `com.fedfork.irc.agentOperator` / `com.fedfork.irc.agents` to find it |
-| `atirc mesh run` panics: `Could not automatically determine the process-level CryptoProvider` | atirc e59d18a enables both rustls providers; run with `--jetstream off` (AtircNode `spec.jetstream: off`) until atirc installs a default provider |
-| `atirc agent run`: `no harness configured` | the harness config used to come with the token; the mesh daemon is the unit's main process and keeps running |
+| `atirc mesh run` panics: `Could not automatically determine the process-level CryptoProvider` | an atirc older than a6a3f0f (both rustls providers, no default); the pinned `assets.atirc` installs ring |
+| `atirc agent run`: `no harness configured` | without a token the harness comes from the agent user's local config (`[agent] harness` in `<config dir>/config.toml`); kcp ships none, so the agent answers only once one is configured; the mesh daemon is the unit's main process and keeps running |
 | guest has no `atirc mesh` | the bidder serves an older socialweb-guest-downloads; roll the bidder to a build with the `assets.atirc` cargosrc pin |
 | oauthQr bidder SessionExpired after rollout | scope added to Bidder/RequesterOAuthScope: re-sign every OAuth identity (announce before tagging) |
 | harness never joins | no agent config for the owner chain (`atirc config agent`), or claude still installing (give it ~1 min) |

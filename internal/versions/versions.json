@@ -417,16 +417,16 @@
       }
     },
     "atirc": {
-      "version": "0.1.0-e59d18a",
-      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit e59d18a581f3085d4e79dabc24c8a7398cdcd3d6 (2026-11-10, mesh: peer iroh may be a bare endpoint id), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
+      "version": "0.1.0-a6a3f0f",
+      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit a6a3f0fd849cfbca9d28f56562009b93c6d8fcda (2026-11-10, atirc: rustls default provider, mesh agent prompt, ATIRC_NICK for nick), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
       "verify": "the source archive's sha256 is pinned here and its top directory must name the pinned commit; the build runs in a private mount namespace with remapped paths, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a cargosrc change re-pins it)",
       "executables": {
         "atirc": "atirc"
       },
       "cargosrc": {
-        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/e59d18a581f3085d4e79dabc24c8a7398cdcd3d6",
-        "sha256": "9060146432d7964ebaaf97fdfcfcad32d95b1233731b9a30005afe3cc5da253f",
-        "commit": "e59d18a581f3085d4e79dabc24c8a7398cdcd3d6",
+        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/a6a3f0fd849cfbca9d28f56562009b93c6d8fcda",
+        "sha256": "901e4edd10ee0f81cbd671ad6c25fef365ab8af17093dbec7532ff9787f8f1c8",
+        "commit": "a6a3f0fd849cfbca9d28f56562009b93c6d8fcda",
         "toolchain": "1.97.0",
         "manifest": "cli/Cargo.toml",
         "package": "atirc",
@@ -448,14 +448,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "bf1aa470a3931a41ad064f3486f692d14b3457dbe8d8c324510259c8e3427bbf",
-          "rawBytes": 44190008,
-          "zstdBytes": 9768665
+          "treeSha256": "6318d8207074a94a598596fdd5abccc5f1d547a9b5d05ec5918e895f00487349",
+          "rawBytes": 51337024,
+          "zstdBytes": 11498256
         },
         "linux/arm64": {
-          "treeSha256": "b3ed2421d255b384fb4b36dc76e9dc75a2bc365e32971e024bd086ede000436b",
-          "rawBytes": 42197672,
-          "zstdBytes": 9639904
+          "treeSha256": "e0587fc6b1e11ed3854c19bece2d4c08cf8e1d1d40fba24ab15cb766979cbb06",
+          "rawBytes": 48895808,
+          "zstdBytes": 11312962
         }
       }
     },
@@ -1541,14 +1541,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "15be03c284a25cd1f5be773df612b7980a2c422507ee93854b890d69f5904a51",
-          "rawBytes": 102115518,
-          "zstdBytes": 29975940
+          "treeSha256": "aec3cc5970bb32649b79562496923edab8d962097fe4de133da7df3177df1f0f",
+          "rawBytes": 109262534,
+          "zstdBytes": 31705287
         },
         "linux/arm64": {
-          "treeSha256": "15be03c284a25cd1f5be773df612b7980a2c422507ee93854b890d69f5904a51",
-          "rawBytes": 102115518,
-          "zstdBytes": 29975940
+          "treeSha256": "aec3cc5970bb32649b79562496923edab8d962097fe4de133da7df3177df1f0f",
+          "rawBytes": 109262534,
+          "zstdBytes": 31705287
         }
       }
     }
