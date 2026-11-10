@@ -30,6 +30,8 @@ type AuthServer struct {
 
 	AuthorizationEndpoint string
 
+	PushedAuthorizationEndpoint string
+
 	TokenEndpoint string
 
 	RevocationEndpoint string
@@ -104,6 +106,7 @@ func authServerMetadata(ctx context.Context, client *http.Client, authServer str
 	var metadata struct {
 		Issuer                string `json:"issuer"`
 		AuthorizationEndpoint string `json:"authorization_endpoint"`
+		PushedEndpoint        string `json:"pushed_authorization_request_endpoint"`
 		TokenEndpoint         string `json:"token_endpoint"`
 		RevocationEndpoint    string `json:"revocation_endpoint"`
 	}
@@ -120,6 +123,11 @@ func authServerMetadata(ctx context.Context, client *http.Client, authServer str
 	}
 	if metadata.AuthorizationEndpoint != "" {
 		if as.AuthorizationEndpoint, err = EndpointURL(authServer, metadata.AuthorizationEndpoint); err != nil {
+			return AuthServer{}, err
+		}
+	}
+	if metadata.PushedEndpoint != "" {
+		if as.PushedAuthorizationEndpoint, err = EndpointURL(authServer, metadata.PushedEndpoint); err != nil {
 			return AuthServer{}, err
 		}
 	}

@@ -500,6 +500,13 @@ func (a *Accounts) beginBrowserAuthorization(ctx context.Context, workspace stri
 	if hint := cmp.Or(strings.TrimSpace(id.Spec.Did), strings.TrimSpace(id.Spec.Handle)); hint != "" {
 		query.Set("login_hint", hint)
 	}
+	if as.PushedAuthorizationEndpoint != "" {
+		requestURI, err := oauthclient.PushAuthorization(ctx, client, as.PushedAuthorizationEndpoint, key, query)
+		if err != nil {
+			return "", "", time.Time{}, err
+		}
+		query = url.Values{"client_id": {clientID}, "request_uri": {requestURI}}
+	}
 	parsed, err := url.Parse(as.AuthorizationEndpoint)
 	if err != nil {
 		return "", "", time.Time{}, err

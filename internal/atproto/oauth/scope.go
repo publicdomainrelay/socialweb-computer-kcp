@@ -151,11 +151,9 @@ var (
 	)
 )
 
-// ponytail: the requester signs in with a GET authorize URL that carries this scope twice (scope and the
-// loopback client_id); bsky.social refuses sign-in once that URL nears 8 KB (44 tokens failed, 41 are about
-// 7.6 KB), so only the guest events an agent contract leaves get delete scopes. Upgrade path: PAR.
 var RequesterOptionalScopes = slices.Concat(collectionScopes([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent, CollectionVMDelete,
-	CollectionGuestSecrets, CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
+	CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets, CollectionGuestAgentStart,
+	CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 	[]string{RepoIngressOfferWrite, RepoPeerWrite})
 
 var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)
