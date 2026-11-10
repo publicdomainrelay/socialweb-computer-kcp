@@ -9,7 +9,11 @@ import (
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 )
 
-const webrtcPortsDir = "webrtc-udp-ports"
+const (
+	webrtcPortsDir = "webrtc-udp-ports"
+
+	meshUDPPortName = "bidder-mesh"
+)
 
 type webrtcPorts struct {
 	reg *component.PortRegistry

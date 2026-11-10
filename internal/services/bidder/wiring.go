@@ -186,7 +186,13 @@ func (s *Service) mesh(ctx context.Context) core.Mesh {
 	if !s.inboundXRPC() || s.mux == nil {
 		return nil
 	}
-	mesh, err := webrtc.NewMesh(ctx, webrtc.MeshConfig{StateDir: s.stateDir(), Handler: s.mux, Log: s.log})
+	port := 0
+	if ports, err := s.webrtcPorts(); err == nil {
+		if port, err = ports.Allocate(meshUDPPortName); err != nil {
+			s.log.Warn("bidder_mesh_udp_port", "err", err.Error())
+		}
+	}
+	mesh, err := webrtc.NewMesh(ctx, webrtc.MeshConfig{StateDir: s.stateDir(), Handler: s.mux, Log: s.log, UDPPort: port})
 	if err != nil {
 		s.log.Warn("bidder_mesh_unavailable", "err", err.Error())
 		return nil

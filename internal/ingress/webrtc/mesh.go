@@ -21,6 +21,7 @@ import (
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/channelconn"
@@ -42,6 +43,8 @@ type MeshConfig struct {
 	Handler http.Handler
 
 	Log *slog.Logger
+
+	UDPPort int
 }
 
 type Mesh struct {
@@ -100,6 +103,14 @@ func NewMesh(ctx context.Context, cfg MeshConfig) (*Mesh, error) {
 	}
 	settings := webrtc.SettingEngine{}
 	tuneSettings(&settings)
+	if cfg.UDPPort > 0 {
+		conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.UDPPort})
+		if err != nil {
+			log.Warn("webrtc_mesh_udp_port_unbound", "port", cfg.UDPPort, "err", err.Error())
+		} else {
+			settings.SetICEUDPMux(ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn}))
+		}
+	}
 	return &Mesh{identity: identity, certificate: certificate, fingerprint: fingerprint, handler: cfg.Handler, log: log, ctx: ctx,
 		api: webrtc.NewAPI(webrtc.WithSettingEngine(settings))}, nil
 }
