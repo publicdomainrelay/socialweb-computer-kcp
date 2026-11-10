@@ -4538,8 +4538,10 @@ fail, rather than the code read against this document alone.
   (it had saved its infra snapshot before the receipt) ran on hat-9 until an operator delete. Now every skip or
   refuse path sets `spec.associationExpiresAt` to accept + `market.ContractAssociationLifetime` (24 h, log
   `bidder_lifetime_capped`). The existing observer releases the VM 10 min after it (`AssociationExpiryGrace`).
-  No market record carries a requested lifetime (compute.vm, rfp, accept and the bid and accept payloads have
-  none), so there is no longer-hold option yet; a CLI `--hold` VM ends after 24 h 10 min.
+  The one schema change: compute.vm gets an optional `expiresAt` (datetime). When set it replaces the 24 h default
+  (a bidder may still end the VM earlier by its own policy), and an RFP whose `expiresAt` has passed gets no bid.
+  `run request --expires-in <duration>` sets it through the ComputeContract label
+  `socialweb.computer/vm-expires-at` (unix seconds), so no CRD schema changes.
 
 - **pkg/embedded keeps impersonating system:kcp:admin; a stalled workspace initializer is a kcp
   retry fix plus a self-explaining wait error (plan 0038, 2026-10-31).** Before: 2 of 7 iOS app

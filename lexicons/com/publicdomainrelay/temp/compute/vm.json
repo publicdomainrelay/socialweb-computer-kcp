@@ -19,6 +19,7 @@
           "location": { "type": "ref", "ref": "#location" },
           "user_data": { "type": "string", "description": "cloud-init user data." },
           "net": { "type": "boolean", "description": "kind deno: the program reaches the public internet (never loopback, link-local or private ranges). A bidder runs it only for its owner: the requester is the bidder's DID, its operator, or associated to that operator." },
+          "expiresAt": { "type": "string", "format": "datetime", "description": "When the requester wants the VM ended. The bidder ends it then (it may end it earlier by its own policy) and refuses an RFP whose expiresAt has passed; without it, the bidder ends the VM 24 h after the accept." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

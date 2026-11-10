@@ -61,8 +61,12 @@ func (b *Bidder) payloadRefused(ctx context.Context, rfp *market.RFP) (string, e
 	if err != nil {
 		return "", fmt.Errorf("bidder: resolving the RFP payload: %w", err)
 	}
-	if _, err := parseVMRecord(payload.Value); err != nil {
+	record, err := parseVMRecord(payload.Value)
+	if err != nil {
 		return err.Error(), nil
+	}
+	if at, err := market.ParseTime(record.ExpiresAt); err == nil && !at.After(b.now()) {
+		return fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt), nil
 	}
 	return "", nil
 }

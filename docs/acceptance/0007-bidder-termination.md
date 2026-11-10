@@ -64,8 +64,9 @@ Bidder journal, in order (hat-7 example, 2026-10-31 22:51Z):
   StateSync stalled (648384c1); an unsigned inbound `vm.delete` is refused at submitEvent with 400 and creates no StateSync
 - atirc: next use of any token leased on the contract -> 401 `lease is not alive`, latched (no revival if the record later disappears)
 - Without an operator delete: a VM whose requester never returns is released by the bidder at its
-  `spec.associationExpiresAt` + 10 min. That is the association proof's `expiresAt`, or accept + 24 h for a requester with
-  no proof (`bidder_lifetime_capped` at provisioning, `bidder_association_expired_release` at the end). Before this cap
+  `spec.associationExpiresAt` + 10 min: the compute.vm `expiresAt` (CLI `--expires-in`), else accept + 24 h, or the
+  association proof's `expiresAt` when earlier (`bidder_lifetime_capped` at provisioning, `bidder_association_expired_release`
+  at the end). Before this cap
   (2026-11-10), 8 VMs that the iOS app leaked from killed launches ran on hat-9 until an operator delete.
 
 ## Pass criteria

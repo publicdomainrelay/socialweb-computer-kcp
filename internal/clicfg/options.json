@@ -651,6 +651,10 @@
       "type": "boolean",
       "description": "run request, resume: keep the contract held when this process ends; its kcp stops and run request release|resume <name> starts it again from its state dir"
     },
+    "expires-in": {
+      "type": "string",
+      "description": "run request: ask the bidder to end the VM this long from now (Go duration; the compute.vm expiresAt). Without it the bidder ends the VM 24 h after its accept, --hold or not"
+    },
     "exec": {
       "type": "string",
       "description": "run request, resume: run this program over ssh on the guest (StrictHostKeyChecking=yes against the host keys the guest reported) instead of an interactive session"

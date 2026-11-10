@@ -104,8 +104,10 @@ $SWC run request release "$NAME" --state-dir "$R"
   (`-- --atproto-identity-mode pdsAccount --atproto-handle <handle> --atproto-pds-url <pds>`, the password in
   `ATPROTO_PASSWORD` in the environment of that one command; `run request` has no `--atproto-password` option)
 - `run request list`, `run request resume <name>`, `run request release <name>` manage the invocations it recorded
-- `--hold` holds the VM until you release it, but the bidder ends any VM 24 h 10 min after its accept
-  (`bidder_lifetime_capped`); no request field asks for longer yet
+- `--hold` holds the VM until you release it, but the bidder ends it 24 h (+ 10 min grace) after its accept
+  unless the request asks otherwise: `--expires-in <Go duration>` (e.g. `72h`) sets the compute.vm `expiresAt` and
+  the bidder ends the VM then instead (`bidder_lifetime_capped source="compute.vm expiresAt"`); an `expiresAt` already
+  past gets no bid
 - one invocation is one contract; there is no `kubectl apply` of an Infra into it (section 7)
 
 ## 5. Agent VM: The atirc Join

@@ -26,6 +26,10 @@ import (
 const (
 	ContractAssociationLifetime = market.ContractAssociationLifetime
 
+	// ContractExpiresAtLabel on a ComputeContract is the unix time (seconds) its
+	// compute.vm asks the bidder to end the VM at (compute.vm expiresAt).
+	ContractExpiresAtLabel = "socialweb.computer/vm-expires-at"
+
 	associationRetryFirst = 2 * time.Second
 
 	associationRetryMax = 5 * time.Minute
@@ -751,4 +755,12 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 	}
 	r.log().Info("requester_guest_requester", "did", did, "request", got.URI)
 	r.ensureAssociation(ctx, state.Accept, state)
+}
+
+func contractExpiresAt(label string) string {
+	sec, err := strconv.ParseInt(strings.TrimSpace(label), 10, 64)
+	if err != nil || sec <= 0 {
+		return ""
+	}
+	return market.FormatTime(time.Unix(sec, 0))
 }

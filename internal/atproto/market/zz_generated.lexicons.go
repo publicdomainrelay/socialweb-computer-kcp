@@ -1328,6 +1328,7 @@ type ComputeVM struct {
 	Cpus      int64                      `json:"cpus,omitempty"`
 	CreatedAt string                     `json:"createdAt,omitempty"`
 	Disk      string                     `json:"disk,omitempty"`
+	ExpiresAt string                     `json:"expiresAt,omitempty"`
 	Kind      string                     `json:"kind,omitempty"`
 	Location  *ComputeVMLocation         `json:"location,omitempty"`
 	Mem       string                     `json:"mem,omitempty"`

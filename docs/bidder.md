@@ -220,9 +220,10 @@ Check the host afterwards: `kb get computevms.socialweb.computer` is empty for t
 `firecracker` process remains for it.
 
 Without an operator, every VM still ends on its own. At provisioning the bidder writes the VM's end
-into `spec.associationExpiresAt`: a contract-scoped association proof's `expiresAt` (a guest or R2
-requester), otherwise the accept time plus 24 h (`market.ContractAssociationLifetime`, log
-`bidder_lifetime_capped`; no market record carries a requested lifetime). The observer releases the VM
+into `spec.associationExpiresAt`: the RFP's compute.vm `expiresAt` when it carries one (an RFP whose
+`expiresAt` has passed gets no bid), otherwise the accept time plus 24 h (`market.ContractAssociationLifetime`;
+log `bidder_lifetime_capped` with its source), and a contract-scoped association proof's `expiresAt` (a guest
+or R2 requester) when that is earlier. The observer releases the VM
 10 min after that (`AssociationExpiryGrace`, log `bidder_association_expired_release`), so a requester
 that never returns (an app killed before it saved the receipt, a lost laptop) holds a VM 24 h 10 min at
 most.

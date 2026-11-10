@@ -376,13 +376,13 @@ func retry(ctx context.Context, deadline time.Time, timeout time.Duration, what 
 	}
 }
 
-func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractSpec, timeout time.Duration) error {
+func (k *Kcp) CreateContract(ctx context.Context, spec v1alpha1.ComputeContractSpec, labels map[string]string, timeout time.Duration) error {
 	if spec.TTLSecondsAfterFinished == nil {
 		ttl := ContractTTLSeconds
 		spec.TTLSecondsAfterFinished = &ttl
 	}
 	body, err := kube.ApplyBody(&v1alpha1.ComputeContract{TypeMeta: typeMeta("ComputeContract"),
-		ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract}, Spec: spec}, false)
+		ObjectMeta: metav1.ObjectMeta{Name: marketrequester.RequesterContract, Labels: labels}, Spec: spec}, false)
 	if err != nil {
 		return err
 	}

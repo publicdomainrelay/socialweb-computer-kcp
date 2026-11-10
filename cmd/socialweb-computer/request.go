@@ -52,7 +52,7 @@ const (
 	sshConnectionFailed  = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated")
@@ -63,6 +63,7 @@ type requestRun struct {
 	stateRoot         string
 	inv               request.Invocation
 	hold              bool
+	expiresAt         string
 	skipSSH           bool
 	exec              string
 	secrets           string
@@ -342,6 +343,13 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
+	}
+	if in := strings.TrimSpace(vals.String("expires-in")); in != "" {
+		d, err := time.ParseDuration(in)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("expires-in %q: want a positive Go duration", in)
+		}
+		r.expiresAt = strconv.FormatInt(time.Now().Add(d).Unix(), 10)
 	}
 	if r.networkTimeout, err = time.ParseDuration(vals.String("network-timeout")); err != nil {
 		return nil, fmt.Errorf("network-timeout: %w", err)
@@ -1312,7 +1320,11 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		r.contract.SecretsRef = &ref
 		r.log("the secrets bundle is in the invocation's own OpenBao", "mount", ref.Mount, "path", ref.Path)
 	}
-	if err := r.kcp.CreateContract(ctx, r.contract, r.networkTimeout); err != nil {
+	var labels map[string]string
+	if r.expiresAt != "" {
+		labels = map[string]string{requester.ContractExpiresAtLabel: r.expiresAt}
+	}
+	if err := r.kcp.CreateContract(ctx, r.contract, labels, r.networkTimeout); err != nil {
 		r.stop(context.WithoutCancel(ctx), false)
 		return a.fail(exitFailed, "run request: %v", err)
 	}

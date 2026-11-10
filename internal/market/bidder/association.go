@@ -13,17 +13,20 @@ import (
 
 const AssociationExpiryGrace = 10 * time.Minute
 
-func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt string) string {
+func (b *Bidder) associationExpiry(ctx context.Context, requesterDID, acceptedAt, vmExpiresAt string) string {
 	start := b.now()
 	if at, err := market.ParseTime(acceptedAt); err == nil && at.Before(start) {
 		start = at
 	}
-	bound := start.Add(market.ContractAssociationLifetime)
+	bound, source := start.Add(market.ContractAssociationLifetime), "accept + "+market.ContractAssociationLifetime.String()
+	if at, err := market.ParseTime(vmExpiresAt); err == nil {
+		bound, source = at, "compute.vm expiresAt"
+	}
 	if out := b.proofExpiry(ctx, requesterDID, bound); out != "" {
 		return out
 	}
 	out := market.FormatTime(bound)
-	b.log.Info("bidder_lifetime_capped", "requester", requesterDID, "expiresAt", out, "lifetime", market.ContractAssociationLifetime.String())
+	b.log.Info("bidder_lifetime_capped", "requester", requesterDID, "expiresAt", out, "source", source)
 	return out
 }
 

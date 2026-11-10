@@ -405,7 +405,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
-			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO()})
+			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
+			ExpiresAt: contractExpiresAt(contract.Labels[ContractExpiresAtLabel])})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)
 		}

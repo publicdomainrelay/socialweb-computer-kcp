@@ -73,6 +73,8 @@ type vmRecord struct {
 	UserData string `json:"user_data"`
 
 	Net bool `json:"net"`
+
+	ExpiresAt string `json:"expiresAt"`
 }
 
 func parseVMRecord(value map[string]any) (vmRecord, error) {
@@ -95,6 +97,11 @@ func parseVMRecord(value map[string]any) (vmRecord, error) {
 		return out, fmt.Errorf("bidder: the RFP payload names %d cpus", out.CPUs)
 	case strings.TrimSpace(out.UserData) == "":
 		return out, errors.New("bidder: the RFP payload carries no user_data; a guest without it is unreachable")
+	}
+	if out.ExpiresAt != "" {
+		if _, err := market.ParseTime(out.ExpiresAt); err != nil {
+			return out, fmt.Errorf("bidder: the RFP payload's expiresAt %q is no datetime", out.ExpiresAt)
+		}
 	}
 	return out, nil
 }
@@ -206,7 +213,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
-	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID, req.acceptedAt)
+	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID, req.acceptedAt, record.ExpiresAt)
 	created := true
 	if err := b.intents.CreateComputeVM(ctx, *vm); err != nil {
 		if !errors.Is(err, contract.ErrExists) {
