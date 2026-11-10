@@ -12,7 +12,10 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -245,12 +248,34 @@ func (c *Composer) resolveAccountPds(ctx context.Context, ws string, id v1alpha1
 		return u, remote, nil
 	}
 	if remote == nil {
-		return "", nil, fmt.Errorf("compose: mode pdsAccount names no pdsUrl and no RemotePDS ref; it fails closed instead of using a local repo")
+		if pds := accountPds(ctx, id); pds != "" {
+			return pds, nil, nil
+		}
+		return "", nil, fmt.Errorf("compose: mode pdsAccount names no pdsUrl and no RemotePDS ref, and its handle or DID resolves to no PDS; it fails closed instead of using a local repo")
 	}
 	if strings.TrimSpace(remote.Spec.URL) == "" {
 		return "", nil, fmt.Errorf("compose: RemotePDS %s names no url; mode pdsAccount fails closed", remote.Name)
 	}
 	return strings.TrimSpace(remote.Spec.URL), remote, nil
+}
+
+func accountPds(ctx context.Context, id v1alpha1.ApplicationIdentity) string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	dir := identity.DefaultDirectory()
+	var found *identity.Identity
+	var err error
+	if did, perr := syntax.ParseDID(strings.TrimSpace(id.Did)); perr == nil {
+		found, err = dir.LookupDID(ctx, did)
+	} else if handle, perr := syntax.ParseHandle(strings.TrimSpace(id.Handle)); perr == nil {
+		found, err = dir.LookupHandle(ctx, handle)
+	} else {
+		return ""
+	}
+	if err != nil || found == nil {
+		return ""
+	}
+	return found.PDSEndpoint()
 }
 
 func (c *Composer) remotePDSRef(ctx context.Context, ws string, ref *commonv1.ObjectRef) (*pdsv1alpha1.RemotePDS, error) {

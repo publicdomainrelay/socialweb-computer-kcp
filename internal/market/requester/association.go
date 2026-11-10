@@ -501,6 +501,49 @@ func (r *contractRunner) deleteContractRecords(ctx context.Context) {
 	r.deleteRBAC(ctx)
 	r.deleteAgentPeer(ctx)
 	r.deleteAssociation(ctx)
+	r.deleteMarketRecords(ctx)
+}
+
+func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
+	q := r.q
+	if q.repo == nil {
+		return
+	}
+	var refs []commonv1.StrongRef
+	if state := r.stateCopy(); state != nil {
+		if state.Release != nil {
+			refs = append(refs, state.Release.Event, state.Release.Payload)
+		}
+		for _, ref := range []*commonv1.StrongRef{state.Accept, state.RFP, state.Payload} {
+			if ref != nil {
+				refs = append(refs, *ref)
+			}
+		}
+	}
+	for _, event := range q.contractEvents.Filter(func(e v1alpha1.ContractEvent) bool {
+		return e.Spec.ContractRef.Name == r.name && e.Spec.Direction == v1alpha1.ContractEventOutbound
+	}) {
+		for _, ref := range []*commonv1.StrongRef{event.Status.Event, event.Status.Record} {
+			if ref != nil {
+				refs = append(refs, *ref)
+			}
+		}
+	}
+	deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	deleted := 0
+	for _, ref := range refs {
+		aturi, err := syntax.ParseATURI(ref.URI)
+		if err != nil || aturi.Authority().String() != q.repoDID {
+			continue
+		}
+		if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, aturi.Collection().String(), aturi.RecordKey().String()); err != nil && !errors.Is(err, market.ErrNotFound) {
+			r.log().Warn("requester_record_delete_failed", "record", ref.URI, "err", err)
+			continue
+		}
+		deleted++
+	}
+	r.log().Info("requester_contract_records_deleted", "deleted", deleted, "of", len(refs))
 }
 
 func SecretsUpdatedEventName(contract string, ref commonv1.StrongRef) string {

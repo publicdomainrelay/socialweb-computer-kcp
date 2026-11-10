@@ -1380,8 +1380,8 @@ func (r *contractRunner) finishRelease(ctx context.Context, state *v1alpha1.Node
 	release.LastError = ""
 	r.setRelease(release)
 	r.log().Info("requester_released", "receipt", receiptURIOf(state), "attempts", release.Attempts, "message", message)
-	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), "released", int32(release.Attempts))
 	r.deleteContractRecords(ctx)
+	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, message, state, r.currentBids(), r.currentChosen(), "released", int32(release.Attempts))
 }
 
 func (r *contractRunner) captureReleaseRequest() {
@@ -1454,8 +1454,8 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 	q := r.q
 	r.captureReleaseRequest()
 	if state == nil || state.Receipt == nil {
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		r.deleteContractRecords(ctx)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released before a VM was held", state, r.currentBids(), r.currentChosen(), "released", 1)
 		return nil
 	}
 	if state.Release == nil || !state.Release.OK {
@@ -1466,8 +1466,8 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 		if state.Timestamps != nil && state.Timestamps.Released == "" {
 			state.Timestamps.Released = q.nowISO()
 		}
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 		r.deleteContractRecords(ctx)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 		return nil
 	}
 	if state.Release != nil && state.Release.OK {
@@ -1476,8 +1476,8 @@ func (r *contractRunner) releaseContract(ctx context.Context, state *v1alpha1.No
 			release.LastError = ""
 			r.setRelease(release)
 		}
-		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released", state, r.currentBids(), r.currentChosen(), "released", 1)
 		r.deleteContractRecords(ctx)
+		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, "released", state, r.currentBids(), r.currentChosen(), "released", 1)
 		return nil
 	}
 
@@ -1587,8 +1587,8 @@ func (r *contractRunner) settleTerminated(ctx context.Context, state *v1alpha1.N
 		r.setRelease(release)
 	}
 	r.log().Info("requester_release_settled_by_termination", "receipt", receiptURIOf(state), "bidder", winnerDID(state), "reason", state.Termination.Reason)
-	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 	r.deleteContractRecords(ctx)
+	r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(state.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
 	return true
 }
 
