@@ -12,6 +12,11 @@ resource, release, dev down. The atirc join of the agent VM is a prod step ([001
   2026-11-01 09:22-09:42Z, own network `acc12`, main ec97f78e (rc158 + docs) dev build, requester by `run requester
   --network`: every step passes (readings below); Held contracts stay Held across a `run requester` restart, but a
   restart within about 5 s of the Ctrl-C fails (Known Pitfalls)
+  2026-11-10 15:10-15:20Z, own network `acc12r` on hat-8, main eb018e0e dev build, requester by `spec.apps`: steps 1-7
+  and 9 pass (network Ready, vouches Applied, `quickstart-vm-ok` over iroh, node `*-tenant-node1` Ready and
+  `quickstart-k8s-ok`, deno `quickstart-deno-ok sum=10`, the agent refused for its `.local` handle); release logs
+  `requester_contract_records_deleted` for the VM and the deno contract; `dev down` 108 s, no VM left. Step 8 is for
+  the `run requester` form and was not run; the prod step waits for alice.
 
 ```mermaid
 sequenceDiagram
