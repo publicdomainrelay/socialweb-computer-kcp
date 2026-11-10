@@ -162,7 +162,7 @@ sets:
           - kind: APIBinding
             for: Ready
   - name: hostprocesses
-    summary: the HostProcess, Postgres and OpenBaoServer schemas and their export in the provider workspace and its binding in root, applied by every core so the application's own kcp holds its host processes, the bootstrap mirrors, its postgres servers and its OpenBao servers (plan 0006 M2-HOSTPROCESS-KIND, M2-POSTGRES, M2-OPENBAO-SERVER); needs the provider workspace
+    summary: the HostProcess, Postgres, AtircNode and OpenBaoServer schemas and their export in the provider workspace and its binding in root, applied by every core so the application's own kcp holds its host processes, the bootstrap mirrors, its postgres servers and its OpenBao servers (plan 0006 M2-HOSTPROCESS-KIND, M2-POSTGRES, M2-OPENBAO-SERVER); needs the provider workspace
     values: None
     phases:
       - name: schemas
@@ -170,6 +170,7 @@ sets:
         files:
           - path: hostprocess-apiresourceschema.yaml
           - path: postgres-apiresourceschema.yaml
+          - path: atircnode-apiresourceschema.yaml
           - path: openbaoserver-apiresourceschema.yaml
           - path: remoteopenbao-apiresourceschema.yaml
           - path: vault-apiresourceschema.yaml

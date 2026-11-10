@@ -86,6 +86,12 @@ var APIResources = []APIResource{
 		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
+	{Kind: "AtircNode", Plural: "atircnodes", Revision: 1, Export: "hostprocesses", Object: AtircNode{}, PrinterColumns: []PrinterColumn{
+		{Name: "Identity", Type: "string", JSONPath: ".status.identity"},
+		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
+		{Name: "PID", Type: "integer", JSONPath: ".status.runtime.pid"},
+		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
+	}},
 	{Kind: "OpenBaoServer", Plural: "openbaoservers", Revision: 11, Export: "hostprocesses", Object: OpenBaoServer{}, Contracts: []string{commonv1.ContractVaults}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "Address", Type: "string", JSONPath: ".status.address"},

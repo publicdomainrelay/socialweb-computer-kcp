@@ -15,6 +15,11 @@ spec:
       storage:
         crd: {}
     - group: socialweb.computer
+      name: atircnodes
+      schema: v1alpha1-1.atircnodes.socialweb.computer
+      storage:
+        crd: {}
+    - group: socialweb.computer
       name: openbaoservers
       schema: v1alpha1-11.openbaoservers.socialweb.computer
       storage:

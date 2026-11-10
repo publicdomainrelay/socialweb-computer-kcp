@@ -25,6 +25,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atircnode"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostos"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
@@ -187,6 +188,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 		coreCfg := ComponentCoreConfig(ctx, cfg, rec, log)
 		coreCfg.Postgres = postgresctl.New(PostgresConfig(bcfg, rec))
+		coreCfg.AtircNodes = &atircnode.Options{Prefix: bcfg.Layout.Names().HostProcessPrefix(), StateDir: bcfg.Layout.StateDir}
 		if servers, err := openbaoctl.New(OpenBaoServerConfig(bcfg, rec, log)); err != nil {
 			log.Warn("the OpenBaoServer controller does not start", "err", err.Error())
 		} else {

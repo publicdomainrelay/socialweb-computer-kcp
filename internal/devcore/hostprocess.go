@@ -10,8 +10,10 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap/table"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostprocess"
@@ -63,7 +65,14 @@ func HostProcessConfig(bcfg bootstrap.Config, rec devinstance.Record, m hostsvc.
 			if e, ok := rec.Executables[a.Name]; ok && e.Path != "" {
 				return e.Path, nil
 			}
-			return "", fmt.Errorf("devcore: no executable %s in this dev instance", a.Name)
+			if assets.Release() {
+				if cache, err := assets.DevCache(clicfg.OSEnv{}); err == nil {
+					if e, err := assets.Resolve(assets.Options{Cache: cache, Log: log}, a.Name); err == nil {
+						return e.Path, nil
+					}
+				}
+			}
+			return "", fmt.Errorf("devcore: no executable %s in this dev instance or its embedded assets", a.Name)
 		},
 		Mirrors:      func() []hostprocess.Mirror { return Mirrors(bcfg, l) },
 		ApplyTimeout: HostProcessApplyTimeout, Selector: "!" + computevm.LabelComputeVM, Log: log}

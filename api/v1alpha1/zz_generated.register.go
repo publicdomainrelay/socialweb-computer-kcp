@@ -28,6 +28,7 @@ const (
 	GuestIdentityGrantResource       = "guestidentitygrants"
 	HostProcessResource              = "hostprocesses"
 	PostgresResource                 = "postgreses"
+	AtircNodeResource                = "atircnodes"
 	OpenBaoServerResource            = "openbaoservers"
 	RemoteOpenBaoResource            = "remoteopenbaos"
 	VaultResource                    = "vaults"
@@ -88,6 +89,7 @@ var (
 	GuestIdentityGrantGVR       = GroupVersion.WithResource(GuestIdentityGrantResource)
 	HostProcessGVR              = GroupVersion.WithResource(HostProcessResource)
 	PostgresGVR                 = GroupVersion.WithResource(PostgresResource)
+	AtircNodeGVR                = GroupVersion.WithResource(AtircNodeResource)
 	OpenBaoServerGVR            = GroupVersion.WithResource(OpenBaoServerResource)
 	RemoteOpenBaoGVR            = GroupVersion.WithResource(RemoteOpenBaoResource)
 	VaultGVR                    = GroupVersion.WithResource(VaultResource)
@@ -165,6 +167,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&HostProcessList{},
 		&Postgres{},
 		&PostgresList{},
+		&AtircNode{},
+		&AtircNodeList{},
 		&OpenBaoServer{},
 		&OpenBaoServerList{},
 		&RemoteOpenBao{},
@@ -458,6 +462,20 @@ func (in *Postgres) DeepCopyObject() runtime.Object {
 }
 
 func (in *PostgresList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *AtircNode) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+func (in *AtircNodeList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}

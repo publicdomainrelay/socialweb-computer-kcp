@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/ports"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atircnode"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atprotosession"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/childapplication"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/cluster"
@@ -300,6 +301,13 @@ func (c *Core) registerHost(mgr *ctlruntime.Manager, clients *workspaceClients, 
 	}
 	if cfg.Postgres != nil {
 		if _, err := postgres.Register(mgr, postgres.Options{Log: cfg.Log, Host: cfg.Postgres, Scope: scope}); err != nil {
+			return err
+		}
+	}
+	if cfg.AtircNodes != nil {
+		opts := *cfg.AtircNodes
+		opts.Log, opts.Scope = cfg.Log, scope
+		if _, err := atircnode.Register(mgr, opts); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,13 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: AtircNode
+metadata:
+  name: laptop
+spec:
+  handle: alice.example.com
+  nick: laptop
+  channels:
+    - "#alice_example_com"
+  peers:
+    - alice.example.com
+  ircPort: 0
+  passwordEnvFile: REPLACE-HOME/.config/atirc/atp-password.env

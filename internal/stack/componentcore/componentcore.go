@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component/kcpclients"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/atircnode"
 	nodeclaimctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/nodeclaim"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
@@ -118,6 +119,8 @@ type Config struct {
 	Compute *computevm.Config
 
 	Postgres *postgresctl.Host
+
+	AtircNodes *atircnode.Options
 
 	OpenBao *openbaoctl.Servers
 

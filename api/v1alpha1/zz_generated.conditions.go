@@ -102,6 +102,14 @@ func (in *Postgres) SetConditions(conditions []metav1.Condition) {
 	in.Status.Conditions = conditions
 }
 
+func (in *AtircNode) GetConditions() []metav1.Condition {
+	return in.Status.Conditions
+}
+
+func (in *AtircNode) SetConditions(conditions []metav1.Condition) {
+	in.Status.Conditions = conditions
+}
+
 func (in *OpenBaoServer) GetConditions() []metav1.Condition {
 	return in.Status.Conditions
 }
