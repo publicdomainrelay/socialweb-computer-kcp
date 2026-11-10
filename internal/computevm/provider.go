@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -272,6 +273,21 @@ func ReleaseRequestRef(o *v1alpha1.ComputeVM) *commonv1.StrongRef {
 	}
 	request := *o.Spec.Release.Request
 	return &request
+}
+
+func ReleaseReason(o *v1alpha1.ComputeVM) string {
+	if o == nil || o.Spec.Release == nil || ReleaseRequestRef(o) != nil || o.Spec.AssociationExpiresAt == "" {
+		return "deleted_on_request"
+	}
+	requested, err := time.Parse(time.RFC3339Nano, ReleaseRequestedAt(o))
+	if err != nil {
+		return "deleted_on_request"
+	}
+	expires, err := time.Parse(time.RFC3339Nano, o.Spec.AssociationExpiresAt)
+	if err != nil || requested.Before(expires) {
+		return "deleted_on_request"
+	}
+	return "expired"
 }
 
 func ContractReceipt(o *v1alpha1.ComputeVM) string {

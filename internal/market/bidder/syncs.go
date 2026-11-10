@@ -220,7 +220,7 @@ func (b *Bidder) ensureTerminationSync(ctx context.Context, info contractInfo, o
 		}
 		vm.Spec.Contract.SubmitEventURL = cmp.Or(vm.Spec.Contract.SubmitEventURL, info.submitEventURL)
 	}
-	sync, err := b.guests.Termination(vm, b.cfg.Workspace, releaseReason, observedAt, request)
+	sync, err := b.guests.Termination(vm, b.cfg.Workspace, b.guests.ReleaseReason(vm), observedAt, request)
 	if err != nil {
 		return "", err
 	}

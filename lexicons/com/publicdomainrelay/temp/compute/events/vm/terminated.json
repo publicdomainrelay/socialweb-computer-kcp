@@ -12,7 +12,7 @@
         "properties": {
           "reason": {
             "type": "string",
-            "knownValues": ["guest_poweroff", "vmm_exited", "oom", "host_reboot", "identity_mismatch", "deleted_on_request"]
+            "knownValues": ["guest_poweroff", "vmm_exited", "oom", "host_reboot", "identity_mismatch", "deleted_on_request", "expired"]
           },
           "exitCode": { "type": "integer" },
           "observedAt": { "type": "string", "format": "datetime" },

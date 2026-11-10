@@ -257,6 +257,7 @@ sequenceDiagram
 ```
 
 - a guest that stops for any other reason gets `vm.terminated` with `request` unset and a reason from `market.VMTerminatedReasons` (`guest_poweroff`, `vmm_exited`, `oom`, `host_reboot`, `identity_mismatch`)
+- a VM the bidder ends at its `spec.associationExpiresAt` (+ grace) gets `vm.terminated` `{reason: expired}`, `request` unset (`computevm.ReleaseReason`: a release without a `vm.delete`, requested at or after that time)
 - a release whose destroy record or submitEvent keeps failing settles `Released` once the bidder's `vm.terminated` for that receipt appears
 - a bidder also releases a VM whose contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`, [identity.md](identity.md#contract-scoped-association))
 

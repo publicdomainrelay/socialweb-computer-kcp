@@ -255,7 +255,7 @@ func (c *Controller) deleteOnRequest(ctx context.Context, req ctlruntime.Request
 	if observedAt == "" {
 		observedAt = now()
 	}
-	if err := c.host.EnsureTerminationSync(ctx, *vm, "deleted_on_request", observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
+	if err := c.host.EnsureTerminationSync(ctx, *vm, computevm.ReleaseReason(vm), observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	c.log.Info("the creator asks for the release; the ComputeVM is deleted and its finalizer releases the backend", "computevm", vm.Name, "backend", vm.Spec.BackendRef.Kind)
@@ -267,7 +267,7 @@ func (c *Controller) release(ctx context.Context, req ctlruntime.Request, vm *v1
 	if observedAt == "" {
 		observedAt = vm.DeletionTimestamp.UTC().Format(time.RFC3339)
 	}
-	if err := c.host.EnsureTerminationSync(ctx, *vm, "deleted_on_request", observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
+	if err := c.host.EnsureTerminationSync(ctx, *vm, computevm.ReleaseReason(vm), observedAt, computevm.ReleaseRequestRef(vm)); err != nil {
 		return ctlruntime.Result{}, err
 	}
 	fvm, err := c.backend(ctx, req, vm)

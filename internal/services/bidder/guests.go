@@ -24,6 +24,8 @@ func (guests) Releasing(vm *v1alpha1.ComputeVM) bool { return computevm.Releasin
 
 func (guests) ReleaseRequested(vm *v1alpha1.ComputeVM) bool { return computevm.ReleaseRequested(vm) }
 
+func (guests) ReleaseReason(vm *v1alpha1.ComputeVM) string { return computevm.ReleaseReason(vm) }
+
 func (guests) ReleaseRequestRef(vm *v1alpha1.ComputeVM) *commonv1.StrongRef {
 	return computevm.ReleaseRequestRef(vm)
 }

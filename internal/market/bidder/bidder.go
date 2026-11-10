@@ -185,6 +185,8 @@ type Guests interface {
 
 	ReleaseRequestRef(vm *v1alpha1.ComputeVM) *commonv1.StrongRef
 
+	ReleaseReason(vm *v1alpha1.ComputeVM) string
+
 	GuestReport(vm *v1alpha1.ComputeVM) *v1alpha1.ComputeVMGuestReport
 
 	Published(vm *v1alpha1.ComputeVM) *v1alpha1.ComputeVMPublished

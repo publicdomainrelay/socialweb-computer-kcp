@@ -98,6 +98,7 @@ var VMTerminatedReasons = []string{
 	"host_reboot",
 	"identity_mismatch",
 	"deleted_on_request",
+	"expired",
 }
 
 var VMHostKeyTypes = []string{

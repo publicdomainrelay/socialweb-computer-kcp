@@ -226,7 +226,8 @@ log `bidder_lifetime_capped` with its source), and a contract-scoped association
 or R2 requester) when that is earlier. The observer releases the VM
 10 min after that (`AssociationExpiryGrace`, log `bidder_association_expired_release`), so a requester
 that never returns (an app killed before it saved the receipt, a lost laptop) holds a VM 24 h 10 min at
-most.
+most. That `vm.terminated` says `expired`, with no `request` ref; an operator delete and a requester's
+`vm.delete` say `deleted_on_request`.
 
 ## Unit and logs
 
