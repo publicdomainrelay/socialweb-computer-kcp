@@ -387,13 +387,7 @@ func (s *Service) inboundEndpoints() []market.Endpoint {
 	if !s.inboundXRPC() {
 		return nil
 	}
-	out := append([]market.Endpoint(nil), s.marketEndpoints...)
-	if s.marketURL == "" {
-		if endpoint, ok := s.relayEndpoint(); ok {
-			out = append(out, market.Endpoint{Kind: market.EndpointHTTPS, Address: strings.TrimRight(endpoint.URL, "/")})
-		}
-	}
-	return out
+	return append([]market.Endpoint(nil), s.marketEndpoints...)
 }
 
 func (s *Service) inboundXRPC() bool {
