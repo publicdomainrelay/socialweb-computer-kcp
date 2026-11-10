@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "computer.socialweb.ingress.offer",
+  "description": "A sealed WebRTC offer, in the offerer's repo. Record key: <answerer DID>.<session TID>. The answerer learns of it from Jetstream and our relay (collection filter), reads it with one getRecord, and answers once; the offerer deletes it once answered.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["ciphertext", "createdAt"],
+        "properties": {
+          "ciphertext": { "type": "string", "maxLength": 16384, "description": "age-armored JSON {sdp, replyTo}, sealed to the answerer's listen key; replyTo is the offerer's one-session age recipient." },
+          "subhandle": { "type": "string", "maxLength": 253, "description": "The offerer's identity (its handle, or <nick>.<handle>)." },
+          "to": { "type": "string", "maxLength": 253, "description": "The answerer's listen name." },
+          "createdAt": { "type": "string", "format": "datetime", "description": "Answerers ignore an offer older than 2 minutes." }
+        }
+      }
+    }
+  }
+}

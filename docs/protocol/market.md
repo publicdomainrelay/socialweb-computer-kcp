@@ -143,6 +143,11 @@ Every record also reaches the other side two ways. The XRPC call is the fast pat
 - the requester's submitEvent takes only event kinds a requester consumes (`isGuestEventNSID` in `internal/market/requester/events.go`)
 - `submitBid` in the RFP, `submitEvent` in the accept and receipt: a DID service ref (`did#serviceId`, default ids `pdr_temp_market`, `pdr_temp_compute_event`) or an HTTP URL
 - calls to a bidder go to its offering `endpoints[]` with service auth aud `<bidder DID>#pdr_temp_market` (hostname-free; the bidder also takes `#pdr_temp_compute_event`)
+- a `webrtc` endpoint's address is base64url JSON `{did, listen}`: the bidder's `computer.socialweb.ingress.listen/<listen>` holds
+  `{key (age), fingerprint (DTLS)}`; an offerer writes `computer.socialweb.ingress.offer/<bidder DID>.<tid>` (age-sealed `{sdp, replyTo}`)
+  in its own repo, the bidder (offers reach it on its Jetstream and relay streams, collection filter) answers once at
+  `computer.socialweb.ingress.answer/<offerer DID>.<tid>` (sealed `{sdp}`, deleted after 5 min) and serves HTTP/1.1 on each
+  datachannel (keep-alive) to its market XRPC; offers older than 2 min are ignored
 - `ingress[]` on the records and calls: `ingress.webRTC` listen/offer/answer records for a party whose HTTP endpoint is not reachable ([lexicons-market.md](lexicons-market.md#ingresswebrtc))
 
 ## Bid Window And Selection

@@ -105,7 +105,7 @@ func (s *Service) resolveIdentity(ctx context.Context) {
 	s.did = found.Status.Did
 }
 
-func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
+func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*core.Bidder, error) {
 	if s.did == "" {
 		return nil, errors.New("bidder: the record store needs the bidder DID")
 	}
@@ -176,9 +176,22 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		HTTP:        httpClient,
 		Directory:   s.dir,
 		Operators:   s.operators(),
+		Mesh:        s.mesh(ctx),
 		Policy:      s.policyRuns(),
 		Log:         s.log,
 	})
+}
+
+func (s *Service) mesh(ctx context.Context) core.Mesh {
+	if !s.inboundXRPC() || s.mux == nil {
+		return nil
+	}
+	mesh, err := webrtc.NewMesh(ctx, webrtc.MeshConfig{StateDir: s.stateDir(), Handler: s.mux, Log: s.log})
+	if err != nil {
+		s.log.Warn("bidder_mesh_unavailable", "err", err.Error())
+		return nil
+	}
+	return mesh
 }
 
 func (s *Service) operators() core.Operators {

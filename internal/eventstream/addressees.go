@@ -136,6 +136,18 @@ func (a *addressees) wants(ctx context.Context, collection, author string) bool 
 	return true
 }
 
+func (a *addressees) rkeyAddressed(ctx context.Context, collection, rkey string) bool {
+	if a.role == "requester" || collection != market.IngressOfferNSID {
+		return true
+	}
+	index, ok := a.current(ctx)
+	if !ok || !index.BidderOwnsRKey(collection, rkey) {
+		a.drop(&a.unaddressed, collection)
+		return false
+	}
+	return true
+}
+
 func (a *addressees) closed(source, collection, uri string, record map[string]any) bool {
 	if a.role == "requester" || collection != market.RFPNSID || !market.RFPBidWindowOver(uri, record, time.Now()) {
 		return false

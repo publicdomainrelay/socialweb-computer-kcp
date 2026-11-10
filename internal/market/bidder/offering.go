@@ -164,10 +164,11 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	if err := b.findLegacyOffering(ctx); err != nil {
 		return err
 	}
+	endpoints := b.offeredEndpoints(b.ensureListen(ctx))
 	createdAt := now
 	if prior != nil {
 		createdAt = prior.CreatedAt
-		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, b.cfg.Endpoints) && sameStrings(prior.AppliesTo, appliesTo) {
+		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, endpoints) && sameStrings(prior.AppliesTo, appliesTo) {
 			if b.legacyStale {
 				b.mirrorLegacy(ctx, *prior)
 			}
@@ -175,7 +176,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 			return nil
 		}
 	}
-	record, err := market.BuildOffering(b.cfg.Endpoints, appliesTo, nil, createdAt, now)
+	record, err := market.BuildOffering(endpoints, appliesTo, nil, createdAt, now)
 	if err != nil {
 		return err
 	}
@@ -188,9 +189,9 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	case touch:
 		b.log.Info("the bidder offering is refreshed for the relay", "offering", uri, "legacy", b.legacyOffering)
 	case prior == nil:
-		b.log.Info("the bidder offering is written", "offering", uri, "endpoints", b.cfg.Endpoints, "legacy", b.legacyOffering)
+		b.log.Info("the bidder offering is written", "offering", uri, "endpoints", endpoints, "legacy", b.legacyOffering)
 	default:
-		b.log.Info("the bidder offering is corrected", "offering", uri, "endpoints", b.cfg.Endpoints, "legacy", b.legacyOffering)
+		b.log.Info("the bidder offering is corrected", "offering", uri, "endpoints", endpoints, "legacy", b.legacyOffering)
 	}
 	return nil
 }

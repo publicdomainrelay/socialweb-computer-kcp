@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "computer.socialweb.ingress.answer",
+  "description": "A sealed WebRTC answer, in the answerer's repo. Record key: <offerer DID>.<session TID> (the offer's TID). Read with one getRecord; the answerer deletes it after a few minutes.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["ciphertext", "createdAt"],
+        "properties": {
+          "ciphertext": { "type": "string", "maxLength": 16384, "description": "age-armored JSON {sdp}, sealed to the offer's replyTo; its a=fingerprint is the listen record's." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

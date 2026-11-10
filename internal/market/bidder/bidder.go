@@ -245,6 +245,8 @@ type Deps struct {
 
 	Operators Operators
 
+	Mesh Mesh
+
 	Policy *runs.Client
 
 	Log *slog.Logger
@@ -290,6 +292,8 @@ type Bidder struct {
 	directory identity.Directory
 
 	operators Operators
+
+	mesh Mesh
 
 	policy *policyEvaluator
 
@@ -391,6 +395,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
 		directory:   deps.Directory,
 		operators:   deps.Operators,
+		mesh:        deps.Mesh,
 		policy:      &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
 		log:         log,
 		now:         now,

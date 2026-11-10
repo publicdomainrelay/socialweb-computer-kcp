@@ -879,6 +879,8 @@ func (b *Bidder) applyInbox(ctx context.Context, request participant.OutboxReque
 		if err := b.applyMarketEvent(ctx, payload.URI, payload.CID, payload.Record, payload.DID); err != nil {
 			return participant.Observation{}, err
 		}
+	case market.IngressOfferNSID:
+		b.answerOffer(ctx, payload.DID, payload.URI, payload.Record)
 	}
 	b.inboxed.Store(inboxKey(request), true)
 	return participant.InboxObservation(request, payload.URI), nil

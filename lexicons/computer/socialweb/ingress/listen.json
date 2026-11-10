@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "computer.socialweb.ingress.listen",
+  "description": "A WebRTC answerer's keys, in its own repo. Record key: the listen name (a bidder's market endpoint: market; a mesh peer: its subhandle). Read with one getRecord; never listed.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["key", "fingerprint", "createdAt"],
+        "properties": {
+          "key": { "type": "string", "maxLength": 128, "description": "The age X25519 recipient (age1...) offers are sealed to." },
+          "fingerprint": { "type": "string", "maxLength": 256, "description": "The DTLS certificate fingerprint every answer carries, as \"sha-256 AB:CD:...\"." },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

@@ -159,7 +159,7 @@ func RequesterConsumes(collection string) bool {
 
 func BidderConsumes(collection string) bool {
 	switch collection {
-	case RFPNSID, AcceptNSID, EventNSID:
+	case RFPNSID, AcceptNSID, EventNSID, IngressOfferNSID:
 		return true
 	}
 	return false
@@ -219,9 +219,17 @@ func (a *Addressees) own(did string) bool {
 	return did != "" && a.DIDs[did]
 }
 
+func (a *Addressees) BidderOwnsRKey(collection, rkey string) bool {
+	if collection != IngressOfferNSID {
+		return true
+	}
+	did, tid, ok := strings.Cut(rkey, ".")
+	return ok && tid != "" && a.own(did)
+}
+
 func (a *Addressees) BidderAddressed(collection string, record map[string]any) bool {
 	switch collection {
-	case RFPNSID:
+	case RFPNSID, IngressOfferNSID:
 		return true
 	case AcceptNSID:
 		accept, err := ParseAccept(record)

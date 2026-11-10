@@ -231,6 +231,9 @@ func (h *marketHandler) deliverOnce(ctx context.Context, event events.Event, ada
 }
 
 func (h *marketHandler) deliverOp(ctx context.Context, event events.Event, adapter string, repo syntax.DID, uri, collection, rkey string, op events.Op) error {
+	if !h.addressees.rkeyAddressed(ctx, collection, rkey) {
+		return ctx.Err()
+	}
 	var expected *cid.Cid
 	if op.CID != "" {
 		parsed, err := cid.Decode(op.CID)

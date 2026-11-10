@@ -40,6 +40,8 @@ const (
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
 	CollectionFedproxySSHKey        = "com.fedproxy.sshPublicKey"
 	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
+	CollectionIngressListen         = "computer.socialweb.ingress.listen"
+	CollectionIngressAnswer         = "computer.socialweb.ingress.answer"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
 	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
@@ -96,6 +98,8 @@ var (
 			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
 			CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
+		[]string{collectionScope(CollectionIngressListen, "create", "update")},
+		[]string{collectionScope(CollectionIngressAnswer, "create", "delete")},
 		[]string{collectionScope(CollectionHeartbeat, "create", "update")},
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create", "update", "delete")},
 		[]string{collectionScope(CollectionAssociation, "create", "update", "delete")},

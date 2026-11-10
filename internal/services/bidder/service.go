@@ -296,7 +296,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		s.log.Warn("the bidder market relay did not start", "err", err)
 	}
 	s.authorizer.Store(s.newAuthorizer())
-	bidder, err := s.newBidder(intents)
+	bidder, err := s.newBidder(ctx, intents)
 	if err != nil {
 		s.log.Warn("the bidder does not serve the market", "err", err)
 	}

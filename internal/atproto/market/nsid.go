@@ -60,6 +60,12 @@ const (
 
 	IngressWebRTCNSID = "com.publicdomainrelay.temp.ingress.webRTC"
 
+	IngressListenNSID = "computer.socialweb.ingress.listen"
+	IngressOfferNSID  = "computer.socialweb.ingress.offer"
+	IngressAnswerNSID = "computer.socialweb.ingress.answer"
+
+	MarketListenRKey = "market"
+
 	IngressModeListen = "listen"
 	IngressModeOffer  = "offer"
 	IngressModeAnswer = "answer"

@@ -49,7 +49,7 @@ const (
 
 var RequesterStreamCollections = []string{market.BidNSID, market.ReceiptNSID, market.EventNSID}
 
-var BidderStreamCollections = []string{market.RFPNSID, market.AcceptNSID, market.EventNSID}
+var BidderStreamCollections = []string{market.RFPNSID, market.AcceptNSID, market.EventNSID, market.IngressOfferNSID}
 
 func MarketStreamCollections(role string) []string {
 	if role == RequesterStreamRole {
