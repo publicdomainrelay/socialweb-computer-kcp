@@ -8,7 +8,12 @@ Run after every rollout; it is the gate before "tests may resume".
 - Build: the CI build of a main commit: `main/<commit>/binaries/socialweb-computer-linux-amd64` in the public bucket once the run's
   `publish` job succeeded, else the run's `binaries` artifact (`gh run download <run> -n binaries`); check it against that run's
   `SHA256SUMS`. A local tag build is the fallback. Installs run from the lead host over ssh (no CI deploy key)
-- Last pass: rc154, 2026-11-01 02:22-02:25Z (all components, 0 restarts); page compat vs rc153 01:17Z
+- Last pass: 2026-11-10. Bidders hat-7 + hat-9 on rollout 6 (2d367fe8) 15:47Z: version, bidder.json ready, MarketIdentity
+  Ready, `bidder-tangled-vouch`, 0 ERROR / 0 unsupported since restart, hosts empty. Gateway + ssh gateway on rollout 5
+  (438ca0fa) 15:31Z: SshGateway Ready, 12 min with 0 restarts, 0 ERROR from start, endpoints 200. Compat smoke (bob, rollout 5
+  bidders): CLI `run request --exec id` Held -> Released (hat-9); atlibs requester page at shell.socialweb.computer, fresh
+  profile: bind_key, Run a contract -> receipt, guest hostKeys + webrtc fingerprint, release terminated, its 5 records deleted
+- Previous pass: rc154, 2026-11-01 02:22-02:25Z (all components, 0 restarts); page compat vs rc153 01:17Z
 
 ```mermaid
 flowchart LR
