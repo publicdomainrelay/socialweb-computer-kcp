@@ -139,8 +139,8 @@ Pass criteria:
 - The fresh requester signals a new WebRTC session to the winner and releases: `requester_released`,
   `requester_agent_peer_deleted`, `requester_association_deleted`, `requester_contract_records_deleted`.
 - Evidence: `infra restore visible=true`, then `released contracts=<id>`.
-- Known flake (2 of 6 launches on 2026-11-10): the requester compose waits on `Workspace app phase Initializing
-  initializers [system:apibindings]` and retries forever; relaunch the app.
+- The requester compose must not stall on `Workspace <app|socialweb-provider> phase Initializing initializers
+  [system:apibindings]` (see Known pitfalls; fixed in the kcp fork, kcp-ios 120706ba2).
 
 If restore says the snapshot was discarded as stale, the app cold-boots; the
 release must still work from a fresh requester once identity is Ready.
@@ -177,6 +177,19 @@ Pass criteria:
 - Chat scroll stays put when the reader is scrolled up (owner bug 3981);
   a "N new messages" pill appears instead.
 - Launch: kcp ready ~4 s, requester ready ~5-6 s on simulator.
+
+## Known pitfalls
+
+| Symptom | Cause / fix |
+| --- | --- |
+| requester compose stuck on `Workspace app` (or `socialweb-provider`) `phase Initializing initializers [system:apibindings]`, every default APIBinding `Bound`, about 1 launch in 13-20 (2026-11-10) | the kcp workspace scheduling reconciler retried after a conflicting Workspace patch and set the already initialized LogicalCluster back to `Initializing`; admission re-armed `status.initializers` and the APIBinder had no event left to react to. Fixed in the kcp fork (github.com/johnandersen777/kcp branch kcp-ios 120706ba2: only Scheduling -> Initializing; the app pins f233e4f2c); 25 of 25 relaunches compose after it. Same code is in upstream kcp; servers run unpatched upstream kcp |
+| a launch "sits after `requester_started`" with no `infra_contract_requested` and no bidder discovery (1 launch in ~8) | the app's launch PATCHes the session EphemeralInfra at the resourceVersion it read, and the infra controller writes the object's status right after the requester starts: `launch failed: kcp HTTP 409 ... the object has been modified` (logged since the fix; before, only errorText). Fixed in the app (atirc-ios-client adab576): read-modify-apply retries on 409 (launch, release, release all); 10 of 10 launches request a contract (2026-11-10, bob) |
+| VMs keep running after the app was killed during launch loops (8 bob VMs on hat-9, 2026-11-10) | the app persisted the infra snapshot at launch, before the receipt; a killed app restored a receipt-less contract, requested a new one and orphaned the VM. Fixed in the app (adab576): the snapshot is persisted every 5 s while the requester runs (unchanged state not rewritten); each relaunch then releases the previous VM. Bidders end any VM with no association proof at accept + 24 h (kcp 97b635a6); before that, operator delete (0007) |
+| a watch silently misses events after a burst (any controller) | the kcp fork's memory store dropped a watch replay beyond 100 events with the watch still open; fixed in the fork (kcp-ios f233e4f2c, replay buffered whole) |
+
+Stall diagnosis: the console (`simctl launch --console-pty`) carries the kcpapply wait error with the Workspace
+phase, initializers and every False LogicalCluster condition; a stall with no `APIBindingsInitialized=False`
+condition and all APIBindings Bound is the re-armed initializer above.
 
 ## Automation hooks (DEBUG)
 
