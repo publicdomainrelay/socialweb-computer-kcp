@@ -6,22 +6,23 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
 
 - Author: the `atirc-ios-client-dev` peer agent; folded here by the docs agent (device ids replaced by placeholders)
 - Plan: [0038](../plans/0038-ios-embedded-kcp.yaml)
-- Last pass: simulator 2026-10-31 (A2 agent joined 02:36Z, A3 revoke 02:39:36Z before Released, A4 cross-restart 02:33Z)
+- Last pass: simulator 2026-11-10, alice, bidders reached over WebRTC only (kcp aaab79d0, app 37c9b0f, rollout 6
+  bidders): A1 16:24Z (41 scopes granted), A2 hat-9 Held 16:27Z, A3 Released 16:31:34Z (14 of 14 records deleted),
+  A4 cross-restart release 16:37:37Z. A5/A6 not re-run (no change since 2026-10-31)
 - Related: [0004](0004-vm-atirc-agent.md) (agent path), [0008](0008-host-observer.md) (host evidence)
-- Since the p2p ingress cut-over bidders advertise iroh and webrtc endpoints, https only on hat-7 while
-  `market-https=true` lasts. The embedded Go requester dials iroh (the dumbpipe binary: not on iOS) or https, so
-  A2-A4 need either an https bidder or the Go WebRTC endpoint dialer (`internal/ingress/webrtc` MeshDialer, in
-  progress 2026-11-10); hat-7 keeps https until A2 passes over webrtc. 2026-11-10: the app still builds for the
-  simulator (`xcodebuild ... build`, iPhone 17e, existing framework)
+- Bidders advertise iroh and webrtc endpoints (https only on hat-7 while `market-https=true` lasts). The embedded
+  requester has no dumbpipe, so it takes webrtc (`internal/ingress/webrtc` MeshDialer: sealed
+  `computer.socialweb.ingress.offer` record, answer by getRecord, HTTP over datachannels); the simulator runs force
+  it with `SIMCTL_CHILD_SOCIALWEB_REQUESTER_BIDDER_ENDPOINTS=webrtc`
 
 ## Artifacts
 
 | Item | Value |
 | --- | --- |
 | App repo | `~/src/atirc-client-ios/AT-IRC` (local only; no remote) |
-| Framework | `GoLib/AtircGo.xcframework`, built by `GoLib/build.sh` from the socialweb mount |
-| Framework target | socialweb `973f7821` in the accepted build (`a43e389`+) |
-| App build | `a43e389`+ (presence `2c23c1f`, perf `a43e389`; tests `f8e4841`) |
+| Framework | `GoLib/AtircGo.xcframework`, built by `GoLib/build.sh` from `SOCIALWEB_COMMIT` of `SOCIALWEB_SRC` (a socialweb-computer-kcp clone); it seeds the patched apiserver module under /tmp itself |
+| Framework target | socialweb-computer-kcp `aaab79d0` in the accepted build (`37c9b0f`) |
+| App build | `37c9b0f` (client_id scope = `RequesterOAuthScope`, 41 tokens; presence `2c23c1f`, perf `a43e389`) |
 | Simulator | iPhone 17e (`<simulator udid>`) |
 | Device | owner iPhone (`<device udid>`) |
 | Bundle id | `com.fedfork.irc.AT-IRC` |
@@ -33,7 +34,9 @@ Never add a second gomobile framework: one Go runtime per app.
 - Build succeeds:
   `xcodebuild -project AT-IRC.xcodeproj -scheme AT-IRC -configuration Debug -destination 'platform=iOS Simulator,id=<simulator udid>' -derivedDataPath .build build`
 - Tests pass: `xcodebuild ... test` (17 unit + 2 UI at `f8e4841`).
-- IRC account signed in (the app's own atproto OAuth account).
+- IRC account signed in (the app's own atproto OAuth account): `Scripts/sim-signin.sh <simulator udid>` (alice).
+- `OAuthClient.scope` (the loopback client_id's scope) equals the pinned kcp's `oauth.RequesterOAuthScope`
+  (`OAuthScopeTests`): the market sign-in reuses that client_id.
 - Market identity may be `SessionExpired`; A1 re-signs it.
 - Gateway/socialweb services reachable; bidders Ready.
 
@@ -63,6 +66,11 @@ Failure signatures:
   Ready.
 - No sign-in URL -> loopback bind failed or config empty; check
   `market-oauth` logs and the visible error text.
+- `callback received keys=error,error_description,iss,state` and the browser shows `Sign-in failed:
+  invalid_scope` -> the requester asks for a scope the app's client_id does not declare; regenerate
+  `OAuthClient.scope` from the pinned kcp's `RequesterOAuthScope`.
+- The PDS password step says `The data you submitted is invalid` -> the requester's GET authorize URL (scope
+  twice: parameter and client_id) is near 8 KB; 44 scope tokens failed, 41 pass (aaab79d0).
 
 ## A2 - Launch, agentStart, join
 
@@ -79,26 +87,33 @@ Steps:
 
 Pass criteria:
 - Contract shows `Held` with a VM name.
-- `ContractEvent` outbound `guest.agentStart` settles.
-- atirc mints a **leased** child token for the contract.
-- Guest joins the channel and posts at least one line.
+- Console (`simctl launch --console-pty`): `webrtc_mesh_connected` per bidder (about 1.4 s), no iroh or https
+  bidder endpoint.
+- `ContractEvent` outbound `guest.agentStart` settles: `agentStart ... Submitted: submitted to webrtc://...`.
+- Token-less agent: `requester_agent_lease_written`, `requester_agent_mesh_key_written`,
+  `requester_agent_peer_published` (no `requester_agent_peer_failed`; a ScopeMissingError there means the
+  session lacks `repo:computer.socialweb.peer`; sign in again).
 - Agent process runs on a bidder host; request host-side logs confirm the VM.
+- Guest join on the channel: 0004 / 0011 own the mesh agent; not re-checked from the app on 2026-11-10.
 
 ## A3 - Release before termination
 
-Purpose: Release must revoke the agent's atirc token before the VM dies.
+Purpose: Release ends the VM and removes the agent's lease, its mesh peer record and the contract's records.
+Token-less agents hold no atirc token, so there is no revoke step (the lease latch and the association expiry make
+a missed cleanup harmless).
 
 Steps:
-1. With a Held/running contract, tap **Release**.
-2. Observe the atirc token revocation and the VM termination.
+1. With a Held/running contract, tap **Release** (the test hook releases 240 s after agentStart).
+2. Observe the release over WebRTC and the record cleanup.
 
 Pass criteria:
-- `revoke` timestamp is **strictly before** `vm.terminated`.
-- Contract reaches `Released`.
-- Host reports the VM gone.
+- `requester_released`, then `requester_agent_peer_deleted` and `requester_association_deleted`.
+- `requester_contract_records_deleted deleted=N of=N` and no `requester_record_delete_skipped`.
+- No `computer.socialweb.ingress.offer` record left in the account.
+- Host reports the VM gone (no firecracker for it).
 
-Observed accepted run: revoke 0.6 s before termination (iOS agent
-`einfra-atirc-ios-p1z6dz`).
+Observed accepted run (2026-11-10, hat-9): released 16:31:34Z, peer and association deleted the same second,
+14 of 14 records deleted (`einfra-atirc-ios-z2g1t8`).
 
 ## A4 - Cross-restart release from sealed snapshot
 
@@ -115,8 +130,11 @@ Steps:
 
 Pass criteria:
 - Chat shows the restored contract row before any network refresh.
-- Release revokes the token before `vm.terminated`.
+- The fresh requester signals a new WebRTC session to the winner and releases: `requester_released`,
+  `requester_agent_peer_deleted`, `requester_association_deleted`, `requester_contract_records_deleted`.
 - Evidence: `infra restore visible=true`, then `released contracts=<id>`.
+- Known flake (2 of 6 launches on 2026-11-10): the requester compose waits on `Workspace app phase Initializing
+  initializers [system:apibindings]` and retries forever; relaunch the app.
 
 If restore says the snapshot was discarded as stale, the app cold-boots; the
 release must still work from a fresh requester once identity is Ready.
@@ -205,13 +223,13 @@ sequenceDiagram
     Bidders->>Requester: bids
     Requester->>VM: accept + provision
     VM->>Requester: Held + lease
-    Requester->>Atirc: mint leased agent token
+    Requester->>Requester: lease, mesh key, computer.socialweb.peer record
     App->>VM: ContractEvent guest.agentStart
     VM->>Atirc: agent joins channel
     App->>Requester: Release
-    Requester->>Atirc: revoke token
+    Requester->>VM: release (over WebRTC)
     Requester->>VM: terminate
-    Atirc-->>Requester: terminated (after revoke)
+    Requester->>Requester: delete peer record, association, contract records
 ```
 
 ## Security constraints
@@ -220,6 +238,6 @@ sequenceDiagram
   never print, log, or post its values or any sign-in URL.
 - Snapshots (kcp, requester, infra, provider identities) are sealed with a
   Keychain key, Data Protection Complete, excluded from backups.
-- The app never holds a long-lived agent token; the requester mints a leased
-  child after the contract receipt and it dies by revoke or lease latch.
+- The agent is token-less: the requester writes a contract-scoped lease (association) and a mesh peer record;
+  release deletes both, and their expiry makes a missed cleanup harmless.
 - Local commits only; never push the app repo.
