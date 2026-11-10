@@ -1363,8 +1363,10 @@ func (a *app) loadRequest(vals clicfg.Values, rest []string, verb string) (*requ
 	if r.summary.Identity == "" {
 		r.summary.Identity = inv.Identity
 	}
-	if verb == "release" && r.summary.Phase == string(v1alpha1.ComputeContractReleased) && !r.summary.KcpRunning {
-		r.log("the contract is already Released and no process runs the invocation's kcp; the invocation is only removed")
+	neverHeld := r.summary.Phase == string(v1alpha1.ComputeContractFailed) && (r.summary.Contract == nil || r.summary.Contract.ReceiptUri == "")
+	if verb == "release" && (r.summary.Phase == string(v1alpha1.ComputeContractReleased) || neverHeld) && !r.summary.KcpRunning {
+		r.log("the contract is Released, or Failed before a VM was held, and no process runs the invocation's kcp; the invocation is only removed",
+			"phase", r.summary.Phase)
 		r.cleanupOnly = true
 		return r, exitOK
 	}
