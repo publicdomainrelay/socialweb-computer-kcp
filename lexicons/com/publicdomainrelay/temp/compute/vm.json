@@ -18,6 +18,7 @@
           "network": { "type": "string", "description": "Network transfer allowance, such as 500G." },
           "location": { "type": "ref", "ref": "#location" },
           "user_data": { "type": "string", "description": "cloud-init user data." },
+          "net": { "type": "boolean", "description": "kind deno: the program reaches the public internet (never loopback, link-local or private ranges). A bidder runs it only for its owner: the requester is the bidder's DID, its operator, or associated to that operator." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

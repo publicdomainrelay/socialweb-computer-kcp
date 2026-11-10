@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-31.computecontracts.socialweb.computer
+  name: v1alpha1-32.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -50,6 +50,8 @@ spec:
                   - vm
                   - deno
                 default: vm
+              net:
+                type: boolean
               policy:
                 type: string
               policyArgs:

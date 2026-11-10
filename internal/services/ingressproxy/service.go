@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/ingress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/iroh"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/opentunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/xrpcsubscription"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/hostport"
@@ -207,7 +208,15 @@ func (s *Service) buildProvider(relayURL string) (ingress.Provider, exposure.Ing
 		})
 		return provider, exposure.NewSubscriberRegistrar(s.deps.Registry, s.deps.Bus, s.deps.Identity), v1alpha1.IngressProviderXRPCSubscription, nil
 	case v1alpha1.IngressProviderIroh:
-		return nil, nil, "", errors.New("ingressproxy: provider iroh is not supported yet; select xrpc-subscription or opentunnel")
+		cfg := iroh.Config{StateDir: s.deps.StateDir, Log: s.deps.Log}
+		if spec := s.spec.Iroh; spec != nil {
+			cfg.DumbpipePath, cfg.RelayURL, cfg.ListenHost = spec.DumbpipePath, spec.RelayURL, spec.ListenHost
+		}
+		if err := cfg.Check(); err != nil {
+			return nil, nil, "", err
+		}
+		provider := iroh.New(cfg)
+		return provider, registrar{impl: provider, bus: s.deps.Bus}, v1alpha1.IngressProviderIroh, nil
 	case v1alpha1.IngressProviderOpenTunnel:
 		spec := s.spec.OpenTunnel
 		if spec == nil {

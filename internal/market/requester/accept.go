@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bluesky-social/indigo/atproto/syntax"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
@@ -242,20 +240,7 @@ func (q *Requester) bidderFor(did string) (Bidder, bool) {
 }
 
 func (q *Requester) bidderForBid(ctx context.Context, bid BidRecord) (Bidder, bool) {
-	if bidder, ok := q.bidderFor(bid.DID); ok && bidder.Endpoint != "" {
-		return bidder, true
-	}
-	raw := strings.TrimSpace(stringOf(bid.Record["submitAccept"]))
-	if raw == "" {
-		return Bidder{}, false
-	}
-	endpoint, audience, err := resolveBidderEndpoint(ctx, q.deps.Directory, raw)
-	if err != nil || endpoint == "" {
-		return Bidder{}, false
-	}
-	bidder := Bidder{DID: bid.DID, Endpoint: endpoint, Audience: audience}
-	q.rememberBidders([]Bidder{bidder})
-	return bidder, true
+	return q.bidderForDID(ctx, bid.DID)
 }
 
 func (q *Requester) bidderForDID(ctx context.Context, did string) (Bidder, bool) {
@@ -267,29 +252,6 @@ func (q *Requester) bidderForDID(ctx context.Context, did string) (Bidder, bool)
 		if bidder, ok := q.bidderFor(did); ok && bidder.Endpoint != "" {
 			return bidder, true
 		}
-	}
-	parsed, err := syntax.ParseDID(did)
-	if err != nil {
-		return Bidder{}, false
-	}
-	identityDoc, err := q.deps.Directory.LookupDID(ctx, parsed)
-	if err != nil || identityDoc == nil {
-		return Bidder{}, false
-	}
-	for fragment, service := range identityDoc.Services {
-		if service.URL == "" {
-			continue
-		}
-		if fragment != defaultMarketServiceID && !strings.Contains(fragment, "market") {
-			continue
-		}
-		endpoint, audience, err := resolveBidderEndpoint(ctx, q.deps.Directory, service.URL)
-		if err != nil || endpoint == "" {
-			continue
-		}
-		bidder := Bidder{DID: did, Endpoint: endpoint, Audience: audience}
-		q.rememberBidders([]Bidder{bidder})
-		return bidder, true
 	}
 	return Bidder{}, false
 }

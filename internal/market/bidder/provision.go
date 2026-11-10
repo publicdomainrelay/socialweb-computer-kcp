@@ -70,6 +70,8 @@ type vmRecord struct {
 	Role string `json:"role"`
 
 	UserData string `json:"user_data"`
+
+	Net bool `json:"net"`
 }
 
 func parseVMRecord(value map[string]any) (vmRecord, error) {

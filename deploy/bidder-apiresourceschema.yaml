@@ -475,14 +475,16 @@ spec:
                 type: array
                 items:
                   type: string
-              marketExposureRef:
-                type: object
-                properties:
-                  name:
-                    type: string
-                    maxLength: 253
-                required:
-                  - name
+              marketExposureRefs:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      maxLength: 253
+                  required:
+                    - name
               mode:
                 type: string
               comms:

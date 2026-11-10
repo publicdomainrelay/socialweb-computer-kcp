@@ -40,7 +40,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-operator-signin", "bidder-options", "kcp-path", "kine-path", "bao-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
+	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-operator-signin", "bidder-options", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -668,7 +668,7 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 	}
 	prefix := r.vals.String("unit-prefix")
 	exes := map[string]devinstance.Executable{}
-	for _, x := range []struct{ name, option string }{{bidder.ExeKcp, "kcp-path"}, {bidder.ExeKine, "kine-path"}, {bidder.ExeBao, "bao-path"}} {
+	for _, x := range []struct{ name, option string }{{bidder.ExeKcp, "kcp-path"}, {bidder.ExeKine, "kine-path"}, {bidder.ExeBao, "bao-path"}, {marketbidder.DumbpipeExecutable, "dumbpipe-path"}} {
 		e, err := r.a.optionalExe(ctx, r.vals, x.name, x.option)
 		if err != nil {
 			return r.a.fail(exitRefused, "%s: %v", verb, err)

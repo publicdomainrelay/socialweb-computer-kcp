@@ -14,6 +14,8 @@ type Program struct {
 
 	Net bool
 
+	PublicNetOnly bool
+
 	Env map[string]string
 }
 

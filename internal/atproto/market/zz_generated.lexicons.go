@@ -395,16 +395,15 @@ func (v *BadgeBlueKeys) UnmarshalJSON(b []byte) error {
 }
 
 type Bid struct {
-	Type         string                     `json:"$type"`
-	Config       *StrongRef                 `json:"config,omitempty"`
-	CreatedAt    string                     `json:"createdAt,omitempty"`
-	Ingress      []StrongRef                `json:"ingress,omitempty"`
-	Payload      StrongRef                  `json:"payload"`
-	RFP          StrongRef                  `json:"rfp"`
-	Signatures   Signatures                 `json:"signatures,omitempty"`
-	SubmitAccept string                     `json:"submitAccept,omitempty"`
-	Extra        map[string]json.RawMessage `json:"-"`
-	absent       map[string]json.RawMessage
+	Type       string                     `json:"$type"`
+	Config     *StrongRef                 `json:"config,omitempty"`
+	CreatedAt  string                     `json:"createdAt,omitempty"`
+	Ingress    []StrongRef                `json:"ingress,omitempty"`
+	Payload    StrongRef                  `json:"payload"`
+	RFP        StrongRef                  `json:"rfp"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
 }
 
 func (Bid) NSID() string {
@@ -1332,6 +1331,7 @@ type ComputeVM struct {
 	Kind      string                     `json:"kind,omitempty"`
 	Location  *ComputeVMLocation         `json:"location,omitempty"`
 	Mem       string                     `json:"mem,omitempty"`
+	Net       bool                       `json:"net,omitempty"`
 	Network   string                     `json:"network,omitempty"`
 	Role      string                     `json:"role"`
 	UserData  string                     `json:"user_data,omitempty"`
@@ -1392,6 +1392,31 @@ func (v *ComputeVMLocation) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ComputeVMLocation(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type Endpoint struct {
+	Address string                     `json:"address"`
+	Kind    string                     `json:"kind"`
+	Extra   map[string]json.RawMessage `json:"-"`
+	absent  map[string]json.RawMessage
+}
+
+func (v Endpoint) MarshalJSON() ([]byte, error) {
+	type plain Endpoint
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *Endpoint) UnmarshalJSON(b []byte) error {
+	type plain Endpoint
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = Endpoint(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil
@@ -1559,7 +1584,7 @@ type Offering struct {
 	Type        string                     `json:"$type"`
 	AppliesTo   []string                   `json:"appliesTo,omitempty"`
 	CreatedAt   string                     `json:"createdAt"`
-	EndpointURL string                     `json:"endpointUrl,omitempty"`
+	Endpoints   []Endpoint                 `json:"endpoints,omitempty"`
 	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	RefreshedAt string                     `json:"refreshedAt,omitempty"`
 	WithdrawnAt string                     `json:"withdrawnAt,omitempty"`

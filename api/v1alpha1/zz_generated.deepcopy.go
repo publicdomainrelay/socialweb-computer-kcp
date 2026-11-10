@@ -1177,10 +1177,10 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.MarketExposureRef != nil {
-		in, out := &in.MarketExposureRef, &out.MarketExposureRef
-		*out = new(commonv1alpha1.LocalObjectRef)
-		**out = **in
+	if in.MarketExposureRefs != nil {
+		in, out := &in.MarketExposureRefs, &out.MarketExposureRefs
+		*out = make([]commonv1alpha1.LocalObjectRef, len(*in))
+		copy(*out, *in)
 	}
 	if in.Comms != nil {
 		in, out := &in.Comms, &out.Comms

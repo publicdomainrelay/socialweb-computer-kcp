@@ -237,9 +237,6 @@ func (r *Bid) Validate() error {
 	if err := validateOptionalRef(r.Config); err != nil {
 		return err
 	}
-	if err := validateOptionalServiceRef(r.SubmitAccept); err != nil {
-		return err
-	}
 	if err := validateIngressList(r.Ingress); err != nil {
 		return err
 	}
@@ -317,9 +314,10 @@ func (r *Event) Validate() error {
 }
 
 func (r *Offering) Validate() error {
-	r.EndpointURL = strings.TrimSpace(r.EndpointURL)
-	if err := validateOptionalServiceRef(r.EndpointURL); err != nil {
-		return err
+	for _, endpoint := range r.Endpoints {
+		if err := endpoint.Validate(); err != nil {
+			return err
+		}
 	}
 	if r.WithdrawnAt == "" || len(r.AppliesTo) > 0 {
 		if err := validateAppliesTo(r.AppliesTo); err != nil {
@@ -517,12 +515,11 @@ func CreateRFPAt(ctx context.Context, w RecordWriter, repo, rkey string, opts RF
 }
 
 type BidOptions struct {
-	RFP          RecordRef
-	Config       *RecordRef
-	Payload      RecordRef
-	SubmitAccept string
-	Ingress      []RecordRef
-	CreatedAt    string
+	RFP       RecordRef
+	Config    *RecordRef
+	Payload   RecordRef
+	Ingress   []RecordRef
+	CreatedAt string
 }
 
 func BuildBid(opts BidOptions) (Bid, error) {
@@ -542,10 +539,7 @@ func BuildBid(opts BidOptions) (Bid, error) {
 	if err != nil {
 		return Bid{}, err
 	}
-	if err := validateOptionalServiceRef(opts.SubmitAccept); err != nil {
-		return Bid{}, err
-	}
-	return Bid{RFP: rfp, Config: config, Payload: payload, SubmitAccept: opts.SubmitAccept, Ingress: ingress, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
+	return Bid{RFP: rfp, Config: config, Payload: payload, Ingress: ingress, CreatedAt: isoOrNow(opts.CreatedAt)}, nil
 }
 
 func BidRKey(bidderDID, rfpURI, rfpCID string) string {
@@ -745,10 +739,11 @@ func PutEvent(ctx context.Context, w RecordWriter, repo, rkey string, opts Event
 	return SignedRecord{URI: ref.URI, CID: ref.CID, Record: signed}, nil
 }
 
-func BuildOffering(endpointURL string, appliesTo []string, ingress []RecordRef, createdAt, refreshedAt string) (Offering, error) {
-	endpointURL = strings.TrimSpace(endpointURL)
-	if err := validateOptionalServiceRef(endpointURL); err != nil {
-		return Offering{}, err
+func BuildOffering(endpoints []Endpoint, appliesTo []string, ingress []RecordRef, createdAt, refreshedAt string) (Offering, error) {
+	for _, endpoint := range endpoints {
+		if err := endpoint.Validate(); err != nil {
+			return Offering{}, err
+		}
 	}
 	if err := validateAppliesTo(appliesTo); err != nil {
 		return Offering{}, err
@@ -757,7 +752,7 @@ func BuildOffering(endpointURL string, appliesTo []string, ingress []RecordRef, 
 	if err != nil {
 		return Offering{}, err
 	}
-	return Offering{EndpointURL: endpointURL, AppliesTo: appliesTo, Ingress: records, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
+	return Offering{Endpoints: endpoints, AppliesTo: appliesTo, Ingress: records, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
 }
 
 func BuildWithdrawnOffering(createdAt, withdrawnAt string) (Offering, error) {

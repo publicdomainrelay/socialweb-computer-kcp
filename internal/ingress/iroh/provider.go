@@ -410,10 +410,12 @@ func (r *registration) startChild(ctx context.Context) (*child, error) {
 				stop()
 				return nil, fmt.Errorf("ingressproxy iroh: dumbpipe printed %q: %w", ticket, err)
 			}
-			if _, err := clusterlink.ParseTicket(ticket); err != nil {
+			short, err := clusterlink.ShortTicket(ticket)
+			if err != nil {
 				stop()
 				return nil, fmt.Errorf("ingressproxy iroh: dumbpipe printed %q: %w", ticket, err)
 			}
+			ticket = short
 			r.log.Info("ingressproxy_iroh_dumbpipe_listening", "address", r.bridge.Address(), "ticket", ticket)
 			return &child{cmd: cmd, ticket: ticket, tail: tail, started: time.Now(), output: output}, nil
 		}

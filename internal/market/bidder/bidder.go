@@ -87,7 +87,7 @@ type Config struct {
 
 	GuestURL string
 
-	EndpointURL string
+	Endpoints []market.Endpoint
 
 	InboundXRPC bool
 
@@ -243,6 +243,8 @@ type Deps struct {
 
 	Directory identity.Directory
 
+	Operators Operators
+
 	Policy *runs.Client
 
 	Log *slog.Logger
@@ -286,6 +288,8 @@ type Bidder struct {
 	verifier participant.Verifier
 
 	directory identity.Directory
+
+	operators Operators
 
 	policy *policyEvaluator
 
@@ -386,6 +390,7 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		outbound:    &participant.Outbound{HTTP: deps.HTTP, Tokens: deps.Tokens, Log: log},
 		verifier:    participant.Verifier{Directory: deps.Directory, Records: deps.Records},
 		directory:   deps.Directory,
+		operators:   deps.Operators,
 		policy:      &policyEvaluator{runs: deps.Policy, scope: cfg.ScopePolicy, records: deps.Records},
 		log:         log,
 		now:         now,

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,8 +34,6 @@ const (
 	bidderDiscoveryTimeout = 10 * time.Second
 
 	defaultMarketServiceID = market.DefaultMarketServiceID
-
-	maxBidderServiceRefHops = 8
 )
 
 var ErrBidderUnreachable = errors.New("requester: the bidder's market endpoint is not reachable yet")
@@ -246,6 +243,8 @@ type HTTPMarket struct {
 
 	HTTPClient *http.Client
 
+	Iroh bool
+
 	Timeout time.Duration
 
 	Log *slog.Logger
@@ -386,71 +385,25 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	if !market.OfferingApplies(offering, market.ComputeVMNSID) {
 		return nil, dropNoOffering
 	}
-	endpoint, audience, err := resolveBidderEndpoint(ctx, m.Directory, offering.EndpointURL)
-	if err != nil {
-		m.log().Warn("requester_bidder_endpoint_refused", "did", did, "endpoint", offering.EndpointURL, "err", err)
-		return nil, dropEndpoint + err.Error()
-	}
-	if endpoint == "" {
+	bidder, ok := BidderFor(did, offering.Endpoints, m.Iroh)
+	if !ok {
 		return nil, dropNoEndpoint
 	}
-	return []Bidder{{DID: did, Endpoint: endpoint, Audience: audience}}, dropNoOffering
+	return []Bidder{bidder}, dropNoOffering
 }
 
-func resolveBidderEndpoint(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", nil
-	}
-	return resolveBidderServiceRef(ctx, dir, raw)
-}
-
-func resolveBidderServiceRef(ctx context.Context, dir identity.Directory, raw string) (string, string, error) {
-	if dir == nil {
-		return "", "", fmt.Errorf("offering endpoint %q needs an identity directory", raw)
-	}
-	seen := map[string]bool{}
-	current := strings.TrimSpace(raw)
-	for range maxBidderServiceRefHops {
-		if !strings.HasPrefix(current, "did:") {
-			u, err := url.Parse(current)
-			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-				return "", "", fmt.Errorf("offering endpoint %q is not an absolute http or https URL or a DID service ref", current)
-			}
-			base := strings.TrimRight(current, "/")
-			if !strings.HasSuffix(base, "/xrpc") {
-				base += "/xrpc"
-			}
-			return base, market.ServiceDIDForHost(u.Host), nil
+func BidderFor(did string, endpoints []market.Endpoint, iroh bool) (Bidder, bool) {
+	for _, kind := range []string{market.EndpointIroh, market.EndpointHTTPS} {
+		if kind == market.EndpointIroh && !iroh {
+			continue
 		}
-		didText := current
-		fragment := defaultMarketServiceID
-		if before, after, found := strings.Cut(current, "#"); found {
-			didText = before
-			if strings.TrimSpace(after) != "" {
-				fragment = strings.TrimSpace(after)
+		for _, endpoint := range endpoints {
+			if endpoint.Kind == kind && endpoint.Validate() == nil {
+				return Bidder{DID: did, Endpoint: endpoint.URL(), Audience: did + "#" + market.DefaultMarketServiceID}, true
 			}
 		}
-		key := didText + "#" + fragment
-		if seen[key] {
-			return "", "", fmt.Errorf("offering endpoint %q repeats the service reference %s", raw, key)
-		}
-		seen[key] = true
-		did, err := syntax.ParseDID(strings.TrimSpace(didText))
-		if err != nil {
-			return "", "", fmt.Errorf("offering endpoint %q: %w", raw, err)
-		}
-		doc, err := dir.LookupDID(ctx, did)
-		if err != nil || doc == nil {
-			return "", "", fmt.Errorf("offering endpoint %q cannot be resolved", raw)
-		}
-		service, ok := doc.Services[fragment]
-		if !ok || strings.TrimSpace(service.URL) == "" {
-			return "", "", fmt.Errorf("offering endpoint %q names no service %s", raw, fragment)
-		}
-		current = strings.TrimSpace(service.URL)
 	}
-	return "", "", fmt.Errorf("offering endpoint %q exceeds %d service reference hops", raw, maxBidderServiceRefHops)
+	return Bidder{}, false
 }
 
 func (m *HTTPMarket) token(ctx context.Context, audience string, lxm string) (string, error) {

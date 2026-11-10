@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
+	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
@@ -25,14 +26,20 @@ const (
 
 	Kind = string(v1alpha1.ApplicationKindMarketBidder)
 
-	BidderSet             = "market-bidder"
-	BidderComponent       = "bidder"
-	BidderApp             = "market-bidder"
-	BidderIdentity        = "bidder"
-	BidderAccount         = "bidder"
-	BidderVaultServer     = "bidder"
-	BidderVaultClient     = "bidder"
-	DefaultPolicy         = v1alpha1.BidderDefaultPolicy
+	BidderSet         = "market-bidder"
+	BidderComponent   = "bidder"
+	BidderApp         = "market-bidder"
+	BidderIdentity    = "bidder"
+	BidderAccount     = "bidder"
+	BidderVaultServer = "bidder"
+	BidderVaultClient = "bidder"
+	DefaultPolicy     = v1alpha1.BidderDefaultPolicy
+	IrohIngress       = "ingress-iroh"
+
+	IrohExposureSuffix = "-iroh"
+
+	DumbpipeExecutable = "dumbpipe"
+
 	BidderProfileProdQr   = "prod-qr"
 	BidderProfileNetwork  = "market-network"
 	BidderProfileDevLocal = "dev-local"
@@ -371,6 +378,11 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		guestSpec.Storage = &v1alpha1.ComponentStorage{BlobsDir: downloads}
 	}
 	guest := compose.Desired{Kind: compose.ComponentKindGuestControlPlane, Name: GuestComponent, Spec: guestSpec}
+	dumbpipe, err := p.dumbpipe()
+	if err != nil {
+		return nil, err
+	}
+	marketHTTPS := o.Spec.Profile != BidderProfileProdQr || compose.OptionValue(o.Spec.Options, "market-https") == "true"
 	var image string
 	var firecracker *v1alpha1.FirecrackerProvider
 	var kcp *v1alpha1.KcpProvider
@@ -386,7 +398,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	}
 	bidder := compose.Desired{Kind: compose.ComponentKindBidder, Name: BidderComponent, Spec: v1alpha1.BidderSpec{
 		ComponentSpec:        p.c.NetworkComponentSpec(p.r, compose.ComponentCRStateDir(stateRoot, compose.ComponentKindBidder, BidderComponent), network),
-		MarketExposureRef:    &commonv1.LocalObjectRef{Name: compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent) + compose.ExposureIngressSuffix},
+		MarketExposureRefs:   p.marketExposures(marketHTTPS, dumbpipe),
 		Mode:                 string(plan.Mode),
 		Identity:             ident,
 		PdsRef:               plan.ComponentPdsRef(),
@@ -415,12 +427,44 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		}
 		out = append([]compose.Desired{{Kind: compose.ComponentKindPds, Name: compose.PdsComponent, Spec: pdsSpec}}, out...)
 	}
-	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindBidder, BidderComponent, "market", network, hostnames, false, true)...)
+	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindBidder, BidderComponent, "market", network, hostnames, false, marketHTTPS)...)
+	if dumbpipe != "" {
+		out = append(out, compose.Desired{Kind: compose.ComponentKindIngressProxy, Name: IrohIngress, Spec: v1alpha1.IngressProxySpec{
+			ComponentSpec: compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindIngressProxy, IrohIngress), nil),
+			Provider:      v1alpha1.IngressProviderIroh,
+			Iroh:          &v1alpha1.IngressProxyIroh{DumbpipePath: dumbpipe},
+		}}, compose.ExposureDesired(compose.ComponentKindBidder, BidderComponent, IrohExposureSuffix, exposurev1alpha1.ExposureModeIngress, "", "/",
+			IrohIngress, exposurev1alpha1.ExposureTLS{}))
+	}
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindGuestControlPlane, GuestComponent, "http", network, hostnames, true, true)...)
 	if plan.Local {
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, in.config)...)
 	}
 	return compose.ApplyOverrides(o.Spec.Components, out)
+}
+
+func (p *pass) marketExposures(https bool, dumbpipe string) []commonv1.LocalObjectRef {
+	name := compose.ServiceNameFor(compose.ComponentKindBidder, BidderComponent)
+	var out []commonv1.LocalObjectRef
+	if dumbpipe != "" {
+		out = append(out, commonv1.LocalObjectRef{Name: name + IrohExposureSuffix})
+	}
+	if https {
+		out = append(out, commonv1.LocalObjectRef{Name: name + compose.ExposureIngressSuffix})
+	}
+	return out
+}
+
+func (p *pass) dumbpipe() (string, error) {
+	record := p.c.Config().Record
+	if record == nil {
+		return "", nil
+	}
+	rec, err := record()
+	if err != nil {
+		return "", fmt.Errorf("marketbidder: reading the instance record for dumbpipe: %w", err)
+	}
+	return rec.Executables[DumbpipeExecutable].Path, nil
 }
 
 func (p *pass) guestDownloadsDir() (string, error) {

@@ -219,6 +219,7 @@ apps:
       - {name: vm-name, to: contract.vmName}
       - {name: user-data, to: contract.userData}
       - {name: compute-kind, to: contract.computeKind}
+      - {name: net, to: contract.net}
       - {name: ssh-authorized-key, to: contract.sshAuthorizedKeys}
       - {name: policy, to: contract.policy}
       - {name: policy-args, to: contract.policyArgs}

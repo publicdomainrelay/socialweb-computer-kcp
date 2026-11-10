@@ -2,7 +2,7 @@ package market
 
 import "time"
 
-//go:generate go run ../../lexgen -err ErrInvalidRecord -include com.publicdomainrelay.temp.market.,com.publicdomainrelay.temp.ingress.,com.publicdomainrelay.temp.compute.,com.publicdomainrelay.temp.badgeBlueKeys,network.attested.signature,com.atproto.repo.strongRef -trim com.publicdomainrelay.temp.market.,com.publicdomainrelay.temp.,com.atproto.repo.,network. -name network.attested.signature#signatures=Signatures,com.publicdomainrelay.temp.compute.events.vm.hostKeys#hostKey=HostKey
+//go:generate go run ../../lexgen -err ErrInvalidRecord -include com.publicdomainrelay.temp.market.,com.publicdomainrelay.temp.ingress.,com.publicdomainrelay.temp.compute.,com.publicdomainrelay.temp.badgeBlueKeys,network.attested.signature,com.atproto.repo.strongRef -trim com.publicdomainrelay.temp.market.,com.publicdomainrelay.temp.,com.atproto.repo.,network. -name network.attested.signature#signatures=Signatures,com.publicdomainrelay.temp.market.offering#endpoint=Endpoint,com.publicdomainrelay.temp.compute.events.vm.hostKeys#hostKey=HostKey
 
 const (
 	StrongRefNSID = "com.atproto.repo.strongRef"

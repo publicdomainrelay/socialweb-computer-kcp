@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-17.computevms.socialweb.computer
+  name: v1alpha1-18.computevms.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -198,6 +198,8 @@ spec:
                   timeoutSeconds:
                     type: integer
                     format: int32
+                  net:
+                    type: boolean
                 required:
                   - source
               guestNetwork:

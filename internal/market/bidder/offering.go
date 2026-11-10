@@ -3,6 +3,7 @@ package bidder
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	createdAt := now
 	if prior != nil {
 		createdAt = prior.CreatedAt
-		if !touch && prior.WithdrawnAt == "" && prior.EndpointURL == b.cfg.EndpointURL && sameStrings(prior.AppliesTo, appliesTo) {
+		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, b.cfg.Endpoints) && sameStrings(prior.AppliesTo, appliesTo) {
 			if b.legacyStale {
 				b.mirrorLegacy(ctx, *prior)
 			}
@@ -174,7 +175,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 			return nil
 		}
 	}
-	record, err := market.BuildOffering(b.cfg.EndpointURL, appliesTo, nil, createdAt, now)
+	record, err := market.BuildOffering(b.cfg.Endpoints, appliesTo, nil, createdAt, now)
 	if err != nil {
 		return err
 	}
@@ -187,9 +188,9 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	case touch:
 		b.log.Info("the bidder offering is refreshed for the relay", "offering", uri, "legacy", b.legacyOffering)
 	case prior == nil:
-		b.log.Info("the bidder offering is written", "offering", uri, "endpoint", b.cfg.EndpointURL, "legacy", b.legacyOffering)
+		b.log.Info("the bidder offering is written", "offering", uri, "endpoints", b.cfg.Endpoints, "legacy", b.legacyOffering)
 	default:
-		b.log.Info("the bidder offering is corrected", "offering", uri, "endpoint", b.cfg.EndpointURL, "legacy", b.legacyOffering)
+		b.log.Info("the bidder offering is corrected", "offering", uri, "endpoints", b.cfg.Endpoints, "legacy", b.legacyOffering)
 	}
 	return nil
 }
@@ -352,4 +353,8 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func sameEndpoints(a, b []market.Endpoint) bool {
+	return slices.EqualFunc(a, b, func(x, y market.Endpoint) bool { return x.Kind == y.Kind && x.Address == y.Address })
 }

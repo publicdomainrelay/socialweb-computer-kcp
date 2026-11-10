@@ -60,8 +60,8 @@ func (a *Authorizer) Verify(ctx context.Context, header, lxm string) (string, er
 	if a == nil || a.Directory == nil {
 		return "", errors.New("participant: the service has no identity directory")
 	}
-	if a.Hostname == "" {
-		return "", errors.New("participant: the service has no service hostname")
+	if a.Hostname == "" && len(a.AudienceDIDs) == 0 {
+		return "", errors.New("participant: the service has no service hostname or audience")
 	}
 	result, err := market.VerifyServiceAuth(ctx, a.Directory, market.VerifyServiceAuthOptions{
 		AuthHeader:        header,

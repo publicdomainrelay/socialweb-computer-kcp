@@ -1,10 +1,13 @@
 package requester
 
 import (
+	"os/exec"
+
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/iroh"
 	"strings"
 	"time"
 
@@ -100,6 +103,11 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	runner := func(ctx context.Context, engine commonv1.ObjectRef, workflow string) (policy.Runner, error) {
 		return bus.Resolve[policy.Runner](ctx, handlers, self, engine, bus.Capability{Name: policy.CapabilityRun, Scope: []string{workflow}})
 	}
+	httpClient := s.client
+	dumbpipe, _ := exec.LookPath("dumbpipe")
+	if dumbpipe != "" {
+		httpClient = iroh.Client(s.client, dumbpipe, s.deps.Log)
+	}
 	core, err := role.New(s.cfg, role.Deps{
 		Intents:        intents,
 		Inputs:         inputs,
@@ -114,7 +122,8 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 		ContractEvents: events,
 		Ingress:        s.ingress,
 		Directory:      s.directory,
-		HTTP:           s.client,
+		HTTP:           httpClient,
+		Iroh:           dumbpipe != "",
 		Now:            time.Now,
 		Log:            s.deps.Log,
 	})

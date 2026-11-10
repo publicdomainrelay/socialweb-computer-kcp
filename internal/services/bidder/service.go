@@ -20,6 +20,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/ingress"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/component"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/computevm"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
@@ -100,6 +101,8 @@ type Service struct {
 	serviceAuthHost string
 
 	marketURL string
+
+	marketEndpoints []market.Endpoint
 
 	guestURL string
 
@@ -318,7 +321,7 @@ func (s *Service) prepare(ctx context.Context) error {
 		})
 	}
 	s.wg.Go(func() { s.crawl().Run(ctx) })
-	s.log.Info("the bidder serves the market", "did", s.did, "guest", s.guestURL, "offering", s.inboundMarketURL(),
+	s.log.Info("the bidder serves the market", "did", s.did, "guest", s.guestURL, "endpoints", s.inboundEndpoints(),
 		"serviceAuthHost", s.serviceAuthHost, "identityMode", strings.TrimSpace(s.spec.Mode), "inboundXRPC", s.inboundXRPC())
 	return nil
 }
@@ -380,11 +383,17 @@ func (s *Service) publicMarketURL() string {
 	return ""
 }
 
-func (s *Service) inboundMarketURL() string {
+func (s *Service) inboundEndpoints() []market.Endpoint {
 	if !s.inboundXRPC() {
-		return ""
+		return nil
 	}
-	return s.publicMarketURL()
+	out := append([]market.Endpoint(nil), s.marketEndpoints...)
+	if s.marketURL == "" {
+		if endpoint, ok := s.relayEndpoint(); ok {
+			out = append(out, market.Endpoint{Kind: market.EndpointHTTPS, Address: strings.TrimRight(endpoint.URL, "/")})
+		}
+	}
+	return out
 }
 
 func (s *Service) inboundXRPC() bool {

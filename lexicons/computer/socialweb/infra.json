@@ -44,6 +44,7 @@
         "sshAuthorizedKeys": { "type": "array", "items": { "type": "string" } },
         "userData": { "type": "string", "maxLength": 65536, "description": "cloud-init user_data; never a secret, it is public here." },
           "computeKind": { "type": "string", "knownValues": ["vm", "deno"], "description": "What the bidder runs: a firecracker virtual machine (the default when absent), or a deno sandbox that runs spec.userData as its program." },
+          "net": { "type": "boolean", "description": "computeKind deno: the program reaches the public internet; a bidder runs it only for its owner." },
         "policy": { "type": "string" },
         "policyArgs": { "type": "string" },
         "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 },

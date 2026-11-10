@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -160,6 +161,37 @@ func ParseTicket(ticket string) (string, error) {
 		return "", fmt.Errorf("%w: %q carries no version-0 endpoint address", ErrBadTicket, ticket)
 	}
 	return didkey.EndpointID(ed25519.PublicKey(raw[1 : 1+ed25519.PublicKeySize]))
+}
+
+func ShortTicket(ticket string) (string, error) {
+	if _, err := ParseTicket(ticket); err != nil {
+		return "", err
+	}
+	raw, _ := ticketEncoding.DecodeString(strings.ToUpper(strings.TrimPrefix(ticket, TicketPrefix)))
+	head, rest := raw[:1+ed25519.PublicKeySize], raw[1+ed25519.PublicKeySize:]
+	count, n := binary.Uvarint(rest)
+	if n <= 0 {
+		return "", fmt.Errorf("%w: %q has no address count", ErrBadTicket, ticket)
+	}
+	rest = rest[n:]
+	var relays [][]byte
+	for range count {
+		if len(rest) == 0 || rest[0] != 0 {
+			break
+		}
+		size, m := binary.Uvarint(rest[1:])
+		if m <= 0 || uint64(len(rest)-1-m) < size {
+			return "", fmt.Errorf("%w: %q has a truncated relay URL", ErrBadTicket, ticket)
+		}
+		end := 1 + m + int(size)
+		relays = append(relays, rest[:end])
+		rest = rest[end:]
+	}
+	body := append(append([]byte{}, head...), binary.AppendUvarint(nil, uint64(len(relays)))...)
+	for _, relay := range relays {
+		body = append(body, relay...)
+	}
+	return TicketPrefix + strings.ToLower(ticketEncoding.EncodeToString(body)), nil
 }
 
 func StableTicket(k Key) string {

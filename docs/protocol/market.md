@@ -101,7 +101,7 @@ flowchart LR
 
 | record | writer | reader | rule |
 |---|---|---|---|
-| `market.offering` at `self` | bidder (`internal/market/bidder/offering.go`) | requester (`market.ReadOffering`) | `appliesTo` must hold `compute.vm` (`market.OfferingApplies`); `endpointUrl` = where submitRfp goes; `withdrawnAt` + empty `appliesTo` = withdrawn |
+| `market.offering` at `self` | bidder (`internal/market/bidder/offering.go`) | requester (`market.ReadOffering`) | `appliesTo` must hold `compute.vm` (`market.OfferingApplies`); `endpoints[]` = where the market XRPC goes (`{kind, address}`: iroh a short ticket, node id and relay, no IPs; https an origin; the requester takes iroh first when it has dumbpipe, else https); `withdrawnAt` + empty `appliesTo` = withdrawn |
 | `market.heartbeat` at `self` | bidder, every `HeartbeatInterval` (60 s) | requester (`market.HeartbeatCache`), `internal/marketpresence` | fresh while `createdAt` is at most `HeartbeatTTL` (300 s) old; `offering` names the offering (a legacy non-`self` rkey is read through it) |
 | `market.relays` at `self` | no Go writer here | requester (`market.RelayURLsOf`) | extra relays to ask `listReposByCollection` |
 
@@ -141,7 +141,8 @@ Every record also reaches the other side two ways. The XRPC call is the fast pat
 - `market.AuthorizeRecord(issuer, uri)`: the submitted record must be in the issuer's repo
 - the bidder answers submitBid too (it only parses the bid); the bidder routes exist only with inbound XRPC (`inboundXRPC`)
 - the requester's submitEvent takes only event kinds a requester consumes (`isGuestEventNSID` in `internal/market/requester/events.go`)
-- `submitBid` in the RFP, `submitAccept` in the bid, `submitEvent` in the accept and receipt: a DID service ref (`did#serviceId`, default ids `pdr_temp_market`, `pdr_temp_compute_event`) or an HTTP URL
+- `submitBid` in the RFP, `submitEvent` in the accept and receipt: a DID service ref (`did#serviceId`, default ids `pdr_temp_market`, `pdr_temp_compute_event`) or an HTTP URL
+- calls to a bidder go to its offering `endpoints[]` with service auth aud `<bidder DID>#pdr_temp_market` (hostname-free; the bidder also takes `#pdr_temp_compute_event`)
 - `ingress[]` on the records and calls: `ingress.webRTC` listen/offer/answer records for a party whose HTTP endpoint is not reachable ([lexicons-market.md](lexicons-market.md#ingresswebrtc))
 
 ## Bid Window And Selection

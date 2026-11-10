@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	peatproto "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 	"slices"
 	"strings"
 	"sync"
@@ -49,19 +51,27 @@ func (s *Service) resolveIntents(ctx context.Context) (contract.Intents, error) 
 
 func (s *Service) awaitInputs(ctx context.Context) error {
 	var wg sync.WaitGroup
-	ref := s.spec.MarketExposureRef
-	exposure := ""
-	if ref != nil {
-		exposure = strings.TrimSpace(ref.Name)
-	}
-	if exposure != "" {
-		wg.Go(func() { s.marketURL = s.inputs.AwaitAddress(ctx, exposure, inputWait, nil) })
+	addresses := make([]string, len(s.spec.MarketExposureRefs))
+	for i, ref := range s.spec.MarketExposureRefs {
+		if name := strings.TrimSpace(ref.Name); name != "" {
+			wg.Go(func() { addresses[i] = s.inputs.AwaitAddress(ctx, name, inputWait, nil) })
+		}
 	}
 	wg.Go(func() { s.guestURL = s.resolveGuestURL(ctx) })
 	wg.Go(func() { s.resolveIdentity(ctx) })
 	wg.Wait()
-	if exposure != "" && s.marketURL == "" && s.inboundXRPC() {
-		return fmt.Errorf("bidder: the market Exposure %s reports no address yet; the offering and the service-auth audience have one source, so the bidder does not advertise another host", exposure)
+	for i, address := range addresses {
+		endpoint, err := market.EndpointFor(address)
+		if err != nil {
+			if s.inboundXRPC() {
+				return fmt.Errorf("bidder: the market Exposure %s: %w", s.spec.MarketExposureRefs[i].Name, err)
+			}
+			continue
+		}
+		s.marketEndpoints = append(s.marketEndpoints, endpoint)
+		if endpoint.Kind == market.EndpointHTTPS {
+			s.marketURL = endpoint.Address
+		}
 	}
 	return nil
 }
@@ -127,7 +137,7 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		ClaimedBy:           s.deps.Self.Name,
 		ProviderHandle:      s.providerHandle,
 		GuestURL:            s.guestURL,
-		EndpointURL:         s.inboundMarketURL(),
+		Endpoints:           s.inboundEndpoints(),
 		InboundXRPC:         s.inboundXRPC(),
 		ScopePolicy:         s.spec.Policy,
 		GuestTLSPort:        portOf(s.spec.Network.GuestTLSURL()),
@@ -165,9 +175,19 @@ func (s *Service) newBidder(intents contract.Intents) (*core.Bidder, error) {
 		Tokens:      participant.NewTokens(s.minter(), DefaultCallTimeout),
 		HTTP:        httpClient,
 		Directory:   s.dir,
+		Operators:   s.operators(),
 		Policy:      s.policyRuns(),
 		Log:         s.log,
 	})
+}
+
+func (s *Service) operators() core.Operators {
+	client := peatproto.NewClient()
+	client.HTTP = s.egress.Client(RecordRequestTimeout)
+	if plc := strings.TrimSpace(s.network().PLCDirectoryURL); plc != "" {
+		client.PLCURL = plc
+	}
+	return trust.NewResolver(trust.ResolverOptions{Client: client})
 }
 
 func (s *Service) guestDownloads() map[string]string {
@@ -379,10 +399,16 @@ func (s *Service) newAuthorizer() *participant.Authorizer {
 		audiences = append(audiences, s.spec.ServiceAuth.Audience...)
 	}
 	audiences = append(audiences, market.ServiceAudienceDIDs(s.serviceAuthHost)...)
+	ids := []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID}
+	if s.did != "" {
+		for _, id := range ids {
+			audiences = append(audiences, s.did+"#"+id)
+		}
+	}
 	return &participant.Authorizer{
 		Directory:    s.dir,
 		Hostname:     s.serviceAuthHost,
-		ServiceIDs:   []string{market.DefaultMarketServiceID, market.DefaultComputeEventServiceID},
+		ServiceIDs:   ids,
 		AudienceDIDs: audiences,
 	}
 }

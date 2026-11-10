@@ -57,7 +57,7 @@ func (b *Bidder) startSandbox(ctx context.Context, vm *v1alpha1.ComputeVM) error
 	b.sandboxes[vm.Name] = run
 	b.sandboxMu.Unlock()
 	b.log.Info("a deno sandbox starts", "computevm", vm.Name, "dir", dir, "runner", b.cfg.Sandbox.Kind(), "timeout", timeout.String())
-	program := sandbox.Program{Source: vm.Spec.Sandbox.Source, Dir: dir, Timeout: timeout}
+	program := sandbox.Program{Source: vm.Spec.Sandbox.Source, Dir: dir, Timeout: timeout, Net: vm.Spec.Sandbox.Net, PublicNetOnly: true}
 	go b.runSandbox(runCtx, vm.Name, program)
 	return nil
 }

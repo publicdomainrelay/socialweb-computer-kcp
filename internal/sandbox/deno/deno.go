@@ -86,6 +86,8 @@ func (r *Runner) freshState(env map[string]string) (string, []string, error) {
 	return root, []string{"DENO_DIR=" + denoDir, "TMPDIR=" + tmp}, nil
 }
 
+const DenyNet = "0.0.0.0/8,127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,[::1],[::],localhost,metadata.google.internal"
+
 func (r *Runner) Available() bool { return r.Path != "" }
 
 func (r *Runner) Fenced() bool { return true }
@@ -108,6 +110,9 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	args := []string{"run", "--quiet", "--no-prompt", "--no-config"}
 	if p.Net {
 		args = append(args, "--allow-net")
+		if p.PublicNetOnly {
+			args = append(args, "--deny-net="+DenyNet)
+		}
 	} else {
 		args = append(args, "--deny-net", "--no-remote", "--no-lock")
 	}

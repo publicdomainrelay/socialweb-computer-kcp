@@ -114,7 +114,7 @@
 |---|---|
 | file | `market/bid.json` |
 | type | record, key any |
-| key fields | `rfp`*, `payload`* (-> `market.bids.free`), `signatures`*, `config` (-> `compute.config.wif.simple`), `submitAccept`, `ingress[]`, `createdAt` |
+| key fields | `rfp`*, `payload`* (-> `market.bids.free`), `signatures`*, `config` (-> `compute.config.wif.simple`), `ingress[]`, `createdAt` |
 | rkey | `market.BidRKey(bidderDID, rfpURI, rfpCID)` = `bid-<20 hex>`; also the Bid object name |
 | written by | bidder: `writeBidRecord` in `internal/market/bidder/bids.go` (`market.BuildBid`, `market.SignRecord`) |
 | read by | requester: `submitBid` (`Requester.SubmitBid` in `internal/market/requester/callbacks.go`), stream, catch-up `getRecord` at `BidRKey` (`internal/market/requester/bidcatchup.go`); bidder at accept time |
@@ -234,7 +234,7 @@
 |---|---|
 | file | `market/offering.json` |
 | type | record, key any (writers use `self`) |
-| key fields | `appliesTo`* (holds `compute.vm`), `createdAt`*, `endpointUrl`, `ingress[]`, `refreshedAt`, `withdrawnAt` |
+| key fields | `appliesTo`* (holds `compute.vm`), `createdAt`*, `endpoints[]` (`{kind: iroh|webrtc|https, address}`), `ingress[]`, `refreshedAt`, `withdrawnAt` |
 | rkey | `self` (`market.OfferingRKey`) |
 | written by | bidder: `putOffering`, `withdraw` in `internal/market/bidder/offering.go` |
 | read by | requester: `market.ReadOffering` (`self`, else the rkey the heartbeat names), `market.OfferingApplies`; relays list its repos by `listReposByCollection` |

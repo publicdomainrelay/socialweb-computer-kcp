@@ -135,6 +135,9 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 	if err := fsx.ReadJSON(l.Record, &rec); err != nil {
 		return fmt.Errorf("devcore: reading %s: %w", l.Record, err)
 	}
+	if dumbpipe := rec.Executables["dumbpipe"].Path; filepath.IsAbs(dumbpipe) {
+		os.Setenv("PATH", filepath.Dir(dumbpipe)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 	var prev devinstance.Core
 	fsx.ReadJSON(l.CoreRecord, &prev)
 	core := devinstance.Core{Generation: prev.Generation + 1, PID: os.Getpid(), InvocationID: os.Getenv("INVOCATION_ID"),

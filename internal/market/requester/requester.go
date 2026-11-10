@@ -205,6 +205,8 @@ type Deps struct {
 
 	HTTP *http.Client
 
+	Iroh bool
+
 	Now func() time.Time
 
 	Log *slog.Logger
@@ -673,6 +675,7 @@ func (q *Requester) Start(ctx context.Context) error {
 		IngressWritable: q.ingressWritable,
 		IngressSTUN:     q.cfg.WebRTCSTUN(),
 		HTTPClient:      q.deps.HTTP,
+		Iroh:            q.deps.Iroh,
 		Timeout:         q.cfg.BidWindow,
 		Log:             q.log,
 		StartedAt:       startedAt,

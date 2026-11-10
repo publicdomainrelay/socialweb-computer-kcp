@@ -448,7 +448,7 @@ type BidderSpec struct {
 
 	BidderDIDs []string `json:"bidderDIDs,omitempty"`
 
-	MarketExposureRef *commonv1.LocalObjectRef `json:"marketExposureRef,omitempty"`
+	MarketExposureRefs []commonv1.LocalObjectRef `json:"marketExposureRefs,omitempty"`
 
 	Mode string `json:"mode,omitempty"`
 

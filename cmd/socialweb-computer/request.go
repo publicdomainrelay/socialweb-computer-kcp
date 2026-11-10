@@ -393,6 +393,8 @@ func (r *requestRun) contractArg(p compose.AppArg) (bool, error) {
 		default:
 			return true, fmt.Errorf("--compute-kind %q: want vm or deno", p.Value)
 		}
+	case p.To == "contract.net":
+		r.contract.Net = p.Value == "" || p.Value == "true"
 	case p.To == "contract.userData":
 		b, err := os.ReadFile(p.Value)
 		if err != nil {

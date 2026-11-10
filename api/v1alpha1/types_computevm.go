@@ -60,6 +60,8 @@ type ComputeVMSandbox struct {
 	Source string `json:"source"`
 
 	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+
+	Net bool `json:"net,omitempty"`
 }
 
 type GuestNetworkOptions struct {

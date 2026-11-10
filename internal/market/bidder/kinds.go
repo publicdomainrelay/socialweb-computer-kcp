@@ -8,6 +8,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 var ErrKindUnsupported = fmt.Errorf("bidder: the RFP asks for a compute kind this bidder does not serve")
@@ -72,4 +73,49 @@ func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string
 		return err.Error(), nil
 	}
 	return "", nil
+}
+
+type Operators interface {
+	ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error)
+}
+
+func (b *Bidder) netRefused(ctx context.Context, rfp *market.RFP, requester string) (string, error) {
+	payload, err := b.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
+	if err != nil {
+		return "", fmt.Errorf("bidder: resolving the RFP payload for its net: %w", err)
+	}
+	if net, _ := payload.Value["net"].(bool); !net {
+		return "", nil
+	}
+	if kind, _ := payload.Value["kind"].(string); kind != string(v1alpha1.ComputeKindDeno) {
+		return "net is a computeKind deno option", nil
+	}
+	return b.ownerOnly(ctx, requester)
+}
+
+func (b *Bidder) ownerOnly(ctx context.Context, requester string) (string, error) {
+	if requester == b.cfg.DID {
+		return "", nil
+	}
+	if b.operators == nil {
+		return "the bidder cannot check its owner, so it runs no networked sandbox", nil
+	}
+	owner, found, err := b.operators.ResolveOperatorDidFor(ctx, b.cfg.DID, trust.BidderAssociate)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		owner = b.cfg.DID
+	}
+	if requester == owner {
+		return "", nil
+	}
+	operator, found, err := b.operators.ResolveOperatorDidFor(ctx, requester, trust.RequesterAssociate)
+	if err != nil {
+		return "", err
+	}
+	if found && operator == owner {
+		return "", nil
+	}
+	return "a networked sandbox runs only for the bidder's owner " + owner, nil
 }

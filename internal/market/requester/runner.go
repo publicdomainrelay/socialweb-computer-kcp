@@ -399,7 +399,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
-			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, CreatedAt: q.nowISO()})
+			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO()})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)
 		}
@@ -570,7 +570,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	}
 	state.Phase = v1alpha1.ContractWinnerSelected
 	state.Bid = &commonv1.StrongRef{URI: winner.URI, CID: winner.CID}
-	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID, SubmitAccept: strings.TrimSpace(stringOf(winner.Record["submitAccept"]))}
+	state.Winner = &v1alpha1.ContractWinner{DID: winner.DID}
 	state.Bids = new(len(allBids))
 	state.Timestamps.WinnerSelected = q.nowISO()
 	state.AcceptPending = &v1alpha1.ContractAcceptPending{BidURI: winner.URI}
@@ -1596,15 +1596,7 @@ func (q *Requester) winnerBidder(ctx context.Context, state *v1alpha1.NodeClaimC
 	if state.Winner == nil || state.Winner.DID != bidderDID {
 		return Bidder{}, false
 	}
-	ref := strings.TrimSpace(state.Winner.SubmitAccept)
-	if ref == "" {
-		return Bidder{}, false
-	}
-	endpoint, audience, err := resolveBidderEndpoint(ctx, q.deps.Directory, ref)
-	if err != nil || endpoint == "" {
-		return Bidder{}, false
-	}
-	return Bidder{DID: bidderDID, Endpoint: endpoint, Audience: audience}, true
+	return q.bidderForDID(ctx, bidderDID)
 }
 
 func sleepCtx(ctx context.Context, delay time.Duration) error {

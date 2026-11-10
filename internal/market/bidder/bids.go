@@ -266,6 +266,15 @@ func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time
 		b.failBid(ctx, bid, "GuestToolsUnserved", refused, now)
 		return nil, nil
 	}
+	refused, err = b.netRefused(ctx, rfp, bid.Spec.Requester)
+	if err != nil {
+		return nil, err
+	}
+	if refused != "" {
+		b.log.Info("bidder_net_refused", "rfp", bid.Spec.Rfp.URI, "requester", bid.Spec.Requester, "reason", refused)
+		b.failBid(ctx, bid, "NetRefused", refused, now)
+		return nil, nil
+	}
 	if scope := b.policy.Scope(ctx, participant.PolicyInput{SelfDid: b.cfg.DID, CounterpartyDid: bid.Spec.Requester,
 		RFP: &participant.PolicyRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID}}); !scope.Allow {
 		b.failBid(ctx, bid, stage+"ScopeDenied", lead+scope.Reason, now)
@@ -436,11 +445,10 @@ func (b *Bidder) writeBidRecord(ctx context.Context, bid *v1alpha1.Bid, now time
 		return market.StrongRef{}, fmt.Errorf("writing the bid payload: %w", err)
 	}
 	record, err := market.BuildBid(market.BidOptions{
-		RFP:          market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID},
-		Config:       &market.RecordRef{URI: configRef.URI, CID: configRef.CID},
-		Payload:      market.RecordRef{URI: payload.URI, CID: payload.CID},
-		SubmitAccept: b.cfg.EndpointURL,
-		CreatedAt:    now.Format(time.RFC3339),
+		RFP:       market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID},
+		Config:    &market.RecordRef{URI: configRef.URI, CID: configRef.CID},
+		Payload:   market.RecordRef{URI: payload.URI, CID: payload.CID},
+		CreatedAt: now.Format(time.RFC3339),
 	})
 	if err != nil {
 		return market.StrongRef{}, err

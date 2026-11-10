@@ -10,7 +10,7 @@
         "type": "object",
         "required": ["appliesTo", "createdAt"],
         "properties": {
-          "endpointUrl": { "type": "string", "description": "Where requesters submit RFPs: a DID service ref (did#serviceId) or an HTTP URL." },
+          "endpoints": { "type": "array", "items": { "type": "ref", "ref": "#endpoint" }, "description": "Where requesters call the bidder's market XRPC, in the bidder's order of preference. Service auth for any of them has aud <bidder DID>#pdr_temp_market (#pdr_temp_compute_event for submitEvent)." },
           "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC listen records, including the STUN servers it gathers with." },
           "appliesTo": {
             "type": "array",
@@ -21,6 +21,14 @@
           "refreshedAt": { "type": "string", "format": "datetime" },
           "withdrawnAt": { "type": "string", "format": "datetime", "description": "Set when the bidder stopped taking RFPs; appliesTo is empty then." }
         }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "required": ["kind", "address"],
+      "properties": {
+        "kind": { "type": "string", "knownValues": ["iroh", "webrtc", "https"], "description": "iroh: HTTP/1.1 over dumbpipe connect <address>; https: an https origin." },
+        "address": { "type": "string", "maxLength": 2048, "description": "iroh: a short endpoint ticket (endpoint id and relay URLs, no IP addresses); https: an https origin." }
       }
     }
   }

@@ -34,6 +34,8 @@ type ComputeContractTemplate struct {
 
 	ComputeKind ComputeKind `json:"computeKind,omitempty" apigen:"default=vm,enum=vm|deno"`
 
+	Net bool `json:"net,omitempty"`
+
 	Policy string `json:"policy,omitempty"`
 
 	PolicyArgs string `json:"policyArgs,omitempty"`

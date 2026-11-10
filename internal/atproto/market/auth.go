@@ -61,8 +61,8 @@ func VerifyServiceAuth(ctx context.Context, dir identity.Directory, opts VerifyS
 	if dir == nil {
 		return nil, fmt.Errorf("%w: no identity directory", ErrInvalidAuth)
 	}
-	if opts.Hostname == "" {
-		return nil, fmt.Errorf("%w: no service hostname", ErrInvalidAuth)
+	if opts.Hostname == "" && len(opts.ExtraAudienceDIDs) == 0 {
+		return nil, fmt.Errorf("%w: no service hostname or audience", ErrInvalidAuth)
 	}
 	if opts.LXM == "" {
 		return nil, fmt.Errorf("%w: no lexicon method", ErrInvalidAuth)
@@ -75,12 +75,21 @@ func VerifyServiceAuth(ctx context.Context, dir identity.Directory, opts VerifyS
 	if err != nil {
 		return nil, err
 	}
-	serviceDID := ServiceDIDForHost(strings.ToLower(opts.Hostname))
-	dids := append([]string{serviceDID, ServiceDIDForHost(opts.Hostname)}, opts.ExtraAudienceDIDs...)
-	if name, _, err := net.SplitHostPort(opts.Hostname); err == nil && name != "" {
-		dids = append(dids, ServiceDIDForHost(strings.ToLower(name)))
+	var dids []string
+	if opts.Hostname != "" {
+		dids = append(dids, ServiceDIDForHost(strings.ToLower(opts.Hostname)), ServiceDIDForHost(opts.Hostname))
+		if name, _, err := net.SplitHostPort(opts.Hostname); err == nil && name != "" {
+			dids = append(dids, ServiceDIDForHost(strings.ToLower(name)))
+		}
 	}
-	audiences := make([]serviceAudience, 0, len(dids)*(len(opts.ServiceIDs)+1))
+	audiences := make([]serviceAudience, 0, (len(dids)+len(opts.ExtraAudienceDIDs))*(len(opts.ServiceIDs)+1))
+	for _, did := range opts.ExtraAudienceDIDs {
+		if base, id, ok := strings.Cut(did, "#"); ok && base != "" && id != "" {
+			audiences = append(audiences, serviceAudience{aud: did, serviceID: id})
+		} else {
+			dids = append(dids, did)
+		}
+	}
 	for _, did := range dids {
 		audiences = append(audiences, serviceAudience{aud: did})
 		for _, id := range opts.ServiceIDs {

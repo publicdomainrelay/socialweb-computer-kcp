@@ -17,6 +17,15 @@ func (b *Bidder) provisionSandbox(ctx context.Context, req provisionRequest, rec
 	if err != nil {
 		return "", err
 	}
+	if record.Net {
+		refused, err := b.ownerOnly(ctx, req.requesterDID)
+		if err != nil {
+			return "", err
+		}
+		if refused != "" {
+			return "", errors.New("bidder: " + refused)
+		}
+	}
 	vm := &v1alpha1.ComputeVM{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ComputeVM"},
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -26,7 +35,7 @@ func (b *Bidder) provisionSandbox(ctx context.Context, req provisionRequest, rec
 			Owner:      v1alpha1.ComputeVMOwner{Handle: b.cfg.ProviderHandle},
 			Requester:  v1alpha1.ComputeVMRequester{Did: req.requesterDID},
 			Accept:     &commonv1.StrongRef{URI: req.acceptURI, CID: req.acceptCID},
-			Sandbox:    &v1alpha1.ComputeVMSandbox{Source: record.UserData},
+			Sandbox:    &v1alpha1.ComputeVMSandbox{Source: record.UserData, Net: record.Net},
 		},
 	}
 	if req.owner != nil {

@@ -271,6 +271,7 @@ type InfraContract struct {
 	DenyBidderDids     []string                   `json:"denyBidderDids,omitempty"`
 	GuestTools         []string                   `json:"guestTools,omitempty"`
 	Name               string                     `json:"name"`
+	Net                bool                       `json:"net,omitempty"`
 	Policy             string                     `json:"policy,omitempty"`
 	PolicyArgs         string                     `json:"policyArgs,omitempty"`
 	ReleaseRequestedAt string                     `json:"releaseRequestedAt,omitempty"`
