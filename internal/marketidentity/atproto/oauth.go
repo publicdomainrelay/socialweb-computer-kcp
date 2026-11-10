@@ -664,10 +664,10 @@ func (e *scopeChangedError) subjects() []string {
 
 func (a *Accounts) requiredScopes(id *v1alpha1.MarketIdentity) []string {
 	if id.Spec.Mode == v1alpha1.MarketIdentityModeOAuthSessionProxy {
-		return strings.Fields(id.Spec.SessionScope)
+		return atprotooauth.RequiredScopes(strings.Fields(id.Spec.SessionScope))
 	}
 	if scopes := ownScopes(id); len(scopes) > 0 {
-		return scopes
+		return atprotooauth.RequiredScopes(scopes)
 	}
 	return atprotooauth.RequiredScopes(a.oauthScopes())
 }

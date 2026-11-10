@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/lease"
 )
 
@@ -111,7 +112,7 @@ type MountSource interface {
 
 func ServerOf(workspace, name string, st v1alpha1.OpenBaoServerStatus, clientName string) (Server, error) {
 	if strings.TrimSpace(st.Address) == "" || st.Refs == nil {
-		return Server{}, fmt.Errorf("openbao: OpenBaoServer %s/%s reports no address yet (phase %s)", workspace, name, st.Phase)
+		return Server{}, fmt.Errorf("openbao: OpenBaoServer %s/%s reports no address yet (phase %s): %w", workspace, name, st.Phase, vault.ErrNotServing)
 	}
 	out := Server{
 		Workspace: workspace,

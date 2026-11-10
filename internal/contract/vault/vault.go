@@ -10,6 +10,8 @@ var (
 	ErrNotFound = errors.New("vault: not found (HTTP 404)")
 
 	ErrMountNotReady = errors.New("vault: the mount is not ready")
+
+	ErrNotServing = errors.New("vault: the server is not serving yet")
 )
 
 const (

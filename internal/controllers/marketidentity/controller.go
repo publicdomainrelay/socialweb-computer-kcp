@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
+	contractvault "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/binding"
@@ -148,6 +149,11 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 		refErr, refAfter = nil, min(refAfter, ctlruntime.DefaultBackoffMax)
 	}
 	reconcileErr = errors.Join(reconcileErr, refErr)
+	if errors.Is(reconcileErr, vaultctl.ErrUnbound) || errors.Is(reconcileErr, contractvault.ErrNotServing) {
+		c.log.Info("a MarketIdentity waits for its vault; the vault bind wakes it", "workspace", req.Workspace, "identity", req.Name,
+			"err", reconcileErr.Error())
+		reconcileErr = nil
+	}
 	if refAfter > 0 && (result.RequeueAfter == 0 || refAfter < result.RequeueAfter) {
 		result.RequeueAfter = refAfter
 	}
