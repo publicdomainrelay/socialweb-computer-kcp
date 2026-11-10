@@ -227,9 +227,7 @@ func (m *Mesh) watch(pc *webrtc.PeerConnection) {
 			done()
 		}
 	})
-	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		dc.OnOpen(func() { m.serve(dc) })
-	})
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) { m.serve(dc) })
 }
 
 func (m *Mesh) serve(dc *webrtc.DataChannel) {
