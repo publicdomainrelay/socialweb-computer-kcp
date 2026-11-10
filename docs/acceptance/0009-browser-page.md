@@ -4,8 +4,8 @@ The requester page in a browser tab: it signs in with OAuth, rents a VM on the m
 wasm module, opens a shell on it over a WebRTC datachannel, releases it and deletes what it wrote. Every
 market call reaches the bidder over the bidder's offering `webrtc` endpoint (offer and answer as
 `computer.socialweb.ingress.offer` / `.answer` records); a browser cannot dial iroh, and bidders advertise https
-only with `market-https=true` (the hat-7 transition, removed once this runbook passes against iroh/webrtc-only
-bidders).
+only with `market-https=true` (the hat-7 transition, removed 2026-11-10 after this runbook passed against
+iroh/webrtc-only bidders).
 
 - Since 2026-11-10 the page is the atlibs requester page (repo atlibs-socialweb-computer-requester, `web/webrtc`),
   deployed by its `scripts/deploy-page.sh`. It replaced the kcp-wasm page (kcp compiled to js/wasm, branch

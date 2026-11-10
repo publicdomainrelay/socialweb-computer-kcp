@@ -10,7 +10,7 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
   bidders): A1 16:24Z (41 scopes granted), A2 hat-9 Held 16:27Z, A3 Released 16:31:34Z (14 of 14 records deleted),
   A4 cross-restart release 16:37:37Z. A5/A6 not re-run (no change since 2026-10-31)
 - Related: [0004](0004-vm-atirc-agent.md) (agent path), [0008](0008-host-observer.md) (host evidence)
-- Bidders advertise iroh and webrtc endpoints (https only on hat-7 while `market-https=true` lasts). The embedded
+- Bidders advertise iroh and webrtc endpoints (hat-7's `market-https=true` transition ended 2026-11-10; no prod bidder advertises https). The embedded
   requester has no dumbpipe, so it takes webrtc (`internal/ingress/webrtc` MeshDialer: sealed
   `computer.socialweb.ingress.offer` record, answer by getRecord, HTTP over datachannels); the simulator runs force
   it with `SIMCTL_CHILD_SOCIALWEB_REQUESTER_BIDDER_ENDPOINTS=webrtc`

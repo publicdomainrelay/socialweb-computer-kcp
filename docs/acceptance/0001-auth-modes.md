@@ -21,7 +21,7 @@ and the bidders. Do not run it without that authority.
 ## Hosts for this pass (2026-11-10)
 
 - hat-7 is john's prod bidder (`did:plc:7q5lnitxv4meizdon5fmhzrq`). Its offering
-  endpoints are iroh, https and webrtc. Do not re-identity hat-7 and do not end
+  endpoints are iroh and webrtc (its `market-https=true` transition ended 2026-11-10). Do not re-identity hat-7 and do not end
   its session.
 - hat-9 is bob's bidder (`did:plc:4vcig7s43z3nyqrnepmcfzqt`). Its offering
   endpoints are iroh and webrtc.
@@ -214,7 +214,7 @@ receives `market.rfp` and `market.accept` from this stream. The offering lists
 the bidder's endpoints as `endpoints: [{kind, address}]` with kind `iroh`,
 `webrtc` or `https`. A prod-qr bidder lists `https` only with the bidder option
 `market-https=true` (config.json `"bidder-options": "--market-https=true"`).
-hat-7 lists iroh, https and webrtc; hat-9 lists iroh and webrtc. The requester
+hat-7 and hat-9 list iroh and webrtc (no prod bidder lists https since 2026-11-10). The requester
 reads the winner's offering to reach it.
 
 ```bash
@@ -559,7 +559,7 @@ for D in "$D7" "$D9"; do
 done
 ```
 
-hat-7 prints `["iroh","https","webrtc"]` and hat-9 `["iroh","webrtc"]` (any
+hat-7 and hat-9 each print `["iroh","webrtc"]` (any
 order); each prints `false`: no offering carries `endpointUrl`.
 
 A direct child edit is reverted and reported:
