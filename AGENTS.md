@@ -246,6 +246,12 @@ requester's own kcp, and `install` prints both. A password never goes into reque
     side is `run request proxy <name> --tag <tag>` (`internal/webrtcproxy`), and `run request ssh
     --transport webrtc` uses it as the ssh ProxyCommand; `run request --tunnel <tag>:<port>[:<transport>]`
     asks for tunnels. STUN is `stun:stun.cloudflare.com:3478` only; no TURN (plan 0034).
+    A tunnels.json entry `{"tag": "<tag>", "mcp": true}` (no port) is the guest agent's own MCP shell
+    server (`internal/guestagent/mcp.go`, `jobs.go`: tools exec, start, read, write, kill, list, as root):
+    the daemon serves MCP Streamable HTTP (POST /mcp, JSON, stateless) on the root-only unix socket
+    `/run/socialweb-guest-agent/mcp.sock`, that tag's datachannels are bridged to the socket, and
+    `socialweb-guest-agent mcp --stdio` (over iroh: `ssh root@guest socialweb-guest-agent mcp --stdio`)
+    proxies newline-delimited JSON-RPC to it, so jobs live in the daemon and outlive a connection.
   - The browser shell: ssh over webrtc comes first; wootty is the fallback. An opentunnel entry with
     `shell {envFile}` (default `/etc/wootty/wootty.env`) runs `wootty-<tag>.service` on
     `127.0.0.1:<port>` behind that tag's https URL; a shell on transport webrtc is invalid. The shell
