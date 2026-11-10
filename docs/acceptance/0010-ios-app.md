@@ -21,8 +21,8 @@ the iOS counterpart to the k8s, ssh, and browser-page acceptance docs.
 | --- | --- |
 | App repo | `~/src/atirc-client-ios/AT-IRC` (local only; no remote) |
 | Framework | `GoLib/AtircGo.xcframework`, built by `GoLib/build.sh` from `SOCIALWEB_COMMIT` of `SOCIALWEB_SRC` (a socialweb-computer-kcp clone); it seeds the patched apiserver module under /tmp itself |
-| Framework target | socialweb-computer-kcp `aaab79d0` in the accepted build (`37c9b0f`) |
-| App build | `37c9b0f` (client_id scope = `RequesterOAuthScope`, 41 tokens; presence `2c23c1f`, perf `a43e389`) |
+| Framework target | socialweb-computer-kcp `c770a887` (`2b6b998`); A1-A4 accepted on `aaab79d0` (`37c9b0f`), A1-A3 again on the c770a887 scope set |
+| App build | `2b6b998` (client_id scope = `RequesterOAuthScope`, 13 tokens; presence `2c23c1f`, perf `a43e389`) |
 | Simulator | iPhone 17e (`<simulator udid>`) |
 | Device | owner iPhone (`<device udid>`) |
 | Bundle id | `com.fedfork.irc.AT-IRC` |
@@ -69,8 +69,10 @@ Failure signatures:
 - `callback received keys=error,error_description,iss,state` and the browser shows `Sign-in failed:
   invalid_scope` -> the requester asks for a scope the app's client_id does not declare; regenerate
   `OAuthClient.scope` from the pinned kcp's `RequesterOAuthScope`.
-- The PDS password step says `The data you submitted is invalid` -> the requester's GET authorize URL (scope
-  twice: parameter and client_id) is near 8 KB; 44 scope tokens failed, 41 pass (aaab79d0).
+- The PDS password step says `The data you submitted is invalid` -> the loopback client_id (it carries the whole
+  scope) is too long: 44-46 single-collection tokens (client_id about 3.6-3.8 KB) failed, through PAR too. Since
+  c770a887 the requester asks multi-collection repo permissions (`repo?collection=..&collection=..&action=..`,
+  13 tokens) and signs in with PAR.
 
 ## A2 - Launch, agentStart, join
 
