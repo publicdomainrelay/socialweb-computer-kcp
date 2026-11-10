@@ -11,7 +11,8 @@ usage: $0 --asset NAME --arch x86_64|aarch64 --out FILE
 Builds one static musl binary of a Rust program from its pinned source archive (the cargosrc object of
 assets.<NAME> in internal/versions/versions.json: url, sha256, commit, toolchain, manifest, package, bin):
 the archive is checked against its sha256 pin and its top directory must name the pinned commit; cargo
-build --release --locked runs with the pinned rustc in a private mount namespace (unshare) that shows the
+build --release --locked runs with the pinned rustc in an empty environment (env -i)
+and a private mount namespace (unshare) that shows the
 source at /mnt/src, the target dir at /mnt/target, CARGO_HOME at /mnt/cargo and RUSTUP_HOME at /mnt/rustup,
 with zig cc and zig ar of the zig rust/build.sh pins as the C compiler, so the bytes do not depend on where
 anything lives. Crates come from their registries and git sources, verified by the archive's Cargo.lock.
@@ -147,17 +148,18 @@ unshare --user --map-root-user --mount bash -c '
   mount --bind "$4" /mnt/rustup
   mount --bind "$5" /mnt/zig
   mount --bind "$6" /mnt/wrap
+  mkdir -p /mnt/target/home /mnt/target/tmp
   shift 6
   cd /mnt/src
   exec "$@"
 ' _ "$work/src" "$target_dir" "$cargo_home" "$rustup_home" "$zig_dir" "$root/rust/zig" \
-  env -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER \
+  env -i HOME=/mnt/target/home TMPDIR=/mnt/target/tmp LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC CARGO_INCREMENTAL=0 \
   CARGO_HOME=/mnt/cargo RUSTUP_HOME=/mnt/rustup RUSTUP_TOOLCHAIN="$toolchain" CARGO_TARGET_DIR=/mnt/target \
-  ZIG_GLOBAL_CACHE_DIR=/mnt/target/zig-cache ZIG_LOCAL_CACHE_DIR=/mnt/target/zig-cache PATH="/mnt/cargo/bin:$PATH" \
+  ZIG_GLOBAL_CACHE_DIR=/mnt/target/zig-cache ZIG_LOCAL_CACHE_DIR=/mnt/target/zig-cache PATH="$ns_sysroot/bin:/usr/local/bin:/usr/bin:/bin" RUSTC="$ns_sysroot/bin/rustc" \
   RUSTFLAGS="--remap-path-prefix=/mnt/src=/$asset --remap-path-prefix=/mnt/cargo/registry/src=/cargo-registry --remap-path-prefix=/mnt/cargo/git/checkouts=/cargo-git --remap-path-prefix=$ns_sysroot=/rust-sysroot" \
   "CC_$lower=/mnt/wrap/cc" "CFLAGS_$lower=--target=$triple -fno-sanitize=undefined" "AR_$lower=/mnt/wrap/ar" \
   "CARGO_TARGET_${upper}_LINKER=$ns_sysroot/lib/rustlib/$host/bin/rust-lld" \
-  cargo build --release --locked --target "$triple" -p "$package" --bin "$bin" --manifest-path "/mnt/src/$manifest"
+  "$ns_sysroot/bin/cargo" build --release --locked --target "$triple" -p "$package" --bin "$bin" --manifest-path "/mnt/src/$manifest"
 built="$target_dir/$triple/release/$bin"
 publish "$built"
 mkdir -p "$cache/.tmp.$$"
