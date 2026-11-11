@@ -8,6 +8,11 @@ token leased to the contract dies.
 - Procedure: [bidder.md, Terminate a VM from the bidder](../bidder.md#terminate-a-vm-from-the-bidder)
 - Used on prod: R2 orphan (hat-7, 2026-10-30), iOS cross-restart retry VM (hat-7, 2026-10-31 02:07Z), stray debug VM (hat-7, 2026-10-31 18:11Z)
 - Last pass: 2026-11-10 15:14Z (hat-7, rollout 5 438ca0fa): bob's held contract, delete -> gone in ~1 s, `vm.terminated` pinned (`termination-payload-19e3b1b5db974dc15cff4d61429bbeb2`, `deleted_on_request`, no `request` ref), requester `release` -> Released "the bidder ended the contract: deleted_on_request"
+- Last expiry pass: 2026-11-11 01:17Z (hat-9, rollout 10 253031e2, binary 233343a9): bob `run request --hold --expires-in 3m`,
+  `bidder_lifetime_capped` (compute.vm expiresAt 01:07:32Z), `bidder_association_expired_release` 01:17:32Z, released in 1 s,
+  `vm.terminated` pinned (`termination-payload-8719af6146077f7514b9d08be02b4c4e`, cid
+  `bafyreiht6bbyzcvfy4jfakpzqrkdp6tn7os6mi6cetmlq44eefmqwidjoi`, `expired`, no `request` ref), requester `release` ->
+  Released "the bidder ended the contract: expired"; the contract's records gone from bob's repo; hosts 0 firecracker
 
 ```mermaid
 sequenceDiagram
@@ -73,6 +78,7 @@ Bidder journal, in order (hat-7 example, 2026-10-31 22:51Z):
 
 - ComputeVM gone within seconds; contract released
 - `vm.terminated` exists in the bidder repo with reason `deleted_on_request`
+- Without an operator delete (expiry): `vm.terminated` with reason `expired` and no `request` ref
 - Host clean: `kb get computevms,firecrackervms` "No resources found", `pgrep -c -x firecracker` 0, `sudo ls -A <handle>/vms | wc -l` 0
 - Leased tokens dead (atirc-dev check, or a probe with the token gets 401)
 - Unleased (plain) tokens of the contract revoked manually (atirc-dev, by subhandle)

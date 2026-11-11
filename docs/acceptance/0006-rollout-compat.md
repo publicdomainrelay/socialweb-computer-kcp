@@ -8,6 +8,11 @@ Run after every rollout; it is the gate before "tests may resume".
 - Build: the CI build of a main commit: `main/<commit>/binaries/socialweb-computer-linux-amd64` in the public bucket once the run's
   `publish` job succeeded, else the run's `binaries` artifact (`gh run download <run> -n binaries`); check it against that run's
   `SHA256SUMS`. A local tag build is the fallback. Installs run from the lead host over ssh (no CI deploy key)
+- Rollout 10 (bidders only): 2026-11-11, 253031e2 (CI 42927796096, published sha256 233343a9cc0b = `main/latest`).
+  hat-9 00:57Z, hat-7 01:01Z, hat-8 `swc-bidder` 01:02Z, each after `pgrep -x firecracker` = 0 and a config backup
+  (`config.json.bak-rollout10-*`): version, readyz ok, MarketBidder Ready, offering `["iroh","webrtc"]`, 0 ERROR from
+  start, three `ingress.offer` stream dials, mesh UDP listener, hosts empty. Rollback: `bin/previous` = d1f19736 (rollout 9).
+  Proof round: [0007](0007-bidder-termination.md) last expiry pass
 - Last pass: 2026-11-10, rollout 8 (5e6c4e3d, published sha256 b7b286df94b4) on every component. Bidders hat-9 19:19Z,
   hat-7 19:20Z, hat-8 `swc-bidder` 19:21Z (`main/<commit>/binaries` checked against SHA256SUMS, `infra/hosts/hat-N.sh
   --apply`, hat-8 `SSH_TARGET=hat-8 infra/bidder/deploy.sh --apply`): version, MarketBidder Ready 6/6, no `pendingAction`,
