@@ -22,6 +22,8 @@ const (
 	GuestRequesterStopTimeout = 2 * time.Minute
 
 	GuestRequesterReleaseTimeout = GuestRequesterStopTimeout + GuestRequesterReleaseUnitTimeout + time.Minute
+
+	GuestRequesterIdentityReleaseTimeout = GuestRequesterStopTimeout + time.Minute
 )
 
 const (
@@ -338,6 +340,7 @@ set -euo pipefail
 [ "${R2_HOLD:-}" = 1 ] && args+=(--hold)
 [ -n "${R2_COLOCATED:-}" ] && args+=(--colocated "${R2_COLOCATED}")
 [ "${R2_IDENTITY:-}" = 1 ] && args+=(--identity-only)
+[ "${R2_IDENTITY:-}" = 1 ] && exec socialweb-computer "${args[@]}"
 socialweb-computer "${args[@]}"
 if [ "${R2_AGENT:-}" = 1 ] && [ "${R2_HOLD:-}" = 1 ]; then
   exec socialweb-computer run request agent "${R2_NAME}"

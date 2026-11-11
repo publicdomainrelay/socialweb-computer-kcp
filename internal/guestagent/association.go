@@ -342,15 +342,20 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 	if a.cfg.Association == nil {
 		return
 	}
+	env, _ := os.ReadFile(filepath.Join(RequesterDir, RequesterStartEnvFile))
+	identity := strings.Contains(string(env), "\nR2_IDENTITY=1\n")
 	stopCtx, cancelStop := context.WithTimeout(a.ctx, GuestRequesterStopTimeout)
+	if identity {
+		a.stopRequesterMain(stopCtx, seq)
+	}
 	out, err := exec.CommandContext(stopCtx, "systemctl", "stop", RequesterUnit).CombinedOutput()
 	cancelStop()
 	if err != nil {
 		a.log.Warn("guest_r2_release", "seq", seq, "step", "stop "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
 	}
 	record := r2ReleasedRecord{Type: R2ReleasedNSID, Ok: true, CreatedAt: createdAt()}
-	if env, _ := os.ReadFile(filepath.Join(RequesterDir, RequesterStartEnvFile)); strings.Contains(string(env), "\nR2_IDENTITY=1\n") {
-		record.Message = "the identity-only guest requester rents nothing; it retired its accounts when it stopped"
+	if identity {
+		record.Message = "the identity-only guest requester rents nothing; it retired its accounts (records deleted, DIDs tombstoned) as it stopped"
 		if err != nil {
 			record.Ok, record.Message = false, tail("stopping the identity-only guest requester: "+err.Error()+": "+string(out), 500)
 		}
@@ -360,5 +365,20 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 	a.log.Info("guest_r2_release", "seq", seq, "ok", record.Ok, "message", record.Message)
 	if err := a.poster.Post(a.ctx, record.Type, "", record); err != nil {
 		a.log.Warn("guest_r2_release", "seq", seq, "step", "post r2Released", "err", err.Error())
+	}
+}
+
+func (a *Agent) stopRequesterMain(ctx context.Context, seq int64) {
+	out, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGTERM", RequesterUnit).CombinedOutput()
+	if err != nil {
+		a.log.Warn("guest_r2_release", "seq", seq, "step", "signal the main process of "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
+		return
+	}
+	for exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", RequesterUnit).Run() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
 	}
 }

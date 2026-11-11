@@ -498,9 +498,12 @@ again; user_data installs `atirc-agent.service`
     `run request release` gets RequestReleaseWait + RequestRevokeWait + 2 min, the release unit 1 min
     more, the cascade (GuestRequesterReleaseTimeout) the unit stop plus 1 min more, and the parent's
     `run request release` waits the cascade plus `--contract-timeout`. An identity-only guest requester (no r2Start
-    for the contract) rents nothing: the guest agent stops it (it retires its accounts on stop, bounded to 1 min,
-    and its summary says Released), skips the release unit and answers guest.r2Released at once, and the
-    parent waits for that answer only RenterTombstoneWait (2 min) before it goes on; the outcome is
+    for the contract) rents nothing: the guest agent sends SIGTERM to the unit's main process only (the run
+    script execs `socialweb-computer`; a plain `systemctl stop` signals the whole cgroup, its kcp too, and the
+    kcp runs the retire), waits for it to exit (it retires its accounts on stop, bounded to 1 min, and its
+    summary says Released), skips the release unit and answers guest.r2Released, all within
+    GuestRequesterStopTimeout (2 min), and the parent waits for that answer GuestRequesterIdentityReleaseTimeout
+    (the stop plus 1 min) before it goes on; the outcome is
     `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose
     requester's contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`,
     at most 24 h after the accept, the earliest `expiresAt` of the proof's `parent` chain, only from a proof

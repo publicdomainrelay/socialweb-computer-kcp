@@ -12,7 +12,11 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
-const GuestRequesterReleaseTimeout = cloudinit.GuestRequesterReleaseTimeout
+const (
+	GuestRequesterReleaseTimeout = cloudinit.GuestRequesterReleaseTimeout
+
+	GuestRequesterIdentityReleaseTimeout = cloudinit.GuestRequesterIdentityReleaseTimeout
+)
 
 func GuestRequesterReleaseEventName(contract string) string {
 	name := "r2-release-" + contract
@@ -67,7 +71,7 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 	if _, renting := q.contractEvents.Find(func(e v1alpha1.ContractEvent) bool {
 		return e.Spec.ContractRef.Name == contract.Name && e.Spec.NSID == market.ComputeEventsGuestR2StartNSID
 	}); !renting {
-		limit = RenterTombstoneWait
+		limit = GuestRequesterIdentityReleaseTimeout
 	}
 	r.log().Info("requester_guest_requester_release", "contractEvent", name, "timeout", limit.String())
 	answered := func(e MarketEvent) bool {
