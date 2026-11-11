@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,18 +82,6 @@ func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
 		return cloudinit.DefaultAssociationRefFile, nil
 	}
 	return cloudinit.AssociationRefPath(contract.Spec.Association.RefFile)
-}
-
-func (q *Requester) renterRotationKey() string {
-	path := q.cfg.stateFile(market.RenterRotationKeyFile)
-	if path == "" {
-		return ""
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(raw))
 }
 
 func (q *Requester) endorsementRefused(ctx context.Context) error {
@@ -424,7 +411,7 @@ func (r *contractRunner) ensureAssociationRequest(ctx context.Context, contract 
 		return err
 	}
 	raw, err := json.Marshal(v1alpha1.AssociationRequest{Principal: r.q.repoDID, Contract: accept.URI, Nonce: hex.EncodeToString(nonce),
-		RotationKey: r.q.renterRotationKey()})
+		RotationKey: r.q.renterRotationDID()})
 	if err != nil {
 		return err
 	}
@@ -468,6 +455,7 @@ func (r *contractRunner) deleteAssociation(ctx context.Context) {
 	for rkey := range rkeys {
 		r.deleteAssociationRecord(ctx, rkey, accept)
 	}
+	r.tombstoneFallback(state)
 }
 
 func (r *contractRunner) deleteAssociationRecord(ctx context.Context, rkey string, accept commonv1.StrongRef) {
@@ -753,11 +741,12 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 		refuse("the association request record carries another nonce")
 		return
 	}
+	state.GuestRequester.Accounts = guestAccounts(asked.Accounts, q.repoDID, did)
 	if err := r.settleGuestRequester(ctx, state, v1alpha1.ContractGuestRequesterVerified, "the association request "+got.URI+" matches"); err != nil {
 		fail("record the verified guest requester", err)
 		return
 	}
-	r.log().Info("requester_guest_requester", "did", did, "request", got.URI)
+	r.log().Info("requester_guest_requester", "did", did, "request", got.URI, "accounts", state.GuestRequester.Accounts)
 	r.ensureAssociation(ctx, state.Accept, state)
 }
 

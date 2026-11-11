@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1054,6 +1055,47 @@ func (r *requestRun) releaseForOwner(ctx context.Context) int {
 	return exitOK
 }
 
+func (r *requestRun) awaitGuestTombstones(ctx context.Context, c *v1alpha1.ComputeContract) {
+	dids := requester.GuestDIDs(c)
+	if len(dids) == 0 {
+		return
+	}
+	plcURL := requester.PublicPLCDirectoryURL
+	if n := r.root.Network; n != nil && strings.TrimSpace(n.PLCDirectoryURL) != "" {
+		plcURL = strings.TrimRight(strings.TrimSpace(n.PLCDirectoryURL), "/")
+	}
+	r.log("waiting for the guest's DIDs to be tombstoned (by the guest, else by the renter rotation key) before the kcp stops",
+		"dids", dids, "timeout", (requester.RenterTombstoneWait + time.Minute).String())
+	wctx, cancel := context.WithTimeout(ctx, requester.RenterTombstoneWait+time.Minute)
+	defer cancel()
+	for {
+		left := slices.DeleteFunc(slices.Clone(dids), func(did string) bool { return plcGone(wctx, plcURL, did) })
+		if len(left) == 0 {
+			r.log("the guest's DIDs are tombstoned", "dids", dids)
+			return
+		}
+		select {
+		case <-wctx.Done():
+			r.a.log.Warn("the guest's DIDs are not tombstoned; their grant expiry and contract checks still end their trust", "dids", left)
+			return
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+func plcGone(ctx context.Context, plcURL, did string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, plcURL+"/"+did, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusGone
+}
+
 func (r *requestRun) followRelease(ctx context.Context) (*v1alpha1.ComputeContract, bool) {
 	current, err := r.kcp.AwaitContract(ctx, requestSummaryRead, func(*v1alpha1.ComputeContract) bool { return true })
 	if err != nil || current == nil || !current.Spec.Release || releaseSettled(current.Spec.ReleaseRequestedAt)(current) {
@@ -1169,6 +1211,9 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 		}
 	}
 	r.writeSummary(ctx, c)
+	if remove {
+		r.awaitGuestTombstones(context.WithoutCancel(ctx), c)
+	}
 	r.stop(context.WithoutCancel(ctx), remove)
 	r.writeSummary(ctx, nil)
 	r.a.printJSON(r.summary)
@@ -1523,6 +1568,7 @@ func runRequestRelease(ctx context.Context, a *app, vals clicfg.Values, rest []s
 		return exitFailed
 	}
 	r.writeSummary(ctx, c)
+	r.awaitGuestTombstones(ctx, c)
 	r.stop(context.WithoutCancel(ctx), true)
 	if r.standalone.StateDir != "" {
 		if _, err := os.Stat(r.standalone.StateDir); err == nil {

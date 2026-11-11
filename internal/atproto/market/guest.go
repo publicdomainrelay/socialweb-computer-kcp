@@ -11,7 +11,7 @@ import (
 
 const ContractAssociationLifetime = 24 * time.Hour
 
-const RenterRotationKeyFile = "plc-rotation.pub"
+const RenterRotationKeyFile = "plc-rotation.key"
 
 func GrantRecord(agent string, createdAt any) map[string]any {
 	return map[string]any{"$type": AssociationNSID, "agent": agent, "createdAt": createdAt}

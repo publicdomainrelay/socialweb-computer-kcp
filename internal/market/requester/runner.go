@@ -49,6 +49,8 @@ type contractRunner struct {
 
 	releaseOnce sync.Once
 
+	tombstoneOnce sync.Once
+
 	done chan struct{}
 
 	cancel context.CancelFunc

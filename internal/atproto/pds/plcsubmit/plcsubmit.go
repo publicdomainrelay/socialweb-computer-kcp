@@ -264,15 +264,22 @@ func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, se
 	return p.verifyServiceUpdate(ctx, did, &last, op, opCID, endpoint)
 }
 
-func (p *HTTPPLCSubmitter) Tombstone(ctx context.Context, did syntax.DID) error {
+func (p *HTTPPLCSubmitter) Head(ctx context.Context, did syntax.DID) (plc.Operation, error) {
 	var ops []plc.Operation
 	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
-		return err
+		return plc.Operation{}, err
 	}
 	if len(ops) == 0 {
-		return fmt.Errorf("pds: the PLC log for %s is empty", did)
+		return plc.Operation{}, fmt.Errorf("pds: the PLC log for %s is empty", did)
 	}
-	last := ops[len(ops)-1]
+	return ops[len(ops)-1], nil
+}
+
+func (p *HTTPPLCSubmitter) Tombstone(ctx context.Context, did syntax.DID) error {
+	last, err := p.Head(ctx, did)
+	if err != nil {
+		return err
+	}
 	if last.Type == plc.TypeTombstone {
 		return nil
 	}
@@ -287,7 +294,13 @@ func (p *HTTPPLCSubmitter) Tombstone(ctx context.Context, did syntax.DID) error 
 	if err != nil {
 		return fmt.Errorf("pds: creating the PLC tombstone: %w", err)
 	}
-	return p.submit(ctx, did, op.SignedObject())
+	if err := p.submit(ctx, did, op.SignedObject()); err != nil {
+		return err
+	}
+	if head, err := p.Head(ctx, did); err != nil || head.Type != plc.TypeTombstone || head.Sig != op.Sig {
+		return fmt.Errorf("pds: the PLC tombstone of %s is not the head operation", did)
+	}
+	return nil
 }
 
 func (p *HTTPPLCSubmitter) verifyServiceUpdate(ctx context.Context, did syntax.DID, prev *plc.Operation, expected *plc.Operation, expectedCID string, endpoint string) error {

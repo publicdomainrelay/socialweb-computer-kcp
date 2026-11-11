@@ -684,13 +684,9 @@ func SyncRequesterRepoKey(stateRoot, pdsStateDir, did, requesterDir string) (boo
 	if err != nil {
 		return changed, fmt.Errorf("the app Pds PLC rotation key: %w", err)
 	}
-	public, err := rotation.PublicKey()
-	if err != nil {
-		return changed, err
-	}
-	path, want := filepath.Join(requesterDir, market.RenterRotationKeyFile), public.DIDKey()+"\n"
+	path, want := filepath.Join(requesterDir, market.RenterRotationKeyFile), rotation.Multibase()+"\n"
 	if have, readErr := os.ReadFile(path); readErr != nil || string(have) != want {
-		if err := WriteFileAtomic(path, []byte(want), 0o644); err != nil {
+		if err := WriteFileAtomic(path, []byte(want), 0o600); err != nil {
 			return changed, fmt.Errorf("writing the requester's %s: %w", market.RenterRotationKeyFile, err)
 		}
 		changed = true
