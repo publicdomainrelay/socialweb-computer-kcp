@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
@@ -156,47 +155,34 @@ func (h *repoHandle) Proof(ctx context.Context, collection syntax.NSID, rkey syn
 	if err != nil {
 		return nil, err
 	}
-	br := &sqlBlockReader{db: h.store.db, did: h.did.String()}
-	tree, err := loadFullTree(ctx, br, head.Data)
+	did := h.did.String()
+	key := []byte(nsid.String() + "/" + rk.String())
+	headBlk, err := readBlock(ctx, h.store.db, did, head.CID)
 	if err != nil {
 		return nil, err
 	}
-	rc, err := tree.Get([]byte(nsid.String() + "/" + rk.String()))
-	if err != nil {
-		return nil, err
+	out := []blocks.Block{headBlk}
+	next := &head.Data
+	var rc *cid.Cid
+	for next != nil && rc == nil {
+		blk, err := readBlock(ctx, h.store.db, did, *next)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, blk)
+		next, rc, err = mstPathStep(blk, key)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if rc == nil {
 		return nil, ErrRecordNotFound
 	}
-	nodeCIDs := make(map[cid.Cid]bool)
-	collectNodeCIDs(tree.Root, nodeCIDs)
-	cids := make([]cid.Cid, 0, len(nodeCIDs)+2)
-	cids = append(cids, head.CID)
-	for c := range nodeCIDs {
-		if c != head.CID {
-			cids = append(cids, c)
-		}
-	}
-	cids = append(cids, *rc)
-	sort.Slice(cids, func(i, j int) bool { return cids[i].String() < cids[j].String() })
-	headBlk, err := readBlock(ctx, h.store.db, h.did.String(), head.CID)
+	recBlk, err := readBlock(ctx, h.store.db, did, *rc)
 	if err != nil {
 		return nil, err
 	}
-	ordered := []blocks.Block{headBlk}
-	seen := map[cid.Cid]bool{head.CID: true}
-	for _, c := range cids {
-		if seen[c] {
-			continue
-		}
-		blk, err := readBlock(ctx, h.store.db, h.did.String(), c)
-		if err != nil {
-			return nil, err
-		}
-		seen[c] = true
-		ordered = append(ordered, blk)
-	}
-	return WriteCAR(head.CID, ordered)
+	return WriteCAR(head.CID, append(out, recBlk))
 }
 
 func (h *repoHandle) Verify(ctx context.Context) error {

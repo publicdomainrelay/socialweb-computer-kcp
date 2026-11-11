@@ -1,11 +1,13 @@
 package repo
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
 
 	"github.com/bluesky-social/indigo/atproto/repo/mst"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 )
 
@@ -72,18 +74,28 @@ func DiffTrees(oldTree, newTree *mst.Tree) ([]CommitOp, error) {
 	return ops, nil
 }
 
-func collectNodeCIDs(n *mst.Node, out map[cid.Cid]bool) {
-	if n == nil {
-		return
+func mstPathStep(blk blocks.Block, key []byte) (*cid.Cid, *cid.Cid, error) {
+	nd, err := mst.NodeDataFromCBOR(bytes.NewReader(blk.RawData()))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: mst node %s: %v", ErrCorruptRepo, blk.Cid(), err)
 	}
-	if n.CID != nil {
-		out[*n.CID] = true
+	c := blk.Cid()
+	n, err := nd.Node(&c)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: mst node %s: %v", ErrCorruptRepo, c, err)
 	}
+	var child *cid.Cid
 	for _, e := range n.Entries {
-		if e.Child != nil {
-			collectNodeCIDs(e.Child, out)
-		} else if e.ChildCID != nil {
-			out[*e.ChildCID] = true
+		switch {
+		case e.ChildCID != nil:
+			child = e.ChildCID
+		case bytes.Equal(key, e.Key):
+			return nil, e.Value, nil
+		case bytes.Compare(key, e.Key) < 0:
+			return child, nil, nil
+		default:
+			child = nil
 		}
 	}
+	return child, nil, nil
 }
