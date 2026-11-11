@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "computer.socialweb.peer",
-  "description": "How to reach one subhandle of the repository's account directly. Record key: the subhandle. Read with one getRecord(DID, computer.socialweb.peer, subhandle); never listed. A reader trusts the record only while its lease verifies: the market.association chain from the account up to its owner, every link unexpired and its contract Held. A stale record whose lease no longer verifies is ignored.",
+  "description": "How to reach one subhandle of the repository's account directly. Record key: the subhandle. Read with one getRecord(DID, computer.socialweb.peer, subhandle); never listed. A reader trusts the record only while the identlink walk of the repository DID reaches the owner: every grant unexpired and its contract Held. A stale record whose walk no longer reaches the owner is ignored.",
   "defs": {
     "main": {
       "type": "record",
@@ -13,7 +13,6 @@
           "iroh": { "type": "string", "maxLength": 1024, "description": "A short iroh ticket (node id and relay, no addresses) whose endpoint serves this account's XRPC directly." },
           "webrtc": { "type": "string", "format": "did", "description": "The DID whose repo answers computer.socialweb.ingress.offer records for this account." },
           "channels": { "type": "array", "maxLength": 64, "items": { "type": "string", "maxLength": 256 }, "description": "The atirc channels the subhandle is in." },
-          "lease": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The contract-scoped market.association that names this account; the record is valid only while that association and its parents verify." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

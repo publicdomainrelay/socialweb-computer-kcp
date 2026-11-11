@@ -230,13 +230,10 @@ func (v *AcceptsX402) UnmarshalJSON(b []byte) error {
 
 type Association struct {
 	Type      string                     `json:"$type"`
+	Agent     string                     `json:"agent"`
 	Contract  *StrongRef                 `json:"contract,omitempty"`
 	CreatedAt string                     `json:"createdAt"`
 	ExpiresAt string                     `json:"expiresAt,omitempty"`
-	Note      string                     `json:"note,omitempty"`
-	Parent    *StrongRef                 `json:"parent,omitempty"`
-	Service   string                     `json:"service"`
-	Subject   string                     `json:"subject"`
 	Extra     map[string]json.RawMessage `json:"-"`
 	absent    map[string]json.RawMessage
 }
@@ -276,11 +273,10 @@ func (v *Association) UnmarshalJSON(b []byte) error {
 
 type AssociationRequest struct {
 	Type      string                     `json:"$type"`
-	Authority string                     `json:"authority"`
 	Contract  string                     `json:"contract"`
 	CreatedAt string                     `json:"createdAt"`
 	Nonce     string                     `json:"nonce"`
-	Service   string                     `json:"service"`
+	Principal string                     `json:"principal"`
 	Extra     map[string]json.RawMessage `json:"-"`
 	absent    map[string]json.RawMessage
 }
@@ -355,7 +351,6 @@ type BadgeBlueKeys struct {
 	KeyID     string                     `json:"keyId"`
 	Name      string                     `json:"name,omitempty"`
 	Nonce     string                     `json:"nonce,omitempty"`
-	Proof     *StrongRef                 `json:"proof,omitempty"`
 	Service   string                     `json:"service"`
 	Extra     map[string]json.RawMessage `json:"-"`
 	absent    map[string]json.RawMessage

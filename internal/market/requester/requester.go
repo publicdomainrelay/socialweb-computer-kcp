@@ -670,6 +670,7 @@ func (q *Requester) Start(ctx context.Context) error {
 		RelayURLs:       q.cfg.DiscoveryRelays(),
 		BidderDIDs:      append([]string(nil), q.cfg.Spec.BidderDIDs...),
 		OperatorDID:     strings.TrimSpace(q.cfg.Spec.OperatorDID),
+		Trust:           q.trustResolver(),
 		Ingress:         q.ingress(),
 		IngressRef:      q.ingressDescriptor,
 		IngressWritable: q.ingressWritable,

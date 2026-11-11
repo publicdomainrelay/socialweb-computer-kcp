@@ -1,7 +1,7 @@
 package atproto
 
 import (
-	"encoding/json"
+	"context"
 	"slices"
 	"strings"
 
@@ -9,9 +9,10 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
-func Associate(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) {
+func (a *Accounts) Associate(ctx context.Context, id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) {
 	declared := uniqueDIDs(id.Spec.ApprovedAssociations)
 	previous := make([]string, 0, len(status.Associations))
 	for _, did := range uniqueDIDs(status.Associations) {
@@ -19,7 +20,7 @@ func Associate(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, 
 			previous = append(previous, did)
 		}
 	}
-	verified, observed := verifiedClaims(id, watch, status)
+	verified, observed := a.verifiedPrincipals(ctx, id, watch, status)
 	if !observed {
 		verified = previous
 	}
@@ -31,13 +32,13 @@ func Associate(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, 
 	}
 	status.Associations = uniqueDIDs(append(slices.Clone(declared), verified...))
 	if removed && len(status.Associations) == 0 {
-		conds.Set(&status.Conditions, id.Generation, v1alpha1.ConditionAssociated, false, ReasonRevoked, "the operator's verified claim record is gone")
+		conds.Set(&status.Conditions, id.Generation, v1alpha1.ConditionAssociated, false, ReasonRevoked, "the identlink walk of the identity reaches no principal any more")
 		return
 	}
 	setAssociated(status, id.Generation, id.Spec.Association)
 }
 
-func verifiedClaims(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) ([]string, bool) {
+func (a *Accounts) verifiedPrincipals(ctx context.Context, id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) ([]string, bool) {
 	if watch == nil || id.Spec.Mode != v1alpha1.MarketIdentityModeLocalRepo || id.Spec.Association == v1alpha1.AssociationSkip {
 		return nil, false
 	}
@@ -48,16 +49,16 @@ func verifiedClaims(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWa
 	if !meta.IsStatusConditionTrue(watch.Status.Conditions, v1alpha1.ConditionVerified) && len(watch.Status.Deleted) == 0 {
 		return nil, false
 	}
+	walked, err := a.trust.Walk(ctx, subject, trust.Association{})
+	if err != nil {
+		return nil, false
+	}
 	var out []string
-	for _, record := range watch.Status.Records {
-		did := associationClaimDid(record, subject, id.Spec.AssociationService)
-		if did == "" {
+	for _, root := range walked.Roots {
+		if operator := strings.TrimSpace(id.Spec.AssociateWith); root == subject || strings.HasPrefix(operator, "did:") && root != operator {
 			continue
 		}
-		if operator := strings.TrimSpace(id.Spec.AssociateWith); strings.HasPrefix(operator, "did:") && did != operator {
-			continue
-		}
-		out = append(out, did)
+		out = append(out, root)
 	}
 	slices.Sort(out)
 	return slices.Compact(out), true
@@ -71,26 +72,6 @@ func uniqueDIDs(in []string) []string {
 		}
 	}
 	return out
-}
-
-func associationClaimDid(record v1alpha1.WatchedRecord, subject, service string) string {
-	var value struct {
-		Challenge string `json:"challenge"`
-		KeyID     string `json:"keyId"`
-		Service   string `json:"service"`
-	}
-	if err := json.Unmarshal(record.Value, &value); err != nil {
-		return ""
-	}
-	challenge := strings.TrimSpace(value.Challenge)
-	keyID := strings.TrimSpace(value.KeyID)
-	if strings.TrimSpace(service) == "" || strings.TrimSpace(value.Service) != service {
-		return ""
-	}
-	if strings.HasPrefix(challenge, "did:") && keyID == subject && record.Did == challenge {
-		return challenge
-	}
-	return ""
 }
 
 func associatedTrue(status *v1alpha1.MarketIdentityStatus) bool {

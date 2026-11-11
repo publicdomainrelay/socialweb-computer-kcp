@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
@@ -18,21 +19,13 @@ import (
 
 const (
 	VouchNSID            = "sh.tangled.graph.vouch"
-	BadgeBlueKeysNSID    = "com.publicdomainrelay.temp.badgeBlueKeys"
-	AssociationNSID      = "com.publicdomainrelay.temp.market.association"
-	BskyPostNSID         = "app.bsky.feed.post"
-	DelvePostNSID        = "town.delve.feed.post"
-	MentionFacetType     = "app.bsky.richtext.facet#mention"
-	MirrorRKey           = "association"
-	BidderAssociate      = "bidder_associate"
-	RequesterAssociate   = "requester_associate"
 	defaultTrustCacheTTL = 5 * time.Minute
 	trustErrorTTL        = 5 * time.Second
 )
 
 type Host interface {
 	Resolve(ctx context.Context, ref atproto.StrongRef) (map[string]any, error)
-	ResolveOperatorDid(ctx context.Context, did string) (string, bool, error)
+	Walk(ctx context.Context, did string, assoc Association) (identlink.Result, error)
 	Vouches(ctx context.Context, voucher, subject string) (bool, error)
 	Log(level, msg string, meta map[string]any)
 }
@@ -45,20 +38,15 @@ type Snapshot struct {
 
 type ResolverOptions struct {
 	Client *atproto.Client
+	Source identlink.Source
 	Store  *cache.Store
 	TTL    time.Duration
 	Log    func(level, msg string, meta map[string]any)
 }
 
-type operatorKey struct {
-	did     string
-	service string
-	assoc   associationKey
-}
-
-type operatorEntry struct {
-	value string
-	found bool
+type walkKey struct {
+	did   string
+	assoc Association
 }
 
 type vouchKey struct {
@@ -66,18 +54,14 @@ type vouchKey struct {
 	subject string
 }
 
-type claim struct {
-	operator string
-	subject  string
-	service  string
-}
-
 type Resolver struct {
 	client *atproto.Client
+	source identlink.Source
 	store  *cache.Store
 	log    func(level, msg string, meta map[string]any)
 	now    func() time.Time
-	ops    *ttlcache.Cache[operatorKey, operatorEntry]
+	ttl    time.Duration
+	walks  *ttlcache.Cache[walkKey, identlink.Result]
 	vouch  *ttlcache.Cache[vouchKey, bool]
 }
 
@@ -86,18 +70,23 @@ func NewResolver(opts ResolverOptions) *Resolver {
 	if client == nil {
 		client = atproto.NewClient()
 	}
-	ttl := opts.TTL
-	ttl = opt.Positive(ttl, defaultTrustCacheTTL)
+	source := opts.Source
+	if source == nil {
+		source = identlink.NewRemote(identlink.PLCDirectory(client.PLCURL, client.HTTP), client.HTTP)
+	}
+	ttl := opt.Positive(opts.TTL, defaultTrustCacheTTL)
 	log := opts.Log
 	if log == nil {
 		log = func(string, string, map[string]any) {}
 	}
 	return &Resolver{
 		client: client,
+		source: source,
 		store:  opts.Store,
 		log:    log,
 		now:    time.Now,
-		ops:    ttlcache.New[operatorKey, operatorEntry](ttlcache.Options{TTL: ttl}),
+		ttl:    ttl,
+		walks:  ttlcache.New[walkKey, identlink.Result](ttlcache.Options{TTL: ttl}),
 		vouch:  ttlcache.New[vouchKey, bool](ttlcache.Options{TTL: ttl}),
 	}
 }
@@ -126,121 +115,55 @@ func (r *Resolver) getRecord(ctx context.Context, repo, collection, rkey string)
 	return value, err
 }
 
-func (r *Resolver) ResolveOperatorDid(ctx context.Context, did string) (string, bool, error) {
-	return r.ResolveOperatorDidFor(ctx, did, "")
+type walkIO struct {
+	r               *Resolver
+	requireContract bool
 }
 
-func (r *Resolver) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
-	return r.ResolveOperatorDidWith(ctx, did, service, Association{})
+func (w walkIO) ResolveDID(ctx context.Context, did string) (*identlink.Doc, error) {
+	return w.r.source.ResolveDID(ctx, did)
 }
 
-func (r *Resolver) ResolveOperatorDidWith(ctx context.Context, did, service string, assoc Association) (string, bool, error) {
+func (w walkIO) GetRecord(ctx context.Context, repo, collection, rkey string) (map[string]any, error) {
+	value, err := w.r.source.GetRecord(ctx, repo, collection, rkey)
+	if _, scoped := value["contract"]; w.requireContract && collection == identlink.GrantNSID && !scoped {
+		return nil, err
+	}
+	return value, err
+}
+
+func (w walkIO) ContractHeld(ctx context.Context, contract identlink.StrongRef, authorities []string) (bool, error) {
+	return w.r.contractHeld(ctx, atproto.StrongRef{URI: contract.URI, CID: contract.CID}, authorities)
+}
+
+func (w walkIO) Now() time.Time {
+	return w.r.now()
+}
+
+func (r *Resolver) Walk(ctx context.Context, did string, assoc Association) (identlink.Result, error) {
 	did = strings.TrimSpace(did)
-	service = strings.TrimSpace(service)
-	if did == "" {
-		return "", false, nil
+	assoc = assoc.normal()
+	key := walkKey{did: did, assoc: assoc}
+	if res, ok := r.walks.Get(key); ok {
+		return res, nil
 	}
-	if !associationRole(service) {
-		r.log("info", "resolveOperatorDid needs a role", map[string]any{"did": did, "service": service})
-		return "", false, nil
+	res := identlink.Walk(ctx, walkIO{r: r, requireContract: assoc.RequireContract}, did, identlink.Options{MaxDepth: assoc.MaxDepth})
+	if err := ctx.Err(); err != nil {
+		return identlink.Result{}, err
 	}
-	akey := assoc.key()
-	key := operatorKey{did: did, service: service, assoc: akey}
-	if entry, ok := r.ops.Get(key); ok {
-		return entry.value, entry.found, nil
+	if len(res.Errors) > 0 {
+		r.log("warn", "identlink walk left edges unconfirmed", map[string]any{"did": did, "errors": res.Errors})
+		r.walks.SetTTL(key, res, trustErrorTTL)
+		return res, nil
 	}
-	operator, found, err := r.operatorOf(ctx, did, service, akey)
-	if err != nil {
-		if ctx.Err() != nil {
-			return "", false, ctx.Err()
-		}
-		r.log("warn", "resolveOperatorDid failed", map[string]any{"did": did, "service": service, "error": err.Error()})
-		r.ops.SetTTL(key, operatorEntry{}, trustErrorTTL)
-		return "", false, nil
-	}
-	r.ops.Set(key, operatorEntry{value: operator, found: found})
-	return operator, found, nil
-}
-
-func (r *Resolver) operatorOf(ctx context.Context, did, service string, assoc associationKey) (string, bool, error) {
-	mirror, ok, err := r.mirrorOf(ctx, did, service)
-	if err != nil || !ok {
-		return "", false, err
-	}
-	if mirror.hasProof {
-		if mirror.proof == nil {
-			_, err := r.deny("the mirror proof is not a strongRef", mirror.claim, nil)
-			return "", false, err
-		}
-		return r.proofHeld(ctx, mirror.claim, *mirror.proof, assoc)
-	}
-	if assoc.association {
-		root, held, err := r.associationHeld(ctx, mirror.claim, assoc)
-		if err != nil {
-			return "", false, err
-		}
-		if held {
-			return root, true, nil
+	ttl := r.ttl
+	for _, a := range res.Ancestors {
+		if a.ExpiresAt != nil {
+			ttl = min(ttl, max(a.ExpiresAt.Sub(r.now()), time.Second))
 		}
 	}
-	if assoc.claim && !assoc.requireContract {
-		held, err := r.claimHeld(ctx, mirror.claim)
-		if err != nil {
-			return "", false, err
-		}
-		if held {
-			return mirror.operator, true, nil
-		}
-	}
-	r.log("info", "resolveOperatorDid unclaimed mirror", map[string]any{"did": did, "operator": mirror.operator, "service": mirror.service})
-	return "", false, nil
-}
-
-type mirrorRecord struct {
-	claim
-	proof    *atproto.StrongRef
-	hasProof bool
-}
-
-func (r *Resolver) mirrorOf(ctx context.Context, did, service string) (mirrorRecord, bool, error) {
-	value, err := r.getRecord(ctx, did, BadgeBlueKeysNSID, MirrorRKey)
-	if err != nil || value == nil {
-		return mirrorRecord{}, false, err
-	}
-	held, ok := claimOf(value)
-	rawProof, hasProof := value["proof"]
-	proof, _ := strongRefOf(rawProof)
-	mirror := mirrorRecord{claim: held, proof: proof, hasProof: hasProof}
-	return mirror, ok && mirror.subject == did && mirror.operator != did && associationService(mirror.service, service), nil
-}
-
-func ClaimRKey(service, subject string) string {
-	return service + "-" + strings.ReplaceAll(subject, ":", "-")
-}
-
-func (r *Resolver) claimHeld(ctx context.Context, want claim) (bool, error) {
-	value, err := r.getRecord(ctx, want.operator, BadgeBlueKeysNSID, ClaimRKey(want.service, want.subject))
-	if err != nil {
-		return false, err
-	}
-	held, ok := claimOf(value)
-	return ok && held == want, nil
-}
-
-func claimOf(value map[string]any) (claim, bool) {
-	service, _ := value["service"].(string)
-	subject, _ := value["keyId"].(string)
-	operator, _ := value["challenge"].(string)
-	c := claim{operator: strings.TrimSpace(operator), subject: strings.TrimSpace(subject), service: strings.TrimSpace(service)}
-	return c, strings.HasPrefix(c.operator, "did:") && strings.HasPrefix(c.subject, "did:")
-}
-
-func associationRole(service string) bool {
-	return service == BidderAssociate || service == RequesterAssociate
-}
-
-func associationService(recordService, want string) bool {
-	return associationRole(want) && recordService == want
+	r.walks.SetTTL(key, res, ttl)
+	return res, nil
 }
 
 func (r *Resolver) Vouches(ctx context.Context, voucher, subject string) (bool, error) {
@@ -272,22 +195,24 @@ func (r *Resolver) Log(level, msg string, meta map[string]any) {
 }
 
 func (r *Resolver) ApplyEvent(did, rkey string) {
-	r.ops.DeleteKeys(func(key operatorKey) bool { return key.did == did })
-	r.vouch.DeleteKeys(func(key vouchKey) bool {
-		return (did != "" && key.voucher == did) || (rkey != "" && key.voucher == rkey)
+	named := func(x string) bool { return x != "" && (x == did || x == rkey) }
+	r.walks.DeleteFunc(func(key walkKey, res identlink.Result) bool {
+		return named(key.did) || slices.ContainsFunc(res.Ancestors, func(a identlink.Ancestor) bool { return named(a.DID) })
 	})
+	if did != "" {
+		r.source.Forget(did)
+	}
+	r.vouch.DeleteKeys(func(key vouchKey) bool { return named(key.voucher) })
 }
 
 func (r *Resolver) Invalidate() {
-	r.ops.DeleteKeys(func(operatorKey) bool { return true })
+	r.walks.DeleteKeys(func(walkKey) bool { return true })
 	r.vouch.DeleteKeys(func(vouchKey) bool { return true })
 }
 
-type opResult struct {
-	did      string
-	operator string
-	found    bool
-	err      error
+type walked struct {
+	res identlink.Result
+	err error
 }
 
 type vouchResult struct {
@@ -297,19 +222,7 @@ type vouchResult struct {
 	err     error
 }
 
-type ServiceOperatorResolver interface {
-	ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error)
-}
-
-type AssociationOperatorResolver interface {
-	ResolveOperatorDidWith(ctx context.Context, did, service string, assoc Association) (string, bool, error)
-}
-
-func BuildSnapshotFor(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string) (Snapshot, error) {
-	return BuildSnapshotWith(ctx, host, selfDid, counterpartyDid, selfService, counterpartyService, Association{})
-}
-
-func BuildSnapshotWith(ctx context.Context, host Host, selfDid, counterpartyDid, selfService, counterpartyService string, assoc Association) (Snapshot, error) {
+func BuildSnapshot(ctx context.Context, host Host, selfDid, counterpartyDid string, assoc Association) (Snapshot, error) {
 	snapshot := Snapshot{
 		OperatorOf:       make(map[string]string),
 		VouchedBy:        make(map[string][]string),
@@ -322,102 +235,97 @@ func BuildSnapshotWith(ctx context.Context, host Host, selfDid, counterpartyDid,
 	defer wg.Wait()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	roleResolver, _ := host.(ServiceOperatorResolver)
-	assocResolver, _ := host.(AssociationOperatorResolver)
-	selfAssoc := assoc
-	selfAssoc.RequireContract = false
-	resolve := func(did, service string) (string, bool, error) {
-		if assocResolver != nil {
-			if did == selfDid {
-				return assocResolver.ResolveOperatorDidWith(ctx, did, service, selfAssoc)
-			}
-			return assocResolver.ResolveOperatorDidWith(ctx, did, service, assoc)
-		}
-		if roleResolver != nil {
-			return roleResolver.ResolveOperatorDidFor(ctx, did, service)
-		}
-		return "", false, nil
-	}
-	dids := []string{selfDid}
+	var self, cp walked
+	wg.Go(func() { self.res, self.err = host.Walk(ctx, selfDid, Association{MaxDepth: assoc.MaxDepth}) })
 	if counterpartyDid != "" && counterpartyDid != selfDid {
-		dids = append(dids, counterpartyDid)
+		wg.Go(func() { cp.res, cp.err = host.Walk(ctx, counterpartyDid, assoc) })
 	}
-	results := make(chan opResult, len(dids))
-	for _, did := range dids {
-		service := selfService
-		if did == counterpartyDid {
-			service = counterpartyService
-		}
+	wg.Wait()
+	if err := errors.Join(self.err, cp.err); err != nil {
+		return snapshot, err
+	}
+	snapshot.OperatorOf = operatorsOf(selfDid, counterpartyDid, self.res, cp.res)
+	selfSide := self.res.Side()
+	snapshot.TrustedOperators = selfSide
+	if counterpartyDid == "" || counterpartyDid == selfDid {
+		snapshot.VouchedBy[selfDid] = []string{}
+		return snapshot, nil
+	}
+	cpSide := cp.res.Side()
+	pairs := vouchPairs(selfSide, cpSide)
+	for _, p := range pairs {
+		snapshot.VouchedBy[p.voucher] = []string{}
+	}
+	results := make(chan vouchResult, len(pairs))
+	for _, p := range pairs {
 		wg.Go(func() {
-			operator, found, err := resolve(did, service)
-			results <- opResult{did: did, operator: operator, found: found, err: err}
+			vouched, err := host.Vouches(ctx, p.voucher, p.subject)
+			results <- vouchResult{voucher: p.voucher, subject: p.subject, vouched: vouched, err: err}
 		})
 	}
-	operators := make(map[string]string, len(dids))
-	for range dids {
+	for range pairs {
 		result := <-results
 		if result.err != nil {
 			return snapshot, result.err
 		}
-		if result.did == selfDid {
-			if result.found && result.operator != "" {
-				operators[selfDid] = result.operator
-			} else {
-				operators[selfDid] = selfDid
-			}
+		if !result.vouched {
 			continue
 		}
-		if result.found && result.operator != "" {
-			operators[result.did] = result.operator
+		snapshot.VouchedBy[result.voucher] = append(snapshot.VouchedBy[result.voucher], result.subject)
+		switch {
+		case slices.Contains(selfSide, result.voucher) && slices.Contains(cpSide, result.subject):
+			snapshot.VouchedBy[result.voucher] = append(snapshot.VouchedBy[result.voucher], counterpartyDid)
+		case slices.Contains(cpSide, result.voucher) && slices.Contains(selfSide, result.subject):
+			snapshot.VouchedBy[counterpartyDid] = append(snapshot.VouchedBy[counterpartyDid], selfDid)
 		}
 	}
-	snapshot.OperatorOf = operators
-	trusted := []string{selfDid}
-	if operator := operators[selfDid]; operator != "" && operator != selfDid {
-		trusted = append(trusted, operator)
-	}
-	snapshot.TrustedOperators = trusted
-	vouchers := distinct(append(append([]string(nil), trusted...), counterpartyDid, operators[counterpartyDid]))
-	subjects := distinct([]string{selfDid, operators[selfDid], counterpartyDid, operators[counterpartyDid]})
-	pairs := 0
-	vouchResults := make(chan vouchResult, len(vouchers)*len(subjects))
-	for _, voucher := range vouchers {
-		snapshot.VouchedBy[voucher] = []string{}
-		for _, subject := range subjects {
-			if subject == voucher {
-				continue
-			}
-			pairs++
-			wg.Go(func() {
-				vouched, err := host.Vouches(ctx, voucher, subject)
-				vouchResults <- vouchResult{voucher: voucher, subject: subject, vouched: vouched, err: err}
-			})
-		}
-	}
-	for range pairs {
-		result := <-vouchResults
-		if result.err != nil {
-			return snapshot, result.err
-		}
-		if result.vouched {
-			snapshot.VouchedBy[result.voucher] = append(snapshot.VouchedBy[result.voucher], result.subject)
-		}
-	}
-	for _, list := range snapshot.VouchedBy {
+	for voucher, list := range snapshot.VouchedBy {
 		slices.Sort(list)
+		snapshot.VouchedBy[voucher] = slices.Compact(list)
 	}
 	return snapshot, nil
 }
 
-func distinct(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value == "" || seen[value] {
-			continue
+func operatorsOf(selfDid, counterpartyDid string, self, cp identlink.Result) map[string]string {
+	out := map[string]string{selfDid: selfDid}
+	if len(self.Roots) > 0 {
+		out[selfDid] = self.Roots[0]
+	}
+	if counterpartyDid == "" || counterpartyDid == selfDid {
+		return out
+	}
+	for _, root := range self.Roots {
+		if slices.Contains(cp.Roots, root) {
+			out[selfDid], out[counterpartyDid] = root, root
+			return out
 		}
-		seen[value] = true
-		out = append(out, value)
+	}
+	for _, root := range cp.Roots {
+		if root != counterpartyDid {
+			out[counterpartyDid] = root
+			break
+		}
+	}
+	return out
+}
+
+type vouchPair struct {
+	voucher, subject string
+}
+
+func vouchPairs(selfSide, cpSide []string) []vouchPair {
+	var out []vouchPair
+	add := func(voucher, subject string) {
+		p := vouchPair{voucher: voucher, subject: subject}
+		if voucher != subject && len(out) < identlink.DefaultBudget && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	for sum := 0; sum <= len(selfSide)+len(cpSide)-2; sum++ {
+		for i := max(0, sum-len(cpSide)+1); i <= min(sum, len(selfSide)-1); i++ {
+			add(selfSide[i], cpSide[sum-i])
+			add(cpSide[sum-i], selfSide[i])
+		}
 	}
 	return out
 }

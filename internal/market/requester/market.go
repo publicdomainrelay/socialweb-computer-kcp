@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -230,6 +231,8 @@ type HTTPMarket struct {
 	BidderDIDs []string
 
 	OperatorDID string
+
+	Trust *trust.Resolver
 
 	DenyBidderDIDs []string
 

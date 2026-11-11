@@ -18,7 +18,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -315,7 +314,7 @@ func (r *contractRunner) agentLease(ctx context.Context, contract v1alpha1.Compu
 	written, err := q.repo.PutRecord(ctx, q.repoDID, market.AssociationNSID, rkey, map[string]any{
 		"$type":     market.AssociationNSID,
 		"subject":   q.repoDID,
-		"service":   trust.RequesterAssociate,
+		"service":   market.RequesterAssociate,
 		"contract":  map[string]any{"uri": accept.URI, "cid": accept.CID},
 		"expiresAt": market.FormatTime(q.now().Add(ContractAssociationLifetime)),
 		"createdAt": market.FormatTime(q.now()),

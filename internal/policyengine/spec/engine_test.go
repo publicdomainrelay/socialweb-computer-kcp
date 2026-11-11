@@ -301,7 +301,7 @@ func TestNoTrustSnapshotDenies(t *testing.T) {
 					t.Parallel()
 					h := policytest.New(t)
 					p := policytest.PartiesFor(string(perspective))
-					h.World.Associate(p.CP, p.Self, p.CPSvc)
+					h.World.Associate(p.CP, p.Self)
 					h.World.Vouch(p.Self, p.CP)
 					h.World.Vouch(p.CP, p.Self)
 					h.SetHost(nil)

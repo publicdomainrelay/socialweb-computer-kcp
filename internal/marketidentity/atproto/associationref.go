@@ -12,6 +12,7 @@ import (
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	recordclient "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
@@ -31,7 +32,7 @@ const (
 )
 
 type refKey struct {
-	uri, cid, subject, service string
+	uri, cid, subject string
 }
 
 type refVerdict struct {
@@ -61,21 +62,6 @@ func refCondition(status *v1alpha1.MarketIdentityStatus, generation int64) bool 
 
 var ErrAssociationRefStale = errors.New("marketidentity: the verified association record could not be read again")
 
-func AssociationRole(id *v1alpha1.MarketIdentity) string {
-	for _, owner := range id.OwnerReferences {
-		if owner.Controller == nil || !*owner.Controller {
-			continue
-		}
-		switch owner.Kind {
-		case "MarketRequester", "Gateway", "SshGateway":
-			return trust.RequesterAssociate
-		case "MarketBidder":
-			return trust.BidderAssociate
-		}
-	}
-	return ""
-}
-
 func (a *Accounts) dropAssociationRef(id *v1alpha1.MarketIdentity, status *v1alpha1.MarketIdentityStatus) {
 	previous := status.AssociationRef
 	if previous == nil {
@@ -100,13 +86,12 @@ func (a *Accounts) ApplyAssociationRef(ctx context.Context, id *v1alpha1.MarketI
 	}
 	want := commonv1.StrongRef{URI: strings.TrimSpace(ref.URI), CID: strings.TrimSpace(ref.CID)}
 	subject := strings.TrimSpace(status.Did)
-	service := AssociationRole(id)
-	key := refKey{uri: want.URI, cid: want.CID, subject: subject, service: service}
+	key := refKey{uri: want.URI, cid: want.CID, subject: subject}
 	verdict := refVerdict{reason: ReasonAssociationRefPending, message: "waiting for the identity DID before the association record " + want.URI + " is read"}
 	var err error
 	if subject != "" {
 		verdict, err = a.refs.GetOrLoad(ctx, key, func(ctx context.Context) (refVerdict, time.Duration, error) {
-			v, err := a.verifyAssociationRef(ctx, want, subject, service)
+			v, err := a.verifyAssociationRef(ctx, want, subject)
 			ttl := associationRefTTL
 			if !v.expiresAt.IsZero() {
 				ttl = min(ttl, max(time.Until(v.expiresAt), time.Second))
@@ -155,7 +140,7 @@ func (a *Accounts) ApplyAssociationRef(ctx context.Context, id *v1alpha1.MarketI
 	if verdict.contract != nil {
 		status.AssociationScope = &v1alpha1.AssociationScope{Contract: *verdict.contract, ExpiresAt: verdict.expiresAt.UTC().Format(time.RFC3339Nano)}
 	}
-	message := "the association record " + want.URI + " of " + verdict.authority + " names " + subject + " for " + service
+	message := "the grant " + want.URI + " of " + verdict.authority + " names " + subject + " and its identlink walk reaches " + verdict.authority
 	if !verdict.expiresAt.IsZero() {
 		message += " until " + verdict.expiresAt.UTC().Format(time.RFC3339)
 	}
@@ -176,21 +161,18 @@ func (a *Accounts) settleRef(id *v1alpha1.MarketIdentity, status *v1alpha1.Marke
 	}
 }
 
-func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.StrongRef, subject, service string) (refVerdict, error) {
+func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.StrongRef, subject string) (refVerdict, error) {
 	invalid := func(format string, args ...any) (refVerdict, error) {
 		return refVerdict{reason: ReasonAssociationRefInvalid, message: fmt.Sprintf(format, args...)}, nil
 	}
 	authority, collection, rkey := recordclient.SplitURI(ref.URI)
-	kind := trust.KindOfCollection(collection)
 	switch {
 	case !strings.HasPrefix(ref.URI, "at://") || !strings.HasPrefix(authority, "did:") || rkey == "" || ref.CID == "":
 		return invalid("the association ref %s#%s is not an at://<did>/<collection>/<rkey> uri with a cid", ref.URI, ref.CID)
-	case kind == "":
-		return invalid("the association ref collection %s is not a claim, a market.association or a post", collection)
+	case collection != identlink.GrantNSID || rkey != subject:
+		return invalid("the association ref %s is not the %s grant at the identity's DID", ref.URI, identlink.GrantNSID)
 	case authority == subject:
 		return invalid("the association record %s is in the identity's own repo", ref.URI)
-	case service != trust.RequesterAssociate && service != trust.BidderAssociate:
-		return invalid("the identity is owned by no requester or bidder root, so it has no association role")
 	}
 	record, err := a.records.GetRecordAt(ctx, recordclient.StrongRef{URI: ref.URI, CID: ref.CID})
 	if errors.Is(err, recordclient.ErrRecordNotFound) {
@@ -199,39 +181,28 @@ func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.Strong
 	if err != nil {
 		return refVerdict{}, err
 	}
-	switch {
-	case record.URI != ref.URI:
-		return invalid("the PDS answered %s for the association record %s", record.URI, ref.URI)
-	case record.CID != ref.CID:
+	if record.CID != ref.CID {
 		return invalid("the association record %s has cid %s, not the pinned %s", ref.URI, record.CID, ref.CID)
-	case !trust.Matches(kind, record.Value, authority, subject, service, trust.DefaultPostTemplate):
-		return invalid("the association record %s does not name %s for %s", ref.URI, subject, service)
+	}
+	walked, err := a.trust.Walk(ctx, subject, trust.Association{})
+	if err != nil {
+		return refVerdict{}, err
+	}
+	i := slices.IndexFunc(walked.Ancestors, func(an identlink.Ancestor) bool { return an.DID == authority })
+	if i < 0 {
+		if len(walked.Errors) > 0 {
+			return refVerdict{}, errors.New(strings.Join(walked.Errors, "; "))
+		}
+		return invalid("the identlink walk of %s does not reach %s", subject, authority)
 	}
 	verdict := refVerdict{reason: ReasonAssociationRefVerified, authority: authority}
-	rawContract, scoped := record.Value["contract"]
-	if scoped {
-		fields, _ := rawContract.(map[string]any)
+	if at := walked.Ancestors[i].ExpiresAt; at != nil {
+		verdict.expiresAt = *at
+	}
+	if fields, ok := record.Value["contract"].(map[string]any); ok {
 		uri, _ := fields["uri"].(string)
 		cid, _ := fields["cid"].(string)
-		if !strings.HasPrefix(uri, "at://") || cid == "" {
-			return invalid("the contract of the association record %s is not a strongRef", ref.URI)
-		}
 		verdict.contract = &commonv1.StrongRef{URI: uri, CID: cid}
-	}
-	rawExpires, expiring := record.Value["expiresAt"]
-	expiresAt, _ := rawExpires.(string)
-	if scoped && expiresAt == "" {
-		return invalid("the contract-scoped association record %s has no expiresAt", ref.URI)
-	}
-	if expiring {
-		deadline, err := time.Parse(time.RFC3339Nano, expiresAt)
-		if err != nil {
-			return invalid("the association record %s expiresAt %q is not a datetime", ref.URI, expiresAt)
-		}
-		if !time.Now().Before(deadline) {
-			return invalid("the association record %s expired at %s", ref.URI, expiresAt)
-		}
-		verdict.expiresAt = deadline
 	}
 	return verdict, nil
 }

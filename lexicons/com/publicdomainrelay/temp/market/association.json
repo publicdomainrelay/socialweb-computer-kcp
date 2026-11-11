@@ -1,21 +1,18 @@
 {
   "lexicon": 1,
   "id": "com.publicdomainrelay.temp.market.association",
-  "description": "The repository that holds this record associates the subject DID as its requester or bidder. Record key: <service>-<subject with : replaced by -> for a standing association; <service>-<first 32 hex of sha256(subject)>-<rkey of the contract accept> for a contract-scoped one.",
+  "description": "The grant: the repository that holds this record (the principal) trusts the agent DID as its agent, beside the link.ident.endorsement at the same record key. The pair without the grant is attribution only. Record key: the agent DID.",
   "defs": {
     "main": {
       "type": "record",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["subject", "service", "createdAt"],
+        "required": ["agent", "createdAt"],
         "properties": {
-          "subject": { "type": "string", "format": "did", "description": "The associated requester or bidder repository DID." },
-          "service": { "type": "string", "knownValues": ["requester_associate", "bidder_associate"], "description": "The role the subject is associated for." },
-          "contract": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.accept of the contract this association is scoped to; requires expiresAt." },
-          "expiresAt": { "type": "string", "format": "datetime", "description": "The association is invalid after this time." },
-          "parent": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The association that associates this record's repository, for chains." },
-          "note": { "type": "string", "maxLength": 300 },
+          "agent": { "type": "string", "format": "did", "description": "The agent DID; equal to the record key." },
+          "expiresAt": { "type": "string", "format": "datetime", "description": "The grant is dead after this time; required with contract." },
+          "contract": { "type": "ref", "ref": "com.atproto.repo.strongRef", "description": "The market.accept of the contract this grant is scoped to; dead once the contract is not Held." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

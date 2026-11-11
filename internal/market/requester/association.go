@@ -20,7 +20,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -95,7 +94,7 @@ func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
 }
 
 func ContractAssociationRKey(subject string, accept commonv1.StrongRef) string {
-	return market.ContractScopedRKey(trust.RequesterAssociate, subject, accept.URI)
+	return market.ContractScopedRKey(market.RequesterAssociate, subject, accept.URI)
 }
 
 func (r *contractRunner) associationWritten(subject string) bool {
@@ -290,7 +289,7 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 	record := map[string]any{
 		"$type":     market.AssociationNSID,
 		"subject":   subject,
-		"service":   trust.RequesterAssociate,
+		"service":   market.RequesterAssociate,
 		"contract":  map[string]any{"uri": accept.URI, "cid": accept.CID},
 		"expiresAt": market.FormatTime(expiresAt),
 		"createdAt": market.FormatTime(acceptedAt),
@@ -400,7 +399,7 @@ func (r *contractRunner) associationRequest(ctx context.Context, contract v1alph
 	if err := json.Unmarshal([]byte(entry.Value), &request); err != nil {
 		return associationRequestEntry{}, false, nil
 	}
-	ok := request.Authority == r.q.repoDID && request.Service == trust.RequesterAssociate && request.Contract == accept.URI &&
+	ok := request.Authority == r.q.repoDID && request.Service == market.RequesterAssociate && request.Contract == accept.URI &&
 		len(request.Nonce) == 2*associationNonceBytes
 	return request, ok, nil
 }
@@ -416,7 +415,7 @@ func (r *contractRunner) ensureAssociationRequest(ctx context.Context, contract 
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(associationRequestEntry{Authority: r.q.repoDID, Service: trust.RequesterAssociate, Contract: accept.URI,
+	raw, err := json.Marshal(associationRequestEntry{Authority: r.q.repoDID, Service: market.RequesterAssociate, Contract: accept.URI,
 		Nonce: hex.EncodeToString(nonce)})
 	if err != nil {
 		return err
@@ -728,7 +727,7 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 		refuse("the contract's bundle holds no association request for " + accept.URI)
 		return
 	}
-	rkey := market.ContractScopedRKey(trust.RequesterAssociate, q.repoDID, accept.URI)
+	rkey := market.ContractScopedRKey(market.RequesterAssociate, q.repoDID, accept.URI)
 	got, err := q.repo.GetRecord(ctx, did, market.AssociationRequestNSID, rkey)
 	if err != nil {
 		fail("reading "+did+"'s "+market.AssociationRequestNSID+"/"+rkey, err)
@@ -742,7 +741,7 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 	case market.ATURIAuthority(got.URI) != did:
 		refuse("the association request record is not in " + did + "'s repo")
 		return
-	case asked.Authority != q.repoDID || asked.Service != trust.RequesterAssociate || asked.Contract != accept.URI:
+	case asked.Principal != q.repoDID || asked.Contract != accept.URI:
 		refuse("the association request record names another authority, service or contract")
 		return
 	case subtle.ConstantTimeCompare([]byte(asked.Nonce), []byte(request.Nonce)) != 1:

@@ -17,11 +17,11 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const OperatorKeysPath = "identity/operator/keys"
@@ -183,7 +183,7 @@ func (c *Composer) WriteClaim(ctx context.Context, r Root, o Operator, id *v1alp
 	if err != nil {
 		return "", err
 	}
-	rkey := trust.ClaimRKey(service, didText)
+	rkey := market.ClaimRKey(service, didText)
 	if held, err := repo.GetRecord(ctx, operator, BadgeBlueKeysNSID, rkey); err == nil {
 		var value map[string]any
 		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator, didText, service) {

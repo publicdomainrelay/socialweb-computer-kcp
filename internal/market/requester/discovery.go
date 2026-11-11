@@ -9,6 +9,9 @@ import (
 	"sync"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
+	peatproto "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -19,10 +22,6 @@ const (
 	sourceVouched = "vouched"
 
 	sourceOperated = "operated"
-
-	bidderAssociateService = "bidder_associate"
-
-	requesterAssociateService = "requester_associate"
 
 	trustListLimit = 100
 
@@ -45,11 +44,6 @@ func didValue(value any) string {
 	return ""
 }
 
-func associationRecord(value map[string]any) (service, challenge, keyID string) {
-	service, _ = value["service"].(string)
-	return strings.TrimSpace(service), didValue(value["challenge"]), didValue(value["keyId"])
-}
-
 func (m *HTTPMarket) listRepo(ctx context.Context, did, collection string) []market.ListedRecord {
 	records, err := listAll(ctx, m.Reader, did, collection, trustListLimit)
 	if err != nil && !errors.Is(err, market.ErrNotFound) && ctx.Err() == nil {
@@ -62,21 +56,33 @@ func (m *HTTPMarket) selfDIDs() []string {
 	return BidderDIDList([]string{m.RepoDID})
 }
 
-func (m *HTTPMarket) operatorsOf(ctx context.Context, self string) []string {
-	var out []string
-	for _, record := range m.listRepo(ctx, self, market.BadgeBlueKeysNSID) {
-		service, challenge, keyID := associationRecord(record.Value)
-		if service != bidderAssociateService && service != requesterAssociateService {
-			continue
-		}
-		switch {
-		case keyID == self && challenge != "" && challenge != self:
-			out = append(out, challenge)
-		case challenge == self && keyID != "" && keyID != self:
-			out = append(out, keyID)
-		}
+func (q *Requester) trustResolver() *trust.Resolver {
+	client := peatproto.NewClient()
+	client.HTTP = q.marketHTTP()
+	if network := q.cfg.Spec.Network; network != nil && strings.TrimSpace(network.PLCDirectoryURL) != "" {
+		client.PLCURL = strings.TrimSpace(network.PLCDirectoryURL)
 	}
-	return out
+	return trust.NewResolver(trust.ResolverOptions{Client: client, Source: identlink.NewRemote(q.deps.Directory, client.HTTP)})
+}
+
+func (m *HTTPMarket) walk(ctx context.Context, did string) (identlink.Result, bool) {
+	if m.Trust == nil {
+		return identlink.Result{}, false
+	}
+	walked, err := m.Trust.Walk(ctx, did, trust.Association{})
+	if err != nil {
+		m.log().Debug("requester_discovery_walk_failed", "did", did, "err", err)
+		return identlink.Result{}, false
+	}
+	return walked, true
+}
+
+func (m *HTTPMarket) operatorsOf(ctx context.Context, self string) []string {
+	walked, ok := m.walk(ctx, self)
+	if !ok {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(walked.Roots), func(root string) bool { return root == self })
 }
 
 func (m *HTTPMarket) vouchedBy(ctx context.Context, did string) []string {
@@ -92,28 +98,17 @@ func (m *HTTPMarket) vouchedBy(ctx context.Context, did string) []string {
 	return out
 }
 
-func associates(value map[string]any, operator string) string {
-	service, challenge, keyID := associationRecord(value)
-	if service != bidderAssociateService || challenge != operator || keyID == operator {
-		return ""
-	}
-	return keyID
-}
-
 func (m *HTTPMarket) operatedBy(ctx context.Context, operator string) []string {
 	var candidates []string
-	for _, record := range m.listRepo(ctx, operator, market.BadgeBlueKeysNSID) {
-		if did := associates(record.Value, operator); did != "" {
+	for _, record := range m.listRepo(ctx, operator, identlink.EndorsementNSID) {
+		if did := didValue(record.Value["agent"]); did != "" && did != operator && strings.HasSuffix(record.URI, "/"+did) {
 			candidates = append(candidates, did)
 		}
 	}
 	var out []string
 	for _, did := range BidderDIDList(candidates) {
-		mirrored := slices.ContainsFunc(m.listRepo(ctx, did, market.BadgeBlueKeysNSID), func(record market.ListedRecord) bool {
-			return associates(record.Value, operator) == did
-		})
-		if !mirrored {
-			m.log().Info("requester_operated_unmirrored", "operator", operator, "bidder", did)
+		if walked, ok := m.walk(ctx, did); !ok || !walked.Has(operator) {
+			m.log().Info("requester_operated_unconfirmed", "operator", operator, "bidder", did)
 			continue
 		}
 		out = append(out, did)

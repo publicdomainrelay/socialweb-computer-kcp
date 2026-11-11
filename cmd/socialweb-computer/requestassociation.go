@@ -23,7 +23,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
 )
 
@@ -119,7 +118,7 @@ func readAssociationRequest(path string) (*v1alpha1.AssociationRequest, error) {
 	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
 		return nil, fmt.Errorf("%s is not the requester's association request: %w", path, err)
 	}
-	if entry.Service != trust.RequesterAssociate || entry.Authority == "" || entry.Contract == "" || entry.Nonce == "" {
+	if entry.Service != market.RequesterAssociate || entry.Authority == "" || entry.Contract == "" || entry.Nonce == "" {
 		return nil, fmt.Errorf("%s names no requester_associate authority, contract and nonce", path)
 	}
 	return &v1alpha1.AssociationRequest{Authority: entry.Authority, Contract: entry.Contract, Nonce: entry.Nonce}, nil
@@ -167,7 +166,7 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 
 func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, authority, contract string) {
 	defer watcher.Close()
-	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + market.ContractScopedRKey(trust.RequesterAssociate, authority, contract)
+	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + market.ContractScopedRKey(market.RequesterAssociate, authority, contract)
 	if _, err := r.kcp.AwaitRecord(ctx, compose.AssociationRequestRecordName, r.networkTimeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
 		if rec.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && rec.Status.ObservedGeneration == rec.Generation {
 			return false, fmt.Errorf("the association request record failed: %s", rec.Status.Message)

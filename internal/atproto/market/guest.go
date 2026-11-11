@@ -14,6 +14,16 @@ import (
 const ContractAssociationLifetime = 24 * time.Hour
 
 const (
+	RequesterAssociate = "requester_associate"
+	BidderAssociate    = "bidder_associate"
+	MirrorRKey         = "association"
+)
+
+func ClaimRKey(service, subject string) string {
+	return service + "-" + strings.ReplaceAll(subject, ":", "-")
+}
+
+const (
 	OnNetworkKindIroh   = "iroh"
 	OnNetworkKindHTTPS  = "https"
 	OnNetworkKindWebRTC = "webrtc"

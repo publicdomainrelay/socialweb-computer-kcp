@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
@@ -41,21 +42,24 @@ func (w *World) Unvouch(voucher, subject string) {
 	w.Delete(URI(voucher, trust.VouchNSID, subject))
 }
 
-func claimValue(operator, subject, service string) map[string]any {
-	return map[string]any{"$type": trust.BadgeBlueKeysNSID, "service": service, "keyId": subject, "challenge": operator, "createdAt": createdAt}
+func (w *World) DeclareAgentOf(agent, principal string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.docs[agent] = append(w.docs[agent], identlink.AgentOfPrefix+principal)
 }
 
-func (w *World) Mirror(subject, operator, service string) Ref {
-	return w.put(subject, trust.BadgeBlueKeysNSID, trust.MirrorRKey, claimValue(operator, subject, service))
+func (w *World) Endorse(principal, agent string) Ref {
+	return w.put(principal, identlink.EndorsementNSID, agent, map[string]any{"$type": identlink.EndorsementNSID, "agent": agent})
 }
 
-func (w *World) Claim(operator, subject, service string) Ref {
-	return w.put(operator, trust.BadgeBlueKeysNSID, trust.ClaimRKey(service, subject), claimValue(operator, subject, service))
+func (w *World) Grant(principal, agent string) Ref {
+	return w.put(principal, identlink.GrantNSID, agent, map[string]any{"$type": identlink.GrantNSID, "agent": agent, "createdAt": createdAt})
 }
 
-func (w *World) Associate(subject, operator, service string) {
-	w.Mirror(subject, operator, service)
-	w.Claim(operator, subject, service)
+func (w *World) Associate(agent, principal string) {
+	w.DeclareAgentOf(agent, principal)
+	w.Endorse(principal, agent)
+	w.Grant(principal, agent)
 }
 
 type Contract struct {
@@ -73,12 +77,12 @@ func (w *World) HeldContract(operator, bidder string) Contract {
 	return Contract{Accept: accept, Receipt: receipt, Bidder: bidder}
 }
 
-func (w *World) ContractAssociation(subject, operator, service string, contract Contract, expiresAt time.Time) Ref {
-	w.Mirror(subject, operator, service)
-	return w.put(operator, trust.AssociationNSID, trust.ClaimRKey(service, subject), map[string]any{
-		"$type":     trust.AssociationNSID,
-		"subject":   subject,
-		"service":   service,
+func (w *World) ContractAssociation(agent, principal string, contract Contract, expiresAt time.Time) Ref {
+	w.DeclareAgentOf(agent, principal)
+	w.Endorse(principal, agent)
+	return w.put(principal, identlink.GrantNSID, agent, map[string]any{
+		"$type":     identlink.GrantNSID,
+		"agent":     agent,
 		"contract":  map[string]any{"uri": contract.Accept.URI, "cid": contract.Accept.CID},
 		"expiresAt": expiresAt.UTC().Format(time.RFC3339Nano),
 		"createdAt": createdAt,

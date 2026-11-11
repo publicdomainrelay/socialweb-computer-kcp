@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "link.ident.endorsement",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Published by a principal to confirm an agent that claims to act on its behalf. The record key is the agent's DID.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["agent"],
+        "properties": {
+          "agent": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the endorsed agent. Must match the record key."
+          }
+        }
+      }
+    }
+  }
+}

@@ -2,22 +2,18 @@ package policytest
 
 import (
 	"time"
-
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 type Parties struct {
-	Self, SelfOp, SelfSvc string
-	CP, CPOp, CPSvc       string
+	Self, SelfOp string
+	CP, CPOp     string
 }
 
 func PartiesFor(perspective string) Parties {
 	if perspective == "requester" {
-		return Parties{Self: Requester, SelfOp: ReqOperator, SelfSvc: trust.RequesterAssociate,
-			CP: Bidder, CPOp: BidderOperator, CPSvc: trust.BidderAssociate}
+		return Parties{Self: Requester, SelfOp: ReqOperator, CP: Bidder, CPOp: BidderOperator}
 	}
-	return Parties{Self: Bidder, SelfOp: BidderOperator, SelfSvc: trust.BidderAssociate,
-		CP: Requester, CPOp: ReqOperator, CPSvc: trust.RequesterAssociate}
+	return Parties{Self: Bidder, SelfOp: BidderOperator, CP: Requester, CPOp: ReqOperator}
 }
 
 type TrustCase struct {
@@ -34,40 +30,41 @@ var TrustCases = []TrustCase{
 		w.Vouch(p.Self, p.CP)
 	}},
 	{Name: "vouched-by-verified-self-operator", Vouch: true, Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
+		w.Associate(p.Self, p.SelfOp)
 		w.Vouch(p.SelfOp, p.CP)
 	}},
-	{Name: "vouched-by-self-claimed-self-operator", Build: func(w *World, p Parties) {
-		w.Mirror(p.Self, p.SelfOp, p.SelfSvc)
+	{Name: "vouched-by-self-declared-self-operator", Build: func(w *World, p Parties) {
+		w.DeclareAgentOf(p.Self, p.SelfOp)
 		w.Vouch(p.SelfOp, p.CP)
 	}},
 	{Name: "verified-counterparty-operator-vouched-by-self", Vouch: true, Build: func(w *World, p Parties) {
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.CP, p.CPOp)
 		w.Vouch(p.Self, p.CPOp)
 	}},
 	{Name: "verified-counterparty-operator-vouched-by-self-operator", Vouch: true, Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.Self, p.SelfOp)
+		w.Associate(p.CP, p.CPOp)
 		w.Vouch(p.SelfOp, p.CPOp)
 	}},
-	{Name: "forged-counterparty-operator-claim", Build: func(w *World, p Parties) {
+	{Name: "forged-counterparty-operator", Build: func(w *World, p Parties) {
 		w.Vouch(p.Self, p.CPOp)
-		w.Mirror(p.CP, p.CPOp, p.CPSvc)
+		w.DeclareAgentOf(p.CP, p.CPOp)
 	}},
-	{Name: "claim-for-the-other-role", Build: func(w *World, p Parties) {
+	{Name: "pair-without-grant", Build: func(w *World, p Parties) {
 		w.Vouch(p.Self, p.CPOp)
-		w.Associate(p.CP, p.CPOp, p.SelfSvc)
+		w.DeclareAgentOf(p.CP, p.CPOp)
+		w.Endorse(p.CPOp, p.CP)
 	}},
 	{Name: "vouched-directly-with-verified-operator", Vouch: true, Build: func(w *World, p Parties) {
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.CP, p.CPOp)
 		w.Vouch(p.Self, p.CP)
 	}},
 	{Name: "counterparty-operator-vouches-self-only", Build: func(w *World, p Parties) {
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.CP, p.CPOp)
 		w.Vouch(p.CPOp, p.Self)
 	}},
 	{Name: "mutual-operator-vouches", Vouch: true, Mutuals: true, Build: func(w *World, p Parties) {
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.CP, p.CPOp)
 		w.Vouch(p.Self, p.CPOp)
 		w.Vouch(p.CPOp, p.Self)
 	}},
@@ -79,40 +76,40 @@ var TrustCases = []TrustCase{
 		w.Vouch(p.CP, p.Self)
 	}},
 	{Name: "same-verified-operator", OnlyMe: true, Vouch: true, Mutuals: true, Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
-		w.Associate(p.CP, p.SelfOp, p.CPSvc)
+		w.Associate(p.Self, p.SelfOp)
+		w.Associate(p.CP, p.SelfOp)
 	}},
 	{Name: "counterparty-operated-by-self", OnlyMe: true, Vouch: true, Mutuals: true, Build: func(w *World, p Parties) {
-		w.Associate(p.CP, p.Self, p.CPSvc)
+		w.Associate(p.CP, p.Self)
 	}},
 	{Name: "forged-same-operator", Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
-		w.Mirror(p.CP, p.SelfOp, p.CPSvc)
+		w.Associate(p.Self, p.SelfOp)
+		w.DeclareAgentOf(p.CP, p.SelfOp)
 	}},
 	{Name: "different-verified-operators", Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
-		w.Associate(p.CP, p.CPOp, p.CPSvc)
+		w.Associate(p.Self, p.SelfOp)
+		w.Associate(p.CP, p.CPOp)
 	}},
 	{Name: "contract-scoped-association-held", OnlyMe: true, Vouch: true, Mutuals: true, Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
+		w.Associate(p.Self, p.SelfOp)
 		contract := w.HeldContract(p.SelfOp, OtherBidder)
-		w.ContractAssociation(p.CP, p.SelfOp, p.CPSvc, contract, time.Now().Add(time.Hour))
+		w.ContractAssociation(p.CP, p.SelfOp, contract, time.Now().Add(time.Hour))
 	}},
 	{Name: "contract-scoped-association-expired", Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
+		w.Associate(p.Self, p.SelfOp)
 		contract := w.HeldContract(p.SelfOp, OtherBidder)
-		w.ContractAssociation(p.CP, p.SelfOp, p.CPSvc, contract, time.Now().Add(-time.Minute))
+		w.ContractAssociation(p.CP, p.SelfOp, contract, time.Now().Add(-time.Minute))
 	}},
 	{Name: "contract-scoped-association-released", Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
+		w.Associate(p.Self, p.SelfOp)
 		contract := w.HeldContract(p.SelfOp, OtherBidder)
-		w.ContractAssociation(p.CP, p.SelfOp, p.CPSvc, contract, time.Now().Add(time.Hour))
+		w.ContractAssociation(p.CP, p.SelfOp, contract, time.Now().Add(time.Hour))
 		w.Release(p.SelfOp, contract)
 	}},
 	{Name: "contract-scoped-association-terminated", Build: func(w *World, p Parties) {
-		w.Associate(p.Self, p.SelfOp, p.SelfSvc)
+		w.Associate(p.Self, p.SelfOp)
 		contract := w.HeldContract(p.SelfOp, OtherBidder)
-		w.ContractAssociation(p.CP, p.SelfOp, p.CPSvc, contract, time.Now().Add(time.Hour))
+		w.ContractAssociation(p.CP, p.SelfOp, contract, time.Now().Add(time.Hour))
 		w.Terminate(contract)
 	}},
 }

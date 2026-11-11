@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -284,11 +283,7 @@ func (r *RunReconciler) requestContext(ctx context.Context, run *policyv1alpha1.
 		cache = models.Cache{}
 	}
 	if r.Host != nil && selfDid != "" && counterpartyDid != "" {
-		selfService, counterpartyService := trust.BidderAssociate, trust.RequesterAssociate
-		if stringInput(inputs, "perspective") == perspectiveRequester {
-			selfService, counterpartyService = trust.RequesterAssociate, trust.BidderAssociate
-		}
-		snapshot, err := trust.BuildSnapshotWith(ctx, r.Host, selfDid, counterpartyDid, selfService, counterpartyService, associationOf(run))
+		snapshot, err := trust.BuildSnapshot(ctx, r.Host, selfDid, counterpartyDid, associationOf(run))
 		if err != nil {
 			return nil, err
 		}
@@ -305,8 +300,7 @@ func associationOf(run *policyv1alpha1.PolicyWorkflowRun) trust.Association {
 		return trust.Association{}
 	}
 	assoc := run.Spec.Association
-	return trust.Association{Kinds: slices.Clone(assoc.Kinds), PostTemplate: assoc.PostTemplate, MaxDepth: int(assoc.MaxDepth),
-		RequireContract: assoc.RequireContract}
+	return trust.Association{MaxDepth: int(assoc.MaxDepth), RequireContract: assoc.RequireContract}
 }
 
 func stringInput(inputs map[string]any, key string) string {

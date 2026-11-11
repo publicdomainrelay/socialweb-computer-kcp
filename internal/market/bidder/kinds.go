@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
@@ -91,7 +93,7 @@ func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string
 }
 
 type Operators interface {
-	ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error)
+	Walk(ctx context.Context, did string, assoc trust.Association) (identlink.Result, error)
 }
 
 func (b *Bidder) netRefused(ctx context.Context, rfp *market.RFP, requester string) (string, error) {
@@ -115,22 +117,20 @@ func (b *Bidder) ownerOnly(ctx context.Context, requester string) (string, error
 	if b.operators == nil {
 		return "the bidder cannot check its owner, so it runs no networked sandbox", nil
 	}
-	owner, found, err := b.operators.ResolveOperatorDidFor(ctx, b.cfg.DID, trust.BidderAssociate)
+	self, err := b.operators.Walk(ctx, b.cfg.DID, trust.Association{})
 	if err != nil {
 		return "", err
 	}
-	if !found {
-		owner = b.cfg.DID
-	}
-	if requester == owner {
+	if slices.Contains(self.Roots, requester) {
 		return "", nil
 	}
-	operator, found, err := b.operators.ResolveOperatorDidFor(ctx, requester, trust.RequesterAssociate)
+	theirs, err := b.operators.Walk(ctx, requester, trust.Association{})
 	if err != nil {
 		return "", err
 	}
-	if found && operator == owner {
+	if slices.ContainsFunc(self.Roots, func(root string) bool { return slices.Contains(theirs.Roots, root) }) {
 		return "", nil
 	}
+	owner := strings.Join(self.Roots, ", ")
 	return "a networked sandbox runs only for the bidder's owner " + owner, nil
 }

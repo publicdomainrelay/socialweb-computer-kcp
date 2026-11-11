@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/multiformats/go-multihash"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 )
 
@@ -32,12 +35,13 @@ type stored struct {
 type World struct {
 	mu       sync.Mutex
 	records  map[string]stored
+	docs     map[string][]string
 	down     bool
 	failRepo map[string]bool
 }
 
 func NewWorld() *World {
-	return &World{records: map[string]stored{}, failRepo: map[string]bool{}}
+	return &World{records: map[string]stored{}, docs: map[string][]string{}, failRepo: map[string]bool{}}
 }
 
 func URI(repo, collection, rkey string) string {
@@ -85,6 +89,35 @@ func (w *World) Get(uri string) (string, map[string]any, bool) {
 	record, ok := w.records[uri]
 	return record.cid, record.value, ok
 }
+
+type identSource struct {
+	w *World
+}
+
+var _ identlink.Source = identSource{}
+
+func (w *World) Identlink() identlink.Source {
+	return identSource{w: w}
+}
+
+func (s identSource) ResolveDID(ctx context.Context, did string) (*identlink.Doc, error) {
+	if err := s.w.reachable(ctx, did); err != nil {
+		return nil, err
+	}
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+	return &identlink.Doc{AlsoKnownAs: slices.Clone(s.w.docs[did])}, nil
+}
+
+func (s identSource) GetRecord(ctx context.Context, repo, collection, rkey string) (map[string]any, error) {
+	record, err := s.w.GetRecord(ctx, repo, collection, rkey)
+	if errors.Is(err, market.ErrNotFound) {
+		return nil, nil
+	}
+	return record.Value, err
+}
+
+func (identSource) Forget(string) {}
 
 func (w *World) Client() *atproto.Client {
 	return &atproto.Client{HTTP: &http.Client{Transport: w}, PLCURL: PLCURL}

@@ -19,6 +19,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
 	recordclient "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 const (
@@ -100,6 +101,8 @@ type Accounts struct {
 
 	records *recordclient.Client
 
+	trust *trust.Resolver
+
 	refs *ttlcache.Cache[refKey, refVerdict]
 
 	verified *ttlcache.Cache[refKey, refVerdict]
@@ -127,7 +130,7 @@ func New(cfg Config) *Accounts {
 	records.PLCURL = cmp.Or(strings.TrimSpace(cfg.PLCURL), records.PLCURL)
 	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, sessions: cfg.Sessions, oauth: cfg.OAuth,
 		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{}),
-		records: records, refs: newRefCache(), verified: newVerifiedCache()}
+		records: records, trust: trust.NewResolver(trust.ResolverOptions{Client: records}), refs: newRefCache(), verified: newVerifiedCache()}
 }
 
 func (a *Accounts) reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {

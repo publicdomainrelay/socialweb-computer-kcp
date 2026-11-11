@@ -61,7 +61,7 @@ func NewWith(t testing.TB, opts Options) *Harness {
 		t.Fatalf("policy spec tests need the policy engine's deno: %v", err)
 	}
 	world := NewWorld()
-	resolver := trust.NewResolver(trust.ResolverOptions{Client: world.Client(), TTL: opts.TrustTTL})
+	resolver := trust.NewResolver(trust.ResolverOptions{Client: world.Client(), Source: world.Identlink(), TTL: opts.TrustTTL})
 	box := &Sandbox{inner: sandboxdeno.New(path)}
 	engine := controller.NewEngine(controller.Config{Sandbox: box, Host: resolver, Limits: controller.Limits{MaxConcurrentRuns: 16}})
 	policies := registry.GhaLiteOnly(executor.NewGhaLite(executor.GhaLiteOptions{Sandbox: box}))

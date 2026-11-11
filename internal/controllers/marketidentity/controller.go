@@ -142,7 +142,7 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if err != nil {
 		return ctlruntime.Result{}, err
 	}
-	atproto.Associate(object, watch, &status)
+	c.accounts.Associate(ctx, object, watch, &status)
 	result, reconcileErr := c.accounts.Reconcile(ctx, req.Workspace, object, status)
 	refAfter, refErr := c.accounts.ApplyAssociationRef(ctx, object, &result.Status)
 	if errors.Is(refErr, atproto.ErrAssociationRefStale) && refAfter > 0 {

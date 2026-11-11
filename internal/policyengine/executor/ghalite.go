@@ -66,8 +66,7 @@ func (g *GhaLite) Execute(ctx context.Context, record PolicyRecord, eval *EvalCo
 	}
 	var snapshot *trust.Snapshot
 	if eval.Host != nil {
-		selfService, counterpartyService := snapshotServices(eval.Perspective)
-		built, snapshotErr := trust.BuildSnapshotFor(ctx, eval.Host, eval.SelfDid, eval.CounterpartyDid, selfService, counterpartyService)
+		built, snapshotErr := trust.BuildSnapshot(ctx, eval.Host, eval.SelfDid, eval.CounterpartyDid, trust.Association{})
 		if snapshotErr != nil {
 			if ctx.Err() != nil {
 				return Verdict{}, ctx.Err()
@@ -96,18 +95,9 @@ func (g *GhaLite) Scope(ctx context.Context, record PolicyRecord, input ScopeInp
 	if refusal := runStepRefusal(workflowText); refusal != "" {
 		return Deny(refusal, PolicyGhaLiteNSID), true, nil
 	}
-	var host trust.Host
-	if input.ResolveOperatorDid != nil || input.Vouches != nil {
-		host = scopeHost{
-			resolveOperatorDid:    input.ResolveOperatorDid,
-			resolveOperatorDidFor: input.ResolveOperatorDidFor,
-			vouches:               input.Vouches,
-		}
-	}
 	var snapshot *trust.Snapshot
-	if host != nil {
-		selfService, counterpartyService := snapshotServices(input.Perspective)
-		built, snapshotErr := trust.BuildSnapshotFor(ctx, host, input.SelfDid, input.CounterpartyDid, selfService, counterpartyService)
+	if input.Host != nil {
+		built, snapshotErr := trust.BuildSnapshot(ctx, input.Host, input.SelfDid, input.CounterpartyDid, trust.Association{})
 		if snapshotErr != nil {
 			if ctx.Err() != nil {
 				return Verdict{}, false, ctx.Err()
@@ -349,46 +339,6 @@ func mustJSONString(value string) json.RawMessage {
 	data, _ := json.Marshal(value)
 	return data
 }
-
-type scopeHost struct {
-	resolveOperatorDid    func(context.Context, string) (string, bool, error)
-	resolveOperatorDidFor func(context.Context, string, string) (string, bool, error)
-	vouches               func(context.Context, string, string) (bool, error)
-}
-
-func (h scopeHost) Resolve(ctx context.Context, ref atproto.StrongRef) (map[string]any, error) {
-	return nil, fmt.Errorf("record resolution is not available in scope mode")
-}
-
-func (h scopeHost) ResolveOperatorDid(ctx context.Context, did string) (string, bool, error) {
-	if h.resolveOperatorDid == nil {
-		return "", false, nil
-	}
-	return h.resolveOperatorDid(ctx, did)
-}
-
-func (h scopeHost) ResolveOperatorDidFor(ctx context.Context, did, service string) (string, bool, error) {
-	if h.resolveOperatorDidFor == nil {
-		return "", false, nil
-	}
-	return h.resolveOperatorDidFor(ctx, did, service)
-}
-
-func snapshotServices(perspective Perspective) (string, string) {
-	if perspective == PerspectiveRequester {
-		return trust.RequesterAssociate, trust.BidderAssociate
-	}
-	return trust.BidderAssociate, trust.RequesterAssociate
-}
-
-func (h scopeHost) Vouches(ctx context.Context, voucher, subject string) (bool, error) {
-	if h.vouches == nil {
-		return false, nil
-	}
-	return h.vouches(ctx, voucher, subject)
-}
-
-func (h scopeHost) Log(level, msg string, meta map[string]any) {}
 
 func statusToVerdict(result *models.Result) Verdict {
 	if result == nil {
