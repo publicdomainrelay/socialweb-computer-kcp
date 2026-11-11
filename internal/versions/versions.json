@@ -417,16 +417,16 @@
       }
     },
     "atirc": {
-      "version": "0.1.0-2de8b6c",
-      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit 2de8b6c86c32f1653e89f6d8247d63688d3df612 (2026-11-10, mesh sub --others; mesh run --local-listen; nodes carry the owner's channel and their own; the owner's node bridges browsers), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
+      "version": "0.1.0-9e83813",
+      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit 9e838139956669a60c07f608de73c3fbe4245fb7 (2026-11-10, owner graph on the ident.link pair + grant walk of atlibs-identlink aa7cacc, verified sync.getRecord reads; co-located handles under an ancestor's verified handle, ATIRC_DID, --peer <handle>@<did>), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
       "verify": "the source archive's sha256 is pinned here and its top directory must name the pinned commit; the build runs in a private mount namespace with remapped paths, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a cargosrc change re-pins it)",
       "executables": {
         "atirc": "atirc"
       },
       "cargosrc": {
-        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/2de8b6c86c32f1653e89f6d8247d63688d3df612",
-        "sha256": "4148d588f04007ecb20045834f6d4db551d70c1ec5bab211e75f83ad9319a99c",
-        "commit": "2de8b6c86c32f1653e89f6d8247d63688d3df612",
+        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/9e838139956669a60c07f608de73c3fbe4245fb7",
+        "sha256": "4a7494a05ea7fd3f3013f7d8c0b7e35e19b40df7de4383f502250768f6e76646",
+        "commit": "9e838139956669a60c07f608de73c3fbe4245fb7",
         "toolchain": "1.97.0",
         "manifest": "cli/Cargo.toml",
         "package": "atirc",
@@ -448,14 +448,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "8819a43ceee919c4e598b35d79f86e682ad293f0698a91ea83723179de1c8f95",
-          "rawBytes": 51536360,
-          "zstdBytes": 11534374
+          "treeSha256": "68ed1f3bc786a8a27cee426af09fc775cb464b5f49c6bd7bd7f7897b032d7f2b",
+          "rawBytes": 53788000,
+          "zstdBytes": 11896332
         },
         "linux/arm64": {
-          "treeSha256": "595e960096798b7213a1ea53613b386dc5160151a06cd3ae9f6aa9b7e7b4b453",
-          "rawBytes": 49052832,
-          "zstdBytes": 11339275
+          "treeSha256": "902a588c92e25e4d12ade976ef0a35a7323121d4675e4766a442831037c2f342",
+          "rawBytes": 51294496,
+          "zstdBytes": 11712465
         }
       }
     },
@@ -1541,14 +1541,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "cb14794f22718bc818e1688b6d19021caf55a2804430ec45f1702677eef365f1",
-          "rawBytes": 109465966,
-          "zstdBytes": 31741333
+          "treeSha256": "4a1e2e3efbc57b28753d19336dc2c63d387a2863b68b932c91fea0b25747a687",
+          "rawBytes": 111717606,
+          "zstdBytes": 32104542
         },
         "linux/arm64": {
-          "treeSha256": "cb14794f22718bc818e1688b6d19021caf55a2804430ec45f1702677eef365f1",
-          "rawBytes": 109465966,
-          "zstdBytes": 31741333
+          "treeSha256": "4a1e2e3efbc57b28753d19336dc2c63d387a2863b68b932c91fea0b25747a687",
+          "rawBytes": 111717606,
+          "zstdBytes": 32104542
         }
       }
     }
