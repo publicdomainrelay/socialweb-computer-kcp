@@ -291,7 +291,7 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 	if err != nil {
 		return "write the grant", err
 	}
-	if _, err := q.repo.PutRecord(ctx, q.repoDID, market.EndorsementNSID, rkey, market.EndorsementRecord(subject)); err != nil {
+	if err := q.writeEndorsement(ctx, subject); err != nil {
 		return "write the endorsement", err
 	}
 	r.mu.Lock()
@@ -319,6 +319,22 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 	}
 	r.log().Info("requester_association_written", "subject", subject, "uri", ref.URI, "cid", ref.CID, "expiresAt", market.FormatTime(expiresAt))
 	return "", nil
+}
+
+func (q *Requester) writeEndorsement(ctx context.Context, agent string) error {
+	held, err := q.repo.GetRecord(ctx, q.repoDID, market.EndorsementNSID, agent)
+	switch {
+	case err == nil && held.Value["agent"] == agent:
+		return nil
+	case err == nil:
+		if err := q.repo.DeleteRecord(ctx, q.repoDID, market.EndorsementNSID, agent); err != nil && !errors.Is(err, market.ErrNotFound) {
+			return err
+		}
+	case !errors.Is(err, market.ErrNotFound):
+		return err
+	}
+	_, err = q.repo.CreateRecordAt(ctx, q.repoDID, market.EndorsementNSID, agent, market.EndorsementRecord(agent))
+	return err
 }
 
 func recordContract(value map[string]any) (commonv1.StrongRef, bool) {

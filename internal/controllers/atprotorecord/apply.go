@@ -11,9 +11,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 )
 
@@ -132,7 +134,7 @@ func Apply(ctx context.Context, repo atprotorepo.Repo, object *v1alpha1.AtprotoR
 		out.Message = "the repo held cid " + held.CID + "; the declared record was written"
 	}
 	if out.Reason != "InSync" {
-		written, err := repo.PutRecord(ctx, collection, rkey, resolved)
+		written, err := write(ctx, repo, collection, rkey, resolved, absent)
 		if err != nil {
 			return failed(object, "WriteFailed", err), err
 		}
@@ -143,6 +145,19 @@ func Apply(ctx context.Context, repo atprotorepo.Repo, object *v1alpha1.AtprotoR
 		conds.New(ConditionInSync, true, out.Reason, "the repo holds the declared record", generation),
 	}
 	return out, nil
+}
+
+func write(ctx context.Context, repo atprotorepo.RecordWriter, collection, rkey string, value json.RawMessage, absent bool) (commonv1.StrongRef, error) {
+	if absent {
+		return repo.CreateRecord(ctx, collection, rkey, value)
+	}
+	if collection != identlink.EndorsementNSID {
+		return repo.PutRecord(ctx, collection, rkey, value)
+	}
+	if err := deleteRecord(ctx, repo, collection, rkey); err != nil {
+		return commonv1.StrongRef{}, err
+	}
+	return repo.CreateRecord(ctx, collection, rkey, value)
 }
 
 func deleteRecord(ctx context.Context, repo atprotorepo.RecordWriter, collection, rkey string) error {
