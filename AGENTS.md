@@ -730,7 +730,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
     `go generate ./...` must leave `api`, `internal/atproto/market` and `deploy` unchanged;
-    `go vet ./...`; `scripts/check-architecture.sh`; the policy engine specification tests
+    `go vet ./...`; `scripts/check-architecture.sh`; the identlink vectors (`go run ./hack/identlinkvectors internal/identlink/vectors.json`); the policy engine specification tests
     (`go test ./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/`; they
     find deno through `SOCIALWEB_POLICYTEST_DENO`, the embedded deno, the build-staged pinned zip in
     `~/.tmp/socialweb-computer-build/cache/deno-embed`, or PATH, and fail without one); `go build` and `go vet` of each Go asset module

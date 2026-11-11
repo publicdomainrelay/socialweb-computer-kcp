@@ -69,6 +69,9 @@ echo "check.sh: ok go vet"
 scripts/check-architecture.sh || fail "architecture rules (scripts/check-architecture.sh)"
 echo "check.sh: ok architecture rules"
 
+go run ./hack/identlinkvectors internal/identlink/vectors.json || fail "identlink vectors (go run ./hack/identlinkvectors internal/identlink/vectors.json)"
+echo "check.sh: ok identlink vectors"
+
 policyspec="./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/"
 go test -count=1 -timeout 15m $policyspec || fail "policy engine specification tests (go test $policyspec)"
 echo "check.sh: ok policy engine specification tests"
