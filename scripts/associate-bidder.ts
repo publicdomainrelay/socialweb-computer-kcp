@@ -1,33 +1,20 @@
 const args = new Map<string, string>();
-for (let i = 0; i < Deno.args.length; i += 2) args.set(Deno.args[i].replace(/^--/, ""), Deno.args[i + 1]);
+for (let i = 0; i < Deno.args.length; i++) {
+  const key = Deno.args[i].replace(/^--/, "");
+  const next = Deno.args[i + 1];
+  if (next === undefined || next.startsWith("--")) args.set(key, "true");
+  else args.set(key, Deno.args[++i]);
+}
 const credsPath = args.get("creds");
 const account = args.get("account");
-const subjectDid = args.get("bidder-did") ?? args.get("requester-did") ?? args.get("did");
-const roleArg = args.get("role")?.trim();
-const serviceArg = args.get("service")?.trim();
-const nonceArg = args.get("nonce")?.trim();
-const deleteStale = args.get("delete-stale-service") === "true";
-if (!credsPath || !account || !subjectDid) {
-  console.error("usage: associate-bidder.ts --creds FILE --account BOB (--bidder-did DID | --requester-did DID) [--service bidder_associate|requester_associate] [--nonce N] [--delete-stale-service true]");
+const agentDid = (args.get("agent-did") ?? args.get("bidder-did") ?? args.get("requester-did") ?? args.get("did"))?.trim();
+const remove = args.get("remove") === "true";
+if (!credsPath || !account || !agentDid) {
+  console.error("usage: associate-bidder.ts --creds FILE --account BOB --agent-did DID [--remove]");
   Deno.exit(2);
 }
-const subjectFlag = args.has("requester-did") ? "requester" : args.has("bidder-did") ? "bidder" : "";
-const role = roleArg ?? (subjectFlag || (serviceArg === "requester_associate" ? "requester" : "bidder"));
-if (role !== "bidder" && role !== "requester") {
-  console.error(`unknown role ${role}; want bidder or requester`);
-  Deno.exit(2);
-}
-if (subjectFlag && roleArg && subjectFlag !== roleArg) {
-  console.error(`--${subjectFlag}-did does not match role ${roleArg}`);
-  Deno.exit(2);
-}
-const service = serviceArg ?? `${role}_associate`;
-if (service !== "bidder_associate" && service !== "requester_associate") {
-  console.error(`unknown service ${service}; want bidder_associate or requester_associate`);
-  Deno.exit(2);
-}
-if (service !== `${role}_associate`) {
-  console.error(`role ${role} does not match service ${service}`);
+if (!/^did:(plc|web):[A-Za-z0-9._:%-]+$/.test(agentDid)) {
+  console.error(`not an agent DID: ${agentDid}`);
   Deno.exit(2);
 }
 
@@ -63,38 +50,28 @@ const session = await json(`${pds}/xrpc/com.atproto.server.createSession`, {
   body: JSON.stringify({ identifier: handle, password }),
 });
 
-const nonce = nonceArg || crypto.randomUUID().replace(/-/g, "");
-const rkey = `${service}-${subjectDid.replace(/:/g, "-")}`;
-const record = {
-  $type: "com.publicdomainrelay.temp.badgeBlueKeys",
-  keyId: subjectDid,
-  challenge: operatorDid,
-  service,
-  nonce,
-  name: `${role}-${subjectDid.slice(-8)}`,
-  createdAt: new Date().toISOString(),
-};
-const written = await json(`${pds}/xrpc/com.atproto.repo.putRecord`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessJwt}` },
-  body: JSON.stringify({
-    repo: operatorDid,
-    collection: "com.publicdomainrelay.temp.badgeBlueKeys",
-    rkey,
-    record,
-  }),
-});
-if (deleteStale) {
-  const staleService = service === "bidder_associate" ? "requester_associate" : "bidder_associate";
-  const staleRkey = `${staleService}-${subjectDid.replace(/:/g, "-")}`;
-  try {
-    await json(`${pds}/xrpc/com.atproto.repo.deleteRecord`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessJwt}` },
-      body: JSON.stringify({ repo: operatorDid, collection: "com.publicdomainrelay.temp.badgeBlueKeys", rkey: staleRkey }),
-    });
-    console.error(JSON.stringify({ deletedStaleService: staleService, rkey: staleRkey }));
-  } catch {
-  }
+const GRANT = "com.publicdomainrelay.temp.market.association";
+const ENDORSEMENT = "link.ident.endorsement";
+function call(method: string, body: Record<string, unknown>): Promise<any> {
+  return json(`${pds}/xrpc/com.atproto.repo.${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessJwt}` },
+    body: JSON.stringify({ repo: operatorDid, rkey: agentDid, ...body }),
+  });
 }
-console.log(JSON.stringify({ operatorDid, handle, service, rkey, uri: written.uri, cid: written.cid }));
+
+if (remove) {
+  await call("deleteRecord", { collection: ENDORSEMENT });
+  await call("deleteRecord", { collection: GRANT });
+  console.log(JSON.stringify({ operatorDid, handle, agentDid, removed: [ENDORSEMENT, GRANT] }));
+} else {
+  const grant = await call("putRecord", {
+    collection: GRANT,
+    record: { $type: GRANT, agent: agentDid, createdAt: new Date().toISOString() },
+  });
+  const endorsement = await call("putRecord", {
+    collection: ENDORSEMENT,
+    record: { $type: ENDORSEMENT, agent: agentDid },
+  });
+  console.log(JSON.stringify({ operatorDid, handle, agentDid, grant: { uri: grant.uri, cid: grant.cid }, endorsement: { uri: endorsement.uri, cid: endorsement.cid } }));
+}
