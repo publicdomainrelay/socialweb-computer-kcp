@@ -96,11 +96,15 @@ func (r *requestRun) associationRef(network bool) error {
 	}
 	r.root.Identity.Association = v1alpha1.AssociationRequireApproval
 	if wait != "" {
-		request, err := readAssociationRequest(guestPaths().request)
+		request, handle, err := readAssociationRequest(guestPaths().request)
 		if err != nil {
 			return err
 		}
 		r.root.Identity.AssociationRequest = request
+		if handle != "" && r.root.Identity.Handle == "" {
+			r.root.Identity.Handle = handle
+			r.log("the guest requester takes the handle its renter named", "handle", handle)
+		}
 		r.awaitRefFile = wait
 		r.log("the association ref file is empty; this requester reports its DID to the guest agent and waits for the ref", "file", wait,
 			"didFile", guestPaths().did)
@@ -111,24 +115,30 @@ func (r *requestRun) associationRef(network bool) error {
 	return nil
 }
 
-func readAssociationRequest(path string) (*v1alpha1.AssociationRequest, error) {
+func readAssociationRequest(path string) (*v1alpha1.AssociationRequest, string, error) {
 	raw, err := readAssociationRefFile(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	var entry v1alpha1.AssociationRequest
+	var entry requester.AssociationRequestEntry
 	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-		return nil, fmt.Errorf("%s is not the requester's association request: %w", path, err)
+		return nil, "", fmt.Errorf("%s is not the requester's association request: %w", path, err)
 	}
 	if entry.Principal == "" || entry.Contract == "" || entry.Nonce == "" {
-		return nil, fmt.Errorf("%s names no principal, contract and nonce", path)
+		return nil, "", fmt.Errorf("%s names no principal, contract and nonce", path)
 	}
 	if entry.RotationKey != "" {
 		if _, err := atcrypto.ParsePublicDIDKey(entry.RotationKey); err != nil {
-			return nil, fmt.Errorf("%s: the principal's rotationKey is not a did:key: %w", path, err)
+			return nil, "", fmt.Errorf("%s: the principal's rotationKey is not a did:key: %w", path, err)
 		}
 	}
-	return &entry, nil
+	handle := strings.ToLower(strings.TrimSpace(entry.Handle))
+	if handle != "" {
+		if _, err := syntax.ParseHandle(handle); err != nil {
+			return nil, "", fmt.Errorf("%s: the handle %q is not a handle: %w", path, entry.Handle, err)
+		}
+	}
+	return &entry.AssociationRequest, handle, nil
 }
 
 func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIdentity) error {

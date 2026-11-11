@@ -23,6 +23,8 @@ const (
 
 	AtircUsernameEnv = "ATP_USERNAME"
 
+	AtircDIDEnv = "ATIRC_DID"
+
 	agentPeerPublished = "PeerPublished"
 )
 
@@ -140,15 +142,19 @@ func (r *contractRunner) publishAgentPeer(ctx context.Context, contract v1alpha1
 		return fmt.Errorf("the handle %q and the RFP %q make no agent identity", q.handle, state.RFPURI)
 	}
 	env := AtircUsernameEnv + "=" + strings.ToLower(strings.TrimSpace(q.handle)) + "\n" + AtircNickEnv + "=" + nick + "\n"
+	peer := ""
 	if fromGuest(contract) {
 		env = ""
-		if handle := r.colocatedHandle(ctx, state, nick); handle != "" {
-			env = AtircUsernameEnv + "=" + handle + "\n"
+		if handle, did := r.colocatedAgent(ctx, state, nick); did != "" {
+			env, peer = AtircUsernameEnv+"="+handle+"\n"+AtircDIDEnv+"="+did+"\n", handle+"@"+did
 		}
 	}
 	seed, fresh, err := r.agentKey(ctx, contract, envFile, env)
 	if err != nil {
 		return err
+	}
+	if fresh && peer != "" {
+		r.log().Info("requester_agent_identity", "peer", peer, "hint", "an owner node reaches the agent with atirc mesh run --peer "+peer)
 	}
 	if fromGuest(contract) {
 		ticket := clusterlink.StableTicket(clusterlink.Key{Private: ed25519.NewKeyFromSeed(seed)})
@@ -184,21 +190,34 @@ func (r *contractRunner) agentPeerDone(ctx context.Context, contract v1alpha1.Co
 	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent "+identity+"'s mesh key is "+how+"; the guest requester publishes its peer record as its co-located account "+nickOf(identity))
 }
 
-func (r *contractRunner) colocatedHandle(ctx context.Context, state *v1alpha1.NodeClaimContract, nick string) string {
+func (r *contractRunner) declaredHandle(ctx context.Context, did string) string {
+	ident, err := r.q.deps.Directory.LookupDID(ctx, syntax.DID(did))
+	if err == nil {
+		var handle syntax.Handle
+		if handle, err = ident.DeclaredHandle(); err == nil {
+			return handle.String()
+		}
+	}
+	r.log().Warn("requester_agent_handle_unknown", "did", did, "err", err.Error())
+	return ""
+}
+
+func (r *contractRunner) colocatedAgent(ctx context.Context, state *v1alpha1.NodeClaimContract, nick string) (string, string) {
 	if state == nil || state.GuestRequester == nil || state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified || r.q.deps.Directory == nil {
-		return ""
+		return "", ""
 	}
-	ident, err := r.q.deps.Directory.LookupDID(ctx, syntax.DID(state.GuestRequester.Did))
-	if err != nil {
-		r.log().Warn("requester_agent_handle_unknown", "did", state.GuestRequester.Did, "err", err.Error())
-		return ""
+	r2 := r.declaredHandle(ctx, state.GuestRequester.Did)
+	if r2 == "" {
+		return "", ""
 	}
-	handle, err := ident.DeclaredHandle()
-	if err != nil {
-		r.log().Warn("requester_agent_handle_unknown", "did", state.GuestRequester.Did, "err", err.Error())
-		return ""
+	handle := nick + "." + r2
+	for _, did := range state.GuestRequester.Accounts {
+		if r.declaredHandle(ctx, did) == handle {
+			return handle, did
+		}
 	}
-	return nick + "." + handle.String()
+	r.log().Warn("requester_agent_handle_unknown", "handle", handle, "accounts", state.GuestRequester.Accounts, "err", "no co-located account of R2 declares it")
+	return "", ""
 }
 
 func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.ComputeContract, envFile, env string) ([]byte, bool, error) {

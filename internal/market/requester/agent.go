@@ -65,6 +65,15 @@ func (q *Requester) checkAgentHandle(ctx context.Context) error {
 	return fmt.Errorf("the atirc agent needs a requester handle that resolves to %s: %s; start the requester with --atproto-handle <a domain you control> whose DNS TXT _atproto.<handle> or https://<handle>/.well-known/atproto-did names that DID", q.did, reason)
 }
 
+func (q *Requester) verifiedHandle(ctx context.Context) string {
+	handle := strings.ToLower(strings.TrimSpace(q.handle))
+	h, err := syntax.ParseHandle(handle)
+	if handle == "" || err != nil || !h.AllowedTLD() || q.deps.Directory == nil || q.handleMismatch(ctx, h) != "" {
+		return ""
+	}
+	return handle
+}
+
 func (q *Requester) handleMismatch(ctx context.Context, h syntax.Handle) string {
 	if q.deps.Directory == nil {
 		return ""

@@ -399,6 +399,12 @@ func (r *contractRunner) associationRequest(ctx context.Context, contract v1alph
 	return request, ok, nil
 }
 
+type AssociationRequestEntry struct {
+	v1alpha1.AssociationRequest
+
+	Handle string `json:"handle,omitempty"`
+}
+
 func (r *contractRunner) ensureAssociationRequest(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef) error {
 	if contract.Spec.SecretsRef == nil {
 		return fmt.Errorf("%w: spec.association.fromGuest needs spec.secretsRef", errAssociationRefused)
@@ -410,15 +416,19 @@ func (r *contractRunner) ensureAssociationRequest(ctx context.Context, contract 
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(v1alpha1.AssociationRequest{Principal: r.q.repoDID, Contract: accept.URI, Nonce: hex.EncodeToString(nonce),
-		RotationKey: r.q.renterRotationDID()})
+	entry := AssociationRequestEntry{AssociationRequest: v1alpha1.AssociationRequest{Principal: r.q.repoDID, Contract: accept.URI,
+		Nonce: hex.EncodeToString(nonce), RotationKey: r.q.renterRotationDID()}}
+	if r.q.verifiedHandle(ctx) != "" {
+		_, entry.Handle = r.agentIdentity(r.stateCopy())
+	}
+	raw, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
 	if err := r.putBundleEntry(ctx, contract, SecretEntry{Path: cloudinit.DefaultAssociationRequestFile, Value: string(raw) + "\n", Mode: "0600"}); err != nil {
 		return err
 	}
-	r.log().Info("requester_association_request_entry", "path", cloudinit.DefaultAssociationRequestFile, "contract", accept.URI)
+	r.log().Info("requester_association_request_entry", "path", cloudinit.DefaultAssociationRequestFile, "contract", accept.URI, "handle", entry.Handle)
 	return nil
 }
 
