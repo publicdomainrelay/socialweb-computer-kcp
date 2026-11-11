@@ -61,6 +61,10 @@ func (r *Resolver) deny(reason string, contract atproto.StrongRef, meta map[stri
 	return false, nil
 }
 
+func (r *Resolver) ContractHeld(ctx context.Context, contract atproto.StrongRef, authorities []string) (bool, error) {
+	return r.contractHeld(ctx, contract, authorities)
+}
+
 func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef, authorities []string) (bool, error) {
 	repo, collection, _ := atproto.SplitURI(contract.URI)
 	if !slices.Contains(authorities, repo) || collection != market.AcceptNSID {

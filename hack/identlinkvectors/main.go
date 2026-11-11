@@ -1,16 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/atdata"
+	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
+
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
 type want struct {
@@ -32,6 +41,95 @@ type vectors struct {
 		Options identlink.Options `json:"options"`
 		Want    want              `json:"want"`
 	} `json:"cases"`
+	Market []struct {
+		Name        string              `json:"name"`
+		Contract    identlink.StrongRef `json:"contract"`
+		Authorities []string            `json:"authorities"`
+		Want        json.RawMessage     `json:"want"`
+	} `json:"market"`
+}
+
+const (
+	plcURL = "https://plc.identlinkvectors.invalid"
+	pdsURL = "https://pds.identlinkvectors.invalid"
+)
+
+func reply(req *http.Request, code int, body any) *http.Response {
+	data, _ := json.Marshal(body)
+	return &http.Response{StatusCode: code, Status: fmt.Sprintf("%d %s", code, http.StatusText(code)),
+		Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(data)), Request: req}
+}
+
+func recordCID(raw json.RawMessage) (string, error) {
+	value, err := atdata.UnmarshalJSON(raw)
+	if err != nil {
+		return "", err
+	}
+	data, err := atdata.MarshalCBOR(value)
+	if err != nil {
+		return "", err
+	}
+	sum, err := cid.NewPrefixV1(cid.DagCBOR, multihash.SHA2_256).Sum(data)
+	if err != nil {
+		return "", err
+	}
+	return sum.String(), nil
+}
+
+func (v *vectors) RoundTrip(req *http.Request) (*http.Response, error) {
+	switch req.URL.Scheme + "://" + req.URL.Host {
+	case plcURL:
+		var doc identlink.Doc
+		ok, err := entry(v.DIDs, strings.TrimPrefix(req.URL.Path, "/"), &doc)
+		switch {
+		case err != nil:
+			return reply(req, http.StatusInternalServerError, map[string]any{"error": "InternalServerError"}), nil
+		case !ok:
+			return reply(req, http.StatusNotFound, map[string]any{"error": "NotFound"}), nil
+		}
+		return reply(req, http.StatusOK, map[string]any{"service": []any{map[string]any{
+			"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": pdsURL}}}), nil
+	case pdsURL:
+		if req.URL.Path != "/xrpc/com.atproto.repo.getRecord" {
+			break
+		}
+		q := req.URL.Query()
+		uri := "at://" + q.Get("repo") + "/" + q.Get("collection") + "/" + q.Get("rkey")
+		raw, ok := v.Records[uri]
+		switch {
+		case ok && string(raw) == `"error"`:
+			return reply(req, http.StatusInternalServerError, map[string]any{"error": "InternalServerError"}), nil
+		case !ok || string(raw) == "null":
+			return reply(req, http.StatusBadRequest, map[string]any{"error": "RecordNotFound"}), nil
+		}
+		c, err := recordCID(raw)
+		if err != nil {
+			return nil, err
+		}
+		return reply(req, http.StatusOK, map[string]any{"uri": uri, "cid": c, "value": raw}), nil
+	}
+	return reply(req, http.StatusNotFound, map[string]any{"error": "NotFound"}), nil
+}
+
+func marketCases(v *vectors) int {
+	resolver := trust.NewResolver(trust.ResolverOptions{Client: &atproto.Client{HTTP: &http.Client{Transport: v}, PLCURL: plcURL}})
+	failed := 0
+	for _, c := range v.Market {
+		held, err := resolver.ContractHeld(context.Background(), atproto.StrongRef{URI: c.Contract.URI, CID: c.Contract.CID}, c.Authorities)
+		got := "false"
+		switch {
+		case err != nil:
+			got = `"error"`
+		case held:
+			got = "true"
+		}
+		if got == strings.TrimSpace(string(c.Want)) {
+			continue
+		}
+		failed++
+		fmt.Fprintf(os.Stderr, "identlink market vector %q: got %s, want %s (err %v)\n", c.Name, got, c.Want, err)
+	}
+	return failed
 }
 
 func entry(m map[string]json.RawMessage, key string, out any) (bool, error) {
@@ -122,9 +220,10 @@ func main() {
 		wantJSON, _ := json.Marshal(c.Want)
 		fmt.Fprintf(os.Stderr, "identlink vector %q: got %s, want %s\n", c.Name, gotJSON, wantJSON)
 	}
-	if failed > 0 || len(v.Cases) == 0 {
-		fmt.Fprintf(os.Stderr, "identlink vectors: %d of %d failed\n", failed, len(v.Cases))
+	marketFailed := marketCases(&v)
+	if failed+marketFailed > 0 || len(v.Cases) == 0 || len(v.Market) == 0 {
+		fmt.Fprintf(os.Stderr, "identlink vectors: %d of %d walk and %d of %d market cases failed\n", failed, len(v.Cases), marketFailed, len(v.Market))
 		os.Exit(1)
 	}
-	fmt.Printf("identlink vectors: %d cases ok\n", len(v.Cases))
+	fmt.Printf("identlink vectors: %d walk cases and %d market cases ok\n", len(v.Cases), len(v.Market))
 }
