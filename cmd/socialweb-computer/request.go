@@ -829,9 +829,10 @@ func (r *requestRun) identityHint(obj *v1alpha1.MarketIdentity) string {
 	}
 	return strings.Join([]string{
 		"The requester's DID " + did + " is a new localRepo DID with association RequireApproval. No bidder accepts it",
-		"until the operator's verified association claim names it. The operator writes that claim from a checkout",
-		"of socialweb-computer-kcp, with the operator account's credential file:",
-		"  deno run -A --no-lock scripts/associate-bidder.ts --creds <operator credential file> --account <ACCOUNT> --requester-did " + did,
+		"until its DID document holds https://ident.link/agent-of/<operator DID> (socialweb-computer identity agent-of add)",
+		"and the operator's grant and link.ident.endorsement at rkey = this DID exist. The operator writes those from a",
+		"checkout of socialweb-computer-kcp, with the operator account's credential file (docs/bidder.md#association):",
+		"  deno run -A --no-lock scripts/associate-bidder.ts --creds <operator credential file> --account <ACCOUNT> --agent-did " + did,
 		"This invocation keeps waiting for it; Ctrl-C stops it before any contract is posted.",
 		"The prod CLI requester signs in with an existing account instead: socialweb-computer run request ... -- --atproto-oauth-qr",
 	}, "\n")

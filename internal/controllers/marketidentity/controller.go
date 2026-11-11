@@ -157,6 +157,9 @@ func (c *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, obje
 	if refAfter > 0 && (result.RequeueAfter == 0 || refAfter < result.RequeueAfter) {
 		result.RequeueAfter = refAfter
 	}
+	if result.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval && (result.RequeueAfter == 0 || result.RequeueAfter > atproto.AssociationRecheck) {
+		result.RequeueAfter = atproto.AssociationRecheck
+	}
 	next := object.DeepCopy()
 	next.Status = result.Status
 	if err := req.ApplyStatus(ctx, next); err != nil {

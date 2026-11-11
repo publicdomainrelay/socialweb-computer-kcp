@@ -733,7 +733,7 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	}
 	awaitingOperator := ""
 	if a := id.Status.PendingAction; a != nil && id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan {
-		awaitingOperator = "waiting for the operator's claim record (badgeBlueKeys keyId " + id.Status.Did + " with the nonce n of " + a.URL + ")"
+		awaitingOperator = "waiting for the requester identity's sign-in at " + a.URL
 	}
 	sessionsFile := ""
 	if m := o.Spec.MarketNetwork; o.Spec.Profile == ProfileGatewayNetwork && m != nil && m.OwnerSessionsFile != "" {

@@ -102,7 +102,7 @@ sequenceDiagram
 |---|---|
 | NSID | `com.atproto.repo.strongRef` (atproto's; a vendored copy in `lexicons/com/atproto/repo/strongRef.json` so the embedded catalog resolves refs) |
 | type | object `{uri (at-uri), cid}` |
-| used in | `market.rfp` (`payload`, `policies[]`, `ingress[]`), `market.bid`, `market.accept`, `market.receipt`, `market.event`, `market.association` (`contract`), `badgeBlueKeys` (`proof`), `network.attested.proof` (`subject`) |
+| used in | `market.rfp` (`payload`, `policies[]`, `ingress[]`), `market.bid`, `market.accept`, `market.receipt`, `market.event`, `market.association` (`contract`), `network.attested.proof` (`subject`) |
 | Go | `internal/atproto/market` `StrongRef`, `StrongRefNSID` (generated with the market types) |
 
 - a reader fetches the target with one getRecord and compares the cid where the flow pins it (attached policy, association proof)

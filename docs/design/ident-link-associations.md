@@ -102,6 +102,7 @@ walk(A): queue=[(A, d=0, path=[A], exp=inf)]; seen={A}; lookups=0
 | edge verdict (kcp `defaultTrustCacheTTL`) | 5 min, capped at grant `expiresAt` | 5 s |
 | atirc owner graph, mesh | 10 s (bounded), mesh re-check every 3 s | 2 s |
 | firehose delete of endorsement/grant, `#identity` event | drops that DID's cached edges (`ApplyEvent`, atirc invalidate) | |
+| kcp MarketIdentity: association watch records change, or not Associated | `ApplyEvent(<its DID>)` before the walk; AwaitingApproval re-walks every 1 min (an agent-of PLC op sends no event) | |
 
 ### Trusted for X
 
@@ -175,6 +176,7 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 - bidder DIDs carry `at://<operator handle>` today (borrowed, never verifies); the op sets `alsoKnownAs` to `["https://ident.link/agent-of/<operator>"]`
 - `plcsubmit.UpdateHandle` resets `alsoKnownAs` to `[at://handle]` and would drop agent-of: keep non-`at://` entries
 - no PLC op tool exists for alsoKnownAs: add `socialweb-computer identity agent-of add|remove <did>` (local rotation key, `plc.SignOperation`)
+- prod bidders without `spec.operator` (no operator sign-in) have no principal, so the association is not automatic: the documented operator step is `identity agent-of add <operator> --drop-borrowed-handle` on the host, then the operator writes the grant, then the endorsement, with `scripts/associate-bidder.ts` ([bidder.md](../bidder.md#association))
 
 ## Q3: Extra Data
 

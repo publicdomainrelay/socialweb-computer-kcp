@@ -100,7 +100,7 @@ func (r IdentityRenderer) render(ctx context.Context, name string, a *v1alpha1.M
 			who = fmt.Sprintf("%s (%s)", a.Handle, a.CallerDid)
 		}
 		if in == nil {
-			fmt.Fprintf(r.Out, "%s asks to associate; the accepted path is the operator's verified badgeBlueKeys claim naming %s with the role service; adding the caller to spec.approvedAssociations is a manual workaround only\n", who, a.CallerDid)
+			fmt.Fprintf(r.Out, "%s asks to associate; the accepted path is ident.link: https://ident.link/agent-of/%s in the DID document of marketidentity %s (socialweb-computer identity agent-of add), then that operator's grant and link.ident.endorsement at rkey = this DID (scripts/associate-bidder.ts, docs/bidder.md#association); adding the caller to spec.approvedAssociations is a manual workaround only\n", who, a.CallerDid, name)
 			return nil
 		}
 		fmt.Fprintf(r.Out, "Associate with %s? [y/N] ", who)

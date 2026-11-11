@@ -15,6 +15,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauthclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/pdsclient"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
@@ -106,6 +107,8 @@ type Accounts struct {
 	refs *ttlcache.Cache[refKey, refVerdict]
 
 	verified *ttlcache.Cache[refKey, refVerdict]
+
+	watched *ttlcache.Cache[string, string]
 }
 
 func New(cfg Config) *Accounts {
@@ -130,7 +133,8 @@ func New(cfg Config) *Accounts {
 	records.PLCURL = cmp.Or(strings.TrimSpace(cfg.PLCURL), records.PLCURL)
 	return &Accounts{endpoints: cfg.Endpoints, vault: cfg.Vault, log: log, http: client, resolver: resolver, tls: cfg.TLS, sessions: cfg.Sessions, oauth: cfg.OAuth,
 		states: states, qr: ttlcache.New[string, *qrTransfer](ttlcache.Options{}), browser: ttlcache.New[string, browserIssue](ttlcache.Options{}),
-		records: records, trust: trust.NewResolver(trust.ResolverOptions{Client: records}), refs: newRefCache(), verified: newVerifiedCache()}
+		records: records, trust: trust.NewResolver(trust.ResolverOptions{Client: records}), refs: newRefCache(), verified: newVerifiedCache(),
+		watched: ttlcache.New[string, string](ttlcache.Options{MaxEntries: 4096})}
 }
 
 func (a *Accounts) reconcile(ctx context.Context, workspace string, id *v1alpha1.MarketIdentity, status v1alpha1.MarketIdentityStatus) (Result, error) {
@@ -205,7 +209,9 @@ func (a *Accounts) localRepo(ctx context.Context, workspace string, id *v1alpha1
 func settleAssociation(status *v1alpha1.MarketIdentityStatus, generation int64, mode v1alpha1.AssociationMode, ready string) {
 	if mode != v1alpha1.AssociationSkip && !associatedTrue(status) {
 		status.Phase = v1alpha1.MarketIdentityPhaseAwaitingApproval
-		status.Message = "the PDS is ready; waiting for the operator's verified association claim"
+		status.Message = "the PDS is ready; waiting for " + identlink.AgentOfPrefix + "<operator> in the DID document of " + status.Did +
+			" and the operator's " + identlink.GrantNSID + " grant then " + identlink.EndorsementNSID + " endorsement at rkey " + status.Did +
+			" (docs/bidder.md#association: socialweb-computer identity agent-of add, scripts/associate-bidder.ts)"
 		setReady(status, generation, false, "AwaitingAssociation", status.Message)
 		return
 	}

@@ -111,11 +111,21 @@ sudo $ST/bin/current/socialweb-computer uninstall bidder --purge
 
 ## Association
 
-Without `--bidder-operator-signin`, write the grant and endorsement from a mode-0600 credentials file
+Without `--bidder-operator-signin` this is not automatic. On the bidder host (helpers above), add
+`https://ident.link/agent-of/<your DID>` to the bidder's DID document (a PLC op signed by its local PDS
+rotation key; `--drop-borrowed-handle` drops an `at://<your handle>` entry):
+
+```sh
+OP_DID=<your DID>
+BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
+PDS_DIR=$(sudo kubectl --kubeconfig "$K" get pds pds -o jsonpath='{.spec.stateDir}')
+asb $ST/bin/current/socialweb-computer identity agent-of add "$OP_DID" --did "$BIDDER_DID" --pds-state-dir "$PDS_DIR" --drop-borrowed-handle
+```
+
+Then write the grant and endorsement from a mode-0600 credentials file
 (`<ACCOUNT>_ATPROTO_HANDLE`, `<ACCOUNT>_ATPROTO_PASSWORD`), from a checkout of this repo:
 
 ```sh
-BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
 deno run -A --no-lock scripts/associate-bidder.ts --creds <creds file> --account <ACCOUNT> --agent-did "$BIDDER_DID"
 socialweb-computer internal association "$BIDDER_DID" | jq -c '{roots, errors}'
 ```

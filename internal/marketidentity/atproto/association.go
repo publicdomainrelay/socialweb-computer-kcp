@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 
@@ -12,7 +13,10 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
+const AssociationRecheck = time.Minute
+
 func (a *Accounts) Associate(ctx context.Context, id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) {
+	a.refreshWalk(id, watch, status)
 	declared := uniqueDIDs(id.Spec.ApprovedAssociations)
 	previous := make([]string, 0, len(status.Associations))
 	for _, did := range uniqueDIDs(status.Associations) {
@@ -62,6 +66,25 @@ func (a *Accounts) verifiedPrincipals(ctx context.Context, id *v1alpha1.MarketId
 	}
 	slices.Sort(out)
 	return slices.Compact(out), true
+}
+
+func (a *Accounts) refreshWalk(id *v1alpha1.MarketIdentity, watch *v1alpha1.AtprotoRecordWatch, status *v1alpha1.MarketIdentityStatus) {
+	subject := strings.TrimSpace(status.Did)
+	if subject == "" || id.Spec.Mode != v1alpha1.MarketIdentityModeLocalRepo || id.Spec.Association == v1alpha1.AssociationSkip {
+		return
+	}
+	var seen strings.Builder
+	if watch != nil {
+		for _, r := range watch.Status.Records {
+			seen.WriteString(r.URI + "#" + r.Cid + " ")
+		}
+		seen.WriteString(strings.Join(watch.Status.Deleted, " "))
+	}
+	if last, ok := a.watched.Get(subject); ok && last == seen.String() && associatedTrue(status) {
+		return
+	}
+	a.watched.Set(subject, seen.String())
+	a.trust.ApplyEvent(subject, "")
 }
 
 func uniqueDIDs(in []string) []string {
