@@ -91,6 +91,36 @@ fresh / restarted invocation): hat-9 5.2 / 5.2 s, hat-7 21.6 / 4.8 s, local
 `requester_contract_records_deleted` 12 of 12, every logged record URI
 RecordNotFound three times, 0 plaintext signaling lines, hosts empty.
 
+Gateway re-check (5e6c4e3d), 2026-11-11 01:32-01:58Z: the gateway on 5e6c4e3d
+(redeployed 2026-11-10 19:23Z), every bidder on 253031e2 (rollout 10), alice
+signed in at `k8s.socialweb.computer` by `scripts/oauth-signin.ts --start-api`;
+sections 3, 1, 4, 5 and 6 only. No oauthQr bidder is installed (`swc-qr0001` is
+gone and hat-7 is localRepo, receiving over the relay and Jetstream), so section
+2 does not apply and hat-7 is the receiving host of section 4. Section 3:
+Cluster Ready 36 s after createCluster; the kubeconfig of `getKubeconfig` and of
+the web `POST /api/clusters/kubeconfig` both name
+`https://kcp.socialweb.computer/clusters/root:2wjeqtgx:<cluster>:clusters`, a
+client certificate and no CA data; `get --raw /readyz` ok, k3s v1.36.4+k3s1,
+namespaces `default kube-node-lease kube-public kube-system users`
+(`/api/config` reports `kcpPublicHost: null`: the GatewayAPI does not pass it
+to the cluster API; the kubeconfig takes it from `SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST`).
+Section 4: hat-9 and local `Suspended`, first VM on hat-7, pod Ready 54 s after
+the scale, back to zero nodes in 149 s. Section 5: 1 -> hat-7 (53 s), pause, 2 ->
+hat-8 (49 s), pause, 3 -> hat-9 (49 s): three pods on three distinct nodes, one
+market VM on each bidder. Section 6, one step at a time after the resume: 3 -> 2
+released the hat-9 VM (156 s), 2 -> 1 the hat-8 VM (155 s), 1 -> 0 the hat-7 VM
+(133 s). Each step: one node gone, the other pods on their nodes, one
+`requester_released`, one `requester_contract_records_deleted` (6 records), the
+released host at 0 ComputeVM / 0 FirecrackerVM / 0 firecracker / 0 vm dirs, the
+`vm.terminated` pinned `deleted_on_request` with a `vm.delete` request ref; 0
+bidder ERROR. A pre-run VM (hat-8, before section 1) released while hat-8 was
+paused (A2). Gateway 0 ERROR through the scale steps. After deleteCluster the
+session owner of alice is pruned, and the declared-state `testaccounts`
+AtprotoRecords of alice log `Reconciler error` LinkDenied every 5 s (also after
+the 2026-11-10 pass, until the 19:20Z restart): the AtprotoRepo controller kept
+the binding of the deleted AtprotoRepo (no `Gone` hook); fixed on main, a
+record then waits for its repo binding (INFO).
+
 This runbook was validated end to end on `v0.0.0-rc81`: three pods on three
 distinct tenant nodes, one market VM on each bidder host, paused winners forcing
 the next placement, and every VM released when the cluster returned to zero.
@@ -508,25 +538,55 @@ ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
   kubectl wait --for=condition=Ready bidders.socialweb.computer/bidder --timeout=120s
 
-kubectl --kubeconfig "$KC" delete deployment scale-check
-for i in $(seq 1 120); do
-  nodes=$(kubectl --kubeconfig "$KC" get nodes --no-headers 2>/dev/null | wc -l)
-  [ "$nodes" = 0 ] && break
-  sleep 5
-done
-[ "$nodes" = 0 ] || { echo "cluster still has $nodes nodes"; exit 1; }
-ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o wide"
-```
-
-The claim list is empty (or every claim is `Released`). Check every bidder host:
-no Running ComputeVM may remain, and no `socialweb-vm-*` unit may remain for
-this cluster.
+Scale down one replica at a time, 3 -> 2 -> 1 -> 0. Each step must remove
+exactly one node and release exactly one VM before the next step starts:
 
 ```bash
-ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms.socialweb.computer -o wide"
-ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get computevms.socialweb.computer -o wide"
+for n in 2 1 0; do
+  kubectl --kubeconfig "$KC" scale deployment scale-check --replicas=$n
+  for i in $(seq 1 120); do
+    nodes=$(kubectl --kubeconfig "$KC" get nodes --no-headers 2>/dev/null | wc -l)
+    [ "$nodes" = $n ] && break
+    sleep 5
+  done
+  [ "$nodes" = $n ] || { echo "cluster has $nodes nodes, want $n"; exit 1; }
+  kubectl --kubeconfig "$KC" get nodes -o wide
+  kubectl --kubeconfig "$KC" get pods -o wide
+  ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl --kubeconfig $PROD_K --context root --server $NC get nodeclaims.socialweb.computer -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.contract.winner.did}{\"\\n\"}{end}'"
+  # the orphan check of every bidder host below, then pin the released VM's vm.terminated
+done
+```
+
+At each step: the pods still run on distinct nodes, the claim of the node that
+left is gone, its bidder host has one firecracker fewer, and the gateway logs
+one `requester_released` and one `requester_contract_records_deleted`. Each
+step takes about 2.5 min: the provider holds an idle node for two minutes.
+Check every bidder host (the orphan check of
+[0008](0008-host-observer.md)): the ComputeVM and FirecrackerVM of the released
+VM are gone, and `pgrep -c -x firecracker` counts only the VMs still Running.
+
+```bash
+ssh hat-7 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H7_K kubectl get computevms.socialweb.computer,firecrackervms.socialweb.computer; pgrep -c -x firecracker"
+ssh hat-9 "sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$H9_K kubectl get computevms.socialweb.computer,firecrackervms.socialweb.computer; pgrep -c -x firecracker"
 sudo -n -u swc-bidder env HOME=/var/lib/socialweb-computer/swc-bidder KUBECONFIG=$LOCAL_K \
-  kubectl get computevms.socialweb.computer -o wide
+  kubectl get computevms.socialweb.computer,firecrackervms.socialweb.computer; pgrep -c -x firecracker
+```
+
+Pin the released VM's `vm.terminated` with one getRecord (0008 "Pinning the
+vm.terminated record", step 2). The gateway journal names the receipt URI
+(`at://<bidder DID>/com.publicdomainrelay.temp.market.receipt/receipt-<hex>`);
+the record is `deleted_on_request` with a `vm.delete` request ref:
+
+```bash
+RK=termination-payload-$(printf 'terminated:%s' "$RECEIPT_URI" | sha256sum | cut -c1-32)
+goat get "at://<bidder DID>/com.publicdomainrelay.temp.compute.events.vm.terminated/$RK" | jq -c '{reason, request: .request.uri}'
+```
+
+After the last step the claim list is empty and no host runs a firecracker.
+Delete the deployment:
+
+```bash
+kubectl --kubeconfig "$KC" delete deployment scale-check
 ```
 
 Delete the cluster and the scratch directory:

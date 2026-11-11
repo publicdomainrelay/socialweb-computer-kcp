@@ -91,7 +91,8 @@ func Register(m *ctlruntime.Manager, opts Options) (*Controller, error) {
 		}),
 		ctlruntime.Watches(func(_ context.Context, src ctlruntime.Request, obj *v1alpha1.RemoteRepo) []ctlruntime.Request {
 			return ctl.users(src.Workspace, RemoteRepoKind, obj.Name)
-		})); err != nil {
+		}),
+		ctlruntime.Gone(func(_ context.Context, req ctlruntime.Request) { ctl.bind(req, nil, "") })); err != nil {
 		return nil, fmt.Errorf("atprotorepo: registering the AtprotoRepo controller: %w", err)
 	}
 	return ctl, nil
