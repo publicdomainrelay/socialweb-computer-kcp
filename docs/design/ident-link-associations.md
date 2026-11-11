@@ -141,7 +141,7 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 ```
 
 - mesh accept: owner O == repo DID or O in ancestors(repo DID); peer lifetime = lifetime(repo DID)
-- open: the VM agent's handle `<nick>.<R2 handle>` must resolve both ways for atirc (`whoami`, `verify.rs` `identity`, `locate`). R2's handle is `compose.PdsHandle` `<workspace label>.requester.local` (the guest R2 gets no `--atproto-handle`), and the PDS's `/.well-known/atproto-did` answers its service DID, not an account's: today neither resolves. Needs a resolvable R2 handle under the VM PDS's public host plus a per-Host `atproto-did` answer (and its routing), or atirc taking a handle that is only declared (the DID document's `at://` entry) when the DID's walk reaches a root
+- handles: R2 is `<label>-<rfp rkey>.<renter handle>` (the renter names it in the association request entry when its handle verifies both ways), an agent `<nick>.<R2 handle>`; neither resolves, and the localPDS takes them unresolved. atirc accepts handle H for DID X when H verifies both ways, or X's document declares `at://H` and H is a strict subdomain of the both-ways-verified handle of an ancestor of X in the walk; the agent runs with `ATP_USERNAME=<agent handle>`, `ATIRC_DID=<agent DID>`, owner nodes dial `--peer <agent handle>@<agent DID>` (renter log `requester_agent_identity`)
 - own-DID atirc agents (`/agent/login`, `com.fedfork.irc.agents`): bsky.social ones retired, not migrated (none named in atirc config or docs; the atirc server state is checked at its step). new ones live on a PDS we run, principal rotation key first: no email token
 
 ### VM Cost
@@ -288,6 +288,7 @@ Vectors `vectors.json` (atlibs-identlink root; kcp `internal/identlink/vectors.j
 | 7 | owner rotation key on bidder DIDs | no |
 | 8 | record auth | `sync.getRecord` + CAR verify everywhere |
 | 9 | Rust crate home | own repo `atlibs-identlink` (knotless, Unlicense), Rust + wasm/JS, shared vectors |
+| 10 | agent handles that do not resolve | atirc: declared `at://H`, H a strict subdomain of a both-ways-verified ancestor handle in the walk; `ATIRC_DID`, `--peer <handle>@<did>`; R2 `<label>-<rfp rkey>.<renter handle>`, agent `<nick>.<R2 handle>` |
 | - | hat | dead (owner): removed from testaccounts, skipped |
 | - | bsky.social own-DID atirc agents | retired, not migrated |
 | - | found bugs | fixed in this work: atlibs `associate` TID rkey, mesh-agent self-lease, no lease check in atlibs-atirc/webrtc, atirc `lease_root` skips contract Held, bidder `proofExpiry` second walker |

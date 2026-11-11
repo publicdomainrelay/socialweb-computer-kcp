@@ -265,12 +265,14 @@ requester's own kcp, and `install` prints both. A password never goes into reque
   - The atirc agent (plan 0035; peer to peer, no token): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`)
     needs `spec.secretsRef`. After the receipt is verified the requester (`internal/market/requester/agentpeer.go`)
     generates the agent's iroh key (a 32-byte ed25519 seed) into the bundle at `/etc/atirc/iroh_key.hex` (hex, 0600),
-    writes envFile `ATP_USERNAME=<agent handle>` (0600) and `/etc/socialweb-computer/r2-agent.env`
+    writes envFile `ATP_USERNAME=<agent handle>`, `ATIRC_DID=<agent DID>` (0600) and `/etc/socialweb-computer/r2-agent.env`
     `R2_COLOCATED=<label>-<rfp rkey>=<the key's ticket>`. The agent is a co-located account of the guest requester R2
     (identity-only when nothing else asked for one; no atirc token is minted for R2 or the agent): R2 makes its did:plc
     (renter rotation key first, `agent-of/<R2 DID>`), endorses and grants it in R2's repo and writes
-    `computer.socialweb.peer/<agent handle>` {iroh: that ticket} in the agent's repo. The agent handle is
-    `<label>-<rfp rkey>.<R2 handle>`, which the requester learns from R2's DID document after the nonce check. getSecrets
+    `computer.socialweb.peer/<agent handle>` {iroh: that ticket} in the agent's repo. R2's handle is
+    `<label>-<rfp rkey>.<renter handle>` (the association request entry's `handle`, when the renter's handle verifies), the agent's
+    `<label>-<rfp rkey>.<R2 handle>`; the requester reads both from the DID documents after the nonce check and logs
+    `requester_agent_identity peer=<agent handle>@<agent DID>`, the owner node's `atirc mesh run --peer`. getSecrets
     and the sealed fallback serve the bundle without the envFile and the key until the envFile names `ATP_USERNAME`,
     and that write publishes guest.secretsUpdated so the guest fetches
 again; user_data installs `atirc-agent.service`

@@ -35,7 +35,7 @@ sequenceDiagram
   G->>G: R2 repo: market.association/<agent DID>, link.ident.endorsement/<agent DID>; agent repo: computer.socialweb.peer/<name>.<R2 handle>
   R->>B: ContractEvent outbound guest.agentStart
   B->>G: systemctl start --no-block atirc-agent.service
-  G->>G: atirc mesh run --no-publish as the nick user, ATP_USERNAME=<name>.<R2 handle>, no ATIRC_NICK
+  G->>G: atirc mesh run --no-publish as the nick user, ATP_USERNAME=<name>.<R2 handle>, ATIRC_DID=<agent DID>, no ATIRC_NICK
   N->>G: iroh dial (ALPN atirc/mesh/1), both sides walk the peer record's repo DID
   R->>P: release: delete the endorsement, then the grant
   G->>G: R2 retire: tombstone the R2 and agent DIDs
@@ -64,9 +64,11 @@ NAME=cli-agent-$(date +%s)
 $SWC run request --state-dir "$R" --name "$NAME" --hold --agent-config ~/.config/atirc/config.toml --agent=/etc/atirc/atirc.env -- --atproto-oauth-qr \
   > "$R/$NAME-request.log" 2>&1 &
 # sign in from the pendingAction url (as 0003), wait for Held, requester_agent_mesh_key_written, requester_association_written
-atirc peer show <name>.<R2 handle>            # the binding verifies: node, owner (a root of the walk)
+PEER=$(grep -m1 requester_agent_identity "$R/$NAME-request.log" "$R/requests/$NAME/logs/core.log" | sed 's/.*"peer":"\([^"]*\)".*/\1/')
+echo "$PEER"                                     # <name>.<R2 handle>@<agent DID>
+atirc peer show "$PEER"                          # the binding verifies: node, owner (a root of the walk)
 $SWC run request agent "$NAME" --state-dir "$R"  # publishes guest.agentStart, waits Published
-# an owner node (AtircNode with spec.peers: [<name>.<R2 handle>]) lists the agent in `atirc mesh peers`;
+# an owner node (`atirc mesh run --peer "$PEER"`, or AtircNode spec.peers: ["$PEER"]) lists the agent in `atirc mesh peers`;
 # `atirc mesh pub hello` there, then on the guest as the nick user `atirc mesh sub --cursor 0` shows it;
 # a guest-side `atirc mesh pub` shows up in the owner node's `atirc mesh sub --cursor 0` (both directions);
 # prompt the agent once on the mesh (`atirc mesh pub '<nick>: uname -m'` on the owner node) and see its answer
@@ -121,7 +123,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | `guest_agent_start unit=atirc-agent.service` | guest agent journal | ~1 s after agentStart |
 | `atirc mesh run` running as the nick user, `~/.config/atirc/iroh_key` and `config.toml` 0600, owned by it | guest | after agentStart |
 | the harness starts (claude installs first when missing, ~1 min), posts `<nick> online` and answers a mesh prompt | owner node `atirc mesh sub` | online ~30 s after agentStart; an answer ~25 s after the prompt |
-| the owner node verifies and reaches `<name>.<R2 handle>` | mesh node log | seconds |
+| the owner node verifies and reaches `--peer <name>.<R2 handle>@<agent DID>` (renter log `requester_agent_identity`) | mesh node log | seconds |
 | `requester_association_deleted rkey=<R2 DID>` | requester log | at release |
 | `local_account_retired did=<DID> plc=tombstoned` for the agent and R2 | R2 core log | at release |
 
