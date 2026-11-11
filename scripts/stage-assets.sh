@@ -68,6 +68,12 @@ fi
 die() { echo "stage-assets: $*" >&2; exit 1; }
 say() { echo "stage-assets: $*" >&2; }
 
+want_go="$(awk '$1=="toolchain"{print $2; exit}' "$root/go.mod")"
+[ -n "$want_go" ] || want_go="go$(awk '$1=="go"{print $2; exit}' "$root/go.mod")"
+pinned_goroot="$(GOTOOLCHAIN="$want_go" go env GOROOT)" || die "cannot get the pinned toolchain $want_go"
+export PATH="$pinned_goroot/bin:$PATH" GOTOOLCHAIN=local
+[ "$(go env GOVERSION)" = "$want_go" ] || die "the toolchain at $pinned_goroot is $(go env GOVERSION); go.mod pins $want_go"
+
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 dl_args=(-fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20 --progress-bar)
 api_args=(-fsSL --retry 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20)
