@@ -124,8 +124,8 @@ walk(A): queue=[(A, d=0, path=[A], exp=inf)]; seen={A}; lookups=0
 - the VM runs the guest requester R2 (own did:plc + localPDS, plan 0036). an agent is a co-located account on that PDS; a VM with `--agent` starts R2 identity-only (no RFP) when nothing else asked for one
 - genesis op (one per account): `rotationKeys` = [renter rotation key, VM localPDS key], `alsoKnownAs` = [`at://<handle>`, `https://ident.link/agent-of/<principal>`]
 - principal: R2 for its co-located accounts and VM agents (R2 writes the endorsement + grant in its own repo); the renter for R2 (after the nonce check)
-- the renter's rotation key reaches the VM as a public did:key in the secrets bundle (`identity.rotationKey`); its private half never leaves the renter (Go: `plc-rotation.key`; atlibs: the host's sealed did:key)
-- release: principal deletes endorsement + grant, tombstone (localPDS key; the renter's key when the VM is gone). nothing ran: grant expiry + contract Held + bidder cap end trust
+- the renter's rotation key reaches the VM as a public did:key in the secrets bundle (`identity.rotationKey`); its private half never leaves the renter (Go: the requester component's `<state>/components/Requester-requester/plc-rotation.key`, k256, 0600, made on first use, a copy of the local PDS's `plc-rotation.key` when there is one; pkg/embedded: the same path under `Config.StateDir`; atlibs: the host's sealed did:key)
+- release: principal deletes endorsement + grant, tombstone (localPDS key; the renter's key when the VM is gone: after deleting its grant the renter waits up to 2 m, none after vm.terminated, then tombstones R2 and the DIDs R2 listed in `associationRequest.accounts` whose head op says the right agent-of and holds its key; best effort). nothing ran: grant expiry + contract Held + bidder cap end trust
 - cost per agent: 2 PLC ops (genesis, tombstone; permanent public log), 4 record ops, localPDS share; VM RAM/boot: [measured](#vm-cost)
 
 Genesis (agent co-located with R2):
@@ -145,17 +145,16 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 
 ### VM Cost
 
-| item | reading | how |
+| item | reading | command (`R` = renter state dir, `NAME` = invocation) |
 |---|---|---|
-| R2 + localPDS RAM | (measured at 0004/0005) | after R2 is Ready (`requester_association_written` in the renter log): RSS summed over every process of the `r2` user (R2's socialweb-computer, its kcp and PDS, its user systemd), and the unit's cgroup, inside the VM (below); once without `--agent`/`--colocated` and once with: the difference is the per-agent share |
-| boot to agent online | (measured at 0004) | from the renter log's first line of `run request --agent` to the owner node's `atirc mesh sub` line `<nick> online`; split at the contract's `Held` (condition `AtircTokenMinted` reason `PeerPublished`), `run request agent` (guest.agentStart) and the guest's first `journalctl -u atirc-agent.service -o short-iso` line |
-
-```sh
-socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec '
-  ps -u r2 -o rss= | awk "{s+=\$1} END {print s/1024, \"MiB\"}"
-  systemctl show socialweb-r2.service -p MemoryCurrent
-  journalctl -u atirc-agent.service -o short-iso | head -1'
-```
+| R2 + localPDS RSS | (measured at 0004/0005) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'ps -u r2 -o rss= \| awk "{s+=\$1} END {print s/1024}"'` (MiB, every process of user `r2`: R2's socialweb-computer, its kcp, PDS, user systemd) |
+| R2 unit cgroup | (measured at 0004/0005) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'systemctl show socialweb-r2.service -p MemoryCurrent'` |
+| per-agent share | (measured at 0004/0005) | both rows above once on a `run request --guest-requester` VM without `--colocated` and once on a `run request --agent` VM; the difference |
+| boot: renter start | (measured at 0004) | `head -1 run.log` of `socialweb-computer run request --agent ... 2>&1 \| tee run.log` |
+| boot: Held + R2 verified | (measured at 0004) | `grep -m1 -e '"phase":"Held"' -e requester_guest_requester "$R/requests/$NAME/logs/core.log"` |
+| boot: agentStart | (measured at 0004) | `grep -m1 'run request agent' run.log` (`socialweb-computer run request agent "$NAME"` posts guest.agentStart) |
+| boot: guest unit start | (measured at 0004) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'journalctl -u atirc-agent.service -o short-iso \| head -1'` |
+| boot: agent online | (measured at 0004) | on the owner node: `atirc mesh sub --others 2>&1 \| grep -m1 "<nick> online"` (time from the line's timestamp, or `ts` from moreutils) |
 
 ## Q2: Identities
 

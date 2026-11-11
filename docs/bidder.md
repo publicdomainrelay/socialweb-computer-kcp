@@ -99,7 +99,8 @@ socialweb-computer internal association "$BIDDER_DID" | jq -c '{roots, errors}' 
 
 A requester association uses the same helper with the requester's DID. `--remove` deletes the
 endorsement, then the grant. A missing agent-of entry: `socialweb-computer identity agent-of add
-<operator DID> --did "$BIDDER_DID" --pds-state-dir <bidder Pds stateDir> --drop-borrowed-handle`.
+<operator DID> --did "$BIDDER_DID" --pds-state-dir "$(sudo kubectl --kubeconfig "$K" get pds pds -o jsonpath='{.spec.stateDir}')"
+--drop-borrowed-handle` (the Pds stateDir is `<instance state>/components/Pds-pds` unless the root overrides it).
 
 Non-association mode: patch the root object and let the controller reconcile it. It sets
 `Associated=True` with reason `AssociationSkipped` and writes no record.

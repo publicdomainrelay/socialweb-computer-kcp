@@ -116,8 +116,12 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
 5. Out-of-band loss (a second round): delete the outer ComputeVM on its bidder (0007) without a release;
    `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated`. With the bidder down
    instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). R2 never retires (its VM is
-   gone: both DIDs stay `plc_operation`), yet nothing it published is trusted. On the bidder's vm.terminated the owner's
-   requester logs `requester_contract_records_deleted`: its accept, rfp, compute.vm, contract-scoped grant + endorsement and
+   gone), so on the bidder's vm.terminated the owner's requester tombstones both DIDs with its own rotation key (first in
+   their rotationKeys): `requester_tombstoned did=<R2 DID>` and `did=<mesh1 DID>` with `key=<renter did:key>` (none
+   while R2 still runs: `requester_guest_dids_tombstoned by=the guest`), then for both `curl -s -o /dev/null -w '%{http_code}'
+   https://plc.directory/<did>` is 410 and `/<did>/log/last` is `plc_tombstone`; `requester_tombstone_skipped` names the
+   reason when it does not (no agent-of, or the renter key is not a rotation key). The owner's requester logs
+   `requester_contract_records_deleted`: its accept, rfp, compute.vm, contract-scoped grant + endorsement and
    rbac record are RecordNotFound within seconds. A policy with `association.maxDepth: 1` denies mesh1 (one link only).
 
 Last pass: 2026-11-10. Steps 1, 2 (records) and 4 on kcp cef6a0ca (hat-9): both DIDs `plc_tombstone`, association

@@ -209,7 +209,8 @@ ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-compute
 
 A missing agent-of entry is a PLC op on the gateway host (lead go first):
 `socialweb-computer identity agent-of add <alice DID> --did <requester DID>
---pds-state-dir <gateway Pds stateDir> --drop-borrowed-handle`.
+--pds-state-dir "$(kubectl $ID_ARGS get pds pds -o jsonpath='{.spec.stateDir}')" --drop-borrowed-handle`
+(the Pds stateDir is `<instance state>/components/Pds-pds` unless the root overrides it).
 
 Wait until the identity phase is `Ready`, `status.associations` names alice's
 DID and the `Requester` child reports `spec.operatorDID` with it.

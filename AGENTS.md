@@ -39,7 +39,7 @@ Go:
 | --- | --- |
 | `cmd/` | one directory per binary (`socialweb-computer`, `socialweb-node`, `socialweb-vmexec`, `socialweb-guest-agent`, `socialweb-apigen`, the two OpenBao auth plugins) |
 | `internal/` | the Go packages, in the plan 0026 layers (`docs/ARCHITECTURE.md` section 12) |
-| `pkg/` | the packages another module imports: `pkg/embedded`, the requester an app runs in its own in-process kcp (plan 0038); its `Config.OnSnapshot` bytes hold every vault secret in clear JSON: store them encrypted (Keychain, Data Protection Complete, no backup), never log them; `Config.StateDir` holds the renter PLC rotation key `components/requester-requester/plc-rotation.key` (k256, 0600, made on first use; first rotation key of every guest DID it rents, so it tombstones them when the guest is gone): same protection, never in a backup |
+| `pkg/` | the packages another module imports: `pkg/embedded`, the requester an app runs in its own in-process kcp (plan 0038); its `Config.OnSnapshot` bytes hold every vault secret in clear JSON: store them encrypted (Keychain, Data Protection Complete, no backup), never log them; `Config.StateDir` holds the renter PLC rotation key `components/Requester-requester/plc-rotation.key` (k256, 0600, made on first use; first rotation key of every guest DID it rents, so it tombstones them when the guest is gone): same protection, never in a backup |
 | `api/` | the kcp API types; `go generate ./api/...` writes the schemas, the APIExports and the generated Go |
 | `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
