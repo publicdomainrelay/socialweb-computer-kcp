@@ -145,10 +145,17 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 
 ### VM Cost
 
-| item | reading |
-|---|---|
-| R2 + localPDS RAM | (measured at 0004/0005) |
-| boot to agent online | (measured at 0004) |
+| item | reading | how |
+|---|---|---|
+| R2 + localPDS RAM | (measured at 0004/0005) | after R2 is Ready (`requester_association_written` in the renter log): RSS summed over every process of the `r2` user (R2's socialweb-computer, its kcp and PDS, its user systemd), and the unit's cgroup, inside the VM (below); once without `--agent`/`--colocated` and once with: the difference is the per-agent share |
+| boot to agent online | (measured at 0004) | from the renter log's first line of `run request --agent` to the owner node's `atirc mesh sub` line `<nick> online`; split at the contract's `Held` (condition `AtircTokenMinted` reason `PeerPublished`), `run request agent` (guest.agentStart) and the guest's first `journalctl -u atirc-agent.service -o short-iso` line |
+
+```sh
+socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec '
+  ps -u r2 -o rss= | awk "{s+=\$1} END {print s/1024, \"MiB\"}"
+  systemctl show socialweb-r2.service -p MemoryCurrent
+  journalctl -u atirc-agent.service -o short-iso | head -1'
+```
 
 ## Q2: Identities
 
