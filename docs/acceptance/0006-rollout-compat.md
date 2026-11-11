@@ -81,7 +81,7 @@ kb get computevms.socialweb.computer,firecrackervms.socialweb.computer --no-head
 
 Compat smoke (unchanged clients vs new servers):
 
-- Page: one short prod run as hat on a fresh profile (`page-check.ts`, see [0009](0009-browser-page.md) A6): Request VM -> Held -> 60 s -> reload -> Release. Announce "no parallel hat runs"
+- Page: one short prod run as alice on a fresh profile (`page-check.ts`, see [0009](0009-browser-page.md) A6): Request VM -> Held -> 60 s -> reload -> Release. Announce "no parallel alice runs"
 - CLI: `run request --hold --exec "id"` (previous rc CLI if the RFP / bid shape changed), Held, Released
 - atirc-dev confirms revoke via=account before release in `revocations.ndjson`
 

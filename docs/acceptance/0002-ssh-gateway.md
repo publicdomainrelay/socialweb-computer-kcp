@@ -43,7 +43,7 @@ sequenceDiagram
 | Versions | gateway + ssh gateway >= rc152 (revoke on disconnect), >= rc153 (held sessions survive restart), >= rc154 (vault wait, 0 restarts) |
 | Watchers | gateway agent (gw kcp + gw ssh lines), host watcher per bidder (see [0008](0008-host-observer.md)) |
 
-Vouch pairs used on prod (public test accounts): bob -> john, john -> bob, bob -> hat, hat -> bob, john -> hat.
+Vouch pairs used on prod (public test accounts): bob -> john, john -> bob.
 
 Check a vouch (`goat` or any getRecord client):
 

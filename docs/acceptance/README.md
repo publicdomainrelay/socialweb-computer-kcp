@@ -27,7 +27,7 @@ release everything you rent.
 ## Shared rules
 
 - Announce before, post done after: `<nick> -> all: <test> now; hold VM tests` / `... done; tests may resume`
-- One driver per account at a time (alice, hat, bob); owner-held VMs are never touched
+- One driver per account at a time (alice, bob, john); owner-held VMs are never touched
 - Policies: `bidder-tangled-vouch` on every prod bidder, `requester-tangled-vouch` on requesters; never `open` unless the owner sets it
 - Evidence comes from three sides: requester log, host watcher ([0008](0008-host-observer.md)), atirc-dev (`revocations.ndjson`); plus requester-repo getRecord at computed keys (RecordNotFound after release or termination)
 - Token order: revoke strictly before `vm.terminated`; the lease kills it anyway once termination exists
