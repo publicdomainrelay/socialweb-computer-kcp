@@ -125,7 +125,7 @@ var APIResources = []APIResource{
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 40, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
+	{Kind: "MarketRequester", Plural: "marketrequesters", Revision: 41, Export: "applications", Object: MarketRequester{}, PrinterColumns: []PrinterColumn{
 		{Name: "Profile", Type: "string", JSONPath: ".spec.profile"},
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "DID", Type: "string", JSONPath: ".status.did"},

@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-40.marketrequesters.socialweb.computer
+  name: v1alpha1-41.marketrequesters.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -355,6 +355,18 @@ spec:
                     items:
                       type: string
                     x-kubernetes-list-type: set
+                  colocatedIroh:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        iroh:
+                          type: string
+                      required:
+                        - name
+                        - iroh
                   retire:
                     type: boolean
               ingress:
