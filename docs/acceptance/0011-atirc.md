@@ -4,7 +4,17 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
-- Last pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 15:23Z, atirc 2898af3, prompt answered
+- Last run: 2026-11-11 13:11-13:22Z, atirc 9e83813 (upstream doc at 9e83813 run as well): section 1 pass on hat-8 (`cargo fmt`
+  clean, `cargo test` 17 + 238 passed, 0 failed; `.githooks/pre-commit` green: `mesh::` 17 passed, `test_mesh_loopback.py`
+  2 OK, webrtc loopback skipped without an atlibs-webrtc checkout); section 2 pass on irc.fedfork.com (`GET /` curl 200
+  53788000 B sha256 cd0d0d67, `/chat` 200 and linked, `/dl/v0.1.0-9e83813` 200 same sha, revoke without auth 401 with a JSON
+  body (415 without a content type), serve pid 1694188 unchanged on cd0d0d67, atirc-iroh not restarted: no iroh ops change,
+  0 ERROR since the upgrade); section 3 not exercised (no minting smoke in this pass: VM agents are token-less and the
+  guest requester minted no r2 token); section 4 page / CLI requester **FAIL** with kcp e496cbff ([0004](0004-vm-atirc-agent.md)
+  last run: the renter's endorsement needs `action=update` for OAuth renters, and R2 never gets its association ref); with
+  the ref copied by hand the mesh part held: `atirc peer show` verified owner alice and the grant's `expiresAt`, the owner node
+  listed the agent once started with `--peer`, messages crossed both ways, a prompt was answered in 3.9 s
+- Earlier pass: atirc side of the rc153 compat smoke, 2026-11-01 01:18Z; owner ssh agent revoke 01:05Z; mesh (section 4, kcp VM agents) 2026-11-10 15:23Z, atirc 2898af3, prompt answered
 
 - Owners (2026-11-11): alice and bob are no longer john's atirc agents (`com.fedfork.irc.agents` retired, no agent-of in their DID docs); each is its own root, so their agents' default channel and owner questions go to alice / bob
 

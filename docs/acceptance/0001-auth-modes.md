@@ -54,7 +54,7 @@ sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-ki
   After the pass: pause it, `sudo $S/bin/current/socialweb-computer uninstall
   bidder --account $A --purge`, `sudo userdel $A`, then delete its records in
   bob's repo with `deleteRecord`: `market.offering/self`,
-  `market.heartbeat/self` and its `computer.socialweb.ingress.listen` record. A
+  `market.heartbeat/self` and its `computer.socialweb.ingress.listen/market` record. A
   getRecord of each then answers RecordNotFound. Never delete `badgeBlueKeys`,
   `market.association`, `link.ident.endorsement` or vouch records. A step that only reads may run on the existing
   hat-9 bob bidder instead.
@@ -71,7 +71,39 @@ sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-ki
   (`AUD` below) is unchanged.
 - Every market read is one getRecord at a computable key; no step lists records.
 
-Last pass: 2026-11-10 18:06-18:41Z, every bidder and the gateway on c770a887
+Last pass: 2026-11-11 11:54-12:45Z, every bidder and the gateway on kcp e496cbff
+(release d9438c15, ident.link associations), CLI d9438c15 on hat-8, alice requester,
+bob oauthQr bidder `swc-qr0001` on hat-8 (installed for the pass, removed after),
+no bidders list anywhere (the gateway env names only a deny list). Association: requester
+`did:plc:jjcsg5fg3ujd22ywuxg4lr72` `Associated=True`, phase Ready, `alsoKnownAs`
+[`at://root-app.gateway.local`, `https://ident.link/agent-of/<alice>`], endorsement + grant at rkey =
+requester DID, walk roots [alice], `approvedAssociations` empty; the three bidder pairs (hat-7 -> john,
+hat-9 and hat-8 -> bob): agent-of only, endorsement `{agent}`, grant without `expiresAt`, roots
+[operator]. Section 1: hat-9, local and hat-7 `Suspended` `{"desired":6,"notReady":0,"ready":5,"suspended":1}`,
+Bidder `true Ready`. Section 2: bob signed in by QR (page "Session transferred"; the `--done` text
+waits 60 s for "close this window", the page says "close this page": harmless), root Ready 4/4,
+EventStream `gateway-pds` Running, offering `["iroh","webrtc"]`. Section 3: Cluster Ready 34 s after
+createCluster (`get --raw /readyz` answers NotFound through the kcp front; namespaces list fine).
+Section 4: first VM on the oauthQr bidder, pod Ready 76 s after the apply; zero nodes 139 s after the
+scale. Section 5: oauthQr (73 s), local (52 s), hat-9 (80 s), hat-7 (77 s): four pods on four distinct
+nodes. Section 6 (A2, all four winners paused): 4 -> 3 -> 2 -> 1 -> 0 released hat-9, oauthQr, hat-7,
+local (155, 160, 155, 145 s), each step one `requester_released`, `requester_contract_records_deleted`
+6/6, the released host at 0 ComputeVM / FirecrackerVM / firecracker, `vm.terminated` `deleted_on_request`
+with a `vm.delete` request ref; cluster deleted. Section 7: heartbeat frozen at 12:27:04Z for 180 s,
+root Ready `{"desired":4,"notReady":0,"ready":3,"suspended":1}`, GuestControlPlane and `ingress-iroh`
+Ready, healthz 200; advanced 4 s after resume. Section 8 (hat-7): `applied:true`, heartbeat every 5 s,
+offering cid unchanged for 60 s, four offerings `["iroh","webrtc"]` without `endpointUrl`, drift
+reverted (`a direct edit of a composed child is reverted`), typo `Failed` / `InvalidKey`, child
+generation unchanged. Section 9 (ACC34, fresh / restarted): oauthQr 2.0 / 3.8 s, local 3.1 / 4.8 s,
+hat-9 2.4 / 5.0 s, hat-7 2.3 / 3.6 s; every run `Released`, `requester_contract_records_deleted` 12/12,
+every logged record URI RecordNotFound three times, 0 plaintext signaling lines, hosts empty. Bidder
+ERROR 0 on all three; gateway ERROR only `Reconciler error` of the `root:app` AtprotoRecord
+`testaccount-alice-atirc-operator` (`com.fedfork.irc.agentOperator`, ScopeMissing; Failed since
+02:43Z, pre-existing). Cleanup: `swc-qr0001` uninstalled with `--purge`, `userdel`; bob's
+`market.offering/self`, `market.heartbeat/self` and `computer.socialweb.ingress.listen/market`
+RecordNotFound.
+
+Earlier pass: 2026-11-10 18:06-18:41Z, every bidder and the gateway on c770a887
 (alice requester, bob oauthQr bidder `swc-qr0001` on hat-8). Section 1: hat-9,
 hat-7 and local `Suspended`, Bidder `true Ready`. Section 2: bob signed in by QR,
 root Ready 4/4, EventStream `gateway-pds` Running, offering `["iroh","webrtc"]`.

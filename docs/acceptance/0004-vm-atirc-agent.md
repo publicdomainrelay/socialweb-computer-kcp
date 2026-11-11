@@ -16,7 +16,24 @@ endorsements and grants and tombstones both DIDs.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-11 04:00-04:05Z CLI, alice (pdsAccount) on a prod bidder, rollout 11 (kcp 06d04283, atirc 2de8b6c, guest atirc fecce97e), `--agent-config` (claude on the deepseek model), owner node `atirc mesh run` as alice on hat-8 (`--peer <agent>`, both channels): no mint, no token in the bundle, files root 0600, unit inactive until agentStart; the agent carries `#johnandersen777_bsky_social` and its own `#<label>-<rkey>_aliceoa_bsky_social` and monitors with `atirc mesh sub --others`; online on both 26 s after agentStart; `uname -m` on the owner channel answered `x86_64` and `hostname` on its own channel (1:1) answered there, both 6 s after posting; a browser (atlibs-atirc, headless Chrome over WebRTC to the owner node) asked `nproc`, answered in 3 s; release: peer record and lease RecordNotFound x3, hosts empty. That pass predates the ident.link cut-over (renter-repo peer record + lease): not yet re-run on the flow below
+- Last run: 2026-11-11 12:49-13:50Z, kcp e496cbff (release d9438c15), atirc 9e83813, no bidders list (winner hat-8): **FAIL**.
+  (1) alice by QR (`cli-agent-1794401350`): Held 12:50:51Z; mesh key + association request entry in the bundle, `/etc/atirc/*`
+  root 0600, unit inactive until agentStart (12:56:26Z); R2 reported 12:57:00Z, then `requester_association_failed` x10:
+  `link.ident.endorsement/<R2>: ScopeMissingError: Missing required scope "repo:link.ident.endorsement?action=update"` (the
+  renter writes the endorsement with putRecord; the optional scope is create + delete): no OAuth renter can endorse R2.
+  (2) alice pdsAccount (`cli-agent-1794402927`): Held 13:16:49Z, agentStart 13:17:06Z, `requester_association_written`
+  13:17:36Z (grant contract-scoped, `expiresAt` accept + 24 h, endorsement `{agent}`), `requester_agent_identity` 13:17:36Z; but
+  the guest's `/run/socialweb-r2/association-ref` stays empty (`/etc/socialweb-computer/association-ref` holds the ref): the
+  guest agent mirrors the ref only when `r2-atirc.env` is non-empty, and a token-less `--agent` contract has none, so R2 waits
+  for the ref forever and never writes the agent's grant, endorsement and peer record (walk of the agent: roots [agent]).
+  With the ref copied by hand (a workaround: not a pass) the chain verified in 7 s (ancestors R2 depth 1, alice depth 2,
+  `expiresAt` = the grant's), `atirc peer show` owner alice, the agent came online after the owner node was restarted with
+  `--peer`, messages crossed both ways and `<nick>: uname -m` was answered in 3.9 s. Release: the renter waited the full
+  `GuestRequesterReleaseTimeout` (24 min, `requester_guest_requester_release_timeout`: identity-only R2 never answers
+  r2Release; both runs), then deleted the endorsement and grant (RecordNotFound x3) and tombstoned R2 and the agent with its
+  rotation key (`requester_tombstoned ... by=the renter rotation key`; 2 PLC ops per DID, `plc_tombstone`); hosts empty.
+  Also: the pdsAccount renter's RemoteRepo controller logs `Reconciler error` AuthMissing 401 (15x)
+- Earlier pass: 2026-11-11 04:00-04:05Z CLI, alice (pdsAccount) on a prod bidder, rollout 11 (kcp 06d04283, atirc 2de8b6c, guest atirc fecce97e), `--agent-config` (claude on the deepseek model), owner node `atirc mesh run` as alice on hat-8 (`--peer <agent>`, both channels): no mint, no token in the bundle, files root 0600, unit inactive until agentStart; the agent carries `#johnandersen777_bsky_social` and its own `#<label>-<rkey>_aliceoa_bsky_social` and monitors with `atirc mesh sub --others`; online on both 26 s after agentStart; `uname -m` on the owner channel answered `x86_64` and `hostname` on its own channel (1:1) answered there, both 6 s after posting; a browser (atlibs-atirc, headless Chrome over WebRTC to the owner node) asked `nproc`, answered in 3 s; release: peer record and lease RecordNotFound x3, hosts empty. That pass predates the ident.link cut-over (renter-repo peer record + lease): not yet re-run on the flow below
 
 ```mermaid
 sequenceDiagram
@@ -63,12 +80,16 @@ NAME=cli-agent-$(date +%s)
 # --agent last (or --agent=<envFile>): a bare --agent before another flag swallowed it (pre rc126)
 $SWC run request --state-dir "$R" --name "$NAME" --hold --agent-config ~/.config/atirc/config.toml --agent=/etc/atirc/atirc.env -- --atproto-oauth-qr \
   > "$R/$NAME-request.log" 2>&1 &
-# sign in from the pendingAction url (as 0003), wait for Held, requester_agent_mesh_key_written, requester_association_written
-PEER=$(grep -m1 requester_agent_identity "$R/$NAME-request.log" "$R/requests/$NAME/logs/core.log" | sed 's/.*"peer":"\([^"]*\)".*/\1/')
+# sign in from the pendingAction url (as 0003), wait for Held and requester_agent_mesh_key_written
+$SWC run request agent "$NAME" --state-dir "$R"  # publishes guest.agentStart, waits Published; the guest starts
+                                                 # atirc-agent.service and only then R2 identity-only
+CL="$R/requests/$NAME/dev/$NAME/logs/core.log"   # the renter's core log while it runs ($R/requests/$NAME/logs/ after release)
+# wait for requester_association_written and requester_agent_identity (R2 reports its DID ~30 s after agentStart)
+PEER=$(grep -h -m1 requester_agent_identity "$CL" | sed 's/.*"peer":"\([^"]*\)".*/\1/')
 echo "$PEER"                                     # <name>.<R2 handle>@<agent DID>
 atirc peer show "$PEER"                          # the binding verifies: node, owner (a root of the walk)
-$SWC run request agent "$NAME" --state-dir "$R"  # publishes guest.agentStart, waits Published
-# an owner node (`atirc mesh run --peer "$PEER"`, or AtircNode spec.peers: ["$PEER"]) lists the agent in `atirc mesh peers`;
+# an owner node started (or restarted) with `atirc mesh run --peer "$PEER"` (or AtircNode spec.peers: ["$PEER"]; a node
+# without it never reached the agent on 2026-11-11) lists the agent in `atirc mesh peers`;
 # `atirc mesh pub hello` there, then on the guest as the nick user `atirc mesh sub --cursor 0` shows it;
 # a guest-side `atirc mesh pub` shows up in the owner node's `atirc mesh sub --cursor 0` (both directions);
 # prompt the agent once on the mesh (`atirc mesh pub '<nick>: uname -m'` on the owner node) and see its answer
@@ -78,7 +99,7 @@ Check the pair + grant chain while Held (read only):
 
 ```bash
 RENTER=<renter DID>
-R2=<R2 DID>       # `subject` of requester_association_written in "$R/$NAME-request.log"
+R2=<R2 DID>       # `subject` of requester_association_written in "$CL"
 pds() { curl -s "https://plc.directory/$1" | jq -r '.service[] | select(.id=="#atproto_pds") | .serviceEndpoint'; }
 rec() { curl -s "$(pds "$1")/xrpc/com.atproto.repo.getRecord?repo=$1&collection=$2&rkey=$3" | jq -c '.value // .error'; }
 AGENT=$(curl -s "$(pds "$R2")/xrpc/com.atproto.repo.listRecords?repo=$R2&collection=link.ident.endorsement" | jq -r '.records[].value.agent')
@@ -90,8 +111,8 @@ rec "$AGENT" computer.socialweb.peer "<name>.<R2 handle>"       # {iroh, created
 curl -s "https://plc.directory/$R2" | jq -c .alsoKnownAs           # at://<R2 handle>, https://ident.link/agent-of/$RENTER
 curl -s "https://plc.directory/$AGENT" | jq -c .alsoKnownAs        # at://<name>.<R2 handle>, https://ident.link/agent-of/$R2
 for d in "$R2" "$AGENT"; do curl -s "https://plc.directory/$d/data" | jq -c .rotationKeys; done
-# [renter key, VM localPDS key]; renter key = `find "$R" -name plc-rotation.pub` (a localRepo renter);
-# an OAuth or pdsAccount renter has no local PDS: [VM localPDS key] only
+# [renter key, VM localPDS key]; renter key = the requester component's plc-rotation.key (made on first use, also
+# for an OAuth or pdsAccount renter: 2 keys on 2026-11-11), `requester_tombstoned ... key=` names it
 $SWC internal association "$AGENT" | jq -c '{ancestors, roots, expiresAt, errors}'  # roots [RENTER], R2 depth 1
 ```
 
@@ -103,7 +124,7 @@ for i in 1 2 3; do
   rec "$RENTER" link.ident.endorsement "$R2"; rec "$RENTER" com.publicdomainrelay.temp.market.association "$R2"
 done                                                                # RecordNotFound x6
 for d in "$R2" "$AGENT"; do
-  curl -s -o /dev/null -w '%{http_code}\n' "https://plc.directory/$d"  # 410
+  curl -s -o /dev/null -w '%{http_code}\n' "https://plc.directory/$d"  # 404 (plc.directory answers 404 for a tombstone)
   curl -s "https://plc.directory/$d/log/last" | jq -r .type          # plc_tombstone
 done
 ```
@@ -117,7 +138,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | --- | --- | --- |
 | `requester_agent_mesh_key_written envFile=/etc/atirc/atirc.env keyFile=/etc/atirc/iroh_key.hex mode=0600` | requester log | right after the receipt |
 | `requester_association_request_entry path=/etc/socialweb-computer/association-request.json` | requester log | same second |
-| `requester_association_written subject=<R2 DID> uri=at://<renter>/com.publicdomainrelay.temp.market.association/<R2 DID>` | requester log | after R2 reports its DID and its associationRequest checks (principal, contract, nonce) |
+| `requester_association_written subject=<R2 DID> uri=at://<renter>/com.publicdomainrelay.temp.market.association/<R2 DID>` | renter core log (`$CL`) | after agentStart: R2 identity-only starts then; after R2 reports its DID and its associationRequest checks (principal, contract, nonce) |
 | AtprotoRecords `peer`, `colocated-<name>-grant`, `colocated-<name>-endorsement`, `colocated-<name>-peer` Applied | R2 core log (guest journal, `socialweb-r2.service`) | after the association ref arrived |
 | `Held`, condition `AtircTokenMinted=True reason=PeerPublished` | contract | 29-45 s after request |
 | `guest_agent_start unit=atirc-agent.service` | guest agent journal | ~1 s after agentStart |
@@ -138,7 +159,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 - The renter repo holds no peer record and no self-association for the agent: only the grant + endorsement at rkey = R2 DID
 - After `Held`, before agentStart: `atirc-agent.service` inactive
 - After agentStart: unit active, the owner node reaches the agent, a message crosses the mesh in both directions, the agent answers one prompt
-- Release: the renter's endorsement and grant at rkey = R2 DID answer RecordNotFound (3 reads); R2 and agent DIDs 410 /
+- Release: the renter's endorsement and grant at rkey = R2 DID answer RecordNotFound (3 reads); R2 and agent DIDs 404 /
   `plc_tombstone`; a skipped delete is harmless after the grant's `expiresAt` or once the contract is not Held
 - Without `--agent`: no key, no record, no unit, no atirc binary on the guest
 - Winner host empty after release
@@ -168,4 +189,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | guest has no `atirc mesh` | the bidder serves an older socialweb-guest-downloads; roll the bidder to a build with the `assets.atirc` cargosrc pin |
 | oauthQr bidder SessionExpired after rollout | scope added to Bidder/RequesterOAuthScope: re-sign every OAuth identity (announce before tagging) |
 | harness never answers | the harness exited (journalctl -u atirc-agent), claude still installing (give it ~1 min), or a wrong model / baseUrl / apiKey in the agent config |
+| `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | the renter writes the endorsement with putRecord; the optional scope grants create + delete only (kcp e496cbff, OAuth renters); open |
+| R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | the guest agent mirrors the ref only when `r2-atirc.env` is non-empty; `--agent` contracts are token-less (kcp e496cbff); open |
+| release takes 24 min, `requester_guest_requester_release_timeout` | an identity-only R2 never answers r2Release (kcp e496cbff); open |
 | release after page reload slow (20-38 s) | requester start after boot + release not first; fixed rc134 (release-first on resume, ~17 s click -> Released) |

@@ -7,8 +7,22 @@ token leased to the contract dies.
 
 - Procedure: [bidder.md, End a VM](../bidder.md#end-a-vm)
 - Used on prod: R2 orphan (hat-7, 2026-10-30), iOS cross-restart retry VM (hat-7, 2026-10-31 02:07Z), stray debug VM (hat-7, 2026-10-31 18:11Z)
-- Last pass: 2026-11-10 15:14Z (hat-7, rollout 5 438ca0fa): bob's held contract, delete -> gone in ~1 s, `vm.terminated` pinned (`termination-payload-19e3b1b5db974dc15cff4d61429bbeb2`, `deleted_on_request`, no `request` ref), requester `release` -> Released "the bidder ended the contract: deleted_on_request"
-- Last expiry pass: 2026-11-11 01:17Z (hat-9, rollout 10 253031e2, binary 233343a9): bob `run request --hold --expires-in 3m`,
+- Last pass: 2026-11-11 12:45-12:48Z (kcp e496cbff, release d9438c15, ident.link; CLI requester with no bidders list, the
+  winner was hat-8 `swc-bidder`): bob (pdsAccount) `run request --hold`, Held 12:47:13Z; `kb delete` of
+  `fc-ocnuqjlzgohy-5ecb1d26` -> gone in 4.1 s; bidder journal: termination StateSync 12:47:23.041Z, WARN `submitting the
+  market event to the requester failed` (the CLI had exited), `released` 12:47:26.850Z, `released: the backend is gone and
+  the finalizer is dropped` 12:47:26.909Z; `vm.terminated` pinned (`termination-payload-dae982a43e6a8e7ddd61f7c184f3e8c1`, cid
+  `bafyreicq6udf5vhetwxcvfyn4h6ilzknvslmaeturf5fkabbgz4nuzb64y`, `deleted_on_request`, no `request` ref); requester `release` ->
+  Released "the bidder ended the contract: deleted_on_request", `requester_contract_records_deleted` 4/4, accept and rfp
+  RecordNotFound x3; hosts 0 ComputeVM / 0 firecracker. No atirc token exists for such a contract (token check n/a)
+- Last expiry pass: 2026-11-11 12:48-13:02Z (same release, hat-8 won): bob `run request --hold --expires-in 3m`; walk of bob
+  roots [bob], no `expiresAt`; `bidder_lifetime_capped` 12:48:59Z (expiresAt 12:51:23Z, source `compute.vm expiresAt`);
+  `bidder_association_expired_release` 13:01:23.006Z, released 13:01:24.055Z; `vm.terminated` pinned
+  (`termination-payload-2e7931213cd951bfa81d1fcea1906bed`, cid `bafyreiaayfwhrzrokc6ux4idsq5eg3sgaapph6nes34ytsootligd4nlui`,
+  `expired`, no `request` ref); requester `release` -> Released "the bidder ended the contract: expired"; accept and rfp
+  RecordNotFound x3; hosts empty
+- Earlier pass: 2026-11-10 15:14Z (hat-7, rollout 5 438ca0fa): bob's held contract, delete -> gone in ~1 s, `vm.terminated` pinned (`termination-payload-19e3b1b5db974dc15cff4d61429bbeb2`, `deleted_on_request`, no `request` ref), requester `release` -> Released "the bidder ended the contract: deleted_on_request"
+- Earlier expiry pass: 2026-11-11 01:17Z (hat-9, rollout 10 253031e2, binary 233343a9): bob `run request --hold --expires-in 3m`,
   `bidder_lifetime_capped` (compute.vm expiresAt 01:07:32Z), `bidder_association_expired_release` 01:17:32Z, released in 1 s,
   `vm.terminated` pinned (`termination-payload-8719af6146077f7514b9d08be02b4c4e`, cid
   `bafyreiht6bbyzcvfy4jfakpzqrkdp6tn7os6mi6cetmlq44eefmqwidjoi`, `expired`, no `request` ref), requester `release` ->

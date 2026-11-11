@@ -127,7 +127,7 @@ walk(A): queue=[(A, d=0, path=[A], exp=inf)]; seen={A}; lookups=0
 - principal: R2 for its co-located accounts and VM agents (R2 writes the endorsement + grant in its own repo); the renter for R2 (after the nonce check)
 - the renter's rotation key reaches the VM as a public did:key in the secrets bundle (`identity.rotationKey`); its private half never leaves the renter (Go: the requester component's `<state>/components/Requester-requester/plc-rotation.key`, k256, 0600, made on first use, a copy of the local PDS's `plc-rotation.key` when there is one; pkg/embedded: the same path under `Config.StateDir`; atlibs: the host's sealed did:key)
 - release: principal deletes endorsement + grant, tombstone (localPDS key; the renter's key when the VM is gone: after deleting its grant the renter waits up to 2 m, none after vm.terminated, then tombstones R2 and the DIDs R2 listed in `associationRequest.accounts` whose head op says the right agent-of and holds its key; best effort). nothing ran: grant expiry + contract Held + bidder cap end trust
-- cost per agent: 2 PLC ops (genesis, tombstone; permanent public log), 4 record ops, localPDS share; VM RAM/boot: [measured](#vm-cost)
+- cost per agent: 2 PLC ops (genesis, tombstone; permanent public log), 4 record ops, localPDS share; VM RAM/boot: [measured](#vm-cost) (2026-11-11: every agent and R2 DID of 0004 / 0005 had exactly 2 ops in its PLC log, the last `plc_tombstone`)
 
 Genesis (agent co-located with R2):
 
@@ -149,14 +149,14 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 
 | item | reading | command (`R` = renter state dir, `NAME` = invocation) |
 |---|---|---|
-| R2 + localPDS RSS | (measured at 0004/0005) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'ps -u r2 -o rss= \| awk "{s+=\$1} END {print s/1024}"'` (MiB, every process of user `r2`: R2's socialweb-computer, its kcp, PDS, user systemd) |
-| R2 unit cgroup | (measured at 0004/0005) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'systemctl show socialweb-r2.service -p MemoryCurrent'` |
-| per-agent share | (measured at 0004/0005) | both rows above once on a `run request --guest-requester` VM without `--colocated` and once on a `run request --agent` VM; the difference |
-| boot: renter start | (measured at 0004) | `head -1 run.log` of `socialweb-computer run request --agent ... 2>&1 \| tee run.log` |
-| boot: Held + R2 verified | (measured at 0004) | `grep -m1 -e '"phase":"Held"' -e requester_guest_requester "$R/requests/$NAME/logs/core.log"` |
-| boot: agentStart | (measured at 0004) | `grep -m1 'run request agent' run.log` (`socialweb-computer run request agent "$NAME"` posts guest.agentStart) |
-| boot: guest unit start | (measured at 0004) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'journalctl -u atirc-agent.service -o short-iso \| head -1'` |
-| boot: agent online | (measured at 0004) | on the owner node: `atirc mesh sub --others 2>&1 \| grep -m1 "<nick> online"` (time from the line's timestamp, or `ts` from moreutils) |
+| R2 + localPDS RSS | 1482 MiB (agent VM, R2 identity-only + 1 agent, associated; kcp 751, socialweb-computer 234 + 188 + 62, bao 94, kine 72); 1778 MiB unassociated (R2 waiting for its ref); 12.6 MiB before R2 starts; guest used 1371 of 3939 MiB | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'ps -u r2 -o rss= \| awk "{s+=\$1} END {print s/1024}"'` (MiB, every process of user `r2`: R2's socialweb-computer, its kcp, PDS, user systemd) |
+| R2 unit cgroup | 1528836096 B (1458 MiB) associated, 1978437632 B (1887 MiB) unassociated; the agent unit itself (`atirc-agent.service`, claude harness) 532598784 B (508 MiB) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'systemctl show socialweb-r2.service -p MemoryCurrent'` |
+| per-agent share | not measured: 0005's R2 without `--colocated` failed before a reading (its `--agent` contract refused, R2 retired) | both rows above once on a `run request --guest-requester` VM without `--colocated` and once on a `run request --agent` VM; the difference |
+| boot: renter start | 13:15:27Z (0004, 2026-11-11, pdsAccount renter) | `head -1 run.log` of `socialweb-computer run request --agent ... 2>&1 \| tee run.log` |
+| boot: Held + R2 verified | Held 13:16:49Z (+82 s, `"phase":"Held"` in run.log); R2 reported 13:17:35.5Z (+29 s after agentStart); R2 verified only after the association ref reached it by hand (13:19:14Z): not a clean reading | `grep -m1 -e '"phase":"Held"' run.log`; `grep -m1 requester_guest_requester "$R/requests/$NAME/dev/$NAME/logs/core.log"` (R2 starts at agentStart) |
+| boot: agentStart | 13:17:06Z (+17 s after Held, posted by hand) | `grep -m1 'run request agent' run.log` (`socialweb-computer run request agent "$NAME"` posts guest.agentStart) |
+| boot: guest unit start | 13:17:06Z (same second) | `socialweb-computer run request ssh "$NAME" --state-dir "$R" --exec 'journalctl -u atirc-agent.service -o short-iso \| head -1'` |
+| boot: agent online | 13:20:55Z: not a clean reading (the ref copied by hand 13:19:07Z, the owner node restarted with `--peer` 13:19:38Z, online 77 s later) | on the owner node: `atirc mesh sub --others 2>&1 \| grep -m1 "<nick> online"` (time from the line's timestamp, or `ts` from moreutils) |
 
 ## Q2: Identities
 

@@ -12,7 +12,18 @@ is tombstoned.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md)
 
 - Plan [0036](../plans/0036-record-association.yaml) item V1 (A4-A8)
-- Last pass: part A rc128 cascade 2026-10-30 20:34Z (atirc-dev confirmed server-side); part B 2026-11-10 (see its end).
+- Last run: 2026-11-11 13:32-13:38Z, kcp e496cbff (release d9438c15), no bidders list (winner hat-8), alice pdsAccount (QR
+  renters cannot endorse R2 on this release: [0004](0004-vm-atirc-agent.md) last run (1)): **FAIL**. Outer Held 13:34:01Z;
+  no `requester_atirc_minted` (no r2 token any more); `run request r2 --r2-name r2-v1 --agent --hold` 13:34:03Z; R2 reported
+  13:34:31Z; `requester_association_written` 13:34:32Z (grant contract-scoped + endorsement at rkey = R2 DID). R2 then waits
+  for the ref forever: `/run/socialweb-r2/association-ref` stays empty because the guest agent mirrors it only when
+  `r2-atirc.env` is non-empty (same bug as 0004). With the ref copied by hand (a workaround: not a pass) R2 verified in 3 s
+  and went Ready, and its `--agent` contract failed at once: `refused: the atirc agent needs a requester handle that resolves
+  to <R2 DID>` (R2 handles never resolve, design decision 10); R2 exited and retired. Release of the outer contract:
+  `requester_guest_requester_released` true in 2.3 s, `requester_association_deleted`, `requester_guest_dids_tombstoned`,
+  `requester_contract_records_deleted` 14/14; the grant and endorsement RecordNotFound x3; R2 `plc_tombstone` (2 PLC ops);
+  host empty. Part B not run (blocked by the same mirror)
+- Earlier pass: part A rc128 cascade 2026-10-30 20:34Z (atirc-dev confirmed server-side); part B 2026-11-10 (see its end).
   Both predate the ident.link cut-over (old-shape association, mirror, peer `lease`): not yet re-run on the records below
 
 ```mermaid
@@ -93,6 +104,7 @@ rec "$R2" com.publicdomainrelay.temp.market.associationRequest "$ALICE" # {princ
 curl -s "https://plc.directory/$R2" | jq -c .alsoKnownAs                # at://<R2 handle>, https://ident.link/agent-of/$ALICE
 curl -s "https://plc.directory/$R2/data" | jq -c .rotationKeys          # [renter key, VM localPDS key]; an OAuth renter: [VM localPDS key]
 socialweb-computer internal association "$R2" | jq -c '{roots, expiresAt, errors}'   # roots [ALICE]
+# the renter's core log: $R/requests/$NAME/dev/$NAME/logs/core.log while it runs, $R/requests/$NAME/logs/core.log after
 ```
 
 Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid on R2 RFP 17:16:09 -> R2 joined channel 17:16:38. Cascade revoke ~32 s after outer release.
@@ -112,14 +124,14 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
    [`at://mesh1.<R2 handle>`, `https://ident.link/agent-of/<R2 DID>`], `/data` rotationKeys as R2's;
    `socialweb-computer internal association "$M"` exits 0, roots [owner DID], ancestors R2 (depth 1) and owner (depth 2).
 4. Release the outer contract: for R2 and mesh1 `curl -s -o /dev/null -w '%{http_code}' https://plc.directory/<did>` is
-   410 and `/<did>/log/last` is `plc_tombstone`; the owner's endorsement and grant at rkey = R2 DID are RecordNotFound (3 reads).
+   404 and `/<did>/log/last` is `plc_tombstone`; the owner's endorsement and grant at rkey = R2 DID are RecordNotFound (3 reads).
 5. Out-of-band loss (a second round): delete the outer ComputeVM on its bidder (0007) without a release;
    `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated`. With the bidder down
    instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). R2 never retires (its VM is
    gone), so on the bidder's vm.terminated the owner's requester tombstones both DIDs with its own rotation key (first in
    their rotationKeys): `requester_tombstoned did=<R2 DID>` and `did=<mesh1 DID>` with `key=<renter did:key>` (none
    while R2 still runs: `requester_guest_dids_tombstoned by=the guest`), then for both `curl -s -o /dev/null -w '%{http_code}'
-   https://plc.directory/<did>` is 410 and `/<did>/log/last` is `plc_tombstone`; `requester_tombstone_skipped` names the
+   https://plc.directory/<did>` is 404 and `/<did>/log/last` is `plc_tombstone`; `requester_tombstone_skipped` names the
    reason when it does not (no agent-of, or the renter key is not a rotation key). The owner's requester logs
    `requester_contract_records_deleted`: its accept, rfp, compute.vm, contract-scoped grant + endorsement and
    rbac record are RecordNotFound within seconds. A policy with `association.maxDepth: 1` denies mesh1 (one link only).
@@ -168,4 +180,6 @@ bidder queues the guest event for R2's nested VM, and the release again leaves n
 | R2 token alive after release | revoke ran in a goroutine after Released and the CLI stopped kcp (rc126); fixed rc127 |
 | cross-contract clobber / impersonation via authority vouch | review HIGHs fixed: nonce proof record in the R2 repo; a grant at rkey = R2 DID bound to another contract is refused (`is bound to another contract`) |
 | R2 Ready but its RFPs denied, `internal association <R2>` no roots | the renter's endorsement is missing: `requester_endorsement_skipped` (the optional scope); sign the renter in again |
+| R2 waits for the association ref forever | `/run/socialweb-r2/association-ref` empty: the guest agent mirrors the ref only with a non-empty `r2-atirc.env` (kcp e496cbff); open |
+| R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | the requester's agent check still wants a resolving handle; R2 handles never resolve (kcp e496cbff); open |
 | denied accept, no receipt, guest stays | bounded denied-accept release (A8) |
