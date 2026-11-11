@@ -189,7 +189,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | guest has no `atirc mesh` | the bidder serves an older socialweb-guest-downloads; roll the bidder to a build with the `assets.atirc` cargosrc pin |
 | oauthQr bidder SessionExpired after rollout | scope added to Bidder/RequesterOAuthScope: re-sign every OAuth identity (announce before tagging) |
 | harness never answers | the harness exited (journalctl -u atirc-agent), claude still installing (give it ~1 min), or a wrong model / baseUrl / apiKey in the agent config |
-| `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | the renter writes the endorsement with putRecord; the optional scope grants create + delete only (kcp e496cbff, OAuth renters); open |
-| R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | the guest agent mirrors the ref only when `r2-atirc.env` is non-empty; `--agent` contracts are token-less (kcp e496cbff); open |
-| release takes 24 min, `requester_guest_requester_release_timeout` | an identity-only R2 never answers r2Release (kcp e496cbff); open |
+| `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | the renter writes the endorsement with putRecord; the optional scope grants create + delete only (kcp e496cbff, OAuth renters); fixed in 94c4b74b (createRecord), re-run pending |
+| R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | the guest agent mirrors the ref only when `r2-atirc.env` is non-empty; `--agent` contracts are token-less (kcp e496cbff); fixed in 982ba545, re-run pending |
+| release takes 24 min, `requester_guest_requester_release_timeout` | an identity-only R2 never answers r2Release (kcp e496cbff); fixed in 51a9bbb8 (answer on stop, renter waits 2 min), re-run pending |
 | release after page reload slow (20-38 s) | requester start after boot + release not first; fixed rc134 (release-first on resume, ~17 s click -> Released) |

@@ -180,6 +180,6 @@ bidder queues the guest event for R2's nested VM, and the release again leaves n
 | R2 token alive after release | revoke ran in a goroutine after Released and the CLI stopped kcp (rc126); fixed rc127 |
 | cross-contract clobber / impersonation via authority vouch | review HIGHs fixed: nonce proof record in the R2 repo; a grant at rkey = R2 DID bound to another contract is refused (`is bound to another contract`) |
 | R2 Ready but its RFPs denied, `internal association <R2>` no roots | the renter's endorsement is missing: `requester_endorsement_skipped` (the optional scope); sign the renter in again |
-| R2 waits for the association ref forever | `/run/socialweb-r2/association-ref` empty: the guest agent mirrors the ref only with a non-empty `r2-atirc.env` (kcp e496cbff); open |
-| R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | the requester's agent check still wants a resolving handle; R2 handles never resolve (kcp e496cbff); open |
+| R2 waits for the association ref forever | `/run/socialweb-r2/association-ref` empty: the guest agent mirrors the ref only with a non-empty `r2-atirc.env` (kcp e496cbff); fixed in 982ba545, re-run pending |
+| R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | the requester's agent check still wants a resolving handle; R2 handles never resolve (kcp e496cbff); fixed in e9f1de4a (identlink.HandleOK), re-run pending |
 | denied accept, no receipt, guest stays | bounded denied-accept release (A8) |
