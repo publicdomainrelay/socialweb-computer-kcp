@@ -11,7 +11,8 @@ node of the owner reaches the agent (walk: agent -> R2 -> renter) and the agent 
 endorsements and grants and tombstones both DIDs.
 
 - An invocation that asks for no R2 starts R2 identity-only (no RFP, no nested VM) with the agent as its co-located
-  account: implementation in progress; the steps below describe that flow
+  account (`run request --agent` implies `--associate guest`; the guest agent starts socialweb-r2.service with
+  `R2_IDENTITY=1` and `R2_COLOCATED=<nick>=<agent iroh ticket>` from `/etc/socialweb-computer/r2-agent.env`)
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
