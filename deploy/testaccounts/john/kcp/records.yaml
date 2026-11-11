@@ -1,0 +1,27 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-john-grant-7q5lnitx
+  labels:
+    socialweb.computer/testaccount: john
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-5svqtrhheairglgiiyvutzik}
+  collection: com.publicdomainrelay.temp.market.association
+  rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq"
+  deletionPolicy: Retain
+  record: {"$type": "com.publicdomainrelay.temp.market.association", "agent": "did:plc:7q5lnitxv4meizdon5fmhzrq", "createdAt": "2026-11-11T00:00:00Z"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-john-endorse-7q5lnitx
+  labels:
+    socialweb.computer/testaccount: john
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-5svqtrhheairglgiiyvutzik}
+  collection: link.ident.endorsement
+  rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq"
+  deletionPolicy: Retain
+  record: {"$type": "link.ident.endorsement", "agent": "did:plc:7q5lnitxv4meizdon5fmhzrq"}

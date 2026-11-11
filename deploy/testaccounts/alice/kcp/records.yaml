@@ -29,16 +29,30 @@ spec:
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
 metadata:
-  name: testaccount-alice-claim-requester-jjcsg5fg
+  name: testaccount-alice-grant-jjcsg5fg
   labels:
     socialweb.computer/testaccount: alice
     socialweb.computer/declared-state: testaccounts
 spec:
   repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-lpfuqerea3deuoyrn7ojser4}
-  collection: com.publicdomainrelay.temp.badgeBlueKeys
-  rkey: requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72
+  collection: com.publicdomainrelay.temp.market.association
+  rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72"
   deletionPolicy: Retain
-  record: {"$type": "com.publicdomainrelay.temp.badgeBlueKeys", "challenge": "did:plc:lpfuqerea3deuoyrn7ojser4", "createdAt": "2026-10-23T17:29:25.476Z", "keyId": "did:plc:jjcsg5fg3ujd22ywuxg4lr72", "name": "requester-uxg4lr72", "nonce": "90bfe97940824e50a45cf1c3273496a1", "service": "requester_associate"}
+  record: {"$type": "com.publicdomainrelay.temp.market.association", "agent": "did:plc:jjcsg5fg3ujd22ywuxg4lr72", "createdAt": "2026-11-11T00:00:00Z"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-alice-endorse-jjcsg5fg
+  labels:
+    socialweb.computer/testaccount: alice
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-lpfuqerea3deuoyrn7ojser4}
+  collection: link.ident.endorsement
+  rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72"
+  deletionPolicy: Retain
+  record: {"$type": "link.ident.endorsement", "agent": "did:plc:jjcsg5fg3ujd22ywuxg4lr72"}
 ---
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
@@ -67,20 +81,6 @@ spec:
   rkey: self
   deletionPolicy: Retain
   record: {"$type": "sh.tangled.actor.profile", "avatar": {"$type": "blob", "mimeType": "image/png", "ref": {"$link": "bafkreieyrc34rjwttsk2wyjh37prtr6uzppnp44gxp2wsqkbhyyrzu5s3u"}, "size": 22120}, "bluesky": false}
----
-apiVersion: socialweb.computer/v1alpha1
-kind: AtprotoRecord
-metadata:
-  name: testaccount-alice-atirc-operator
-  labels:
-    socialweb.computer/testaccount: alice
-    socialweb.computer/declared-state: testaccounts
-spec:
-  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-lpfuqerea3deuoyrn7ojser4}
-  collection: com.fedfork.irc.agentOperator
-  rkey: self
-  deletionPolicy: Retain
-  record: {"$type": "com.fedfork.irc.agentOperator", "createdAt": "2026-10-30T07:28:59Z", "owner": "did:plc:5svqtrhheairglgiiyvutzik"}
 ---
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord

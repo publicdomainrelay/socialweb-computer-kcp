@@ -1,0 +1,52 @@
+account: john
+role: bidder operator
+handle: johnandersen777.bsky.social
+did: did:plc:5svqtrhheairglgiiyvutzik
+pds: https://morel.us-east.host.bsky.network
+repo: repo-did-plc-5svqtrhheairglgiiyvutzik
+labels:
+  socialweb.computer/testaccount: john
+  socialweb.computer/declared-state: testaccounts
+apply:
+  kcp: the prod bidder host kcp of hat-7 (bidder did:plc:7q5lnitxv4meizdon5fmhzrq, localRepo; john signed in as its operator by OAuth, bidder.md MarketIdentity operator)
+  identity: MarketIdentity operator
+  workspace: root
+  objects: kcp/
+  fieldManager: socialweb.computer/testaccounts
+counterparties:
+  bob: did:plc:ocnuqjlzgohypj3zoznermms
+  alice: did:plc:lpfuqerea3deuoyrn7ojser4
+  bidderHosts:
+    - did:plc:7q5lnitxv4meizdon5fmhzrq
+oauthScopes:
+  - name: operator
+    source: docs/bidder.md MarketIdentity operator spec.sessionScope, plus the grant collection
+    scopes:
+      - atproto
+      - repo:sh.tangled.graph.vouch?action=create&action=update
+      - repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete
+optionalScopes:
+  - "repo:link.ident.endorsement?action=create&action=delete"
+declared:
+  - {object: testaccount-john-grant-7q5lnitx, collection: com.publicdomainrelay.temp.market.association, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: pending, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
+  - {object: testaccount-john-endorse-7q5lnitx, collection: link.ident.endorsement, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: pending, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
+runtimeOwned: []
+migration:
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-plc-7q5lnitxv4meizdon5fmhzrq", why: "old operator claim; replaced by the endorsement + standing grant at rkey = agent DID"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-z2o7m72gveise2ja4vbo4goq", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-if3ivz5bevo5qby4a5oxksy7", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-fs2tpkl4xrlsjf4hitl4fpuo", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-6f2462uc37dusp3oitwff5mt", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-23thtxu3nucxbrapvvulnebj", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-plc-s7c2up4gmrma7as2qonrufeq", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-plc-ibqsvcmt2xyzn7kklelmkfhr", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-key-zQ3shuHc1Cd9P1WBk3Fne59ABpxoAmXuLDnt17mSy1enXH8X9", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-key-zQ3shk7D7uqbiCAEu2bFKU8ZYcpm26f82XcvFrvjcEUGCQs4q", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-key-zQ3shbzxkcC61Jf9Pza6x8uN84dRWEbHq2eFUmGSLGQnFrCJE", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-key-zQ3shMQpkdFA47hKctSGnncSiCYHtFt2KSjtMhMXtJU8kj62P", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.fedfork.irc.agents, rkey: "did:plc:ocnuqjlzgohypj3zoznermms", why: "removed owner graph; replaced by endorsement + grant"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.fedfork.irc.agents, rkey: "did:plc:lpfuqerea3deuoyrn7ojser4", why: "removed owner graph; replaced by endorsement + grant"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.fedfork.irc.agents, rkey: "did:plc:j4yw65srpdumubaadp7ijmy5", why: "removed owner graph; replaced by endorsement + grant"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: sh.tangled.graph.vouch, rkey: "did:plc:j4yw65srpdumubaadp7ijmy5", why: "hat is dead (404 on plc.directory); its vouch goes"}
+  - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.market.bidderAssociation, rkey: "<TID>", why: "scope removed; listRecords then delete every rkey (40 on 2026-11-10)"}
+  - {repo: "did:plc:7q5lnitxv4meizdon5fmhzrq", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "association", why: "old association mirror in the bidder repo; replaced by agent-of in its DID doc", writer: "hat-7 local PDS (the bidder's own session)"}

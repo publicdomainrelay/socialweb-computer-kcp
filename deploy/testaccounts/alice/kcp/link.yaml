@@ -20,9 +20,9 @@ spec:
     - name: repo.write
       scope:
         - sh.tangled.graph.vouch
-        - com.publicdomainrelay.temp.badgeBlueKeys
+        - com.publicdomainrelay.temp.market.association
+        - link.ident.endorsement
         - app.bsky.actor.profile
         - sh.tangled.actor.profile
-        - com.fedfork.irc.agentOperator
         - bot.did.registration
         - com.publicdomainrelay.temp.auth.allowlist.rbacDid

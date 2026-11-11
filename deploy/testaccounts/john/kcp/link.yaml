@@ -1,0 +1,23 @@
+apiVersion: exposure.socialweb.computer/v1alpha1
+kind: ComponentLink
+metadata:
+  name: testaccount-john-records
+  labels:
+    socialweb.computer/testaccount: john
+    socialweb.computer/declared-state: testaccounts
+spec:
+  from:
+    selector:
+      group: socialweb.computer
+      kind: AtprotoRecord
+      matchLabels:
+        socialweb.computer/testaccount: john
+  to:
+    group: socialweb.computer
+    kind: AtprotoRepo
+    name: repo-did-plc-5svqtrhheairglgiiyvutzik
+  capabilities:
+    - name: repo.write
+      scope:
+        - com.publicdomainrelay.temp.market.association
+        - link.ident.endorsement

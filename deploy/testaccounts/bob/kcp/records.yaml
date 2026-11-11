@@ -15,30 +15,58 @@ spec:
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
 metadata:
-  name: testaccount-bob-claim-bidder-4vcig7s4
+  name: testaccount-bob-grant-4vcig7s4
   labels:
     socialweb.computer/testaccount: bob
     socialweb.computer/declared-state: testaccounts
 spec:
   repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
-  collection: com.publicdomainrelay.temp.badgeBlueKeys
-  rkey: bidder_associate-did-plc-4vcig7s43z3nyqrnepmcfzqt
+  collection: com.publicdomainrelay.temp.market.association
+  rkey: "did:plc:4vcig7s43z3nyqrnepmcfzqt"
   deletionPolicy: Retain
-  record: {"$type": "com.publicdomainrelay.temp.badgeBlueKeys", "challenge": "did:plc:ocnuqjlzgohypj3zoznermms", "createdAt": "2026-10-23T17:23:25.492Z", "keyId": "did:plc:4vcig7s43z3nyqrnepmcfzqt", "name": "bidder-epmcfzqt", "nonce": "254f1b9384cc47d2b7bf8e3bfd11b6e0", "service": "bidder_associate"}
+  record: {"$type": "com.publicdomainrelay.temp.market.association", "agent": "did:plc:4vcig7s43z3nyqrnepmcfzqt", "createdAt": "2026-11-11T00:00:00Z"}
 ---
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
 metadata:
-  name: testaccount-bob-claim-bidder-2l2wdry7
+  name: testaccount-bob-endorse-4vcig7s4
   labels:
     socialweb.computer/testaccount: bob
     socialweb.computer/declared-state: testaccounts
 spec:
   repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
-  collection: com.publicdomainrelay.temp.badgeBlueKeys
-  rkey: bidder_associate-did-plc-2l2wdry77c7jtucbslstagkj
+  collection: link.ident.endorsement
+  rkey: "did:plc:4vcig7s43z3nyqrnepmcfzqt"
   deletionPolicy: Retain
-  record: {"$type": "com.publicdomainrelay.temp.badgeBlueKeys", "challenge": "did:plc:ocnuqjlzgohypj3zoznermms", "createdAt": "2026-10-23T17:23:24.563Z", "keyId": "did:plc:2l2wdry77c7jtucbslstagkj", "name": "bidder-slstagkj", "nonce": "2a6f96bdbfde455bb21192d60939abe1", "service": "bidder_associate"}
+  record: {"$type": "link.ident.endorsement", "agent": "did:plc:4vcig7s43z3nyqrnepmcfzqt"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-grant-2l2wdry7
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: com.publicdomainrelay.temp.market.association
+  rkey: "did:plc:2l2wdry77c7jtucbslstagkj"
+  deletionPolicy: Retain
+  record: {"$type": "com.publicdomainrelay.temp.market.association", "agent": "did:plc:2l2wdry77c7jtucbslstagkj", "createdAt": "2026-11-11T00:00:00Z"}
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: AtprotoRecord
+metadata:
+  name: testaccount-bob-endorse-2l2wdry7
+  labels:
+    socialweb.computer/testaccount: bob
+    socialweb.computer/declared-state: testaccounts
+spec:
+  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
+  collection: link.ident.endorsement
+  rkey: "did:plc:2l2wdry77c7jtucbslstagkj"
+  deletionPolicy: Retain
+  record: {"$type": "link.ident.endorsement", "agent": "did:plc:2l2wdry77c7jtucbslstagkj"}
 ---
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
@@ -67,20 +95,6 @@ spec:
   rkey: self
   deletionPolicy: Retain
   record: {"$type": "sh.tangled.actor.profile", "avatar": {"$type": "blob", "mimeType": "image/png", "ref": {"$link": "bafkreidixoyshftoztftc3tssjyxvshevbjvukashv5axqdwqhtfhrlpve"}, "size": 17167}, "bluesky": false, "description": "Bob the Virtual Machine Builder", "links": ["https://socialweb.computer", "", "", "", ""], "location": "", "preferredHandle": "", "pronouns": "he/him", "stats": ["", ""]}
----
-apiVersion: socialweb.computer/v1alpha1
-kind: AtprotoRecord
-metadata:
-  name: testaccount-bob-atirc-operator
-  labels:
-    socialweb.computer/testaccount: bob
-    socialweb.computer/declared-state: testaccounts
-spec:
-  repoRef: {group: socialweb.computer, kind: AtprotoRepo, name: repo-did-plc-ocnuqjlzgohypj3zoznermms}
-  collection: com.fedfork.irc.agentOperator
-  rkey: self
-  deletionPolicy: Retain
-  record: {"$type": "com.fedfork.irc.agentOperator", "createdAt": "2026-10-30T07:29:05Z", "owner": "did:plc:5svqtrhheairglgiiyvutzik"}
 ---
 apiVersion: socialweb.computer/v1alpha1
 kind: AtprotoRecord
