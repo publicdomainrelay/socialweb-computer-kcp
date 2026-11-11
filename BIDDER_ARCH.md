@@ -86,34 +86,30 @@ inherits `MarketNetworkValue.ingress` and its `dispatcher` instead.
 session into the bidder's OpenBao at `bidder/data/identity/bidder/pds-session`, and the PDS repo key
 at `bidder/data/identity/bidder/keys`. The bidder's own repo is the PDS, not the operator's repo.
 
-Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo; the
-verified operator DID lands in `MarketIdentity.status.associations`. The record shape is:
+Association is the ident.link pair + grant
+([docs/design/ident-link-associations.md](docs/design/ident-link-associations.md)): the bidder adds
+`https://ident.link/agent-of/<operator DID>` to its DID's `alsoKnownAs` (its PDS `plc-rotation.key`;
+a borrowed `at://<operator handle>` entry is dropped), and the operator's repo holds, at rkey = the
+bidder DID:
 
 ```json
-{
-  "$type": "com.publicdomainrelay.temp.badgeBlueKeys",
-  "keyId": "did:plc:<bidder>",
-  "challenge": "did:plc:<operator>",
-  "service": "bidder_associate",
-  "name": "bidder",
-  "createdAt": "2026-10-22T00:41:02Z"
-}
+{"$type": "com.publicdomainrelay.temp.market.association", "agent": "did:plc:<bidder>", "createdAt": "2026-11-11T00:00:00Z"}
+{"$type": "link.ident.endorsement", "agent": "did:plc:<bidder>"}
 ```
 
-`scripts/associate-bidder.ts` writes that record from a mode-0600 credentials file without printing
-the handle or password. The operator's `AtprotoRecordWatch/association` verifies the claim and the
-identity controller writes the operator DID into `status.associations`, setting `Associated=True`
-with reason `Associated`. With `spec.association: Skip` it sets `Associated=True` and reason
-`AssociationSkipped`. A manual patch of `spec.approvedAssociations` is a declarative workaround, not
-the accepted path:
+The bidder writes both (grant first) when it holds the operator's session (`operator-signin`, or a
+market network's operator account); otherwise `scripts/associate-bidder.ts --agent-did <bidder DID>`
+writes them from a mode-0600 credentials file without printing the handle or password. The identity
+controller walks the bidder DID (`internal/identlink`, records by `com.atproto.sync.getRecord`) and
+writes the roots into `status.associations`, setting `Associated=True` with reason `Associated`.
+Deleting the bidder removes its agent-of entry. With `spec.association: Skip` it sets
+`Associated=True` and reason `AssociationSkipped`. A manual patch of `spec.approvedAssociations` is a
+declarative workaround, not the accepted path:
 
 ```bash
 sudo kubectl --kubeconfig "$K" patch marketidentity bidder --type=merge \
   -p "{\"spec\":{\"approvedAssociations\":[\"$OPERATOR_DID\"]}}"
 ```
-
-The bidder's own `AtprotoRecord/association` is applied into the app's PDS by the `AtprotoRecord`
-controller; the record is listed by `com.atproto.repo.listRecords`.
 
 ## Live bidder instances
 
@@ -128,7 +124,7 @@ All three run the release binary at
 `MarketBidder/app` Ready. Each has its own PDS, OpenBao, DID and host guest image
 `bddc484c610e956fb7e198281cf4a19dc8c95fc441c0575f49d2a33de0c74021`.
 
-Association-record state:
+Association-record state (old `badgeBlueKeys/association` mirrors, superseded by the ident.link cut-over and deleted):
 
 - this host: `at://did:plc:vxd7pmlhw6bnpyu6wngewthn/com.publicdomainrelay.temp.badgeBlueKeys/association`,
   cid `bafyreiapgmzf3cgdmpxefzonba52xk5lo6kojkd2eijyiq2yg6jtmirjpm`

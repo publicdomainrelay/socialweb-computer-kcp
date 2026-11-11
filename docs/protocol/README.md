@@ -64,8 +64,6 @@ They appear only as Go constants and OAuth scopes. Each doc lists them where the
 | `com.publicdomainrelay.temp.market.policies.denoWorker` | `internal/policyengine/executor/executor.go` `PolicyDenoWorkerNSID` | [policy.md](policy.md) |
 | `com.publicdomainrelay.temp.compute.secrets` (getSecrets) | `internal/market/requester/secrets.go` `SecretsNSID` | [lexicons-market.md](lexicons-market.md#computesecretsgetsecrets) |
 | `com.publicdomainrelay.temp.compute.config.wif.simple` | `internal/guestidentity/bidconfig.go` `WIFSimpleNSID` | [lexicons-market.md](lexicons-market.md) |
-| `com.publicdomainrelay.temp.requester.associateConfirm` | `internal/app/compose/identity.go` `AssociateConfirmNSID` | [identity.md](identity.md#requesterassociateconfirm) |
-| `com.publicdomainrelay.temp.market.bidderAssociation` | `internal/atproto/oauth/scope.go` `CollectionBidderAssociation` | [identity.md](identity.md#marketbidderassociation) |
 | `com.publicdomainrelay.temp.auth.allowlist.rbacDid` | `internal/atproto/oauth/scope.go` `CollectionRBACDID` | [outside.md](outside.md#scope-only-collections) |
 
 ## Go Packages

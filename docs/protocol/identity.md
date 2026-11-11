@@ -16,8 +16,6 @@
 | `link.ident.endorsement` | record, key `any` (ident.link `74d22dc`, vendored) | the agent DID | principal confirms an agent, [below](#associations-identlink) |
 | `com.publicdomainrelay.temp.market.association` | record | the agent DID | the grant, [below](#associations-identlink) |
 | `com.publicdomainrelay.temp.market.associationRequest` | record | [lexicons-market.md](lexicons-market.md#marketassociationrequest) | flow [below](#contract-scoped-association) |
-| `com.publicdomainrelay.temp.requester.associateConfirm` | XRPC (no lexicon file) | - | OAuth scope only, see [below](#requesterassociateconfirm) |
-| `com.publicdomainrelay.temp.market.bidderAssociation` | collection (no lexicon file) | - | OAuth scope only, see [below](#marketbidderassociation) |
 
 ## network.attested
 
@@ -112,19 +110,9 @@ One collection, two uses. Each has its own rkey and `service`.
 
 - the guest requester R2 is an agent of the renter for one contract: grant `contract` = the renter's `market.accept`, `expiresAt` = the contract deadline
 - `market.associationRequest {principal, contract, nonce}` in the guest repo, rkey = principal DID: the principal endorses only the DID that answered this contract's nonce
-- writers (requester `association.go`, compose `records.go`/`peer.go`, `agentpeer.go`) still write the old shapes until the writer cut-over
+- writers: requester `association.go` (renter: grant + endorsement at rkey = R2 DID after the nonce check), compose `records.go` (operator pair, agent-of), compose `peer.go` (R2: its co-located accounts' grant + endorsement, their peer records without `lease`)
+- the renter writes no VM agent peer record and no self-association; the bundle entry `/etc/socialweb-computer/association-request.json` is {principal, contract, nonce, rotationKey}
 - guest events of this flow (`requesterDid`, `r2Start`, `r2Release`, `r2Released`): [guest-events.md](guest-events.md)
-
-## requester.associateConfirm
-
-- NSID `com.publicdomainrelay.temp.requester.associateConfirm`, constant `AssociateConfirmNSID` (`internal/app/compose/identity.go`)
-- only an OAuth rpc scope: `RPCAssociateConfirm`, in `DIDKeyAssociatorOAuthScope` (`internal/atproto/oauth/scope.go`)
-- meant as the fast path for an allow-listed operator (`docs/ARCHITECTURE.md`); no Go server or caller
-
-## market.bidderAssociation
-
-- NSID `com.publicdomainrelay.temp.market.bidderAssociation`, constant `CollectionBidderAssociation` (`internal/atproto/oauth/scope.go`)
-- create scope on the bidder and desktop sets only. no lexicon file, no writer, no reader in Go
 
 ## Sign-In
 
@@ -134,7 +122,7 @@ One collection, two uses. Each has its own rkey and `service`.
 |---|---|---|---|
 | `localRepo` | the app's own Pds component | none | in-process PDS (`internal/pds/local`) |
 | `pdsAccount` | a PDS account, password in the vault | app password | `com.atproto.server.createSession`, `refreshSession` |
-| `oauthQr` | user's PDS | QR session transfer at qr.fedfork.com (5 min) | OAuth (DPoP), scope `DIDKeyAssociatorOAuthScope` |
+| `oauthQr` | user's PDS | QR session transfer at qr.fedfork.com (5 min) | OAuth (DPoP), scope `QROAuthScope` |
 | `oauthBrowser` | user's PDS | authorize URL in `status.pendingAction` | OAuth |
 | `oauthDelegated` | user's PDS | session handed in by another app | OAuth |
 | `oauthSessionProxy` | user's PDS | a session another component stored in OpenBao (`auth/atproto session/<did>`) | OAuth |

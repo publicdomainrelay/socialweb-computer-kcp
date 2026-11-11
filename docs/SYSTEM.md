@@ -155,8 +155,9 @@ flowchart LR
 | `market.accept` | requester | requester | the chosen bid (no payload record) |
 | `market.receipt` | bidder | bidder | bidder took the accept; payload = the RFP compute.vm ref |
 | `market.event` + `compute.events.vm.*`, `compute.events.guest.*` | both | sender | lifecycle: vm.hostKeys, vm.onNetwork, vm.delete, vm.terminated, guest.* |
-| `market.association`, `market.associationRequest` | requester | requester / guest requester | contract-scoped association (guest requester R2) |
-| `badgeBlueKeys` | operator / user | operator / user | key claims: bidder association (`bidder_associate`), requester association, ssh key claims |
+| `market.association`, `link.ident.endorsement` | principal (operator, renter, R2) | principal | the grant + the ident.link endorsement of an agent, rkey = agent DID ([design/ident-link-associations.md](design/ident-link-associations.md)) |
+| `market.associationRequest` | guest requester R2 | R2 | {principal, contract, nonce}, rkey = principal DID |
+| `badgeBlueKeys` | signer / user | signer / user | key bindings: signer key binding, ssh key claims |
 | `sh.tangled.graph.vouch` | operators, users | voucher | trust edge read by tangled-vouch policies |
 | `computer.socialweb.infra`, `computer.socialweb.ephemeralInfra` | the owner's kcp (infra controller: CLI, gateway, page, iOS) | owner | the record of an Infra / EphemeralInfra object (two-way sync); per-account index at rkey `self`; never deleted ([protocol/infra.md](protocol/infra.md)) |
 
@@ -337,10 +338,10 @@ flowchart TD
 
 ### Associations
 
-- bidder/requester DID tied to operator: one `badgeBlueKeys` record in the operator repo (`challenge` = operator DID, `keyId` = app DID, service `bidder_associate` / requester)
-- `AtprotoRecordWatch/association` verifies; MarketIdentity `status.associations` reports. no manual patch
-- written by `scripts/associate-bidder.ts`
-- contract-scoped association (R2): `market.association` at rkey `requester_associate-<sha256(subject)[:32]>-<accept rkey>`
+- ident.link pair + grant: agent DID doc `https://ident.link/agent-of/<principal DID>`; principal repo `link.ident.endorsement` + `market.association` at rkey = agent DID ([design/ident-link-associations.md](design/ident-link-associations.md))
+- the identlink walk (`internal/identlink`, `sync.getRecord`, CAR verified) decides; MarketIdentity `status.associations` reports the roots. no manual patch
+- standing (bidder hosts, gateway requester): written by the app with the operator's session, or `scripts/associate-bidder.ts --agent-did <did>`
+- contract-scoped (R2, co-located accounts, VM agents): grant `{agent, contract, expiresAt}`, after the R2 nonce check
 
 ### Service auth
 
@@ -473,7 +474,7 @@ flowchart LR
   - bid: `market.BidRKey` per RFP
   - offering: `self`
   - infra index: `computer.socialweb.infra/self`
-  - association: `requester_associate-<sha256>-<accept rkey>`
+  - grant, endorsement: the agent DID
   - ssh key claim: `keyRkey`
 - `listRecords` remains only as a legacy fallback (e.g. a ComputeVM accepted before stable rkeys)
 - progress fields write at most once a minute (no churn commits)

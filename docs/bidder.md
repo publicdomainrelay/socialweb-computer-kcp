@@ -76,12 +76,15 @@ bidder` creates the PDS account and writes the DID into `MarketIdentity/bidder`,
 bidder's OpenBao and the repo key there too. `-- --atproto-oauth-qr` signs in an existing account
 instead; that account's PDS holds the repo and the bidder runs no local PDS.
 
-Association is one `com.publicdomainrelay.temp.badgeBlueKeys` record in the operator's repo with
-`challenge` the operator DID, `keyId` the bidder DID and service `bidder_associate`.
-`scripts/associate-bidder.ts` writes the record from a mode-0600 credentials file and prints neither
-handle nor password. The application's `AtprotoRecordWatch/association` verifies it and the identity
-controller writes the operator DID into `MarketIdentity.status.associations`; no manual patch is
-needed. `spec.approvedAssociations` is the declarative workaround, not the accepted path.
+Association is the ident.link pair + grant ([design/ident-link-associations.md](design/ident-link-associations.md)):
+the bidder adds `https://ident.link/agent-of/<operator DID>` to its DID's `alsoKnownAs` (its PDS
+`plc-rotation.key`; a borrowed `at://<operator handle>` entry is dropped), and the operator's repo holds
+`com.publicdomainrelay.temp.market.association/<bidder DID>` {agent, createdAt} and
+`link.ident.endorsement/<bidder DID>` {agent}. With `operator-signin` (below) the bidder writes both,
+grant first; otherwise `scripts/associate-bidder.ts` writes them from a mode-0600 credentials file and
+prints neither handle nor password. The identity controller walks the bidder DID and writes the
+operator DID into `MarketIdentity.status.associations`; no manual patch is needed.
+`spec.approvedAssociations` is the declarative workaround, not the accepted path.
 
 ```bash
 HANDLE=bobvmbuilder.bsky.social
@@ -90,11 +93,13 @@ CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
 K=$(sudo sh -c "ls -t $STATE/handles/*/kcp/front.json" | head -1 | sed s,front.json,admin.kubeconfig,)
 BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
+deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --agent-did "$BIDDER_DID"
+socialweb-computer internal association "$BIDDER_DID" | jq -c '{roots, errors}'   # roots [operator DID]
 ```
 
-A requester association uses the same helper with `--requester-did`; the helper derives service
-`requester_associate`.
+A requester association uses the same helper with the requester's DID. `--remove` deletes the
+endorsement, then the grant. A missing agent-of entry: `socialweb-computer identity agent-of add
+<operator DID> --did "$BIDDER_DID" --pds-state-dir <bidder Pds stateDir> --drop-borrowed-handle`.
 
 Non-association mode: patch the root object and let the controller reconcile it. It sets
 `Associated=True` with reason `AssociationSkipped` and writes no record.
@@ -106,9 +111,8 @@ sudo kubectl --kubeconfig "$K" patch marketbidder app --type=merge \
   -p '{"spec":{"identity":{"association":"Skip"}}}'
 ```
 
-The bidder's own `AtprotoRecord/association` is applied through the app's PDS by the `AtprotoRecord`
-controller. The helper writes the operator's claim once; the verified claim is the proof, and the
-identity reports `Associated=True`.
+Deleting the bidder removes its agent-of entry. The helper writes the operator's records once; when the
+walk reaches the operator, the identity reports `Associated=True`.
 
 ### Operator sign-in: the operator's vouches from the bidder kcp
 
@@ -125,12 +129,15 @@ in the bidder kcp, as in a market network. Set it once:
 It composes, in the bidder's workspace, the names a market network uses:
 
 - `MarketIdentity operator`: mode `oauthQr`, `spec.sessionScope` `atproto
-  repo:sh.tangled.graph.vouch?action=create&action=update` (the scope the identity checks and asks for; nothing
-  else), the session at `<mount>/identity/operator/oauth-session` of the bidder's OpenBao, association `Skip`;
+  repo:sh.tangled.graph.vouch?action=create&action=update
+  repo:com.publicdomainrelay.temp.market.association?action=create&action=update&action=delete
+  repo:link.ident.endorsement?action=create&action=delete` (the scope the identity checks and asks for; nothing
+  else; without the endorsement scope the bidder logs `operator_endorsement_skipped` and stays unassociated), the session at `<mount>/identity/operator/oauth-session` of the bidder's OpenBao, association `Skip`;
   the transferred QR session must be the named account
 - once it is Ready: `RemotePDS operator-<hash>` (its PDS), `RemoteRepo operator`, `AtprotoRepo operator` and the
   ComponentLink `link-records-operator`, which lets AtprotoRecords labelled
-  `apps.socialweb.computer/record-repo: operator` write `sh.tangled.graph.vouch` through that repo
+  `apps.socialweb.computer/record-repo: operator` write `sh.tangled.graph.vouch` through that repo; the bidder's
+  `AtprotoRecord operator-grant` and `operator-endorsement` (rkey = the bidder DID) go the same way
 
 Without the option nothing of it is composed, and the bidder's own `MarketIdentity bidder` and its scope never
 change. The operator account should be the bidder's associated operator (`MarketIdentity bidder`
@@ -222,8 +229,8 @@ Check the host afterwards: `kb get computevms.socialweb.computer` is empty for t
 Without an operator, every VM still ends on its own. At provisioning the bidder writes the VM's end
 into `spec.associationExpiresAt`: the RFP's compute.vm `expiresAt` when it carries one (an RFP whose
 `expiresAt` has passed gets no bid), otherwise the accept time plus 24 h (`market.ContractAssociationLifetime`;
-log `bidder_lifetime_capped` with its source), and a contract-scoped association proof's `expiresAt` (a guest
-or R2 requester) when that is earlier. The observer releases the VM
+log `bidder_lifetime_capped` with its source), and the requester's identlink lifetime (the earliest grant
+`expiresAt` on its walk: a guest or R2 requester) when that is earlier. The observer releases the VM
 10 min after that (`AssociationExpiryGrace`, log `bidder_association_expired_release`), so a requester
 that never returns (an app killed before it saved the receipt, a lost laptop) holds a VM 24 h 10 min at
 most. That `vm.terminated` says `expired`, with no `request` ref; an operator delete and a requester's

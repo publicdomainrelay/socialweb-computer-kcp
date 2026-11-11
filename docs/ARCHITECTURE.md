@@ -3873,7 +3873,8 @@ root reconciles only the roots of its core's base workspace). `internal/app/comp
   field has one writer: the composer of that object.
 - **Operator associations (D21).** `spec.identity.approvedAssociations` on a root is composed into the requester or
   bidder MarketIdentity spec and into the Requester component's `operatorDID`; the MarketIdentity controller only
-  reports `status.associations` (declared plus watch-verified). The prod gateway reads them from
+  reports `status.associations` (declared plus the roots of the identlink walk of its DID: agent-of, endorsement,
+  grant). The prod gateway reads them from
   `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS`, so a restart keeps them.
 
 ## 13. Invariants
@@ -4122,7 +4123,8 @@ fail, rather than the code read against this document alone.
   requeues to expiresAt plus 10 min (`AssociationExpiryGrace`) and then releases the VM. A guest
   requester's VM therefore cannot outlive its association by more than the grace, even when the
   cascade did not run (a destroyed parent guest, a lost event); a parent released earlier is caught by
-  the cascade, not by the backstop, which bounds the worst case at expiresAt (24 h at most). (3) A
+  the cascade, not by the backstop, which bounds the worst case at expiresAt (24 h at most). Since
+  2026-11-10 the bidder reads the requester's identlink walk `expiresAt` (min grant expiresAt), not a mirror. (3) A
   denied accept with no receipt: `releaseDeniedAccept` waits for the receipt up to 4 times
   (`DeniedAcceptReceiptAttempts`, `ReceiptTimeout` each), each attempt in `status.release.lastError`
   and the `ReleaseFailed` condition; when it gives up the message names the manual path, `run request
@@ -4475,6 +4477,9 @@ fail, rather than the code read against this document alone.
   the repo, and a fresh nonce is shown. A restart keeps the association because the watch re-verifies
   the operator's record. The associateConfirm call stays a fast path for an allow-listed operator.
   Open: the did-key-associator QR page (qr.fedfork.com) does not yet copy `n` into the record it writes.
+  Superseded 2026-11-10: the claim, its nonce, the mirror and associateConfirm are gone; the association is
+  the ident.link pair + grant and the identity controller walks it
+  ([design/ident-link-associations.md](design/ident-link-associations.md)).
 - **A prod tenant owner's repo through the web app session (plan 0031 REC9-PROD-OWNER-SESSION).** Built: the
   MarketIdentity mode `oauthSessionProxy` (`spec.did`, `spec.sessionRef` {Vault `root-vault`, mount
   `auth/atproto`, path `session/<did>`}) reads the session the openbao-plugin-auth-atproto mount holds
@@ -11594,7 +11599,7 @@ token is minted after the receipt is verified (`acceptReceipt`, `resumeReceipt`)
 needs a verified receipt too; every chat.atirc.mint carries `lease {receipt {uri, cid}, termination,
 association? {uri, cid}, contract?}`: the bidder's market.receipt, the at-uri of its vm.terminated
 record at `market.EventRKeys(market.TerminationKey(receiptURI))` (the rkey the policy engine reads),
-the requester_associate record for the r2 token, and the accept uri. The server appends it to the
+the association grant for the r2 token (since 2026-11-10 at rkey = R2 DID), and the accept uri. The server appends it to the
 bearer's chain, so the signed claim `leases` is root to leaf; the requester accepts a token only when
 `leases` is the parent token's chain plus the lease it sent, else it revokes that token and fails the
 mint. Every error answer is a failed mint, retried with backoff. The configured atirc endpoint is
@@ -11733,8 +11738,8 @@ collections, 5897 records; bob 31 collections, 5424 records. Classes:
 
 | class | alice | bob | writer |
 | --- | --- | --- | --- |
-| declared minimum | sh.tangled.graph.vouch bob and john; badgeBlueKeys `requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72` (the gateway requester, live mirror); app.bsky and sh.tangled profile; com.fedfork.irc.agentOperator, bot.did.registration; auth.allowlist.rbacDid | sh.tangled.graph.vouch alice; badgeBlueKeys `bidder_associate-` of the two live bidder hosts (did:plc:4vcig7s43z3nyqrnepmcfzqt, did:plc:2l2wdry77c7jtucbslstagkj, live mirror and heartbeat); the same profiles, atirc and rbacDid records | tangled, bsky, atirc (outside this repository); the claims by the association flow (`scripts/associate-bidder.ts`, the did-key associator) |
-| minimum, runtime-owned | badgeBlueKeys 32-character base58 key claims (`market.BadgeBlueKeysRkey`, one per page, iOS or CLI requester key), market.association (contract-scoped) | market.offering `self` (and, until rcB, the legacy `3msbt7akfhk2m` its heartbeat names), market.heartbeat `self`, the bidder key claim | `internal/market/requester` identity.go, association.go; `internal/market/bidder` offering.go (`internal/controllers/marketpresence` only reads the heartbeat) |
+| declared minimum | sh.tangled.graph.vouch bob and john; `market.association` + `link.ident.endorsement` at rkey `did:plc:jjcsg5fg3ujd22ywuxg4lr72` (the gateway requester; until 2026-11-10 a badgeBlueKeys `requester_associate-` claim + mirror); app.bsky and sh.tangled profile; bot.did.registration (com.fedfork.irc.agentOperator removed 2026-11-10); auth.allowlist.rbacDid | sh.tangled.graph.vouch alice; `market.association` + `link.ident.endorsement` at the rkeys of the two live bidder hosts (did:plc:4vcig7s43z3nyqrnepmcfzqt, did:plc:2l2wdry77c7jtucbslstagkj; until 2026-11-10 badgeBlueKeys `bidder_associate-` claims + mirrors); the same profiles, atirc and rbacDid records | tangled, bsky, atirc (outside this repository); the pair + grant by `scripts/associate-bidder.ts` or the app with the operator's session ([design/ident-link-associations.md](design/ident-link-associations.md)); john: the pair + grant of hat-7 only |
+| minimum, runtime-owned | badgeBlueKeys 32-character base58 key claims (`market.BadgeBlueKeysRkey`, one per page, iOS or CLI requester key), market.association + link.ident.endorsement at rkey = R2 DID (contract-scoped) | market.offering `self` (and, until rcB, the legacy `3msbt7akfhk2m` its heartbeat names), market.heartbeat `self`, the bidder key claim | `internal/market/requester` identity.go, association.go; `internal/market/bidder` offering.go (`internal/controllers/marketpresence` only reads the heartbeat) |
 | run churn | compute.vm 1078, market.rfp 1076, policy.ghalite 796 (one per RFP, `runner.go` CreateRecord), market.event 677, market.accept 464, vm.delete 419, guest.* 260, config.wif.simple 147, ephemeralInfra 46, fedproxy.rbac node.* | market.event 1241, market.bid 754, bids.free 754, config.wif.simple 754, vm.onNetwork 655, market.receipt 354, guest.* 318, vm.hostKeys 137, vm.terminated 131, fedproxy.rbac 226 | `internal/market/requester`, `internal/market/bidder`, `internal/controllers/infra` |
 | stale or another app | badgeBlueKeys claims of DIDs with no mirror (6c7zf6, 5ipkef), market.offering 30 (July), ccrfp, temp.rfp, agent.*, dev.cocore.*, network.comind.*, sh.tangled repo/spindle/publicKey, fedproxy.sshPublicKey, posts, likes, follows | badgeBlueKeys `bidder_associate-` of 4 DIDs with no mirror, org.tangled.*, vibescrobble | earlier releases and other apps |
 
@@ -11773,7 +11778,8 @@ cluster or an infra in use) the records stay Failed RepoNotReady and wake on the
 Scope limits. The OAuth sessions hold no scope for sh.tangled.graph.vouch, the profiles,
 com.fedfork.irc.agentOperator and bot.did.registration, nor rbacDid for alice (bob has create only),
 so for those the IaC verifies (InSync on equal, Failed WriteFailed on drift) and a repair is a
-password-session write by the owner; the badgeBlueKeys claims are repaired through the session
+password-session write by the owner; the association records (badgeBlueKeys claims until 2026-11-10, now the
+pair + grant) are repaired through the session
 (`write: oauth` in identity.yaml). Adding those scopes forces a new sign-in of every OAuth session,
 so it waits for a planned one.
 

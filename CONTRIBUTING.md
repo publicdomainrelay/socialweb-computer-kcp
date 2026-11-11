@@ -208,11 +208,13 @@ sudo "$B" install bidder --handle <handle>
 
 ### Bidder association
 
-A fresh install creates a new DID. Association is one `badgeBlueKeys` record in the operator's repo
-with `challenge` the operator DID and `keyId` the bidder DID, service `bidder_associate`. The
-`AtprotoRecordWatch/association` of the application reads it and the identity controller writes the
-operator DID into `MarketIdentity.status.associations`; no manual patch is needed. The helper
-reads the handle and password from a mode-0600 credentials file and prints neither.
+A fresh install creates a new DID. Association is the ident.link pair + grant
+([docs/design/ident-link-associations.md](docs/design/ident-link-associations.md)): the bidder adds
+`https://ident.link/agent-of/<operator DID>` to its DID doc, and the operator's repo holds
+`com.publicdomainrelay.temp.market.association/<bidder DID>` and `link.ident.endorsement/<bidder DID>`.
+The identity controller walks the bidder DID and writes the operator DID into
+`MarketIdentity.status.associations`; no manual patch is needed. The helper writes the grant, then
+the endorsement; it reads the handle and password from a mode-0600 credentials file and prints neither.
 
 ```bash
 HANDLE=bobvmbuilder.bsky.social
@@ -221,17 +223,16 @@ CREDS=$HOME/.bobvmbuilder_bsky_social_source
 STATE=/var/lib/socialweb-computer/swc-bidder
 K=$(sudo sh -c "ls $STATE/handles/*/kcp/admin.kubeconfig" | head -1)
 BIDDER_DID=$(sudo kubectl --kubeconfig "$K" get marketidentity bidder -o jsonpath='{.status.did}')
-deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --bidder-did "$BIDDER_DID"
+deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --agent-did "$BIDDER_DID"
 sudo kubectl --kubeconfig "$K" get marketidentity bidder \
   -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
-Wait for `Associated=True`. The bidder side declaration `AtprotoRecord/association` is rendered and
-reconciled through the app's PDS.
+Wait for `Associated=True`. `--remove` deletes the endorsement, then the grant.
 
-A requester uses the same helper with its own service and DID. The operator writes it once in the
-operator's repo; the gateway's `AtprotoRecordWatch/association` (service `requester_associate`)
-verifies it and the identity controller approves the requester automatically. No manual
+A requester uses the same helper with its DID. The operator writes the pair once in the operator's
+repo; the gateway adds the agent-of entry to the requester's DID doc and the identity controller
+approves the requester once its walk reaches the operator. No manual
 `approvedAssociations` patch is needed. The gateway kcp is under its state dir (default
 `/var/lib/socialweb-computer/socialweb`); the requester MarketIdentity lives in the workspace
 `root:app`.
@@ -242,13 +243,13 @@ CREDS=$HOME/.aliceoa_bsky_social_source
 KGW=/var/lib/socialweb-computer/socialweb/kcp/admin.kubeconfig
 GW=https://127.0.0.1:6443/clusters/root:app
 REQUESTER_DID=$(sudo kubectl --kubeconfig "$KGW" --server "$GW" get marketidentity requester -o jsonpath='{.status.did}')
-deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --requester-did "$REQUESTER_DID"
+deno run -A --no-lock scripts/associate-bidder.ts --creds "$CREDS" --account "$ACCOUNT" --agent-did "$REQUESTER_DID"
 sudo kubectl --kubeconfig "$KGW" --server "$GW" get marketidentity requester \
   -o jsonpath='{.status.phase}{" "}{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
 ```
 
 Non-association mode: set the identity association to `Skip` and let the controller reconcile it. No
-`badgeBlueKeys` record is written.
+agent-of entry, grant or endorsement is written.
 
 ```bash
 STATE=/var/lib/socialweb-computer/swc-bidder
@@ -614,7 +615,7 @@ requester role scopes (guest.* included) through qr.fedfork.com, and the CLI pri
 The operator signs in with `scripts/oauth-signin.ts --url "<url>"` (AGENTS.md, Prod deployments).
 It waits without a deadline once the identity waits on a person; Ctrl-C stops it before any
 contract is posted. The default `localRepo` makes a new DID per invocation and waits in
-`AwaitingApproval` for the operator's claim (`scripts/associate-bidder.ts --requester-did <did>`;
+`AwaitingApproval` for the operator's endorsement + grant (`scripts/associate-bidder.ts --requester-did <did>`;
 the CLI prints the command with the DID); `-- --skip-qr` skips it but leaves the requester with no
 operator, so `requester-tangled-vouch` vouches no prod bidder.
 

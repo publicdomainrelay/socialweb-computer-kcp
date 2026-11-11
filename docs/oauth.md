@@ -22,9 +22,12 @@ The gateway is API-only. `--start-api` posts the handle to `POST /oauth/start`, 
 `swc_oauth_state` cookie, then drives the authorization server. Without `--start-api` the script opens
 the given url directly.
 
-A bidder in `localRepo` mode does not sign in. Its association is one `badgeBlueKeys` record in the
-operator's repo; the application's watch verifies the record and the identity controller writes the
-operator DID into `MarketIdentity.status.associations`. See
+A bidder in `localRepo` mode does not sign in. Its association is the ident.link pair + grant: an
+agent-of entry in the bidder's DID doc, `link.ident.endorsement` and `market.association` at rkey = the
+bidder DID in the operator's repo; the identity controller walks it and writes the operator DID into
+`MarketIdentity.status.associations`. An operator sign-in and the requester may hold the optional scope
+`repo:link.ident.endorsement?action=create&action=delete`; without it the writer logs a hint and skips
+the endorsement (the agent stays unassociated). See
 [CONTRIBUTING.md](../CONTRIBUTING.md#bidder-association) for the `associate-bidder.ts` procedure.
 
 `oauth-signin.ts` options: `--creds`, `--account`, and `--url` (all required), `--start-api` (begin at

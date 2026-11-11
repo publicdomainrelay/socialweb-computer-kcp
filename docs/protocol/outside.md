@@ -177,7 +177,7 @@ sequenceDiagram
 
 ## Scope-Only Collections
 
-- NSIDs that appear only as OAuth scopes: `com.publicdomainrelay.temp.auth.allowlist.rbacDid` (create, bidder and desktop sets), `com.fedproxy.sshPublicKey`, `com.publicdomainrelay.temp.market.bidderAssociation` ([identity.md](identity.md#marketbidderassociation)), `rpc:com.publicdomainrelay.temp.requester.associateConfirm` ([identity.md](identity.md#requesterassociateconfirm))
+- NSIDs that appear only as OAuth scopes: `com.publicdomainrelay.temp.auth.allowlist.rbacDid` (create, bidder and desktop sets), `com.fedproxy.sshPublicKey`
 
 ## OAuth Scopes Per Role
 
@@ -186,11 +186,12 @@ sequenceDiagram
 
 | set | used by | repo (write) | rpc |
 |---|---|---|---|
-| `RequesterOAuthScope` | CLI and long-lived requesters (`internal/market/requester/requester.go`), `pkg/embedded` (iOS), requester client metadata (`internal/services/requester/routes.go`), dev requester identities (`internal/devcore`) | create+update: `compute.vm`, `market.rfp`, `market.accept`, `market.event`, `compute.events.vm.delete`, `vm.onNetwork`, `guest.publicKey`, `guest.signalWebRTC`, `guest.secrets`, `guest.agentStart`, `guest.secretsUpdated`, `guest.r2Start`, `guest.r2Release`, `policy.ghalite`, `policy.typescript`; create+update+delete: `com.fedproxy.rbac`, `badgeBlueKeys`, `market.association`, `market.associationRequest`, `computer.socialweb.infra`, `ephemeralInfra`; optional: `sh.tangled.graph.vouch` | `market.submitRfp`, `submitAccept`, `submitBid`, `submitEvent` (`aud=*`); `chat.atirc.mint`, `chat.atirc.revoke` (aud `did:web:irc.fedfork.com%23atirc`, revoke optional) |
-| `BidderOAuthScope` | bidder identities (`internal/devcore`, bidder client metadata `internal/services/bidder/routes.go`) | create: `auth.allowlist.rbacDid`, `market.bid`, `bids.free`, `market.receipt`, `market.event`, `compute.config.wif.simple`, `compute.vm`, `market.rfp`, `market.accept`, `vm.delete`, `vm.onNetwork`, `vm.terminated`, `vm.hostKeys`, `guest.publicKey`, `guest.signalWebRTC`, `guest.secretsApplied`, `guest.secretsRequested`, `guest.requesterDid`, `guest.r2Released`, `com.fedproxy.rbac`, `market.bidderAssociation`, `policy.ghalite`, `policy.typescript`; create+update: `market.offering`, `market.heartbeat`; create+update+delete: `badgeBlueKeys`, `market.association` | the four `market.submit*` |
-| `DesktopOAuthScope` | desktop client | create+update: `rbacDid`, offering, bid, bids, receipts, event, `wif.simple`, `com.fedproxy.rbac`, `bidderAssociation`; create: `badgeBlueKeys` | `submitBid`, `submitEvent` |
+| `RequesterOAuthScope` | CLI and long-lived requesters (`internal/market/requester/requester.go`), `pkg/embedded` (iOS), requester client metadata (`internal/services/requester/routes.go`), dev requester identities (`internal/devcore`) | create+update: `compute.vm`, `market.rfp`, `market.accept`, `market.event`, `compute.events.vm.delete`, `vm.onNetwork`, `guest.publicKey`, `guest.signalWebRTC`, `guest.secrets`, `guest.agentStart`, `guest.secretsUpdated`, `guest.r2Start`, `guest.r2Release`, `policy.ghalite`, `policy.typescript`; create+update+delete: `com.fedproxy.rbac`, `badgeBlueKeys`, `market.association`, `market.associationRequest`, `computer.socialweb.infra`, `ephemeralInfra`; optional: `sh.tangled.graph.vouch`, `link.ident.endorsement` (create+delete) | `market.submitRfp`, `submitAccept`, `submitBid`, `submitEvent` (`aud=*`); `chat.atirc.mint`, `chat.atirc.revoke` (aud `did:web:irc.fedfork.com%23atirc`, revoke optional) |
+| `BidderOAuthScope` | bidder identities (`internal/devcore`, bidder client metadata `internal/services/bidder/routes.go`) | create: `auth.allowlist.rbacDid`, `market.bid`, `bids.free`, `market.receipt`, `market.event`, `compute.config.wif.simple`, `compute.vm`, `market.rfp`, `market.accept`, `vm.delete`, `vm.onNetwork`, `vm.terminated`, `vm.hostKeys`, `guest.publicKey`, `guest.signalWebRTC`, `guest.secretsApplied`, `guest.secretsRequested`, `guest.requesterDid`, `guest.r2Released`, `com.fedproxy.rbac`, `policy.ghalite`, `policy.typescript`; create+update: `market.offering`, `market.heartbeat`; create+update+delete: `badgeBlueKeys`, `market.association` | the four `market.submit*` |
+| `DesktopOAuthScope` | desktop client | create+update: `rbacDid`, offering, bid, bids, receipts, event, `wif.simple`, `com.fedproxy.rbac`; create: `badgeBlueKeys` | `submitBid`, `submitEvent` |
 | `ComputeSPAOAuthScope` | compute SPA | create: `compute.vm`, `badgeBlueKeys`, `com.fedproxy.rbac`, `com.fedproxy.sshPublicKey` | `submitRfp`, `submitAccept` |
-| `DIDKeyAssociatorOAuthScope` | `oauthQr` sign-in at qr.fedfork.com (`internal/stack/componentcore/controllers.go` `QRScopes`) | bidder + requester sets | + `requester.associateConfirm` |
+| `QROAuthScope` | `oauthQr` sign-in at qr.fedfork.com (`internal/stack/componentcore/controllers.go` `QRScopes`) | bidder + requester sets | bidder + requester sets |
+| `compose.OperatorSignInScope` | bidder `operator-signin` (`internal/app/compose/operator.go`) | `sh.tangled.graph.vouch` create+update, `market.association` create+update+delete, `link.ident.endorsement` create+delete | - |
 | `K8sOAuthScope` | k8s requester | requester set | + `cluster.createCluster`, `listClusters`, `getKubeconfig`, `controlPlaneUp`, `controlPlaneDown`, `deleteCluster` |
 | `OAuthScope` | the union | all of the above | all of the above |
 | `GatewayAtprotoScope()` | gateway OpenBao atproto plugin and gateway session owners (`internal/app/gateway`) | compose `requesterScope` (a shorter requester list: no guest.agentStart/r2*, no vouch) + `heartbeat` | `market.submit*` + `cluster.*` |
@@ -198,7 +199,7 @@ sequenceDiagram
 
 ### Optional Scopes
 
-- `OptionalScopes` = `rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc`, `repo:sh.tangled.graph.vouch?action=create&action=update`
+- `OptionalScopes` = `rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc`, `repo:sh.tangled.graph.vouch?action=create&action=update`, `repo:link.ident.endorsement?action=create&action=delete` (without it the endorsement writer logs `requester_endorsement_skipped` / `operator_endorsement_skipped` and skips: the agent stays unassociated)
 - `RequiredScopes` drops them from the identity's check (`internal/marketidentity/atproto/oauth.go`): a session granted without them stays Ready
 - a missing optional scope -> `status.pendingAction {kind: signInAgain, reason: ScopeUpgrade}`; the feature that needs it falls back (revoke with the token itself)
 - a new REQUIRED scope = SessionExpired for OAuth identities on rollout. plan the re-sign-in first
