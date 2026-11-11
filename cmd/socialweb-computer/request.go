@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,6 +34,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/statusstate"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/webrtcproxy"
 )
 
@@ -1070,10 +1070,18 @@ func (r *requestRun) awaitGuestTombstones(ctx context.Context, c *v1alpha1.Compu
 	}
 	r.log("waiting for the guest's DIDs to be tombstoned (by the guest, else by the renter rotation key) before the kcp stops",
 		"dids", dids, "timeout", (requester.RenterTombstoneWait + time.Minute).String())
+	directory, err := statusstate.NewHTTPPLCClient(plcURL, nil)
+	if err != nil {
+		r.a.log.Warn("the PLC directory URL is not usable; not waiting for the guest's tombstones", "plc", plcURL, "err", err.Error())
+		return
+	}
 	wctx, cancel := context.WithTimeout(ctx, requester.RenterTombstoneWait+time.Minute)
 	defer cancel()
 	for {
-		left := slices.DeleteFunc(slices.Clone(dids), func(did string) bool { return plcGone(wctx, plcURL, did) })
+		left := slices.DeleteFunc(slices.Clone(dids), func(did string) bool {
+			id, err := directory.Identity(wctx, did)
+			return err == nil && id.Tombstoned
+		})
 		if len(left) == 0 {
 			r.log("the guest's DIDs are tombstoned", "dids", dids)
 			return
@@ -1085,19 +1093,6 @@ func (r *requestRun) awaitGuestTombstones(ctx context.Context, c *v1alpha1.Compu
 		case <-time.After(10 * time.Second):
 		}
 	}
-}
-
-func plcGone(ctx context.Context, plcURL, did string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, plcURL+"/"+did, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return resp.StatusCode == http.StatusGone
 }
 
 func (r *requestRun) followRelease(ctx context.Context) (*v1alpha1.ComputeContract, bool) {
