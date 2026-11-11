@@ -1479,14 +1479,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "7cccbe4ada3ad166eabceebec1ed356cfb069aa369196e51902edd2bbe10d4c6",
+          "treeSha256": "22d1c4210d78a1d4acb129ac5578e23e94d1b1e2d8a2334cb15b0a0793a96715",
           "rawBytes": 40632720,
-          "zstdBytes": 12302873
+          "zstdBytes": 12300185
         },
         "linux/arm64": {
-          "treeSha256": "7cccbe4ada3ad166eabceebec1ed356cfb069aa369196e51902edd2bbe10d4c6",
+          "treeSha256": "22d1c4210d78a1d4acb129ac5578e23e94d1b1e2d8a2334cb15b0a0793a96715",
           "rawBytes": 40632720,
-          "zstdBytes": 12302873
+          "zstdBytes": 12300185
         }
       }
     },
@@ -1541,14 +1541,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "d91dd652e5c688b3d461f07ef71b5598c443a8a1dea8831e8fce61be59d85530",
+          "treeSha256": "cb14794f22718bc818e1688b6d19021caf55a2804430ec45f1702677eef365f1",
           "rawBytes": 109465966,
-          "zstdBytes": 31740432
+          "zstdBytes": 31741333
         },
         "linux/arm64": {
-          "treeSha256": "d91dd652e5c688b3d461f07ef71b5598c443a8a1dea8831e8fce61be59d85530",
+          "treeSha256": "cb14794f22718bc818e1688b6d19021caf55a2804430ec45f1702677eef365f1",
           "rawBytes": 109465966,
-          "zstdBytes": 31740432
+          "zstdBytes": 31741333
         }
       }
     }
