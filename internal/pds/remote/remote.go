@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -61,6 +62,8 @@ type Host struct {
 
 	http *http.Client
 
+	public *http.Client
+
 	auth xrpc.Auth
 
 	secrets Secrets
@@ -94,7 +97,7 @@ func New(cfg Config) (*Host, error) {
 	if cfg.TLS != nil {
 		tlsConfig = cfg.TLS.Clone()
 	}
-	h := &Host{address: address, did: did, tls: tlsConfig, http: httpClient(tlsConfig), auth: cfg.Auth, secrets: cfg.Secrets,
+	h := &Host{address: address, did: did, tls: tlsConfig, http: httpClient(tlsConfig), public: httpClient(nil), auth: cfg.Auth, secrets: cfg.Secrets,
 		timeout: timeout, sessions: map[string]*pdsclient.RemotePDS{}}
 	anon, err := h.client(nil)
 	if err != nil {
@@ -121,6 +124,24 @@ func httpClient(tlsConfig *tls.Config) *http.Client {
 func (h *Host) client(auth xrpc.Auth) (*pdsclient.RemotePDS, error) {
 	return pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: h.address, DID: h.did, HTTPClient: h.http, TLS: h.tls, Auth: auth,
 		Timeout: h.timeout})
+}
+
+var directory = identity.DefaultDirectory()
+
+func (h *Host) reader(ctx context.Context, did syntax.DID) *pdsclient.RemotePDS {
+	ident, err := directory.LookupDID(ctx, did)
+	if err != nil {
+		return h.anon
+	}
+	endpoint := strings.TrimRight(ident.PDSEndpoint(), "/")
+	if endpoint == "" || endpoint == h.address {
+		return h.anon
+	}
+	client, err := pdsclient.NewRemote(pdsclient.RemoteConfig{BaseURL: endpoint, HTTPClient: h.public, Timeout: h.timeout})
+	if err != nil {
+		return h.anon
+	}
+	return client
 }
 
 func (h *Host) Address() string { return h.address }
@@ -262,7 +283,7 @@ func (a *Accounts) Account(ctx context.Context, did string) (pds.Account, error)
 	if err != nil {
 		return pds.Account{}, fmt.Errorf("remote: the account did %q: %w", did, err)
 	}
-	if _, _, err := a.host.anon.GetLatestCommit(ctx, parsed); err != nil {
+	if _, _, err := a.host.reader(ctx, parsed).GetLatestCommit(ctx, parsed); err != nil {
 		var failure *pdsclient.XRPCError
 		if errors.As(err, &failure) && (failure.StatusCode == http.StatusNotFound || failure.Code == "RepoNotFound") {
 			return pds.Account{}, fmt.Errorf("%w: %v", pds.ErrNotFound, err)
@@ -338,7 +359,7 @@ func (s *Sync) LatestCommit(ctx context.Context, did string) (pds.Commit, error)
 	if err != nil {
 		return pds.Commit{}, fmt.Errorf("remote: the repo did %q: %w", did, err)
 	}
-	head, rev, err := s.host.anon.GetLatestCommit(ctx, parsed)
+	head, rev, err := s.host.reader(ctx, parsed).GetLatestCommit(ctx, parsed)
 	if err != nil {
 		return pds.Commit{}, err
 	}
@@ -358,7 +379,7 @@ func (s *Sync) GetRepo(ctx context.Context, did, since string) (io.ReadCloser, e
 		}
 		sinceTID = &tid
 	}
-	return s.host.anon.GetRepo(ctx, parsed, sinceTID)
+	return s.host.reader(ctx, parsed).GetRepo(ctx, parsed, sinceTID)
 }
 
 func (s *Sync) SubscribeRepos(ctx context.Context, cursor *int64, fn func(pds.Event) error) error {
