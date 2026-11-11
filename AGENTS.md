@@ -263,7 +263,8 @@ requester's own kcp, and `install` prints both. A password never goes into reque
     secrets ready file. `run request --tunnel <tag>:<port>:opentunnel:shell[=<envFile>]` (or the
     older `<tag>:<port>:<envFile>`) asks for one.
   - The atirc agent (plan 0035; peer to peer, no token): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`)
-    needs `spec.secretsRef`. After the receipt is verified the requester (`internal/market/requester/agentpeer.go`)
+    needs `spec.secretsRef`; with no `spec.association` the requester treats it as `{fromGuest: true}` plus
+    `guestTools: [socialweb-computer]` (`requester.DefaultAssociation`, every path: CLI, infra, kubectl, page, iOS). After the receipt is verified the requester (`internal/market/requester/agentpeer.go`)
     generates the agent's iroh key (a 32-byte ed25519 seed) into the bundle at `/etc/atirc/iroh_key.hex` (hex, 0600),
     writes envFile `ATP_USERNAME=<agent handle>`, `ATIRC_DID=<agent DID>` (0600) and `/etc/socialweb-computer/r2-agent.env`
     `R2_COLOCATED=<label>-<rfp rkey>=<the key's ticket>`. The agent is a co-located account of the guest requester R2

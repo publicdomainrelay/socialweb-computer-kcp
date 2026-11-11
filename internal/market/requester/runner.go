@@ -93,6 +93,7 @@ type contractRunner struct {
 }
 
 func newContractRunner(q *Requester, contract v1alpha1.ComputeContract) *contractRunner {
+	DefaultAssociation(&contract.Spec)
 	r := &contractRunner{
 		q:         q,
 		name:      contract.Name,
@@ -135,6 +136,7 @@ func recordedStage(state *v1alpha1.NodeClaimContract) bool {
 }
 
 func (r *contractRunner) Update(contract v1alpha1.ComputeContract) {
+	DefaultAssociation(&contract.Spec)
 	r.mu.Lock()
 	r.contract = contract
 	r.mu.Unlock()

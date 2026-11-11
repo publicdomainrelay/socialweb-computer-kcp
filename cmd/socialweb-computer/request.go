@@ -1303,16 +1303,10 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	} else if vals.String("agent-config") != "" {
 		return a.fail(exitRefused, "run request: --agent-config needs --agent")
 	}
-	associate := cmp.Or(vals.String("associate"), r.associate)
-	if associate == "" && r.contract.Agent != nil {
-		associate = "guest"
-	}
-	if r.contract.Association, err = associateOf(associate); err != nil {
+	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)
 	}
-	if r.contract.Association != nil && r.contract.Association.FromGuest && !slices.Contains(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer) {
-		r.contract.GuestTools = append(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer)
-	}
+	requester.DefaultAssociation(&r.contract)
 	if r.contract.Association != nil {
 		if bundle, err = withPlaceholder(bundle, cloudinit.DefaultAssociationRefFile, ""); err != nil {
 			return a.fail(exitRefused, "run request: --associate: %v", err)

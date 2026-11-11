@@ -12,6 +12,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 )
 
 const (
@@ -177,6 +178,7 @@ func runRequestR2(ctx context.Context, a *app, vals clicfg.Values, rest []string
 	if c.Status.Phase != v1alpha1.ComputeContractHeld {
 		return a.fail(exitFailed, "run request r2: the contract is %s, not Held: %s", c.Status.Phase, c.Status.Message)
 	}
+	requester.DefaultAssociation(&c.Spec)
 	if c.Spec.Association == nil || !c.Spec.Association.FromGuest {
 		return a.fail(exitRefused, "run request r2: the contract %s has no spec.association.fromGuest; ask for one with run request --associate guest", c.Name)
 	}

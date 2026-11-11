@@ -72,7 +72,17 @@ func associationSubject(contract v1alpha1.ComputeContract, state *v1alpha1.NodeC
 	return ""
 }
 
+func DefaultAssociation(spec *v1alpha1.ComputeContractSpec) {
+	if spec.Agent != nil && spec.Association == nil {
+		spec.Association = &v1alpha1.ComputeContractAssociation{FromGuest: true, RefFile: cloudinit.DefaultAssociationRefFile}
+	}
+	if a := spec.Association; a != nil && a.FromGuest && !slices.Contains(spec.GuestTools, v1alpha1.GuestToolSocialwebComputer) {
+		spec.GuestTools = append(slices.Clip(spec.GuestTools), v1alpha1.GuestToolSocialwebComputer)
+	}
+}
+
 func fromGuest(contract v1alpha1.ComputeContract) bool {
+	DefaultAssociation(&contract.Spec)
 	a := contract.Spec.Association
 	return a != nil && a.FromGuest && strings.TrimSpace(a.Subject) == ""
 }
