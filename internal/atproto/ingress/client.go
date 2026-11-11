@@ -383,8 +383,12 @@ func (s *Subscriber) handleRequest(msg frame) {
 			"$type":       frameType("response"),
 			"requestId":   req.RequestID,
 			"status":      result.Status,
-			"body":        responseBody(result.Body),
 			"contentType": result.ContentType,
+		}
+		if len(result.Body) > 0 && !json.Valid(result.Body) {
+			out["bodyBase64"] = b64encode(result.Body)
+		} else {
+			out["body"] = responseBody(result.Body)
 		}
 		if len(result.Headers) > 0 {
 			out["headers"] = result.Headers

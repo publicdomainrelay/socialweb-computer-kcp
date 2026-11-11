@@ -658,11 +658,20 @@ func (s *Server) handleResponse(p *peer, msg frame) {
 	if (len(body) == 0 || string(body) == "null") && msg.RawBody != nil {
 		body, _ = json.Marshal(*msg.RawBody)
 	}
+	var raw []byte
+	if msg.BodyBase64 != "" {
+		decoded, err := b64decode(msg.BodyBase64)
+		if err != nil {
+			s.log.Warn("ingress_response_body_invalid", "subdomain", p.subdomain, "err", err.Error())
+		}
+		raw, body = decoded, nil
+	}
 	pr.ch <- dispatchResult{resp: Response{
 		Status:      msg.Status,
 		Body:        body,
 		ContentType: msg.ContentType,
 		header:      header,
+		raw:         raw,
 	}}
 }
 
@@ -996,6 +1005,10 @@ func (s *Server) handleForward(w http.ResponseWriter, req *http.Request, subdoma
 	status := result.Status
 	status = cmp.Or(status, http.StatusOK)
 	w.WriteHeader(status)
+	if result.raw != nil {
+		_, _ = w.Write(result.raw)
+		return
+	}
 	if len(result.Body) == 0 {
 		return
 	}

@@ -60,6 +60,7 @@ type Response struct {
 	Headers     map[string]string
 	// what the relay sends, from a response frame's headers (responseHeaders)
 	header http.Header
+	raw    []byte
 }
 
 type frame struct {
@@ -70,6 +71,7 @@ type frame struct {
 	Params         map[string]string       `json:"params"`
 	Body           json.RawMessage         `json:"body"`
 	RawBody        *string                 `json:"rawBody"`
+	BodyBase64     string                  `json:"bodyBase64,omitempty"`
 	Headers        map[string]HeaderValues `json:"headers"`
 	Status         int                     `json:"status"`
 	ContentType    string                  `json:"contentType"`
