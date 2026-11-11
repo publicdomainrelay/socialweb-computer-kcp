@@ -56,7 +56,7 @@ sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-ki
   bob's repo with `deleteRecord`: `market.offering/self`,
   `market.heartbeat/self` and its `computer.socialweb.ingress.listen` record. A
   getRecord of each then answers RecordNotFound. Never delete `badgeBlueKeys`,
-  association or vouch records. A step that only reads may run on the existing
+  `market.association`, `link.ident.endorsement` or vouch records. A step that only reads may run on the existing
   hat-9 bob bidder instead.
 - The runner host is hat-8 (it has `kubectl`, `dumbpipe`, `deno` and Chrome for
   `scripts/oauth-signin.ts`, and both credential files). Without `goat` there,
@@ -168,36 +168,51 @@ dir.
 ## Requester association
 
 The gateway requester must be associated before it accepts any bid. Check it
-before creating a cluster; a gateway restart can leave the operator claim
-missing.
+before creating a cluster.
 
 The requester MarketIdentity lives in `root:app`; the gateway's components
 (`Pds/pds`, `Requester/requester`, `GatewayAPI/gateway-api`) live in `root`.
-The identity controller associates the requester from the operator's verified
-claim record: `scripts/associate-bidder.ts` writes it from the Alice account and
-the requester's association watch reads it from the bsky JetStream. The identity
-controller reports the result in `status.associations` and the `Associated`
-condition. `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS` (comma-separated DIDs in the
-gateway env) pre-approves operators in `spec.approvedAssociations`; it is not
-needed when the claim is verified. Do not patch the MarketIdentity spec: the
-Gateway root owns it and server-side apply reverts the edit.
+The association is the ident.link pair + grant
+([../design/ident-link-associations.md](../design/ident-link-associations.md)):
+the gateway adds `https://ident.link/agent-of/<alice DID>` to the requester
+DID's `alsoKnownAs` (its local PDS `plc-rotation.key`; a failure logs
+`gateway_requester_agent_of`), and alice's repo holds
+`com.publicdomainrelay.temp.market.association/<requester DID>` {agent,
+createdAt} and `link.ident.endorsement/<requester DID>` {agent}: declared in
+`deploy/testaccounts/alice/identity.yaml`, or written by
+`scripts/associate-bidder.ts` from the Alice account. The identity controller
+walks the requester DID and reports the roots in `status.associations` and the
+`Associated` condition. `SOCIALWEB_GATEWAY_APPROVED_ASSOCIATIONS`
+(comma-separated DIDs in the gateway env) pre-approves operators in
+`spec.approvedAssociations`; it is not needed when the walk reaches alice. Do
+not patch the MarketIdentity spec: the Gateway root owns it and server-side
+apply reverts the edit.
 
 ```bash
 ID_ARGS="--kubeconfig $PROD_K --server https://127.0.0.1:6443/clusters/root:app"
 MI=marketidentities.socialweb.computer
+ALICE=did:plc:lpfuqerea3deuoyrn7ojser4; APDS=https://jellybaby.us-east.host.bsky.network
 ASSOC=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.status.conditions[?(@.type==\"Associated\")].status}'")
 RI_DID=$(ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.status.did}'")
 printf 'requester=%s associated=%s\n' "$RI_DID" "$ASSOC"
+curl -s "https://plc.directory/$RI_DID" | jq -c .alsoKnownAs   # holds https://ident.link/agent-of/$ALICE
+for c in link.ident.endorsement com.publicdomainrelay.temp.market.association; do
+  curl -s "$APDS/xrpc/com.atproto.repo.getRecord?repo=$ALICE&collection=$c&rkey=$RI_DID" | jq -c '.value // .error'
+done                                                           # {agent: RI_DID}, {agent: RI_DID, createdAt}
 if [ "$ASSOC" != True ]; then
-  OP_DID=$(deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.aliceoa_bsky_social_source \
-    --account ALICE --requester-did "$RI_DID" | jq -r .operatorDid)
-  printf 'operator=%s\n' "$OP_DID"
+  deno run -A --no-lock scripts/associate-bidder.ts --creds ~/.aliceoa_bsky_social_source \
+    --account ALICE --agent-did "$RI_DID" | jq -c .
 fi
+socialweb-computer internal association "$RI_DID" | jq -c '{roots, errors}'   # roots [ALICE]
 ssh socialweb.computer "sudo -n -u socialweb env HOME=/var/lib/socialweb-computer/socialweb kubectl $ID_ARGS get $MI requester -o jsonpath='{.spec.approvedAssociations}{\"\n\"}{.status.associations}{\"\n\"}{.status.phase}{\"\n\"}'"
 ```
 
-Wait until the identity phase is `Ready`, `status.associations` names the
-operator DID and the `Requester` child reports `spec.operatorDID` with it.
+A missing agent-of entry is a PLC op on the gateway host (lead go first):
+`socialweb-computer identity agent-of add <alice DID> --did <requester DID>
+--pds-state-dir <gateway Pds stateDir> --drop-borrowed-handle`.
+
+Wait until the identity phase is `Ready`, `status.associations` names alice's
+DID and the `Requester` child reports `spec.operatorDID` with it.
 Without that, every bid is denied by `requester-tangled-vouch` even though
 bidder policy runs succeed.
 
@@ -226,6 +241,30 @@ done
 ```
 
 Each Bidder prints `bidder-tangled-vouch`, and each vouch prints `vouch`.
+
+Each localRepo bidder is its operator's agent by the ident.link pair + grant
+(the bidder writes agent-of with its local PDS `plc-rotation.key`; the
+operator's records are declared in `deploy/testaccounts/{john,bob}/identity.yaml`
+or written by `scripts/associate-bidder.ts --agent-did <bidder DID>`):
+
+```bash
+pair() {  # <bidder DID> <operator DID>
+  curl -s "https://plc.directory/$1" | jq -c .alsoKnownAs
+  P=$(curl -s "https://plc.directory/$2" | jq -r '.service[] | select(.id=="#atproto_pds") | .serviceEndpoint')
+  for c in link.ident.endorsement com.publicdomainrelay.temp.market.association; do
+    curl -s "$P/xrpc/com.atproto.repo.getRecord?repo=$2&collection=$c&rkey=$1" | jq -c '.value // .error'
+  done
+  socialweb-computer internal association "$1" | jq -c '{roots, errors}'
+}
+pair did:plc:7q5lnitxv4meizdon5fmhzrq did:plc:5svqtrhheairglgiiyvutzik   # hat-7 -> john
+pair did:plc:4vcig7s43z3nyqrnepmcfzqt did:plc:ocnuqjlzgohypj3zoznermms   # hat-9 -> bob
+pair did:plc:2l2wdry77c7jtucbslstagkj did:plc:ocnuqjlzgohypj3zoznermms   # hat-8 swc-bidder -> bob
+```
+
+Each `alsoKnownAs` holds `https://ident.link/agent-of/<operator DID>` and no
+`at://<operator handle>`, each endorsement is `{agent: <bidder DID>}`, each
+grant `{agent, createdAt}` with no `expiresAt`, and each walk's roots are
+[operator DID].
 
 ## Service auth for the gateway
 
@@ -754,7 +793,7 @@ $SWC run request ssh "$NAME" --state-dir "$R" --transport webrtc \
 
 The requester is alice, signed in by QR: the CLI requester's identity on the prod market is
 `-- --atproto-oauth-qr` (README, Rent a VM from the CLI). The default `localRepo` makes a new DID
-per invocation that waits in `AwaitingApproval` for alice's association claim, and with
+per invocation that waits in `AwaitingApproval` for alice's endorsement + grant, and with
 `-- --skip-qr` it has no operator, so no prod bidder is vouched. While `run request` waits, it
 prints `identity requester pendingAction scanQr url <url> expiresAt <RFC 3339>` on stderr, and
 again for each new URL. From a second shell, sign alice in with the newest one:
@@ -795,8 +834,9 @@ $SWC run request release "$NAME" --state-dir "$R"
 ```
 
 `run request release` ends `Released`. The requester log has
-`requester_contract_records_deleted`: its accept, rfp, compute.vm,
-contract-scoped market.association and com.fedproxy.rbac records are gone. A
+`requester_contract_records_deleted`: its accept, rfp, compute.vm and
+com.fedproxy.rbac records are gone (with an R2, also the grant and endorsement
+at rkey = R2 DID). A
 getRecord of each at its key in alice's repo answers RecordNotFound; read it 3
 times. A second `run request release` of a Released invocation only removes it.
 Read `computevms.socialweb.computer -o

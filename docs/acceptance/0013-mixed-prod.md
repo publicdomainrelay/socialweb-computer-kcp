@@ -42,6 +42,7 @@ sequenceDiagram
 | --- | --- |
 | Bidder | a bidder the user configured: `install bidder` with the default policy (no `--bidder-policy`: `bidder-tangled-vouch`), [../bidder.md](../bidder.md); for sbx1 it must serve deno: `run bidder --compute-kinds vm,deno`, or `install bidder --compute-kinds vm,deno` (written to its `config.json`; on an already installed bidder, run the install again with the flag, which restarts the bidder unit); optional `--bidder-operator-signin <operator handle>` for the operator vouch of step A4. A `prod-qr` `install bidder` lists `https` in its offering `endpoints` only with the bidder option `market-https=true` (config.json `"bidder-options": "--market-https=true"`); without it the offering lists iroh and webrtc |
 | Bidder DID | `MarketBidder app` `status.did` in the bidder kcp (the operator reads it); it replaces `REPLACE-BIDDER-DID` in every contract of `mixed-prod.yaml` |
+| Bidder association | the bidder DID is its operator's agent: `agent-of/<operator DID>` in its DID doc (written by the bidder) and, in the operator repo, `market.association/<bidder DID>` then `link.ident.endorsement/<bidder DID>` (written by the bidder with `--bidder-operator-signin`, needs the optional scope `repo:link.ident.endorsement?action=create&action=delete`, or by `deno run -A --no-lock scripts/associate-bidder.ts --creds <file> --account <ACCOUNT> --agent-did <bidder DID>`); check: `socialweb-computer internal association <bidder DID>` roots [operator DID] |
 | Requester account | a real atproto account (handle resolves to its DID, PDS public) signed in by OAuth QR; the creds file owner-only (mode 0600), read only by `scripts/oauth-signin.ts` |
 | Vouches | both directions: requester -> bidder by [../../examples/infra/vouch.yaml](../../examples/infra/vouch.yaml) in the requester kcp (needs the optional scope `repo:sh.tangled.graph.vouch`) or `goat`; bidder operator -> requester by [../../examples/infra/vouch-bidder-operator.yaml](../../examples/infra/vouch-bidder-operator.yaml) in the bidder kcp (operator sign-in) or `goat` from the operator account |
 | atirc | a token of your own (`atirc token <nick>`) to `atirc sub` the owner channel; never print it |
@@ -81,8 +82,9 @@ minutes before the first apply when a contract was denied before (verdicts are c
 7. sbx1: `kubectl get computecontracts.socialweb.computer einfra-mixedprod-sbx1 -o jsonpath='{.status.contract.sandbox}'`
    has `stdout` `mixedprod-deno-ok sum=10 on linux/x86_64` and `exitCode` 0.
 8. agent1: the requester log has `requester_agent_bundle_placeholder` (no bao step) and, after the receipt, the
-   token-less mesh agent's `requester_agent_mesh_key_written`, `requester_agent_lease_written` and
-   `requester_agent_peer_published` (`computer.socialweb.peer/<label>-<rfp rkey>.<handle>`); then `sed -e
+   token-less mesh agent's `requester_agent_mesh_key_written` and `requester_association_written` (grant + endorsement
+   at rkey = the in-VM R2 DID; the agent's peer record is R2's co-located account's, no record in the requester repo
+   names it, [0004](0004-vm-atirc-agent.md)); then `sed -e
    's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e 's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/'
    examples/infra/agent-start.yaml | kubectl apply -f -` (ContractEvent `Submitted`). The owner mesh node's view of the
    agent (`atirc mesh peers`, pub/sub both ways) is [0004](0004-vm-atirc-agent.md).
@@ -93,7 +95,8 @@ minutes before the first apply when a contract was denied before (verdicts are c
     `status.atircRevokes` is Done before the bidder's `vm.terminated`; the EphemeralInfra and its ComputeContracts are
     gone; the bidder host is empty ([0008](0008-host-observer.md) watcher: no VM unit, no sandbox); the requester log has
     `requester_contract_records_deleted`, and a getRecord of each contract record (accept, rfp, compute.vm,
-    contract-scoped market.association, com.fedproxy.rbac) at its key answers RecordNotFound (read 3 times); the two
+    com.fedproxy.rbac; for agent1 also `market.association` and `link.ident.endorsement` at rkey = its R2 DID) at its
+    key answers RecordNotFound (read 3 times); the two
     vouch records are still in the repos (`deletionPolicy: Retain`; `goat get` both).
 11. Stop: Ctrl-C the `run requester`.
 
@@ -142,7 +145,7 @@ user (`check-host` reports it).
 | agent1: `requester_agent_bundle_placeholder`, `requester_service_auth` `atircSigning` `oauth`, `requester_atirc_minted`, nick JOIN after agent-start | requester log, atirc channel | Held ~20 s, JOIN within a minute of agent-start (0012 prod readings) |
 | restart: same DID, ready file rewritten, contracts Held | ready file, ComputeContracts | ready again in seconds (quickstart-prod section 7: 1.4 s) |
 | delete: `requester_atirc_revoked`, `status.atircRevokes` Done, then vm.delete, `vm.terminated`, contracts gone | requester log, bidder repo, kcp | under a minute |
-| contract records deleted: `requester_contract_records_deleted`; accept, rfp, compute.vm, association, rbac RecordNotFound at their keys | requester log, getRecord in the requester repo | seconds after the release |
+| contract records deleted: `requester_contract_records_deleted`, `requester_association_deleted` (agent1); accept, rfp, compute.vm, rbac, agent1's grant + endorsement RecordNotFound at their keys | requester log, getRecord in the requester repo | seconds after the release |
 | bidder host empty, vouch records present | 0008 watcher, `goat get` | right after the delete |
 
 ## Prod Readings (2026-11-01, rc159 `ec0f4849`, account alice)
@@ -230,6 +233,7 @@ it; no second release is needed.
 | C: `run requester cluster` says the requester runs no gateway | rc159: the ready file was first written before the gateway was Ready; rc160 writes it once, with `.gateway` |
 | sbx1 `no bids received within 30s`, stays without a bid | the pinned bidder does not serve deno: `--compute-kinds vm,deno` on `run bidder`, or `install bidder --compute-kinds vm,deno` again for an installed bidder |
 | every contract `no bids`; bidder `policy rejected ... not vouched` | the operator -> requester record is missing (step A4); denials are cached 5 minutes |
+| no bids though both vouches exist; `internal association <bidder DID>` has no roots | the bidder is not its operator's agent: no agent-of, or the operator's endorsement is missing (`operator_endorsement_skipped`: sign the operator in again with the optional scope) |
 | agent1 Failed before its RFP, `refused: the atirc agent needs a requester handle that resolves to <did> ... --atproto-handle ...` | the requester handle is `.local` (a localRepo identity, the default without an identity option) or does not resolve; use the OAuth account, or a local PDS on plc.directory with `--atproto-handle <a domain you control>` ([../quickstart-prod.md](../quickstart-prod.md) section 5) |
 | `vouch-bidder` (or the operator record) not Applied, the MarketIdentity has `pendingAction` `signInAgain` `ScopeUpgrade` | the QR page (qr.fedfork.com) granted a session without `repo:sh.tangled.graph.vouch`; the scope is optional, so the identity stays Ready: write the record with `goat`, or sign in again once the QR page asks for it |
 | agent1 Failed `secrets need the requester ingress (getSecrets) or secretsFallback: Sealed` | `--comms-mode Firehose` has no inbound endpoint: add `--secrets-fallback Sealed` after `--`, or keep the default comms `Both` |

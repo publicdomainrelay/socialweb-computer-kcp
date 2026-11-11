@@ -49,16 +49,20 @@ Every smoke that mints must show, from server logs and
 ### Page / CLI requester (token-less VM agent, kcp acceptance 0004)
 - Request VM with an agent -> Held -> release; expect NO `token_minted`: the
   requester writes the agent's iroh key and atirc config (harness, model) into
-  the guest's secrets bundle and `computer.socialweb.peer/<label>-<rfp rkey>.<handle>`
-  leased on a contract-scoped `market.association` (subject = the requester's
-  own DID, expiresAt) into its own repo.
-- `atirc peer show <identity>` verifies (owner = the owner-graph root); the
+  the guest's secrets bundle; the agent is a co-located account of the guest
+  requester R2 (did:plc on the VM localPDS, `agent-of/<R2 DID>`), its
+  `computer.socialweb.peer/<name>.<R2 subhandle>` in its own repo, no `lease`;
+  R2 endorses + grants it, the renter endorses + grants R2 (kcp ident.link
+  cut-over; this section is ahead of the atirc upstream copy).
+- `atirc peer show <identity>` verifies (owner = a root of the walk of the
+  peer record's repo DID); the
   guest runs `atirc mesh run --no-publish` (default Jetstream, no
   CryptoProvider panic) and `atirc agent run` (mesh prompt, harness from its
   `config.toml`); an owner node lists it in `atirc mesh peers`; a message
   crosses the mesh both ways; the agent answers a prompt.
-- Release: the peer record and the lease answer RecordNotFound; a skipped
-  delete ends at the lease's expiresAt.
+- Release: the renter's endorsement and grant at rkey = R2 DID answer
+  RecordNotFound; R2 and agent DIDs `plc_tombstone`; a skipped delete ends at
+  the grant's expiresAt or once the contract is not Held.
 - Restored tab (snapshot) repeat must publish and delete the same way.
 
 ### Mesh (repo-level, every mesh change)
