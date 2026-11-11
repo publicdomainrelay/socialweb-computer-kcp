@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultmemory"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	contractexposure "github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -178,6 +180,11 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, err
 	}
+	stateDir, err := filepath.Abs(cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	cfg.StateDir = stateDir
 	admin := rest.CopyConfig(cfg.Rest)
 	admin.Impersonate = rest.ImpersonationConfig{UserName: "system:kcp:admin", Groups: []string{"system:kcp:admin"}}
 	cfg.Rest = admin
@@ -211,7 +218,7 @@ func Start(parent context.Context, cfg Config) (*Requester, error) {
 		}
 	}()
 	b := bus.New(ctx)
-	composer, err := compose.New(compose.Config{Rest: cfg.Rest, Workspace: RootWorkspace, Bus: b, Log: log})
+	composer, err := compose.New(compose.Config{Rest: cfg.Rest, Workspace: RootWorkspace, Bus: b, Log: log, Layout: devinstance.Layout{StateDir: cfg.StateDir}})
 	if err != nil {
 		return nil, fmt.Errorf("embedded: composer: %w", err)
 	}
