@@ -148,6 +148,7 @@ type Options struct {
 	GuestImageBase         string
 	GuestImageBaseResolved bool
 	Settings               map[string]string
+	accountDefaulted       bool
 	Out                    io.Writer
 }
 
@@ -472,7 +473,7 @@ func validate(o *Options) error {
 		return err
 	}
 	if o.Account == "" {
-		o.Account = DefaultAccount(o.Role)
+		o.Account, o.accountDefaulted = DefaultAccount(o.Role), true
 	}
 	if !accountRE.MatchString(o.Account) {
 		return fmt.Errorf("install: account name %q is not a valid system account name", o.Account)
@@ -548,6 +549,9 @@ func Install(ctx context.Context, o Options, sys System) (Report, error) {
 	if rec.Role != o.Role {
 		return rep, fmt.Errorf("install: %s was installed as a %s; uninstall it first", o.Account, rec.Role)
 	}
+	if err := newInstanceOnDefaultAccount(o, rec); err != nil {
+		return rep, fmt.Errorf("%w: %w", ErrUsage, err)
+	}
 	if rec.StateDir != o.StateDir {
 		return rep, fmt.Errorf("install: %s was installed with state dir %s, not %s", o.Account, rec.StateDir, o.StateDir)
 	}
@@ -573,6 +577,28 @@ func Install(ctx context.Context, o Options, sys System) (Report, error) {
 		in.printf("dry run: %d change(s) computed, nothing written\n", len(rep.Changes))
 	}
 	return rep, nil
+}
+
+func newInstanceOnDefaultAccount(o Options, rec *Record) error {
+	have := rec.Instances()
+	if !o.accountDefaulted || len(have) == 0 {
+		return nil
+	}
+	want := o.Handles
+	if o.Role == hostcontract.RoleRequester {
+		want = o.Names
+	}
+	var added []string
+	for _, w := range want {
+		if !slices.Contains(have, w) {
+			added = append(added, w)
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	return fmt.Errorf("install: the default account %s already hosts %s %s; %s would be a new instance, with its own identity, in that account: pass --account %s to add it there, or --account <another> for a separate install",
+		o.Account, o.Role, strings.Join(have, ", "), strings.Join(added, ", "), o.Account)
 }
 
 func (in *installer) account() error {
