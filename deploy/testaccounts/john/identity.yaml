@@ -28,10 +28,10 @@ oauthScopes:
 optionalScopes:
   - "repo:link.ident.endorsement?action=create&action=delete"
 declared:
-  - {object: testaccount-john-grant-7q5lnitx, collection: com.publicdomainrelay.temp.market.association, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: pending, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
-  - {object: testaccount-john-endorse-7q5lnitx, collection: link.ident.endorsement, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: pending, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
+  - {object: testaccount-john-grant-7q5lnitx, collection: com.publicdomainrelay.temp.market.association, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: bafyreiaqawjj4z3s7bdgqwwtl3ltxltko2ncpji72xpe4gh5iua4az372i, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
+  - {object: testaccount-john-endorse-7q5lnitx, collection: link.ident.endorsement, rkey: "did:plc:7q5lnitxv4meizdon5fmhzrq", cid: bafyreifnyqdf6q4xy57gi6z5q6f3enaobvpbpkdlmfv3oqqykyqsevwlze, write: oauth, readBy: identlink walk (operator of the bidder host hat-7)}
 runtimeOwned: []
-migration:
+migration:  # 2026-11-11 (rollout 12): every exact rkey in this account's repo deleted (getRecord, then deleteRecord); left: pattern rkeys (need listRecords) and other repos' rows (their own sessions)
   - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "bidder_associate-did-plc-7q5lnitxv4meizdon5fmhzrq", why: "old operator claim; replaced by the endorsement + standing grant at rkey = agent DID"}
   - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-z2o7m72gveise2ja4vbo4goq", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
   - {repo: "did:plc:5svqtrhheairglgiiyvutzik", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-if3ivz5bevo5qby4a5oxksy7", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}

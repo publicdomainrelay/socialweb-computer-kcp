@@ -86,8 +86,8 @@ optionalScopes:
 declared:
   - {object: testaccount-alice-vouch-bob, collection: sh.tangled.graph.vouch, rkey: "did:plc:ocnuqjlzgohypj3zoznermms", cid: bafyreibevworfj6lrmonuxh726aq4grg4uzdkp2pekgnhxy3rfm4vnf7py, write: verify, readBy: requester-tangled-vouch (self vouches the bidder operator)}
   - {object: testaccount-alice-vouch-john, collection: sh.tangled.graph.vouch, rkey: "did:plc:5svqtrhheairglgiiyvutzik", cid: bafyreic5ynbanwphikeasgml7jrib6ecrve7uhomcdzwbalh6xyjp5d4mq, write: verify, readBy: requester-tangled-vouch (self vouches the bidder operator)}
-  - {object: testaccount-alice-grant-jjcsg5fg, collection: com.publicdomainrelay.temp.market.association, rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72", cid: pending, write: oauth, readBy: identlink walk (principal of the gateway requester)}
-  - {object: testaccount-alice-endorse-jjcsg5fg, collection: link.ident.endorsement, rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72", cid: pending, write: oauth, readBy: identlink walk (principal of the gateway requester)}
+  - {object: testaccount-alice-grant-jjcsg5fg, collection: com.publicdomainrelay.temp.market.association, rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72", cid: bafyreicdxz3kf44ygy7ujnlho7ymm5icog2wc3mdzils7clfwd4hoi2d4e, write: oauth, readBy: identlink walk (principal of the gateway requester)}
+  - {object: testaccount-alice-endorse-jjcsg5fg, collection: link.ident.endorsement, rkey: "did:plc:jjcsg5fg3ujd22ywuxg4lr72", cid: bafyreigf2iclm25uwmd5ybudazct243hetfmqhwnpqehova2qjuhsqas6m, write: oauth, readBy: identlink walk (principal of the gateway requester)}
   - {object: testaccount-alice-profile-bsky, collection: app.bsky.actor.profile, rkey: self, cid: bafyreifs62pqrjhuouukzxxgx7qmk2jmph6e52whoiuocpokow7sglugza, write: verify, readBy: bsky and atirc display}
   - {object: testaccount-alice-profile-tangled, collection: sh.tangled.actor.profile, rkey: self, cid: bafyreidzndhwkeman3qfnvlodj3nx4oenddhbpgfa27mlhwzls6yechrae, write: verify, readBy: tangled}
   - {object: testaccount-alice-bot-registration, collection: bot.did.registration, rkey: self, cid: bafyreiantydt7s4nvmfl4r76yv4axlwwtaimtelgq3svpv5j4hlfqxspay, write: verify, readBy: atirc agent registration}
@@ -97,7 +97,7 @@ runtimeOwned:
   - {collection: com.publicdomainrelay.temp.market.association, rkeys: R2 DID, writer: "grant at rkey = R2 DID, contract-scoped, written after the R2 nonce check, deleted at release"}
   - {collection: computer.socialweb.infra, rkeys: per Infra, writer: internal/controllers/infra}
   - {collection: link.ident.endorsement, rkeys: R2 DID, writer: "endorsement at the same rkey, written after the grant, deleted before it at release"}
-migration:
+migration:  # 2026-11-11 (rollout 12): every exact rkey in this account's repo deleted (getRecord, then deleteRecord); left: pattern rkeys (need listRecords) and other repos' rows (their own sessions)
   - {repo: "did:plc:lpfuqerea3deuoyrn7ojser4", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-jjcsg5fg3ujd22ywuxg4lr72", why: "old operator claim; replaced by the endorsement + standing grant at rkey = agent DID"}
   - {repo: "did:plc:lpfuqerea3deuoyrn7ojser4", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-6c7zf6foaj2smfht4ad3ap2e", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
   - {repo: "did:plc:lpfuqerea3deuoyrn7ojser4", collection: com.publicdomainrelay.temp.badgeBlueKeys, rkey: "requester_associate-did-plc-5ipkeflamx7tz2venxxgjupl", why: "old operator claim for a retired DID (listRecords 2026-11-10)"}
