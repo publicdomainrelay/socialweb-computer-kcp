@@ -111,6 +111,8 @@ func builtVerbs() map[string]builtVerb {
 		"internal iroh-dial":       {[]string{"socket", "dumbpipe-path"}, runIrohDial},
 		"internal deno-fence":      {nil, runDenoFence},
 		"internal association":     {nil, runInternalAssociation},
+		"identity agent-of add":    {identityAgentOfOptions, runIdentityAgentOf(true)},
+		"identity agent-of remove": {identityAgentOfOptions, runIdentityAgentOf(false)},
 		"internal ingress-relay":   {ingressRelayOptions, runIngressRelay},
 		"internal atproto-relay":   {atprotoRelayOptions, runAtprotoRelay},
 		"internal devsup":          {[]string{"state", "socket", "die-with", "instance"}, runDevsup},

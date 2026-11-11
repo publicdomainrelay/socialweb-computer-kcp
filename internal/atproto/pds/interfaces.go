@@ -61,6 +61,7 @@ type PLCGenesisRequest struct {
 	Service             string
 	SigningKey          string
 	RotationKey         string
+	RecoveryKey         string
 	VerificationMethods map[string]string
 	AlsoKnownAs         []string
 }

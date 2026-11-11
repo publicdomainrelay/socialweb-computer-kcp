@@ -73,12 +73,21 @@ func (p *HTTPPLCSubmitter) SubmitGenesis(ctx context.Context, req atpds.PLCGenes
 	if req.RotationKey != "" && req.RotationKey != p.rotationDID {
 		return atpds.PLCGenesisResult{}, fmt.Errorf("pds: PLC genesis rotation key does not match the submitter key")
 	}
+	rotationKeys := []string{p.rotationDID}
+	if req.RecoveryKey != "" {
+		if _, err := atcrypto.ParsePublicDIDKey(req.RecoveryKey); err != nil {
+			return atpds.PLCGenesisResult{}, fmt.Errorf("pds: the PLC genesis recovery key is not a did:key: %w", err)
+		}
+		if req.RecoveryKey != p.rotationDID {
+			rotationKeys = []string{req.RecoveryKey, p.rotationDID}
+		}
+	}
 	verification := req.VerificationMethods
 	if len(verification) == 0 {
 		verification = map[string]string{"atproto": req.SigningKey}
 	}
 	didRaw, op, err := plc.CreateGenesis(plc.GenesisOptions{
-		RotationKeys:        []string{p.rotationDID},
+		RotationKeys:        rotationKeys,
 		VerificationMethods: verification,
 		AlsoKnownAs:         append([]string(nil), req.AlsoKnownAs...),
 		Services: map[string]plc.Service{
@@ -103,24 +112,37 @@ func (p *HTTPPLCSubmitter) SubmitGenesis(ctx context.Context, req atpds.PLCGenes
 	return atpds.PLCGenesisResult{DID: did, RotationKey: p.rotationDID, Operation: raw}, nil
 }
 
-func (p *HTTPPLCSubmitter) UpdateHandle(ctx context.Context, did syntax.DID, handle string) error {
+func (p *HTTPPLCSubmitter) head(ctx context.Context, did syntax.DID) (plc.Operation, string, error) {
 	var ops []plc.Operation
 	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
-		return err
+		return plc.Operation{}, "", err
 	}
 	if len(ops) == 0 {
-		return fmt.Errorf("pds: the PLC log for %s is empty", did)
+		return plc.Operation{}, "", fmt.Errorf("pds: the PLC log for %s is empty", did)
 	}
 	last := ops[len(ops)-1]
 	if last.Type != plc.TypeOperation {
-		return fmt.Errorf("pds: the PLC operation for %s is not updateable", did)
+		return plc.Operation{}, "", fmt.Errorf("pds: the PLC operation for %s is not updateable", did)
+	}
+	if !slices.Contains(last.RotationKeys, p.rotationDID) {
+		return plc.Operation{}, "", fmt.Errorf("pds: the rotation key %s is not in the PLC log for %s", p.rotationDID, did)
 	}
 	prevCID, err := plc.OperationCID(&last)
 	if err != nil {
-		return fmt.Errorf("pds: computing the PLC operation cid: %w", err)
+		return plc.Operation{}, "", fmt.Errorf("pds: computing the PLC operation cid: %w", err)
 	}
-	prev := prevCID
-	rotationKeys := append([]string(nil), last.RotationKeys...)
+	return last, prevCID, nil
+}
+
+func (p *HTTPPLCSubmitter) editAlsoKnownAs(ctx context.Context, did syntax.DID, edit func([]string) []string) (*plc.Operation, string, error) {
+	last, prev, err := p.head(ctx, did)
+	if err != nil {
+		return nil, "", err
+	}
+	aka := edit(slices.Clone(last.AlsoKnownAs))
+	if slices.Equal(aka, last.AlsoKnownAs) {
+		return nil, "", nil
+	}
 	verification := make(map[string]string, len(last.VerificationMethods))
 	maps.Copy(verification, last.VerificationMethods)
 	services := make(map[string]plc.Service, len(last.Services))
@@ -128,15 +150,69 @@ func (p *HTTPPLCSubmitter) UpdateHandle(ctx context.Context, did syntax.DID, han
 	op := &plc.Operation{
 		Type:                plc.TypeOperation,
 		Prev:                &prev,
-		RotationKeys:        rotationKeys,
+		RotationKeys:        slices.Clone(last.RotationKeys),
 		VerificationMethods: verification,
-		AlsoKnownAs:         []string{"at://" + handle},
+		AlsoKnownAs:         aka,
 		Services:            services,
 	}
 	if err := plc.SignOperation(op, p.rotationKey); err != nil {
-		return fmt.Errorf("pds: signing the PLC operation: %w", err)
+		return nil, "", fmt.Errorf("pds: signing the PLC operation: %w", err)
 	}
-	return p.submit(ctx, did, op.SignedObject())
+	opCID, err := plc.OperationCID(op)
+	if err != nil {
+		return nil, "", fmt.Errorf("pds: computing the PLC operation cid: %w", err)
+	}
+	if err := p.submit(ctx, did, op.SignedObject()); err != nil {
+		return nil, "", err
+	}
+	return op, opCID, nil
+}
+
+func (p *HTTPPLCSubmitter) UpdateHandle(ctx context.Context, did syntax.DID, handle string) error {
+	_, _, err := p.editAlsoKnownAs(ctx, did, func(aka []string) []string {
+		out := []string{"at://" + handle}
+		for _, entry := range aka {
+			if !strings.HasPrefix(entry, "at://") {
+				out = append(out, entry)
+			}
+		}
+		return out
+	})
+	return err
+}
+
+func (p *HTTPPLCSubmitter) UpdateAlsoKnownAs(ctx context.Context, did syntax.DID, add, remove []string) ([]string, error) {
+	var want []string
+	op, opCID, err := p.editAlsoKnownAs(ctx, did, func(aka []string) []string {
+		want = slices.DeleteFunc(aka, func(entry string) bool { return slices.Contains(remove, entry) })
+		for _, entry := range add {
+			if !slices.Contains(want, entry) {
+				want = append(want, entry)
+			}
+		}
+		return want
+	})
+	if err != nil || op == nil {
+		return want, err
+	}
+	var ops []plc.Operation
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String()+"/log", &ops); err != nil {
+		return nil, fmt.Errorf("pds: verifying the PLC alsoKnownAs update: %w", err)
+	}
+	if len(ops) == 0 {
+		return nil, fmt.Errorf("pds: verifying the PLC alsoKnownAs update: the PLC log for %s is empty", did)
+	}
+	if headCID, err := plc.OperationCID(&ops[len(ops)-1]); err != nil || headCID != opCID || ops[len(ops)-1].Sig != op.Sig {
+		return nil, fmt.Errorf("pds: the PLC alsoKnownAs update for %s is not the head operation", did)
+	}
+	var doc plc.DIDDocument
+	if err := p.getJSON(ctx, p.baseURL+"/"+did.String(), &doc); err != nil {
+		return nil, fmt.Errorf("pds: verifying the DID document: %w", err)
+	}
+	if !slices.Equal(doc.AlsoKnownAs, want) {
+		return nil, fmt.Errorf("pds: the DID document of %s has alsoKnownAs %v, not %v", did, doc.AlsoKnownAs, want)
+	}
+	return want, nil
 }
 
 func (p *HTTPPLCSubmitter) UpdateService(ctx context.Context, did syntax.DID, service string) error {

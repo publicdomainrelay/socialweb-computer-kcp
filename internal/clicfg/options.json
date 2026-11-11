@@ -593,6 +593,23 @@
       "type": "string",
       "description": "run request: the invocation's name, a DNS label (default req-<UTC time>); release and resume take it as their argument. run requester: the requester's name, a DNS label (default requester), its state under <state-dir>/requesters/<name>; env, ssh, proxy and password take it as their argument. install requester: the requester instances, comma-separated (unit socialweb-computer-requester@<name>). run bidder --network: the bidder's application name in the market network, a DNS label (default from the handle)"
     },
+    "pds-state-dir": {
+      "type": "string",
+      "description": "identity agent-of add|remove: the state dir of the local PDS whose plc-rotation.key signs the PLC operation"
+    },
+    "did": {
+      "type": "string",
+      "description": "identity agent-of add|remove: the did:plc of the local PDS account whose alsoKnownAs changes"
+    },
+    "plc-url": {
+      "type": "string",
+      "default": "https://plc.directory",
+      "description": "identity agent-of add|remove: the PLC directory the operation is submitted to and read back from"
+    },
+    "drop-borrowed-handle": {
+      "type": "boolean",
+      "description": "identity agent-of add|remove: also remove every at:// alsoKnownAs entry whose handle does not resolve to the account DID (a borrowed operator handle)"
+    },
     "identity": {
       "type": "string",
       "description": "run request: reuse one localRepo DID and repo across invocations from <state-root>/identities/<name>; standalone only, and the first run needs -- --skip-qr or an already-approved identity. Omit for a fresh DID per invocation"
@@ -621,7 +638,7 @@
     "association-ref": {
       "type": "string",
       "bare": "true",
-      "description": "run request: --association-ref[=<at-uri>#<cid> or <file>] bootstraps the requester's association from one pinned record (spec.identity.associationRef): a market.association, a badgeBlueKeys claim or a post in the authority's repo that names this requester's DID for requester_associate; the MarketIdentity verifies it by one getRecord (cid, subject, service, expiresAt), mirrors it as the association proof and the invocation waits until it is verified. An absolute path reads the ref from that file; bare, it is /run/socialweb-r2/association-ref when the guest agent shares that dir (group socialweb-r2, which the agent user is in) and /etc/socialweb-computer/association-ref (root only) otherwise. A missing or empty file (the fromGuest case) makes this requester, once it has a DID, write the association request of association-request.json in the same dir (authority, contract, nonce) as a com.publicdomainrelay.temp.market.associationRequest record into its own repo, then its DID to requester-did there (/run/socialweb-guest-agent/requester-did in the root case), wait for the ref to arrive in the ref file and verify it; with r2-atirc.env there, its own agents' atirc tokens are minted below that token; standalone only"
+      "description": "run request: --association-ref[=<at-uri>#<cid> or <file>] bootstraps the requester's association from one pinned record (spec.identity.associationRef): the principal's market.association grant at rkey = this requester's DID; the MarketIdentity verifies it by one getRecord (cid) and the identlink walk of this DID reaching the grant's repo, and the invocation waits until it is verified. An absolute path reads the ref from that file; bare, it is /run/socialweb-r2/association-ref when the guest agent shares that dir (group socialweb-r2, which the agent user is in) and /etc/socialweb-computer/association-ref (root only) otherwise. A missing or empty file (the fromGuest case) makes this requester, once it has a DID, write the association request of association-request.json in the same dir (authority, contract, nonce) as a com.publicdomainrelay.temp.market.associationRequest record into its own repo, then its DID to requester-did there (/run/socialweb-guest-agent/requester-did in the root case), wait for the ref to arrive in the ref file and verify it; with r2-atirc.env there, its own agents' atirc tokens are minted below that token; standalone only"
     },
     "tunnel": {
       "type": "string",

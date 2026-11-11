@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpjson"
 )
 
+const maxGenesisAlsoKnownAs = 16
+
 type createAccountRequest struct {
 	Handle      string         `json:"handle"`
 	Email       string         `json:"email,omitempty"`
@@ -24,6 +27,7 @@ type createAccountRequest struct {
 	InviteCode  string         `json:"inviteCode,omitempty"`
 	DID         string         `json:"did,omitempty"`
 	RecoveryKey string         `json:"recoveryKey,omitempty"`
+	AlsoKnownAs []string       `json:"alsoKnownAs,omitempty"`
 	PLCOp       map[string]any `json:"plcOp,omitempty"`
 }
 
@@ -173,13 +177,22 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 			writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "PLC directory is not configured")
 			return
 		}
+		aka := []string{"at://" + handle.String()}
+		for _, entry := range req.AlsoKnownAs {
+			if entry = strings.TrimSpace(entry); entry == "" || strings.HasPrefix(entry, "at://") || slices.Contains(aka, entry) || len(aka) > maxGenesisAlsoKnownAs {
+				writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "alsoKnownAs takes distinct entries that are not at:// handles, at most 16")
+				return
+			}
+			aka = append(aka, entry)
+		}
 		result, err := s.plc.SubmitGenesis(ctx, PLCGenesisRequest{
 			Handle:              handle.String(),
 			Service:             s.publicURL(r),
 			SigningKey:          signingDIDKey,
 			RotationKey:         s.cfg.RotationKey,
+			RecoveryKey:         strings.TrimSpace(req.RecoveryKey),
 			VerificationMethods: map[string]string{"atproto": signingDIDKey},
-			AlsoKnownAs:         []string{"at://" + handle.String()},
+			AlsoKnownAs:         aka,
 		})
 		if err != nil {
 			writeXRPCError(w, http.StatusInternalServerError, "InternalError", "PLC genesis failed: "+err.Error())
