@@ -332,6 +332,13 @@ func (s *Server) UpdateService(ctx context.Context, did syntax.DID, service stri
 	return s.plc.UpdateService(ctx, did, service)
 }
 
+func (s *Server) UpdateAlsoKnownAs(ctx context.Context, did syntax.DID, add, remove []string) ([]string, error) {
+	if s.plc == nil || did.Method() != "plc" {
+		return nil, ErrUnsupported
+	}
+	return s.plc.UpdateAlsoKnownAs(ctx, did, add, remove)
+}
+
 func (s *Server) Retire(ctx context.Context, did syntax.DID) error {
 	if s.store == nil {
 		return ErrUnsupported

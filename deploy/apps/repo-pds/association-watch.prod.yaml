@@ -4,9 +4,8 @@ metadata:
   name: association
 spec:
   repo: pds
-  collection: com.publicdomainrelay.temp.badgeBlueKeys
+  collection: link.ident.endorsement
   match:
-    - {fieldPath: keyId, valueFrom: {kind: MarketIdentity, name: "{{.Pds.Identity}}", fieldPath: status.did}}
-    - {fieldPath: service, value: "{{.Pds.AssociateService}}"}
+    - {fieldPath: agent, valueFrom: {kind: MarketIdentity, name: "{{.Pds.Identity}}", fieldPath: status.did}}
   source:
     eventSourceRefs: [{{.Pds.WatchEventSources}}]

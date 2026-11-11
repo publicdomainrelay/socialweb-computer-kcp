@@ -115,6 +115,8 @@ type Accounts interface {
 	Account(ctx context.Context, did string) (Account, error)
 
 	Retire(ctx context.Context, did string) error
+
+	UpdateAlsoKnownAs(ctx context.Context, did string, add, remove []string) ([]string, error)
 }
 
 type Sessions interface {

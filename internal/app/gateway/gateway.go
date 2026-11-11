@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/openbaoctl"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vaultlayout"
 )
@@ -41,7 +42,6 @@ const (
 	GatewayRequesterPolicy  = "gateway-requester"
 	GatewayPdsPolicy        = "gateway-repo-key"
 	GatewayPdsGrant         = "socialweb-computer-k8s-pds"
-	RequesterAssociate      = compose.RequesterAssociate
 	NodeGuestCurlHome       = "/root"
 	GatewayAudienceOption   = "gateway-audience"
 	GatewayNodePolicy       = "node-policy"
@@ -67,6 +67,7 @@ func Register(m *ctlruntime.Manager, c *compose.Composer, web *WebApp) error {
 		compose.TeardownWatch[*v1alpha1.Cluster](c, compose.ExportClusters, Kind)}, c.Watches(Kind)...)
 	opts = append(opts, compose.DrainWatch[*v1alpha1.AtprotoRecord](c, compose.ExportMarketIdentities, Kind))
 	opts = append(opts, compose.SiblingWatch[*v1alpha1.MarketRequester](c, compose.ExportApplications, Kind))
+	opts = append(opts, compose.OperatorRecordWatch(c, compose.ExportMarketIdentities, Kind))
 	opts = append(opts, ctl.publishWatches()...)
 	if err := ctlruntime.For[*v1alpha1.Gateway](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("gateway: registering the Gateway controller: %w", err)
@@ -249,8 +250,7 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 	p := manifests.RepoPds{StateDir: stateDir, Identity: marketrequester.RequesterIdentity, KcpServer: v.KcpServer, KcpWorkspace: v.IdentityWorkspace,
 		VaultServer: v.Requester.Vault.Server, VaultClient: compose.PdsVaultClient, VaultKcpServer: v.KcpServer + "/clusters/" + v.GatewayWorkspace,
 		VaultMount: RequesterVaultMount, VaultMountClient: marketrequester.RequesterVaultClient, VaultWorkspace: v.GatewayWorkspace}
-	p.AssociateService = RequesterAssociate
-	extra := []string{"--associate-service-id", RequesterAssociate}
+	var extra []string
 	var ca string
 	var err error
 	if n != nil {
@@ -276,7 +276,7 @@ func GatewayPds(v manifests.Gateway, stateDir string, n *v1alpha1.MarketNetworkV
 }
 
 func (p *pass) identitySpec(plan compose.AccountPlan) v1alpha1.MarketIdentitySpec {
-	return compose.OperatorWatched(plan.Identity, p.o.Spec.Operator, RequesterAssociate)
+	return compose.OperatorWatched(plan.Identity, p.o.Spec.Operator)
 }
 
 func (p *pass) self(kind, name string) commonv1.ObjectRef {
@@ -639,8 +639,10 @@ func (p *pass) localAccount(ctx context.Context, plan compose.AccountPlan, id *v
 	if err := c.ApplyLocalAccount(ctx, r, rws, acct); err != nil {
 		return nil, nil, "", false, err
 	}
-	if err := c.ApplyAssociationRecord(ctx, r, p.ws, repo, marketrequester.RequesterIdentity, RequesterAssociate); err != nil {
-		return nil, nil, "", false, err
+	if principal := p.principal(ctx); principal != "" && plan.Identity.Association != v1alpha1.AssociationSkip {
+		if err := c.UpdateAgentOf(ctx, r, rws, did, compose.AgentOfEntries(principal), nil); err != nil {
+			c.Log().Warn("gateway_requester_agent_of", "agent", did, "principal", principal, "err", err.Error())
+		}
 	}
 	requesterDir := compose.ComponentCRStateDir(c.StateRoot(), compose.ComponentKindRequester, marketrequester.RequesterComponent)
 	changed, err := compose.SyncRequesterRepoKey(c.StateRoot(), "", did, requesterDir)
@@ -744,7 +746,7 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if fn := c.Config().OnComponents; fn != nil {
 		fn(r.Owner(), snap.Listeners)
 	}
-	switch msg := compose.AssociationWait(plan, id, RequesterAssociate); {
+	switch msg := compose.AssociationWait(plan, id); {
 	case awaitingOperator != "":
 		return p.wait(awaitingOperator)
 	case msg != "":
@@ -851,6 +853,13 @@ func (p *pass) sessionOwners(ctx context.Context, sessions map[string]compose.Ow
 	return out, nil
 }
 
+func (p *pass) principal(ctx context.Context) string {
+	if operator := strings.TrimSpace(p.o.Spec.Operator); identlink.IsDID(operator) {
+		return operator
+	}
+	return p.c.IdentityDid(ctx, p.ws, compose.OperatorRepoName)
+}
+
 func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, sessionsFile string) {
 	c, r, o := p.c, p.r, p.o
 	log := c.Log().With("root", r.Owner())
@@ -865,13 +874,9 @@ func (p *pass) operatorWrites(ctx context.Context, id *v1alpha1.MarketIdentity, 
 		log.Warn("the market network operator links", "err", err.Error())
 		return
 	}
-	if compose.ClaimOpen(id) && o.Spec.Network != nil {
-		operator, err := c.WriteClaim(ctx, r, op, id, "requester-", RequesterAssociate)
-		if err != nil {
-			log.Warn("associating the requester's DID with the market network operator account", "err", err.Error())
-		} else if operator != "" {
-			log.Info("the market network operator account wrote its claim record naming the gateway requester's own DID", "operator", operator,
-				"handle", s.Identifier, "requesterDid", id.Status.Did)
+	if o.Spec.Network != nil && id != nil && id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo && id.Spec.Association != v1alpha1.AssociationSkip {
+		if err := c.ApplyOperatorPair(ctx, r, p.ws, marketrequester.RequesterIdentity, strings.TrimSpace(id.Status.Did)); err != nil {
+			log.Warn("the market network operator account's endorsement and grant of the gateway requester", "err", err.Error())
 		}
 	}
 	if o.Spec.Network != nil {

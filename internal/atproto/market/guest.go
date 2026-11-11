@@ -13,14 +13,18 @@ import (
 
 const ContractAssociationLifetime = 24 * time.Hour
 
-const (
-	RequesterAssociate = "requester_associate"
-	BidderAssociate    = "bidder_associate"
-	MirrorRKey         = "association"
-)
+func GrantRecord(agent string, createdAt any) map[string]any {
+	return map[string]any{"$type": AssociationNSID, "agent": agent, "createdAt": createdAt}
+}
 
-func ClaimRKey(service, subject string) string {
-	return service + "-" + strings.ReplaceAll(subject, ":", "-")
+func ContractGrantRecord(agent string, contract, expiresAt, createdAt any) map[string]any {
+	grant := GrantRecord(agent, createdAt)
+	grant["contract"], grant["expiresAt"] = contract, expiresAt
+	return grant
+}
+
+func EndorsementRecord(agent string) map[string]any {
+	return map[string]any{"$type": EndorsementNSID, "agent": agent}
 }
 
 const (

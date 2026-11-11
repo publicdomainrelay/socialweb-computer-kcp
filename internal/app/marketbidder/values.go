@@ -143,7 +143,7 @@ func BidderPds(v manifests.MarketBidder, stateDir string, n *v1alpha1.MarketNetw
 	p := manifests.RepoPds{StateDir: stateDir, Identity: BidderIdentity, KcpServer: v.Kcp.Server, KcpWorkspace: v.Kcp.Workspace,
 		VaultServer: v.Vault.Server, VaultClient: compose.PdsVaultClient, VaultKcpServer: v.Vault.KcpServer, VaultMount: BidderVaultClient,
 		VaultMountClient: BidderVaultClient, VaultWorkspace: v.Kcp.Workspace,
-		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read, AssociateService: compose.BidderAssociate}
+		PlcDirectoryUrl: n.PLCDirectoryURL, IngressProxyHost: n.IngressProxyHost, Trust: v.Trust, Read: v.Read}
 	var err error
 	if p.WatchEventSources, err = compose.RefFragment(compose.WatchEventSources(compose.SourceInput{Network: n})); err != nil {
 		return p, err

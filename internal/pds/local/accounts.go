@@ -111,6 +111,21 @@ func (a *Accounts) Retire(ctx context.Context, raw string) error {
 	return err
 }
 
+func (a *Accounts) UpdateAlsoKnownAs(ctx context.Context, raw string, add, remove []string) ([]string, error) {
+	if !inScope(a.scope, raw) {
+		return nil, fmt.Errorf("pds: the account %s is outside the granted scope %v", raw, a.scope)
+	}
+	did, err := syntax.ParseDID(raw)
+	if err != nil {
+		return nil, fmt.Errorf("pds: the account did %q: %w", raw, err)
+	}
+	aka, err := a.srv.UpdateAlsoKnownAs(ctx, did, add, remove)
+	if errors.Is(err, atpds.ErrUnsupported) {
+		return nil, fmt.Errorf("%w: %v", pds.ErrUnsupported, err)
+	}
+	return aka, err
+}
+
 type Sessions struct {
 	srv *atpds.Server
 

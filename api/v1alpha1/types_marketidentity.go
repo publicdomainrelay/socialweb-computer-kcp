@@ -64,8 +64,6 @@ type MarketIdentitySpec struct {
 
 	AssociationWatch string `json:"associationWatch,omitempty"`
 
-	AssociationService string `json:"associationService,omitempty"`
-
 	AssociationRef *commonv1.StrongRef `json:"associationRef,omitempty"`
 
 	KeysRef *commonv1.SecretRef `json:"keysRef,omitempty"`

@@ -16,6 +16,7 @@ const (
 	HeartbeatNSID          = "com.publicdomainrelay.temp.market.heartbeat"
 	AssociationNSID        = "com.publicdomainrelay.temp.market.association"
 	AssociationRequestNSID = "com.publicdomainrelay.temp.market.associationRequest"
+	EndorsementNSID        = "link.ident.endorsement"
 
 	BidsFreeNSID     = "com.publicdomainrelay.temp.market.bids.free"
 	BidsX402NSID     = "com.publicdomainrelay.temp.market.bids.x402"

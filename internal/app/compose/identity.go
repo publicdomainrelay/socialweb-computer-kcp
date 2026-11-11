@@ -25,17 +25,13 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 )
 
 const (
 	EnvPdsAccountPassword = "ATPROTO_PASSWORD"
 
 	AssociationWatch = "association"
-
-	AssociateConfirmNSID = "com.publicdomainrelay.temp.requester.associateConfirm"
-	BadgeBlueKeysNSID    = "com.publicdomainrelay.temp.badgeBlueKeys"
-	BidderAssociate      = "bidder_associate"
-	RequesterAssociate   = "requester_associate"
 )
 
 const (
@@ -325,10 +321,9 @@ func (c *Composer) IdentityDid(ctx context.Context, ws, name string) string {
 	return id.Status.Did
 }
 
-func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator, service string) v1alpha1.MarketIdentitySpec {
+func OperatorWatched(s v1alpha1.MarketIdentitySpec, operator string) v1alpha1.MarketIdentitySpec {
 	if s.Mode == v1alpha1.MarketIdentityModeLocalRepo && s.Association != v1alpha1.AssociationSkip {
 		s.AssociateWith, s.AssociationWatch = operator, AssociationWatch
-		s.AssociationService = service
 	}
 	return s
 }
@@ -377,27 +372,6 @@ func (c *Composer) ApplyOAuthIdentityEndpoints(ctx context.Context, r Root, snap
 	return c.applyAs(ctx, r, r.IdentityManager(), ws, MarketIdentityGVR, u)
 }
 
-func ClaimOpen(id *v1alpha1.MarketIdentity) bool {
-	if id == nil || strings.TrimSpace(id.Status.Did) == "" {
-		return false
-	}
-	for _, cond := range id.Status.Conditions {
-		if cond.Type == v1alpha1.ConditionAssociated && cond.Reason == "Revoked" {
-			return false
-		}
-	}
-	if id.Spec.Mode == v1alpha1.MarketIdentityModeLocalRepo {
-		if id.Spec.Association == v1alpha1.AssociationSkip || AssociatedClaim(id) || len(id.Status.Associations) > 0 {
-			return false
-		}
-		if id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingApproval {
-			return true
-		}
-		return id.Status.Phase == v1alpha1.MarketIdentityPhaseReady && len(id.Spec.ApprovedAssociations) == 0
-	}
-	return id.Status.Phase == v1alpha1.MarketIdentityPhaseAwaitingScan && id.Status.PendingAction != nil
-}
-
 func AssociatedClaim(id *v1alpha1.MarketIdentity) bool {
 	if id == nil {
 		return false
@@ -432,14 +406,14 @@ func associationRequired(plan AccountPlan, id *v1alpha1.MarketIdentity) bool {
 	return strings.TrimSpace(id.Spec.AssociationWatch) != "" || strings.TrimSpace(id.Spec.AssociateWith) != ""
 }
 
-func AssociationWait(plan AccountPlan, id *v1alpha1.MarketIdentity, service string) string {
+func AssociationWait(plan AccountPlan, id *v1alpha1.MarketIdentity) string {
 	if !associationRequired(plan, id) {
 		return ""
 	}
 	if ref := plan.Identity.AssociationRef; ref != nil {
 		if id.Spec.AssociationRef == nil || *id.Spec.AssociationRef != *ref || id.Status.AssociationRef == nil || *id.Status.AssociationRef != *ref ||
 			!AssociatedClaim(id) || id.Status.Phase != v1alpha1.MarketIdentityPhaseReady {
-			return "waiting for the MarketIdentity to verify the association record " + ref.URI + " (cid " + ref.CID + "): " + associatedMessage(id)
+			return "waiting for the MarketIdentity to verify the grant " + ref.URI + " (cid " + ref.CID + "): " + associatedMessage(id)
 		}
 		return ""
 	}
@@ -455,7 +429,8 @@ func AssociationWait(plan AccountPlan, id *v1alpha1.MarketIdentity, service stri
 			keyID = did
 		}
 	}
-	return fmt.Sprintf("waiting for the operator's %s claim record (challenge=operator, keyId=%s, service=%s)", service, keyID, service)
+	return fmt.Sprintf("waiting for the operator's %s grant and %s endorsement at rkey %s, and %s%s in the DID document of %s",
+		identlink.GrantNSID, identlink.EndorsementNSID, keyID, identlink.AgentOfPrefix, "<operator>", keyID)
 }
 
 func OperatorDID(declared []string, id *v1alpha1.MarketIdentity) string {

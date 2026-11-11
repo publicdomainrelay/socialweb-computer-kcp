@@ -99,6 +99,8 @@ type Composer struct {
 	applies applyCache
 
 	linkSets linkSets
+
+	agentOf sync.Map
 }
 
 func New(cfg Config) (*Composer, error) {

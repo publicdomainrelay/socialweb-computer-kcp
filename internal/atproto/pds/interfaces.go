@@ -75,6 +75,7 @@ type PLCGenesisResult struct {
 type PLCSubmitter interface {
 	SubmitGenesis(ctx context.Context, req PLCGenesisRequest) (PLCGenesisResult, error)
 	UpdateHandle(ctx context.Context, did syntax.DID, handle string) error
+	UpdateAlsoKnownAs(ctx context.Context, did syntax.DID, add, remove []string) ([]string, error)
 	UpdateService(ctx context.Context, did syntax.DID, service string) error
 	Tombstone(ctx context.Context, did syntax.DID) error
 }

@@ -230,6 +230,10 @@ func (a *Accounts) Describe(ctx context.Context) (pds.Info, error) { return a.ho
 
 func (a *Accounts) Retire(context.Context, string) error { return pds.ErrUnsupported }
 
+func (a *Accounts) UpdateAlsoKnownAs(context.Context, string, []string, []string) ([]string, error) {
+	return nil, pds.ErrUnsupported
+}
+
 func (a *Accounts) CreateAccount(ctx context.Context, req pds.AccountRequest) (pds.Account, error) {
 	password, err := a.host.password(ctx, req.Credentials)
 	if err != nil {

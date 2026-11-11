@@ -578,13 +578,8 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := c.PruneAccountRepos(ctx, r, ws, RequesterIdentity, compose.RepoRefIn(did, ws).Name); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if plan.Identity.AssociationRef != nil {
-		if err := c.ApplyAssociationRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate); err != nil {
-			return ctlruntime.Result{}, err
-		}
-	}
 	if req := o.Spec.Identity.AssociationRequest; req != nil {
-		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, compose.RequesterAssociate, *req); err != nil {
+		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, *req); err != nil {
 			return p.fail(err)
 		}
 	}
@@ -636,7 +631,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	p.st.Did = id.Status.Did
 	compose.FillApplicationStatus(&p.st, o.Generation, false, o.Spec.Components, desired, snap, nil)
 	down := p.ingressDown(snap, plan)
-	switch msg := compose.AssociationWait(plan, id, compose.RequesterAssociate); {
+	switch msg := compose.AssociationWait(plan, id); {
 	case msg != "":
 		return p.wait(msg)
 	case snap.Satisfied(desired) && p.st.Did != "":

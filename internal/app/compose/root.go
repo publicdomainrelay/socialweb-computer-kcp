@@ -176,7 +176,9 @@ func DrainWatch[C ctlruntime.Object](c *Composer, export, rootKind string) ctlru
 }
 
 func OperatorRecordWatch(c *Composer, export, rootKind string) ctlruntime.Option {
-	filter := ctlruntime.WatchFilter[*v1alpha1.AtprotoRecord]{Changed: specChanged[*v1alpha1.AtprotoRecord]}
+	filter := ctlruntime.WatchFilter[*v1alpha1.AtprotoRecord]{Changed: func(old, new *v1alpha1.AtprotoRecord) bool {
+		return specChanged(old, new) || old.Status.Cid != new.Status.Cid || old.Status.Phase != new.Status.Phase
+	}}
 	return ctlruntime.WatchesFiltered(export, filter, func(_ context.Context, src ctlruntime.Request, rec *v1alpha1.AtprotoRecord) []ctlruntime.Request {
 		if rec.GetLabels()[OperatorRecordLabel] != OperatorRepoName {
 			return nil

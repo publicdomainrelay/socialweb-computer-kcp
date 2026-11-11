@@ -16,8 +16,12 @@ import (
 	exposurev1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/exposure/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 )
 
 const (
@@ -82,49 +86,124 @@ func (c *Composer) ApplyOperatorVouch(ctx context.Context, r Root, ws, app, subj
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
 }
 
-const AssociationRecordName = market.MirrorRKey
+const (
+	OperatorGrantRecord = "operator-grant"
 
-func (c *Composer) ApplyAssociationRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity, service string) error {
-	from := func(path string) map[string]any {
-		return map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": path}}
+	OperatorEndorsementRecord = "operator-endorsement"
+)
+
+func (c *Composer) ApplyOperatorPair(ctx context.Context, r Root, ws, identity, agent string) error {
+	if !identlink.IsDID(agent) {
+		return nil
 	}
-	proof := map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": "status.associationRef", "optional": true}}
-	record, err := json.Marshal(map[string]any{"challenge": from("status.associations[0]"), "keyId": from("status.did"),
-		"service": service, "name": identity, "createdAt": from("metadata.creationTimestamp"), "proof": proof})
+	labels := map[string]string{OperatorRecordLabel: OperatorRepoName}
+	apply := func(name, collection string, value map[string]any) error {
+		record, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+			Spec: v1alpha1.AtprotoRecordSpec{RepoRef: OperatorRepoRef(), Collection: collection, Rkey: agent, Record: record}}
+		return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
+	}
+	if err := apply(OperatorGrantRecord, market.AssociationNSID, market.GrantRecord(agent, identityField(identity, "metadata.creationTimestamp"))); err != nil {
+		return err
+	}
+	grant, err := Get[v1alpha1.AtprotoRecord](ctx, c, ws, AtprotoRecordGVR, OperatorGrantRecord)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil || grant.Status.Phase != v1alpha1.AtprotoRecordPhaseApplied || grant.Status.ObservedGeneration != grant.Generation || grant.Status.Cid == "" {
+		return err
+	}
+	if err := apply(OperatorEndorsementRecord, market.EndorsementNSID, market.EndorsementRecord(agent)); err != nil {
+		return err
+	}
+	if e, err := Get[v1alpha1.AtprotoRecord](ctx, c, ws, AtprotoRecordGVR, OperatorEndorsementRecord); err == nil && e.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed {
+		c.log.Warn("operator_endorsement_skipped", "agent", agent, "message", e.Status.Message,
+			"hint", "the operator session may lack the optional scope "+atprotooauth.RepoEndorsementWrite+"; sign the operator in again to grant it; until then the agent stays unassociated")
+	}
+	return nil
+}
+
+func (c *Composer) DeleteOperatorPair(ctx context.Context, ws string) error {
+	ri, err := c.Client(ws, AtprotoRecordGVR)
 	if err != nil {
 		return err
 	}
-	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRecordName},
-		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: BadgeBlueKeysNSID, Rkey: AssociationRecordName, Record: record,
-			OnMissingReference: v1alpha1.MissingReferenceDelete}}
-	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
+	if err := ri.Delete(ctx, OperatorEndorsementRecord, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if _, err := Get[v1alpha1.AtprotoRecord](ctx, c, ws, AtprotoRecordGVR, OperatorEndorsementRecord); !apierrors.IsNotFound(err) {
+		return err
+	}
+	if err := ri.Delete(ctx, OperatorGrantRecord, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+func (c *Composer) UpdateAgentOf(ctx context.Context, r Root, ws, did string, add, remove []string) error {
+	if !identlink.IsDID(did) || len(add)+len(remove) == 0 {
+		return nil
+	}
+	key := strings.Join(add, " ") + "|" + strings.Join(remove, " ")
+	if held, ok := c.agentOf.Load(did); ok && held == key {
+		return nil
+	}
+	accounts, err := bus.Resolve[pds.Accounts](ctx, c.cfg.Bus, r.Ref(), AppRef(ComponentKindPds, PdsComponent, ws),
+		bus.Capability{Name: pds.CapabilityAccount, Scope: []string{ScopeAll}})
+	if err != nil {
+		return err
+	}
+	aka, err := accounts.UpdateAlsoKnownAs(ctx, did, add, remove)
+	if err != nil {
+		return fmt.Errorf("compose: the alsoKnownAs of %s: %w", did, err)
+	}
+	c.agentOf.Store(did, key)
+	c.log.Info("agent_of_applied", "did", did, "alsoKnownAs", aka)
+	return nil
 }
 
 const AssociationRequestRecordName = "association-request"
 
-func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity, service string,
-	req v1alpha1.AssociationRequest) error {
-	authority, err := syntax.ParseDID(strings.TrimSpace(req.Authority))
-	if err != nil || authority.String() != req.Authority {
-		return fmt.Errorf("compose: spec.identity.associationRequest.authority %q is not a DID", req.Authority)
+func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity string, req v1alpha1.AssociationRequest) error {
+	principal, err := syntax.ParseDID(strings.TrimSpace(req.Principal))
+	if err != nil || principal.String() != req.Principal {
+		return fmt.Errorf("compose: spec.identity.associationRequest.principal %q is not a DID", req.Principal)
 	}
 	contract, err := syntax.ParseATURI(strings.TrimSpace(req.Contract))
-	if err != nil || contract.Authority().String() != req.Authority || contract.RecordKey() == "" {
-		return fmt.Errorf("compose: spec.identity.associationRequest.contract %q is not a record of %s", req.Contract, req.Authority)
+	if err != nil || contract.Authority().String() != req.Principal || contract.RecordKey() == "" {
+		return fmt.Errorf("compose: spec.identity.associationRequest.contract %q is not a record of %s", req.Contract, req.Principal)
 	}
 	if nonce := strings.TrimSpace(req.Nonce); nonce == "" || len(nonce) > 128 || nonce != req.Nonce {
 		return fmt.Errorf("compose: spec.identity.associationRequest.nonce is not 1 to 128 characters")
 	}
-	created := map[string]any{"valueFrom": map[string]any{"kind": KindMarketIdentity, "name": identity, "fieldPath": "metadata.creationTimestamp"}}
-	record, err := json.Marshal(map[string]any{"$type": market.AssociationRequestNSID, "authority": req.Authority, "service": service,
-		"contract": req.Contract, "nonce": req.Nonce, "createdAt": created})
+	record, err := json.Marshal(map[string]any{"$type": market.AssociationRequestNSID, "principal": req.Principal,
+		"contract": req.Contract, "nonce": req.Nonce, "createdAt": identityField(identity, "metadata.creationTimestamp")})
 	if err != nil {
 		return err
 	}
 	obj := &v1alpha1.AtprotoRecord{ObjectMeta: metav1.ObjectMeta{Name: AssociationRequestRecordName},
-		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: market.AssociationRequestNSID, Rkey: market.ContractScopedRKey(service, req.Authority, req.Contract),
-			Record: record}}
+		Spec: v1alpha1.AtprotoRecordSpec{RepoRef: &repo, Collection: market.AssociationRequestNSID, Rkey: req.Principal, Record: record}}
 	return c.ApplyTyped(ctx, r, ws, AtprotoRecordGVR, v1alpha1.GroupVersion.String(), "AtprotoRecord", obj)
+}
+
+func AgentOfEntries(principals ...string) []string {
+	var out []string
+	for _, principal := range principals {
+		if identlink.IsDID(principal) {
+			out = append(out, identlink.AgentOfPrefix+principal)
+		}
+	}
+	return out
+}
+
+func BorrowedHandle(handle string) []string {
+	if handle = strings.ToLower(strings.TrimSpace(handle)); handle == "" {
+		return nil
+	}
+	return []string{"at://" + handle}
 }
 
 func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string, caRef *commonv1.ObjectRef) []Link {
@@ -133,7 +212,7 @@ func OperatorRecordLinks(ws string, remotePDS commonv1.ObjectRef, did string, ca
 	records := exposurev1alpha1.ComponentLinkSelector{Group: v1alpha1.GroupName, Kind: "AtprotoRecord", Workspace: ws,
 		MatchLabels: map[string]string{OperatorRecordLabel: OperatorRepoName}}
 	links := []Link{
-		SelectorLink(LinkName("records", OperatorRepoName), records, repo, Cap(atprotorepo.CapabilityWrite, VouchNSID)),
+		SelectorLink(LinkName("records", OperatorRepoName), records, repo, Cap(atprotorepo.CapabilityWrite, VouchNSID, market.AssociationNSID, market.EndorsementNSID)),
 		RepoBackendLink(repo, remote),
 	}
 	identity := AppRef(KindMarketIdentity, OperatorRepoName, ws)

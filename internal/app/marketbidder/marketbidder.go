@@ -20,6 +20,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 )
 
 const (
@@ -204,6 +205,9 @@ func (p *pass) delete(ctx context.Context) (ctlruntime.Result, error) {
 	if v, found, err := c.GetComponent(ctx, r.Workspace, compose.ComponentKindPds, compose.PdsComponent); err == nil && found && v.Status.Ready {
 		pdsUp = true
 	}
+	if pdsUp {
+		p.unassociate(ctx)
+	}
 	records, err := c.ReleaseRecords(ctx, r.Workspace, pdsUp)
 	if err != nil {
 		return ctlruntime.Result{}, err
@@ -306,7 +310,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return p.retry("its set workloads", err)
 	}
 	if !c.Applied(r) {
-		identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)
+		identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator)
 		digest, digestErr := compose.InfraDigest(BidderSet, o.Spec.Profile, values, identity, phases...)
 		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
@@ -343,7 +347,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	id, err := c.Identity(ctx, ws, BidderIdentity)
 	if apierrors.IsNotFound(err) {
-		if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)); err != nil {
+		if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, compose.OperatorWatched(plan.Identity, o.Spec.Operator)); err != nil {
 			return p.retry("its MarketIdentity", err)
 		}
 		return p.wait("its MarketIdentity was missing and is applied again")
@@ -693,10 +697,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	if err := c.PruneAccountRepos(ctx, r, ws, BidderIdentity, compose.RepoRefIn(did, ws).Name); err != nil {
 		return ctlruntime.Result{}, err
 	}
-	if err := c.ApplyAssociationRecord(ctx, r, ws, repo, BidderIdentity, compose.BidderAssociate); err != nil {
-		return ctlruntime.Result{}, err
-	}
-	identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator, compose.BidderAssociate)
+	identity := compose.OperatorWatched(plan.Identity, o.Spec.Operator)
 	identity.Did, identity.PdsURL, identity.Handle = did, pdsPublicURL, pdsHandle
 	if err := c.ApplyIdentitySpec(ctx, r, ws, BidderIdentity, identity); err != nil {
 		return p.retry("its app Pds identity", err)
@@ -736,8 +737,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		p.st.Components = append(p.st.Components, p.guestComponents(ctx)...)
 	}
 	compose.FillApplicationStatus(&p.st, o.Generation, false, o.Spec.Components, desired, snap, nil)
+	p.associate(ctx, plan, id)
 	if o.Spec.Profile == BidderProfileNetwork {
-		p.operator(ctx, id, mount)
+		p.operator(ctx, mount)
 	}
 	p.operatorSignIn(ctx, mount)
 	if snap.Satisfied(desired) && p.st.Did != "" {
@@ -746,7 +748,72 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	return p.wait("waiting for every component to be ready and the bidder's MarketIdentity for a did")
 }
 
-func (p *pass) operator(ctx context.Context, id *v1alpha1.MarketIdentity, mount string) {
+func (p *pass) operatorSession() bool {
+	return p.o.Spec.Profile == BidderProfileNetwork || compose.OperatorSignInSet(p.o.Spec.Options)
+}
+
+func (p *pass) principal(ctx context.Context) string {
+	if operator := strings.TrimSpace(p.o.Spec.Operator); identlink.IsDID(operator) {
+		return operator
+	}
+	return p.c.IdentityDid(ctx, p.r.Workspace, compose.OperatorRepoName)
+}
+
+func (p *pass) borrowedHandle(ctx context.Context) []string {
+	o := p.o
+	handle := strings.TrimSpace(o.Spec.Identity.Handle)
+	if handle == "" {
+		return nil
+	}
+	operatorHandle := ""
+	if op, err := p.c.Identity(ctx, p.r.Workspace, compose.OperatorRepoName); err == nil {
+		operatorHandle = op.Status.Handle
+	}
+	for _, name := range []string{o.Spec.Operator, compose.OptionValue(o.Spec.Options, compose.OperatorSignInOption), operatorHandle} {
+		if strings.EqualFold(strings.TrimSpace(name), handle) {
+			return compose.BorrowedHandle(handle)
+		}
+	}
+	if o.Spec.Profile == BidderProfileNetwork {
+		return compose.BorrowedHandle(handle)
+	}
+	return nil
+}
+
+func (p *pass) associate(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.MarketIdentity) {
+	c, r := p.c, p.r
+	agent := strings.TrimSpace(id.Status.Did)
+	if !plan.Local || plan.Identity.Association == v1alpha1.AssociationSkip || agent == "" {
+		return
+	}
+	if p.operatorSession() {
+		if err := c.ApplyOperatorPair(ctx, r, r.Workspace, BidderIdentity, agent); err != nil {
+			p.log().Warn("bidder_operator_pair", "agent", agent, "err", err.Error())
+		}
+	} else if err := c.DeleteOperatorPair(ctx, r.Workspace); err != nil {
+		p.log().Warn("bidder_operator_pair_delete", "agent", agent, "err", err.Error())
+	}
+	principal := p.principal(ctx)
+	if principal == "" {
+		return
+	}
+	if err := c.UpdateAgentOf(ctx, r, r.Workspace, agent, compose.AgentOfEntries(principal), p.borrowedHandle(ctx)); err != nil {
+		p.log().Warn("bidder_agent_of", "agent", agent, "principal", principal, "err", err.Error())
+	}
+}
+
+func (p *pass) unassociate(ctx context.Context) {
+	c, r := p.c, p.r
+	agent, principal := c.IdentityDid(ctx, r.Workspace, BidderIdentity), p.principal(ctx)
+	if agent == "" || principal == "" {
+		return
+	}
+	if err := c.UpdateAgentOf(ctx, r, r.Workspace, agent, nil, compose.AgentOfEntries(principal)); err != nil {
+		p.log().Warn("bidder_agent_of_remove", "agent", agent, "principal", principal, "err", err.Error())
+	}
+}
+
+func (p *pass) operator(ctx context.Context, mount string) {
 	c, r, o := p.c, p.r, p.o
 	if o.Spec.Network == nil || o.Spec.Identity.Handle == "" || o.Spec.Identity.PdsURL == "" {
 		return
@@ -756,16 +823,6 @@ func (p *pass) operator(ctx context.Context, id *v1alpha1.MarketIdentity, mount 
 	if err := c.ApplyLinks(ctx, r, "operator", compose.OperatorLinks(r, op)); err != nil {
 		p.log().Warn("the operator account links", "err", err.Error())
 		return
-	}
-	if compose.ClaimOpen(id) {
-		operator, err := c.WriteClaim(ctx, r, op, id, "bidder-", compose.BidderAssociate)
-		switch {
-		case err != nil:
-			p.log().Warn("associating the bidder's DID with the market network operator account", "err", err.Error())
-		case operator != "":
-			p.log().Info("the market network operator account wrote its claim record naming the bidder's own DID", "operator", operator,
-				"handle", o.Spec.Identity.Handle, "bidderDid", id.Status.Did)
-		}
 	}
 	if compose.OperatorSignInSet(o.Spec.Options) {
 		return

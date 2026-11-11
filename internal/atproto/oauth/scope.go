@@ -39,13 +39,13 @@ const (
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
 	CollectionFedproxySSHKey        = "com.fedproxy.sshPublicKey"
-	CollectionBidderAssociation     = "com.publicdomainrelay.temp.market.bidderAssociation"
 	CollectionIngressListen         = "computer.socialweb.ingress.listen"
 	CollectionIngressAnswer         = "computer.socialweb.ingress.answer"
 	CollectionIngressOffer          = "computer.socialweb.ingress.offer"
 	CollectionPeer                  = "computer.socialweb.peer"
 	CollectionAssociation           = "com.publicdomainrelay.temp.market.association"
 	CollectionAssociationRequest    = "com.publicdomainrelay.temp.market.associationRequest"
+	CollectionEndorsement           = "link.ident.endorsement"
 	CollectionPolicyGhaLite         = "computer.socialweb.temp.policy.ghalite"
 	CollectionPolicyTypeScript      = "computer.socialweb.temp.policy.typescript"
 	CollectionInfra                 = "computer.socialweb.infra"
@@ -59,12 +59,13 @@ const (
 	RepoIngressAnswerWrite  = "repo:" + CollectionIngressAnswer + "?action=create&action=delete"
 	RepoIngressOfferWrite   = "repo:" + CollectionIngressOffer + "?action=create&action=delete"
 	RepoPeerWrite           = "repo:" + CollectionPeer + "?action=create&action=update&action=delete"
+	RepoAssociationWrite    = "repo:" + CollectionAssociation + "?action=create&action=update&action=delete"
+	RepoEndorsementWrite    = "repo:" + CollectionEndorsement + "?action=create&action=delete"
 
 	RPCSubmitRFP         = "rpc:com.publicdomainrelay.temp.market.submitRfp?aud=*"
 	RPCSubmitAccept      = "rpc:com.publicdomainrelay.temp.market.submitAccept?aud=*"
 	RPCSubmitBid         = "rpc:com.publicdomainrelay.temp.market.submitBid?aud=*"
 	RPCSubmitEvent       = "rpc:com.publicdomainrelay.temp.market.submitEvent?aud=*"
-	RPCAssociateConfirm  = "rpc:com.publicdomainrelay.temp.requester.associateConfirm?aud=*"
 	RPCClusterCreate     = "rpc:com.publicdomainrelay.temp.cluster.createCluster?aud=*"
 	RPCClusterList       = "rpc:com.publicdomainrelay.temp.cluster.listClusters?aud=*"
 	RPCClusterKubeconfig = "rpc:com.publicdomainrelay.temp.cluster.getKubeconfig?aud=*"
@@ -99,8 +100,7 @@ var (
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
 			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
 			CollectionGuestSecretsRequested, CollectionGuestRequesterDID, CollectionGuestR2Released,
-			CollectionFedproxyRBAC, CollectionBidderAssociation, CollectionPolicyGhaLite,
-			CollectionPolicyTypeScript),
+			CollectionFedproxyRBAC, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
 		[]string{RepoIngressListenWrite, RepoIngressAnswerWrite},
 		[]string{collectionScope(CollectionHeartbeat, "create", "update")},
@@ -114,7 +114,7 @@ var (
 		collectionScopes([]string{"create", "update"},
 			CollectionRBACDID, CollectionOffering, CollectionBid, CollectionBidsFree, CollectionBidsX402,
 			CollectionReceipt, CollectionReceiptsFree, CollectionReceiptsX402, CollectionEvent,
-			CollectionConfigWIFSimple, CollectionFedproxyRBAC, CollectionBidderAssociation),
+			CollectionConfigWIFSimple, CollectionFedproxyRBAC),
 		[]string{collectionScope(CollectionBadgeBlueKeys, "create")},
 		[]string{RPCSubmitBid, RPCSubmitEvent},
 	)
@@ -126,10 +126,9 @@ var (
 		[]string{RPCSubmitRFP, RPCSubmitAccept},
 	)
 
-	DIDKeyAssociatorOAuthScope = dedupeScopes(
+	QROAuthScope = dedupeScopes(
 		BidderOAuthScope,
 		RequesterOAuthScope,
-		[]string{RPCAssociateConfirm},
 	)
 
 	K8sOAuthScope = dedupeScopes(
@@ -143,7 +142,7 @@ var (
 		BidderOAuthScope,
 		DesktopOAuthScope,
 		ComputeSPAOAuthScope,
-		DIDKeyAssociatorOAuthScope,
+		QROAuthScope,
 		K8sOAuthScope,
 	)
 )
@@ -151,7 +150,7 @@ var (
 var RequesterOptionalScopes = []string{repoScope([]string{"delete"}, CollectionComputeVM, CollectionRFP, CollectionAccept, CollectionEvent,
 	CollectionVMDelete, CollectionVMOnNetwork, CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecrets,
 	CollectionGuestAgentStart, CollectionGuestSecretsUpdated, CollectionGuestR2Start, CollectionGuestR2Release, CollectionPolicyGhaLite,
-	CollectionPolicyTypeScript), RepoIngressOfferWrite, RepoPeerWrite}
+	CollectionPolicyTypeScript), RepoIngressOfferWrite, RepoPeerWrite, RepoEndorsementWrite}
 
 var OptionalScopes = slices.Concat([]string{RPCAtircRevoke, RepoTangledVouchWrite, RepoIngressListenWrite, RepoIngressAnswerWrite}, RequesterOptionalScopes)
 

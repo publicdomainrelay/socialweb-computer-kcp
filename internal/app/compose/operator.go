@@ -3,21 +3,16 @@ package compose
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
-	"time"
 
-	"github.com/bluesky-social/indigo/atproto/syntax"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	pdsv1alpha1 "github.com/johnandersen777/socialweb-computer-kcp/api/pds/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/atprotorepo"
@@ -155,74 +150,6 @@ func (c *Composer) OperatorRepo(ctx context.Context, r Root, o Operator) (atprot
 	return repo, did, nil
 }
 
-func claimOf(rawURL string) (nonce, service string) {
-	_, frag, _ := strings.Cut(rawURL, "#")
-	q, _ := url.ParseQuery(frag)
-	return q.Get("n"), q.Get("s")
-}
-
-func (c *Composer) WriteClaim(ctx context.Context, r Root, o Operator, id *v1alpha1.MarketIdentity, namePrefix, service string) (string, error) {
-	if id == nil || strings.TrimSpace(service) == "" {
-		return "", nil
-	}
-	nonce, pendingService := "", ""
-	if action := id.Status.PendingAction; action != nil {
-		nonce, pendingService = claimOf(action.URL)
-	}
-	if id.Spec.Mode != v1alpha1.MarketIdentityModeLocalRepo && nonce == "" {
-		return "", nil
-	}
-	if pendingService != "" && pendingService != service {
-		return "", fmt.Errorf("the pending association names service %q, not %q", pendingService, service)
-	}
-	didText := strings.TrimSpace(id.Status.Did)
-	if _, err := syntax.ParseDID(didText); err != nil {
-		return "", fmt.Errorf("the identity's did %q: %w", didText, err)
-	}
-	repo, operator, err := c.OperatorRepo(ctx, r, o)
-	if err != nil {
-		return "", err
-	}
-	rkey := market.ClaimRKey(service, didText)
-	if held, err := repo.GetRecord(ctx, operator, BadgeBlueKeysNSID, rkey); err == nil {
-		var value map[string]any
-		if json.Unmarshal(held.Value, &value) == nil && heldClaimMatches(value, nonce, operator, didText, service) {
-			return "", nil
-		}
-	}
-	fields := map[string]any{"$type": BadgeBlueKeysNSID, "keyId": didText, "challenge": operator, "service": service,
-		"name": namePrefix + didText[len(didText)-8:], "createdAt": time.Now().UTC().Format(time.RFC3339)}
-	if nonce != "" {
-		fields["nonce"] = nonce
-	}
-	record, err := json.Marshal(fields)
-	if err != nil {
-		return "", err
-	}
-	if _, err := repo.PutRecord(ctx, BadgeBlueKeysNSID, rkey, record); err != nil {
-		return "", err
-	}
-	return operator, nil
-}
-
-func heldClaimMatches(value map[string]any, nonce, operator, subject, service string) bool {
-	if value == nil {
-		return false
-	}
-	challenge, _ := value["challenge"].(string)
-	keyID, _ := value["keyId"].(string)
-	if challenge != operator || keyID != subject {
-		return false
-	}
-	if got, _ := value["service"].(string); got != service {
-		return false
-	}
-	if got, _ := value["nonce"].(string); got != "" && got != nonce {
-		return false
-	}
-	return true
-}
-
 const (
 	OperatorSignInOption = "operator-signin"
 
@@ -235,7 +162,8 @@ const (
 	operatorLinkSet = "operator"
 )
 
-var OperatorSignInScope = strings.Join([]string{atprotooauth.ScopeAtproto, atprotooauth.RepoTangledVouchWrite}, " ")
+var OperatorSignInScope = strings.Join([]string{atprotooauth.ScopeAtproto, atprotooauth.RepoTangledVouchWrite, atprotooauth.RepoAssociationWrite,
+	atprotooauth.RepoEndorsementWrite}, " ")
 
 type OperatorSignIn struct {
 	Mode v1alpha1.MarketIdentityMode
