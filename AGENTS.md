@@ -294,7 +294,9 @@ again; user_data installs `atirc-agent.service`
     `role.LocalPdsSignsAtirc`); else `none` with `atircReason`. Before the RFP of a spec.agent contract (no
     `spec.atircParentRef`) the requester writes the placeholder bundle (one empty entry at envFile, 0600) when
     the secretsRef path holds none (`requester_agent_bundle_placeholder`), then refuses the contract (Failed `refused:
-    ... --atproto-handle ...`, no record) when its handle has a disallowed TLD (`.local`) or does not resolve to its DID. An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
+    ... --atproto-handle ...`, no record) when its handle has a disallowed TLD (`.local`) or fails `identlink.HandleOK`
+    (it verifies both ways, or the DID document declares `at://<handle>` and a strict parent of it verifies both ways
+    to an ancestor in the DID's ident.link walk, so a guest requester's namespaced handle passes). An ssh gateway session (`internal/market/requester/sessionatirc.go`) whose
     command starts with `atirc`, or whose client sends `LC_ATIRC=1` (`LC_ATIRC=0` turns it off), gets,
     when it is not an `LC_SESSION` held one, the agent module in its user_data (so the bidder seeds
     `/usr/local/bin/atirc`), and after the receipt the requester mints, with its own service auth

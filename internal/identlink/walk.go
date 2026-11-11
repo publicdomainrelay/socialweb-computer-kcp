@@ -6,6 +6,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 )
 
 const (
@@ -322,4 +325,41 @@ func settle(res *Result, edges []*edge, stuck map[string]bool, maxDepth int) {
 		res.Roots = append(res.Roots, n.did)
 		res.ExpiresAt = earlier(res.ExpiresAt, n.expiresAt)
 	}
+}
+
+func HandleOK(ctx context.Context, dir identity.Directory, walk Result, doc *Doc, handle string) bool {
+	h, err := syntax.ParseHandle(strings.TrimSpace(handle))
+	if err != nil || dir == nil || doc == nil {
+		return false
+	}
+	h = h.Normalize()
+	declared := slices.ContainsFunc(doc.AlsoKnownAs, func(entry string) bool { return strings.EqualFold(entry, "at://"+h.String()) })
+	if !declared {
+		return false
+	}
+	if verifiedDID(ctx, dir, h) == walk.Agent {
+		return true
+	}
+	for rest := h.String(); ; {
+		_, parent, ok := strings.Cut(rest, ".")
+		if !ok || !strings.Contains(parent, ".") {
+			return false
+		}
+		rest = parent
+		p, err := syntax.ParseHandle(parent)
+		if err != nil {
+			return false
+		}
+		if did := verifiedDID(ctx, dir, p); did != "" && walk.Has(did) {
+			return true
+		}
+	}
+}
+
+func verifiedDID(ctx context.Context, dir identity.Directory, h syntax.Handle) string {
+	ident, err := dir.LookupHandle(ctx, h)
+	if err != nil || ident == nil {
+		return ""
+	}
+	return ident.DID.String()
 }
