@@ -83,46 +83,67 @@ func recordField(name, path string) map[string]any {
 	return map[string]any{"valueFrom": map[string]any{"kind": "AtprotoRecord", "name": name, "fieldPath": path}}
 }
 
+func (c *Composer) recordApplied(ctx context.Context, ws, name string) (exists, applied bool, err error) {
+	rec, err := Get[v1alpha1.AtprotoRecord](ctx, c, ws, AtprotoRecordGVR, name)
+	if apierrors.IsNotFound(err) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return true, rec.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied && rec.Status.ObservedGeneration == rec.Generation && rec.Status.Cid != "", nil
+}
+
 func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity string, id *v1alpha1.MarketIdentity, self LocalAccount,
 	subhandle, iroh string, colocated []Colocated) error {
 	keep := map[string]bool{}
-	scope := id.Status.AssociationScope
-	ref := id.Status.AssociationRef
-	if scope == nil || ref == nil {
+	if id.Status.AssociationRef == nil {
 		return c.Prune(ctx, ws, AtprotoRecordGVR, PeerRecordLabel+"="+r.Owner(), keep)
 	}
+	scope := id.Status.AssociationScope
 	ownRKey := PeerRKey(subhandle, self.Handle)
 	created := identityField(identity, "metadata.creationTimestamp")
-	peerRecord := func(lease any) map[string]any {
-		out := map[string]any{"$type": PeerNSID, "lease": lease, "createdAt": created}
-		if iroh != "" {
-			out["iroh"] = iroh
-		}
-		return out
+	peerRecord := map[string]any{"$type": PeerNSID, "createdAt": created}
+	if iroh != "" {
+		peerRecord["iroh"] = iroh
 	}
 	keep[PeerRecordName] = true
-	if err := c.applyPeerRecord(ctx, r, ws, PeerRecordName, RepoRefIn(self.DID, ws), PeerNSID, ownRKey,
-		peerRecord(map[string]any{"uri": ref.URI, "cid": ref.CID})); err != nil {
+	if err := c.applyPeerRecord(ctx, r, ws, PeerRecordName, RepoRefIn(self.DID, ws), PeerNSID, ownRKey, peerRecord); err != nil {
 		return err
 	}
 	for _, other := range colocated {
-		association, mirror, peer := colocatedRecordName(other.Name, "association"), colocatedRecordName(other.Name, "mirror"), colocatedRecordName(other.Name, "peer")
-		keep[association], keep[mirror], keep[peer] = true, true, true
-		if err := c.applyPeerRecord(ctx, r, ws, association, RepoRefIn(self.DID, ws), market.AssociationNSID,
-			market.ContractScopedRKey(RequesterAssociate, other.Account.DID, scope.Contract.URI), map[string]any{
-				"$type": market.AssociationNSID, "subject": other.Account.DID, "service": RequesterAssociate,
-				"contract":  map[string]any{"uri": scope.Contract.URI, "cid": scope.Contract.CID},
-				"expiresAt": scope.ExpiresAt, "parent": map[string]any{"uri": ref.URI, "cid": ref.CID}, "createdAt": created}); err != nil {
+		agent := other.Account.DID
+		grantName, endorseName, peerName := colocatedRecordName(other.Name, "grant"), colocatedRecordName(other.Name, "endorsement"), colocatedRecordName(other.Name, "peer")
+		grant := market.GrantRecord(agent, created)
+		if scope != nil {
+			grant = market.ContractGrantRecord(agent, map[string]any{"uri": scope.Contract.URI, "cid": scope.Contract.CID}, scope.ExpiresAt, created)
+		}
+		keep[grantName] = true
+		if err := c.applyPeerRecord(ctx, r, ws, grantName, RepoRefIn(self.DID, ws), market.AssociationNSID, agent, grant); err != nil {
 			return err
 		}
-		proof := map[string]any{"uri": recordField(association, "status.uri"), "cid": recordField(association, "status.cid")}
-		if err := c.applyPeerRecord(ctx, r, ws, mirror, RepoRefIn(other.Account.DID, ws), BadgeBlueKeysNSID, AssociationRecordName, map[string]any{
-			"$type": BadgeBlueKeysNSID, "challenge": self.DID, "keyId": other.Account.DID, "service": RequesterAssociate, "name": other.Name,
-			"createdAt": created, "proof": proof}); err != nil {
+		endorsed, endorseApplied, err := c.recordApplied(ctx, ws, endorseName)
+		if err != nil {
 			return err
 		}
-		if err := c.applyPeerRecord(ctx, r, ws, peer, RepoRefIn(other.Account.DID, ws), PeerNSID, other.Name+"."+ownRKey,
-			peerRecord(proof)); err != nil {
+		if _, grantApplied, err := c.recordApplied(ctx, ws, grantName); err != nil {
+			return err
+		} else if !grantApplied && !endorsed {
+			continue
+		}
+		keep[endorseName] = true
+		if err := c.applyPeerRecord(ctx, r, ws, endorseName, RepoRefIn(self.DID, ws), market.EndorsementNSID, agent, market.EndorsementRecord(agent)); err != nil {
+			return err
+		}
+		peered, _, err := c.recordApplied(ctx, ws, peerName)
+		if err != nil {
+			return err
+		}
+		if !endorseApplied && !peered {
+			continue
+		}
+		keep[peerName] = true
+		if err := c.applyPeerRecord(ctx, r, ws, peerName, RepoRefIn(agent, ws), PeerNSID, other.Name+"."+ownRKey, peerRecord); err != nil {
 			return err
 		}
 	}
@@ -137,14 +158,11 @@ func (c *Composer) RetireLocalAccounts(ctx context.Context, r Root, ws string, d
 	if err := c.Prune(ctx, ws, AtprotoRecordGVR, PeerRecordLabel+"="+r.Owner(), map[string]bool{}); err != nil {
 		return false, err
 	}
-	if err := ri.Delete(ctx, AssociationRecordName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-		return false, err
-	}
 	left, err := kube.List[metav1.PartialObjectMetadata](ctx, ri, metav1.ListOptions{LabelSelector: PeerRecordLabel + "=" + r.Owner()})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	if _, err := Get[v1alpha1.AtprotoRecord](ctx, c, ws, AtprotoRecordGVR, AssociationRecordName); err == nil || len(left) > 0 {
+	if len(left) > 0 {
 		return false, nil
 	}
 	accounts, err := bus.Resolve[pds.Accounts](ctx, c.cfg.Bus, r.Ref(), AppRef(ComponentKindPds, PdsComponent, ws),

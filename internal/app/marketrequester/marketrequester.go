@@ -50,7 +50,8 @@ type Controller struct {
 func Register(m *ctlruntime.Manager, c *compose.Composer) error {
 	ctl := &Controller{c: c}
 	c.ProvideTrust(schema.GroupKind{Group: v1alpha1.GroupName, Kind: Kind})
-	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer)}, c.Watches(Kind)...)
+	opts := append([]ctlruntime.Option{ctlruntime.Export(compose.ExportApplications), ctlruntime.Finalizer(compose.Finalizer),
+		compose.OperatorRecordWatch(c, compose.ExportMarketIdentities, Kind)}, c.Watches(Kind)...)
 	if err := ctlruntime.For[*v1alpha1.MarketRequester](m, Name, ctl, opts...); err != nil {
 		return fmt.Errorf("marketrequester: registering the MarketRequester controller: %w", err)
 	}

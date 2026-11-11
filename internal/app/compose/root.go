@@ -180,7 +180,7 @@ func OperatorRecordWatch(c *Composer, export, rootKind string) ctlruntime.Option
 		return specChanged(old, new) || old.Status.Cid != new.Status.Cid || old.Status.Phase != new.Status.Phase
 	}}
 	return ctlruntime.WatchesFiltered(export, filter, func(_ context.Context, src ctlruntime.Request, rec *v1alpha1.AtprotoRecord) []ctlruntime.Request {
-		if rec.GetLabels()[OperatorRecordLabel] != OperatorRepoName {
+		if rec.GetLabels()[OperatorRecordLabel] != OperatorRepoName && rec.GetLabels()[PeerRecordLabel] == "" {
 			return nil
 		}
 		var out []ctlruntime.Request

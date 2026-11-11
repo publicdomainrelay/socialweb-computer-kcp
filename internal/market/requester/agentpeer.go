@@ -9,31 +9,18 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/bluesky-social/indigo/atproto/syntax"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 )
 
 const (
-	AgentPeerNSID = "computer.socialweb.peer"
-
 	AtircNickEnv = "ATIRC_NICK"
 
 	AtircUsernameEnv = "ATP_USERNAME"
 
-	AtircAgentOperatorNSID = "com.fedfork.irc.agentOperator"
-
-	AtircAgentsNSID = "com.fedfork.irc.agents"
-
 	agentPeerPublished = "PeerPublished"
-
-	maxOwnerHops = 16
 )
 
 func AtircDefaultChannel(handle string) string {
@@ -54,33 +41,6 @@ func AtircDefaultChannel(handle string) string {
 		return "#atirc"
 	}
 	return strings.ToLower(b.String())
-}
-
-func (r *contractRunner) agentChannel(ctx context.Context) string {
-	q := r.q
-	did, handle := q.repoDID, strings.ToLower(strings.TrimSpace(q.handle))
-	for range maxOwnerHops {
-		op, err := q.repo.GetRecord(ctx, did, AtircAgentOperatorNSID, "self")
-		if err != nil {
-			break
-		}
-		owner, _ := op.Value["owner"].(string)
-		if !strings.HasPrefix(owner, "did:") || owner == did || owner == q.repoDID {
-			break
-		}
-		if _, err := q.repo.GetRecord(ctx, owner, AtircAgentsNSID, did); err != nil {
-			break
-		}
-		did = owner
-	}
-	if did != q.repoDID && q.deps.Directory != nil {
-		if parsed, err := syntax.ParseDID(did); err == nil {
-			if ident, err := q.deps.Directory.LookupDID(ctx, parsed); err == nil && ident.Handle.String() != syntax.HandleInvalid.String() {
-				handle = strings.ToLower(ident.Handle.String())
-			}
-		}
-	}
-	return AtircDefaultChannel(handle)
 }
 
 func agentNick(handle, rfpURI string) string {
@@ -167,8 +127,6 @@ func (r *contractRunner) publishAgentPeer(ctx context.Context, contract v1alpha1
 		return errAgentPeerNotYet
 	}
 	switch {
-	case q.repo == nil:
-		return errors.New("the requester has no repo handle")
 	case q.deps.VaultWrite == nil:
 		return errors.New("the requester has no vault write handle")
 	case contract.Spec.SecretsRef == nil:
@@ -178,34 +136,11 @@ func (r *contractRunner) publishAgentPeer(ctx context.Context, contract v1alpha1
 	if identity == "" {
 		return fmt.Errorf("the handle %q and the RFP %q make no agent identity", q.handle, state.RFPURI)
 	}
-	seed, fresh, err := r.agentKey(ctx, contract, envFile, nick)
+	_, fresh, err := r.agentKey(ctx, contract, envFile, nick)
 	if err != nil {
 		return err
 	}
-	lease, err := r.agentLease(ctx, contract, *state.Accept)
-	if err != nil {
-		return fmt.Errorf("the agent's lease: %w", err)
-	}
-	ticket := clusterlink.StableTicket(clusterlink.Key{Private: ed25519.NewKeyFromSeed(seed)})
-	channel := r.agentChannel(ctx)
-	if existing, err := q.repo.GetRecord(ctx, q.repoDID, AgentPeerNSID, identity); err == nil {
-		got, _ := existing.Value["lease"].(map[string]any)
-		channels, _ := existing.Value["channels"].([]any)
-		if existing.Value["iroh"] == ticket && len(channels) == 1 && channels[0] == channel && got != nil && got["uri"] == lease.URI && got["cid"] == lease.CID {
-			r.agentPeerDone(ctx, contract, envFile, fresh, identity, "present")
-			return nil
-		}
-	} else if !errors.Is(err, market.ErrNotFound) {
-		return fmt.Errorf("read %s/%s: %w", AgentPeerNSID, identity, err)
-	}
-	record := map[string]any{"$type": AgentPeerNSID, "iroh": ticket, "channels": []any{channel},
-		"lease": map[string]any{"uri": lease.URI, "cid": lease.CID}, "createdAt": market.FormatTime(q.now())}
-	written, err := q.repo.PutRecord(ctx, q.repoDID, AgentPeerNSID, identity, record)
-	if err != nil {
-		return fmt.Errorf("write %s/%s: %w", AgentPeerNSID, identity, err)
-	}
-	r.log().Info("requester_agent_peer_published", "identity", identity, "uri", written.URI, "lease", lease.URI, "channel", channel)
-	r.agentPeerDone(ctx, contract, envFile, fresh, identity, "written")
+	r.agentPeerDone(ctx, contract, envFile, fresh, identity, "in the bundle")
 	return nil
 }
 
@@ -224,7 +159,7 @@ func (r *contractRunner) agentPeerDone(ctx context.Context, contract v1alpha1.Co
 			r.log().Warn("requester_agent_peer_notify_failed", "err", err.Error())
 		}
 	}
-	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent's mesh key is in the bundle and "+AgentPeerNSID+"/"+identity+" is "+how)
+	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent "+identity+"'s mesh key is "+how+"; its peer record is the guest requester's co-located account's")
 }
 
 func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.ComputeContract, envFile, nick string) ([]byte, bool, error) {
@@ -286,60 +221,4 @@ func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.Compute
 	r.addSecretEntries(envEntry, keyEntry)
 	r.log().Info("requester_agent_mesh_key_written", "envFile", envFile, "keyFile", cloudinit.AgentIrohKeyFile, "mode", "0600")
 	return seed, true, nil
-}
-
-func (r *contractRunner) agentLease(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef) (commonv1.StrongRef, error) {
-	q := r.q
-	rkey := ContractAssociationRKey(q.repoDID, accept)
-	r.mu.Lock()
-	if r.associationRecords == nil {
-		r.associationRecords = map[string]string{}
-	}
-	r.associationRecords[rkey] = q.repoDID
-	r.mu.Unlock()
-	existing, err := q.repo.GetRecord(ctx, q.repoDID, market.AssociationNSID, rkey)
-	switch {
-	case err == nil:
-		bound, ok := recordContract(existing.Value)
-		if !ok || bound != accept {
-			return commonv1.StrongRef{}, fmt.Errorf("%s is bound to another contract", existing.URI)
-		}
-		exp, _ := existing.Value["expiresAt"].(string)
-		if t, err := market.ParseTime(exp); err == nil && q.now().Add(time.Hour).Before(t) {
-			return commonv1.StrongRef{URI: existing.URI, CID: existing.CID}, nil
-		}
-	case !errors.Is(err, market.ErrNotFound):
-		return commonv1.StrongRef{}, err
-	}
-	written, err := q.repo.PutRecord(ctx, q.repoDID, market.AssociationNSID, rkey, map[string]any{
-		"$type":     market.AssociationNSID,
-		"subject":   q.repoDID,
-		"service":   market.RequesterAssociate,
-		"contract":  map[string]any{"uri": accept.URI, "cid": accept.CID},
-		"expiresAt": market.FormatTime(q.now().Add(ContractAssociationLifetime)),
-		"createdAt": market.FormatTime(q.now()),
-	})
-	if err != nil {
-		return commonv1.StrongRef{}, err
-	}
-	r.log().Info("requester_agent_lease_written", "uri", written.URI, "cid", written.CID)
-	return commonv1.StrongRef{URI: written.URI, CID: written.CID}, nil
-}
-
-func (r *contractRunner) deleteAgentPeer(ctx context.Context) {
-	q := r.q
-	if q.repo == nil || r.snapshot().Spec.Agent == nil {
-		return
-	}
-	_, identity := r.agentIdentity(r.stateCopy())
-	if identity == "" {
-		return
-	}
-	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, AgentPeerNSID, identity); err != nil && !errors.Is(err, market.ErrNotFound) {
-		r.log().Warn("requester_agent_peer_delete_failed", "identity", identity, "err", err.Error())
-		return
-	}
-	r.log().Info("requester_agent_peer_deleted", "identity", identity)
 }
