@@ -80,20 +80,12 @@ func (a *Agent) prepareSharedDir() (int, bool) {
 }
 
 func (a *Agent) mirrorShared(gid int) {
-	envReady := false
 	for _, f := range a.sharedFiles() {
 		raw, err := os.ReadFile(f.src)
 		switch {
-		case f.name == RequesterAtircEnvFile:
-			envReady = err == nil && len(raw) > 0
-			if !envReady {
-				continue
-			}
-		case f.name == AssociationRefFile:
-			if err != nil || !envReady {
-				raw = nil
-			}
-		case err != nil:
+		case f.name == AssociationRefFile && err != nil:
+			raw = nil
+		case err != nil, f.name == RequesterAtircEnvFile && len(raw) == 0:
 			continue
 		}
 		dst := filepath.Join(RequesterDir, f.name)
