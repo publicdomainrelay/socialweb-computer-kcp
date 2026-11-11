@@ -1,8 +1,6 @@
 package market
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -96,11 +94,6 @@ func ValidGuestRequesterDID(did, authority string) error {
 		return fmt.Errorf("market: the guest requester DID %s is the authority's own DID", did)
 	}
 	return nil
-}
-
-func ContractScopedRKey(service, did, acceptURI string) string {
-	sum := sha256.Sum256([]byte(did))
-	return service + "-" + hex.EncodeToString(sum[:])[:32] + "-" + acceptURI[strings.LastIndex(acceptURI, "/")+1:]
 }
 
 var guestRequesterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
