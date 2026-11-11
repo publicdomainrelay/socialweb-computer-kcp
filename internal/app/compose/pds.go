@@ -27,6 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bus"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/pds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	pdssvc "github.com/johnandersen777/socialweb-computer-kcp/internal/services/pds"
 )
 
@@ -502,6 +503,10 @@ type PdsAccount struct {
 	AdoptDID string
 
 	Sync bool
+
+	AlsoKnownAs []string
+
+	RecoveryKey string
 }
 
 func (a PdsAccount) pds() string {
@@ -615,7 +620,8 @@ func (c *Composer) EnsurePdsAccount(ctx context.Context, r Root, a PdsAccount) (
 		did = sess.DID
 	} else {
 		domain := a.Handle[strings.Index(a.Handle, ".")+1:]
-		acct, err := accounts.CreateAccount(ctx, pds.AccountRequest{Handle: a.Handle, Email: a.Handle + "@" + domain, Credentials: a.credentials()})
+		acct, err := accounts.CreateAccount(ctx, pds.AccountRequest{Handle: a.Handle, Email: a.Handle + "@" + domain, Credentials: a.credentials(),
+			AlsoKnownAs: a.AlsoKnownAs, RecoveryKey: a.RecoveryKey})
 		if err != nil {
 			return "", err
 		}
@@ -664,6 +670,28 @@ func SyncRequesterRepoKey(stateRoot, pdsStateDir, did, requesterDir string) (boo
 		}
 		if err := WriteFileAtomic(path, out, 0o600); err != nil {
 			return changed, fmt.Errorf("writing the requester's %s: %w", name, err)
+		}
+		changed = true
+	}
+	rawRotation, err := os.ReadFile(filepath.Join(PdsStateDir(stateRoot, pdsStateDir), pdssvc.RotationKeyFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return changed, nil
+	}
+	if err != nil {
+		return changed, fmt.Errorf("the app Pds PLC rotation key: %w", err)
+	}
+	rotation, err := atcrypto.ParsePrivateMultibase(strings.TrimSpace(string(rawRotation)))
+	if err != nil {
+		return changed, fmt.Errorf("the app Pds PLC rotation key: %w", err)
+	}
+	public, err := rotation.PublicKey()
+	if err != nil {
+		return changed, err
+	}
+	path, want := filepath.Join(requesterDir, market.RenterRotationKeyFile), public.DIDKey()+"\n"
+	if have, readErr := os.ReadFile(path); readErr != nil || string(have) != want {
+		if err := WriteFileAtomic(path, []byte(want), 0o644); err != nil {
+			return changed, fmt.Errorf("writing the requester's %s: %w", market.RenterRotationKeyFile, err)
 		}
 		changed = true
 	}

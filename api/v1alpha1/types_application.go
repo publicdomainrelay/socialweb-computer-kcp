@@ -160,11 +160,13 @@ type ApplicationIdentity struct {
 }
 
 type AssociationRequest struct {
-	Authority string `json:"authority"`
+	Principal string `json:"principal"`
 
 	Contract string `json:"contract"`
 
 	Nonce string `json:"nonce"`
+
+	RotationKey string `json:"rotationKey,omitempty"`
 }
 
 type MarketCommsMode string

@@ -85,8 +85,8 @@ func (a *Accounts) CreateAccount(ctx context.Context, req pds.AccountRequest) (p
 	var out struct {
 		DID string `json:"did"`
 	}
-	if err := call(ctx, a.srv, "com.atproto.server.createAccount",
-		map[string]string{"handle": req.Handle, "email": req.Email, "password": password}, &out); err != nil {
+	if err := call(ctx, a.srv, "com.atproto.server.createAccount", map[string]any{"handle": req.Handle, "email": req.Email, "password": password,
+		"alsoKnownAs": req.AlsoKnownAs, "recoveryKey": req.RecoveryKey}, &out); err != nil {
 		return pds.Account{}, err
 	}
 	did, err := syntax.ParseDID(out.DID)

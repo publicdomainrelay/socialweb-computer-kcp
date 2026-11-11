@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/fsnotify/fsnotify"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
@@ -94,6 +96,11 @@ func (r *requestRun) associationRef(network bool) error {
 	}
 	r.root.Identity.Association = v1alpha1.AssociationRequireApproval
 	if wait != "" {
+		request, err := readAssociationRequest(guestPaths().request)
+		if err != nil {
+			return err
+		}
+		r.root.Identity.AssociationRequest = request
 		r.awaitRefFile = wait
 		r.log("the association ref file is empty; this requester reports its DID to the guest agent and waits for the ref", "file", wait,
 			"didFile", guestPaths().did)
@@ -109,19 +116,19 @@ func readAssociationRequest(path string) (*v1alpha1.AssociationRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	var entry struct {
-		Authority string `json:"authority"`
-		Service   string `json:"service"`
-		Contract  string `json:"contract"`
-		Nonce     string `json:"nonce"`
-	}
+	var entry v1alpha1.AssociationRequest
 	if err := json.Unmarshal([]byte(raw), &entry); err != nil {
 		return nil, fmt.Errorf("%s is not the requester's association request: %w", path, err)
 	}
-	if entry.Service != market.RequesterAssociate || entry.Authority == "" || entry.Contract == "" || entry.Nonce == "" {
-		return nil, fmt.Errorf("%s names no requester_associate authority, contract and nonce", path)
+	if entry.Principal == "" || entry.Contract == "" || entry.Nonce == "" {
+		return nil, fmt.Errorf("%s names no principal, contract and nonce", path)
 	}
-	return &v1alpha1.AssociationRequest{Authority: entry.Authority, Contract: entry.Contract, Nonce: entry.Nonce}, nil
+	if entry.RotationKey != "" {
+		if _, err := atcrypto.ParsePublicDIDKey(entry.RotationKey); err != nil {
+			return nil, fmt.Errorf("%s: the principal's rotationKey is not a did:key: %w", path, err)
+		}
+	}
+	return &entry, nil
 }
 
 func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIdentity) error {
@@ -137,12 +144,12 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("the guest agent state dir %s is missing; --association-ref with an empty ref file needs a guest of a contract with spec.association.fromGuest", dir)
 	}
-	request, err := readAssociationRequest(paths.request)
-	if err != nil {
-		return err
+	request := r.root.Identity.AssociationRequest
+	if request == nil {
+		return fmt.Errorf("the guest requester read no association request from %s", paths.request)
 	}
-	if request.Authority == did {
-		return fmt.Errorf("the association request names this requester's own DID %s as its authority", did)
+	if request.Principal == did {
+		return fmt.Errorf("the association request names this requester's own DID %s as its principal", did)
 	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -153,20 +160,15 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 		return fmt.Errorf("watching %s: %w", r.awaitRefFile, err)
 	}
 	root := r.root
-	root.Identity.AssociationRequest = request
-	if err := r.kcp.ApplyRoot(ctx, root); err != nil {
-		watcher.Close()
-		return fmt.Errorf("applying the association request to the MarketRequester: %w", err)
-	}
 	r.handshakeStarted = true
-	r.log("the association request record goes into this requester's repo", "did", did, "authority", request.Authority, "contract", request.Contract)
-	go r.reportAndAwaitRef(ctx, watcher, root, did, request.Authority, request.Contract)
+	r.log("the association request record goes into this requester's repo", "did", did, "principal", request.Principal, "contract", request.Contract)
+	go r.reportAndAwaitRef(ctx, watcher, root, did, request.Principal)
 	return nil
 }
 
-func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, authority, contract string) {
+func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, principal string) {
 	defer watcher.Close()
-	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + market.ContractScopedRKey(market.RequesterAssociate, authority, contract)
+	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + principal
 	if _, err := r.kcp.AwaitRecord(ctx, compose.AssociationRequestRecordName, r.networkTimeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
 		if rec.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && rec.Status.ObservedGeneration == rec.Generation {
 			return false, fmt.Errorf("the association request record failed: %s", rec.Status.Message)
@@ -257,7 +259,8 @@ func associationRefHint(obj *v1alpha1.MarketIdentity, did string) string {
 	}
 	return strings.Join([]string{
 		"The requester's DID " + did + " bootstraps its association from " + ref.URI + " (cid " + ref.CID + ").",
-		"The record must be in the authority's repo and name " + did + " for requester_associate; " + state,
+		"The grant must be in the principal's repo at rkey " + did + " beside its " + market.EndorsementNSID + ", and " + did + "'s DID document must name " +
+			identlink.AgentOfPrefix + "<principal>; " + state,
 	}, "\n")
 }
 
@@ -285,7 +288,7 @@ func associationFor(subject string) func(*v1alpha1.ComputeContract) bool {
 		if ref == nil || ref.CID == "" || state == nil || state.Accept == nil {
 			return false
 		}
-		return strings.HasSuffix(ref.URI, "/"+market.AssociationNSID+"/"+requester.ContractAssociationRKey(subject, *state.Accept))
+		return strings.HasSuffix(ref.URI, "/"+market.AssociationNSID+"/"+subject)
 	}
 }
 
@@ -314,7 +317,7 @@ func runRequestAssociate(ctx context.Context, a *app, vals clicfg.Values, rest [
 	if err := r.kcp.Associate(ctx, association.Subject); err != nil {
 		return a.fail(exitFailed, "run request associate: setting spec.association: %v", err)
 	}
-	r.log("spec.association is set; the requester writes the contract-scoped market.association record", "subject", association.Subject)
+	r.log("spec.association is set; the requester writes the contract-scoped grant, then the endorsement", "subject", association.Subject)
 	c, err = r.kcp.WaitContract(ctx, r.contractTimeout, associationFor(association.Subject), r.progress)
 	if err != nil {
 		return a.fail(exitFailed, "run request associate: %v", err)

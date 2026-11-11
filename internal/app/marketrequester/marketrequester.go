@@ -534,6 +534,9 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 	}
 	account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.PdsSessionPath("requester"),
 		Handle: pdsHandle, AdoptDID: didHint, Sync: true}
+	if req := o.Spec.Identity.AssociationRequest; req != nil {
+		account.AlsoKnownAs, account.RecoveryKey = compose.AgentOfEntries(req.Principal), req.RotationKey
+	}
 	if err := c.ApplyLinks(ctx, r, "account", compose.WithoutLinks(compose.PdsAccountLinks(r, account), p.links)); err != nil {
 		return ctlruntime.Result{}, err
 	}
@@ -548,7 +551,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return p.retry("its app Pds account", err)
 	}
 	acct := compose.LocalAccount{DID: did, Handle: pdsHandle, SessionID: RequesterVaultServer + ":" + account.Path, PLC: o.Spec.Network != nil}
-	colocated, err := p.colocated(ctx, plan, pdsHandle, acct.PLC)
+	colocated, err := p.colocated(ctx, plan, pdsHandle, acct)
 	if err != nil {
 		return p.retry("its co-located accounts", err)
 	}
@@ -655,7 +658,7 @@ func (p *pass) dumbpipe() (string, error) {
 	return rec.Executables[DumbpipeExecutable].Path, nil
 }
 
-func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandle string, plc bool) ([]compose.Colocated, error) {
+func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandle string, self compose.LocalAccount) ([]compose.Colocated, error) {
 	peer := p.o.Spec.Peer
 	if peer == nil {
 		return nil, nil
@@ -667,12 +670,15 @@ func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandl
 	for _, name := range peer.Colocated {
 		handle := compose.ColocatedHandle(name, pdsHandle)
 		account := compose.PdsAccount{Vault: RequesterVaultServer, Mount: plan.Vault.MountOr(RequesterVaultClient), Path: compose.ColocatedSessionPath(name),
-			Handle: handle, Sync: true}
+			Handle: handle, Sync: true, AlsoKnownAs: compose.AgentOfEntries(self.DID)}
+		if req := p.o.Spec.Identity.AssociationRequest; req != nil {
+			account.RecoveryKey = req.RotationKey
+		}
 		did, err := p.c.EnsurePdsAccount(ctx, p.r, account)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		out = append(out, compose.Colocated{Name: name, Account: compose.LocalAccount{DID: did, Handle: handle, PLC: plc}})
+		out = append(out, compose.Colocated{Name: name, Account: compose.LocalAccount{DID: did, Handle: handle, PLC: self.PLC}})
 	}
 	return out, nil
 }
@@ -689,8 +695,8 @@ func (p *pass) retire(ctx context.Context, self compose.LocalAccount, colocated 
 		conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, false, "RetireFailed", err.Error())
 		return p.retry("retiring its local accounts", err)
 	case !done:
-		conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, false, "DeletingRecords", "deleting the peer, association and mirror records")
-		return p.wait("retiring: deleting the peer, association and mirror records")
+		conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, false, "DeletingRecords", "deleting the peer records, endorsements and grants")
+		return p.wait("retiring: deleting the peer records, endorsements and grants")
 	}
 	conds.Set(&p.st.Conditions, p.o.Generation, compose.ConditionRetired, true, "Retired",
 		fmt.Sprintf("%d local accounts deactivated and their did:plc tombstoned: %s", len(dids), strings.Join(dids, " ")))

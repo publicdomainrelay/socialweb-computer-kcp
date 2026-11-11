@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	atprotooauth "github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/oauth"
 )
 
 const (
@@ -54,16 +56,6 @@ type contractAssociation struct {
 	finished bool
 }
 
-type associationRequestEntry struct {
-	Authority string `json:"authority"`
-
-	Service string `json:"service"`
-
-	Contract string `json:"contract"`
-
-	Nonce string `json:"nonce"`
-}
-
 func associationSubject(contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract) string {
 	a := contract.Spec.Association
 	if a == nil {
@@ -93,8 +85,26 @@ func associationRefFile(contract v1alpha1.ComputeContract) (string, error) {
 	return cloudinit.AssociationRefPath(contract.Spec.Association.RefFile)
 }
 
-func ContractAssociationRKey(subject string, accept commonv1.StrongRef) string {
-	return market.ContractScopedRKey(market.RequesterAssociate, subject, accept.URI)
+func (q *Requester) renterRotationKey() string {
+	path := q.cfg.stateFile(market.RenterRotationKeyFile)
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func (q *Requester) endorsementRefused(ctx context.Context) error {
+	granted, known, err := q.oauthGrants(ctx)
+	if err != nil || !known || !atprotooauth.KnownGrant(granted) || len(atprotooauth.MissingScopes([]string{atprotooauth.RepoEndorsementWrite}, granted)) == 0 {
+		return nil
+	}
+	q.log.Warn("requester_endorsement_skipped", "hint", "the oauth session was not granted the optional scope "+atprotooauth.RepoEndorsementWrite+
+		"; sign in again to grant it; the agent stays unassociated until then")
+	return fmt.Errorf("%w: the oauth session was not granted %s", errAssociationRefused, atprotooauth.RepoEndorsementWrite)
 }
 
 func (r *contractRunner) associationWritten(subject string) bool {
@@ -273,30 +283,29 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 	if !q.now().Before(expiresAt) {
 		return "deadline", fmt.Errorf("%w: the contract deadline %s has passed", errAssociationRefused, market.FormatTime(expiresAt))
 	}
-	rkey := ContractAssociationRKey(subject, accept)
+	if err := q.endorsementRefused(ctx); err != nil {
+		return "the endorsement scope", err
+	}
+	rkey := subject
 	existing, err := q.repo.GetRecord(ctx, q.repoDID, market.AssociationNSID, rkey)
 	switch {
 	case err == nil:
 		if bound, ok := recordContract(existing.Value); !ok || bound != accept {
-			return "write the market.association record", fmt.Errorf("%w: %s is bound to another contract", errAssociationRefused, existing.URI)
+			return "write the grant", fmt.Errorf("%w: %s is bound to another contract", errAssociationRefused, existing.URI)
 		}
 	case !errors.Is(err, market.ErrNotFound):
-		return "read the market.association record", err
+		return "read the grant", err
 	}
 	r.mu.Lock()
 	previous := r.association
 	r.mu.Unlock()
-	record := map[string]any{
-		"$type":     market.AssociationNSID,
-		"subject":   subject,
-		"service":   market.RequesterAssociate,
-		"contract":  map[string]any{"uri": accept.URI, "cid": accept.CID},
-		"expiresAt": market.FormatTime(expiresAt),
-		"createdAt": market.FormatTime(acceptedAt),
-	}
+	record := market.ContractGrantRecord(subject, map[string]any{"uri": accept.URI, "cid": accept.CID}, market.FormatTime(expiresAt), market.FormatTime(acceptedAt))
 	written, err := q.repo.PutRecord(ctx, q.repoDID, market.AssociationNSID, rkey, record)
 	if err != nil {
-		return "write the market.association record", err
+		return "write the grant", err
+	}
+	if _, err := q.repo.PutRecord(ctx, q.repoDID, market.EndorsementNSID, rkey, market.EndorsementRecord(subject)); err != nil {
+		return "write the endorsement", err
 	}
 	r.mu.Lock()
 	if r.associationRecords == nil {
@@ -311,7 +320,7 @@ func (r *contractRunner) associate(ctx context.Context, contract v1alpha1.Comput
 			return "write the bundle entry", err
 		}
 	}
-	status := v1alpha1.ComputeContractStatus{Association: &ref, AssociationMessage: "the association record " + ref.URI + " names " + subject}
+	status := v1alpha1.ComputeContractStatus{Association: &ref, AssociationMessage: "the grant " + ref.URI + " and its endorsement name " + subject}
 	if err := q.deps.Intents.MergeComputeContractStatus(ctx, r.name, status); err != nil && !notFound(err) {
 		return "write the contract status", err
 	}
@@ -390,17 +399,16 @@ func (r *contractRunner) bundleEntry(ctx context.Context, contract v1alpha1.Comp
 	return SecretEntry{}, false, nil
 }
 
-func (r *contractRunner) associationRequest(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef) (associationRequestEntry, bool, error) {
+func (r *contractRunner) associationRequest(ctx context.Context, contract v1alpha1.ComputeContract, accept commonv1.StrongRef) (v1alpha1.AssociationRequest, bool, error) {
 	entry, found, err := r.bundleEntry(ctx, contract, cloudinit.DefaultAssociationRequestFile)
 	if err != nil || !found {
-		return associationRequestEntry{}, false, err
+		return v1alpha1.AssociationRequest{}, false, err
 	}
-	var request associationRequestEntry
+	var request v1alpha1.AssociationRequest
 	if err := json.Unmarshal([]byte(entry.Value), &request); err != nil {
-		return associationRequestEntry{}, false, nil
+		return v1alpha1.AssociationRequest{}, false, nil
 	}
-	ok := request.Authority == r.q.repoDID && request.Service == market.RequesterAssociate && request.Contract == accept.URI &&
-		len(request.Nonce) == 2*associationNonceBytes
+	ok := request.Principal == r.q.repoDID && request.Contract == accept.URI && len(request.Nonce) == 2*associationNonceBytes
 	return request, ok, nil
 }
 
@@ -415,8 +423,8 @@ func (r *contractRunner) ensureAssociationRequest(ctx context.Context, contract 
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	raw, err := json.Marshal(associationRequestEntry{Authority: r.q.repoDID, Service: market.RequesterAssociate, Contract: accept.URI,
-		Nonce: hex.EncodeToString(nonce)})
+	raw, err := json.Marshal(v1alpha1.AssociationRequest{Principal: r.q.repoDID, Contract: accept.URI, Nonce: hex.EncodeToString(nonce),
+		RotationKey: r.q.renterRotationKey()})
 	if err != nil {
 		return err
 	}
@@ -444,10 +452,7 @@ func (r *contractRunner) deleteAssociation(ctx context.Context) {
 	accept := *state.Accept
 	rkeys := map[string]bool{}
 	if subject := associationSubject(r.snapshot(), state); subject != "" {
-		rkeys[ContractAssociationRKey(subject, accept)] = true
-	}
-	if r.snapshot().Spec.Agent != nil {
-		rkeys[ContractAssociationRKey(r.q.repoDID, accept)] = true
+		rkeys[subject] = true
 	}
 	r.mu.Lock()
 	if r.association != nil {
@@ -483,20 +488,21 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, rkey strin
 	existing, err := q.repo.GetRecord(deleteCtx, q.repoDID, market.AssociationNSID, rkey)
 	switch {
 	case errors.Is(err, market.ErrNotFound):
-		forget()
-		return
 	case err != nil:
 		r.log().Warn("requester_association_delete_failed", "rkey", rkey, "step", "read", "err", err.Error())
 		return
+	default:
+		if bound, ok := recordContract(existing.Value); !ok || bound != accept {
+			r.log().Warn("requester_association_delete_skipped", "rkey", rkey, "reason", "the grant is bound to another contract")
+			forget()
+			return
+		}
 	}
-	if bound, ok := recordContract(existing.Value); !ok || bound != accept {
-		r.log().Warn("requester_association_delete_skipped", "rkey", rkey, "reason", "the record is bound to another contract")
-		forget()
-		return
-	}
-	if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, market.AssociationNSID, rkey); err != nil && !errors.Is(err, market.ErrNotFound) {
-		r.log().Warn("requester_association_delete_failed", "rkey", rkey, "err", err.Error())
-		return
+	for _, collection := range []string{market.EndorsementNSID, market.AssociationNSID} {
+		if err := q.repo.DeleteRecord(deleteCtx, q.repoDID, collection, rkey); err != nil && !errors.Is(err, market.ErrNotFound) {
+			r.log().Warn("requester_association_delete_failed", "rkey", rkey, "collection", collection, "err", err.Error())
+			return
+		}
 	}
 	forget()
 	r.log().Info("requester_association_deleted", "rkey", rkey)
@@ -727,7 +733,7 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 		refuse("the contract's bundle holds no association request for " + accept.URI)
 		return
 	}
-	rkey := market.ContractScopedRKey(market.RequesterAssociate, q.repoDID, accept.URI)
+	rkey := q.repoDID
 	got, err := q.repo.GetRecord(ctx, did, market.AssociationRequestNSID, rkey)
 	if err != nil {
 		fail("reading "+did+"'s "+market.AssociationRequestNSID+"/"+rkey, err)
@@ -742,7 +748,7 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 		refuse("the association request record is not in " + did + "'s repo")
 		return
 	case asked.Principal != q.repoDID || asked.Contract != accept.URI:
-		refuse("the association request record names another authority, service or contract")
+		refuse("the association request record names another principal or contract")
 		return
 	case subtle.ConstantTimeCompare([]byte(asked.Nonce), []byte(request.Nonce)) != 1:
 		refuse("the association request record carries another nonce")

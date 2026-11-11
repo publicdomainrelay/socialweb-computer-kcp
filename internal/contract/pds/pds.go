@@ -45,6 +45,10 @@ type AccountRequest struct {
 	Email string
 
 	Credentials commonv1.SecretRef
+
+	AlsoKnownAs []string
+
+	RecoveryKey string
 }
 
 type Account struct {
