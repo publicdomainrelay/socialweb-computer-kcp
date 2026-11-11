@@ -64,8 +64,8 @@ jobs:
       - name: binaries
         run: |
           set -euo pipefail
-          timeout -k 10 5280 scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$GITHUB_SHA" --build-root "$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB"
-          rel="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB/release/$GITHUB_SHA"
+          timeout -k 10 5280 scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$GITHUB_SHA" --build-root "$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_JOB"
+          rel="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_JOB/release/$GITHUB_SHA"
           ls -la "$rel"
           want="$(jq -r '.assets.deno.version' internal/versions/versions.json)"
           jq -e --arg v "$want" '(.builds | length) > 0 and all(.builds[]; .denoEmbedded.version == $v and (.denoEmbedded.zips | keys | sort) == ["linux/amd64","linux/arm64"])' "$rel/release.json"
@@ -74,7 +74,7 @@ jobs:
       - name: node downloads by sha256
         run: |
           set -euo pipefail
-          blob="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_JOB/src/1/internal/assets/blobs/linux_amd64/socialweb-computer-k8s-downloads.tar.zst"
+          blob="$CI_STATE/release-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$GITHUB_JOB/src/1/internal/assets/blobs/linux_amd64/socialweb-computer-k8s-downloads.tar.zst"
           tree="$(mktemp -d "$RUNNER_TEMP/k8s-downloads.XXXXXX")"
           zstd -dc "$blob" | tar -x -C "$tree"
           rm -rf "$OUT/downloads" && mkdir -p "$OUT/downloads"
