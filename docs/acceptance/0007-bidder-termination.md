@@ -5,7 +5,7 @@ gone, cascade gap, stray debug VM) and that the delete leaves nothing behind: th
 contract is released, `vm.terminated` is pinned in the bidder repo, and every atirc
 token leased to the contract dies.
 
-- Procedure: [bidder.md, Terminate a VM from the bidder](../bidder.md#terminate-a-vm-from-the-bidder)
+- Procedure: [bidder.md, End a VM](../bidder.md#end-a-vm)
 - Used on prod: R2 orphan (hat-7, 2026-10-30), iOS cross-restart retry VM (hat-7, 2026-10-31 02:07Z), stray debug VM (hat-7, 2026-10-31 18:11Z)
 - Last pass: 2026-11-10 15:14Z (hat-7, rollout 5 438ca0fa): bob's held contract, delete -> gone in ~1 s, `vm.terminated` pinned (`termination-payload-19e3b1b5db974dc15cff4d61429bbeb2`, `deleted_on_request`, no `request` ref), requester `release` -> Released "the bidder ended the contract: deleted_on_request"
 - Last expiry pass: 2026-11-11 01:17Z (hat-9, rollout 10 253031e2, binary 233343a9): bob `run request --hold --expires-in 3m`,

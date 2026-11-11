@@ -1,6 +1,6 @@
 # Inspecting an application kcp
 
-The long form of the README inspection section: the helpers, every state path, the embedded k3s and the ssh access. Short path in [the README](../README.md#inspect).
+The helpers, every state path, the embedded k3s and the ssh access.
 
 A production application has its own kcp; the applications of a market network share the network's kcp, one workspace each (`root:<app>`). A kcp admin kubeconfig's server URL ends in `/clusters/<workspace>`; swap the workspace to walk the kcp. Define two helpers:
 

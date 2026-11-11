@@ -169,40 +169,11 @@ sudo runuser -u socialweb -- env XDG_RUNTIME_DIR=/run/user/$(id -u socialweb) \
 
 ## Install a release bidder
 
-From the public bucket, with no credentials:
-
-```bash
-HANDLE=<your atproto handle>
-BUCKET=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
-V=$(curl -fsSL https://api.github.com/repos/publicdomainrelay/socialweb-computer-kcp/tags \
-  | jq -r '.[].name' | grep '^v' | sort -V | tail -1)
-ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-mkdir -p /var/tmp/swc-release && cd /var/tmp/swc-release
-curl -fLO "$BUCKET/releases/$V/binaries/socialweb-computer-$ARCH"
-curl -fLO "$BUCKET/releases/$V/binaries/SHA256SUMS"
-grep " socialweb-computer-$ARCH$" SHA256SUMS | sha256sum -c -
-sudo install -m 0755 "socialweb-computer-$ARCH" /usr/local/bin/socialweb-computer
-sudo /usr/local/bin/socialweb-computer install bidder --handle "$HANDLE"
-```
-
-Artifacts and state:
-
-| Item | Path |
-| --- | --- |
-| Unit | `socialweb-computer-bidder@<handle>.service` in `swc-bidder`'s user manager. |
-| State | `/var/lib/socialweb-computer/swc-bidder`. |
-| kcp admin kubeconfig | `/var/lib/socialweb-computer/swc-bidder/handles/<hash>/kcp/admin.kubeconfig` (root only). |
-| Installed binary | `<state>/bin/current/socialweb-computer`; previous at `bin/previous`. |
-| Config | `<state>/config.json`; env file `<state>/gateway.env` for a gateway. |
-
-`install bidder` is idempotent. A re-run with another `--handle` adds an instance. A re-run after a
-changed config or unit restarts the core. `--dry-run` prints the step list and changes nothing.
-
-Install a locally built release binary:
+Release binaries, foreground and installed bidders: [docs/bidder.md](docs/bidder.md). A locally built release
+binary installs the same way:
 
 ```bash
 # variables carry over: C, B
-SHA=$(sha256sum "$B" | cut -d' ' -f1)
 sudo "$B" install bidder --handle <handle>
 ```
 
@@ -760,8 +731,7 @@ defaults to `market-network`.
 
 ### Foreground bidder (no systemd)
 
-[README: run in the foreground](README.md#run-in-the-foreground-no-systemd) has the prod command, the
-prerequisites and the paths. `run bidder --host-backend proc` without `--network` is its own instance
+[docs/bidder.md](docs/bidder.md#foreground) has the prod command and the prerequisites. `run bidder --host-backend proc` without `--network` is its own instance
 `b-<handle-with-dashes>`: `bringUp` of a quick-profile instance under a devsup (die-with this process
 with `--fg`), then the MarketBidder root object, the identity wait and the Ready wait. It runs the
 bidder host checks of `check-host -role bidder` first, without the systemd ones.

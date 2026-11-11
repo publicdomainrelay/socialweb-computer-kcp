@@ -58,7 +58,7 @@ flowchart LR
 ## Steps
 
 1. Canary: upgrade the local bidder only (others stay on the old rc), CLI trust run (alice, `bidder-tangled-vouch`): Held, Released rc=0. Pause the other bidders if the canary must land locally (see 0003)
-2. Upgrade hat-9, then hat-7 (`upgrade --binary <staged> --sha256 <sha>`, then `install bidder --handle <handle>`; [bidder.md](../bidder.md#upgrade-and-uninstall))
+2. Upgrade hat-9, then hat-7 (`upgrade --binary <staged> --sha256 <sha>`, then `install bidder --handle <handle>`; [bidder.md](../bidder.md#installed))
 3. Gateway + ssh gateway ([deploy.md](../deploy.md))
 4. Per-host checks below (host watchers post one CONFIRMED line + one host line each)
 5. Compat smoke (below)
@@ -111,7 +111,7 @@ Timings: one bidder restart ~2 min (VMs survive the upgrade); rc154 whole rollou
 
 ## Cleanup / rollback
 
-- Bidder: `rollback` swaps `bin/current` / `bin/previous` and restarts ([bidder.md](../bidder.md#upgrade-and-uninstall))
+- Bidder: `rollback` swaps `bin/current` / `bin/previous` and restarts ([bidder.md](../bidder.md#installed))
 - Page: redeploy the previous `page-rcN` tag
 - ssh gateway on 22: re-enable the legacy unit only as last resort (kept for rollback)
 - Release compat smoke VMs; hosts empty

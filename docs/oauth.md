@@ -1,6 +1,6 @@
 # OAuth sign-in, association and its failures
 
-The long form of the README sign-in paths: what the script drives, every option, the per-mode notes and how to recover. Short paths in [the README](../README.md#use-the-hosted-gateway) and [Rent a VM from the CLI](../README.md#rent-a-vm-from-the-cli).
+What the script drives, every option, the per-mode notes and how to recover.
 
 `scripts/oauth-signin.ts` drives a headless `/usr/bin/google-chrome` (puppeteer-core) through the flow: the page, the PDS authorize page, the password, then "Authorize". The script reads the handle and password from the credential file itself, so they never appear on the command line or in a log. It writes one screenshot per step to `~/.tmp/oauth-signin/<ts>/` (mode 0700).
 

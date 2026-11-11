@@ -1,6 +1,6 @@
 # The gateway and its API front
 
-The long form of the gateway sections of the README: the deploy script's environment, the gateway's API front, the caddy sites and the post-deploy sign-in. Short path in [the README](../README.md#use-the-hosted-gateway).
+The deploy script's environment, the gateway's API front, the caddy sites and the post-deploy sign-in.
 
 A development gateway is a child of a market network: start the network with `--with-gateway`.
 
