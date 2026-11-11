@@ -723,7 +723,15 @@ type RequesterPeer struct {
 
 	Colocated []string `json:"colocated,omitempty" apigen:"listType=set"`
 
+	ColocatedIroh []ColocatedIroh `json:"colocatedIroh,omitempty"`
+
 	Retire bool `json:"retire,omitempty"`
+}
+
+type ColocatedIroh struct {
+	Name string `json:"name"`
+
+	Iroh string `json:"iroh"`
 }
 
 type Gateway struct {

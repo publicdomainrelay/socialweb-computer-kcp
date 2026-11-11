@@ -49,6 +49,7 @@ func (a *Agent) sharedFiles() []sharedFile {
 		{src: filepath.Join(dir, AssociationRequestFile), name: AssociationRequestFile},
 		{src: filepath.Join(dir, RequesterAtircEnvFile), name: RequesterAtircEnvFile},
 		{src: a.cfg.Association.RefFile, name: AssociationRefFile},
+		{src: filepath.Join(dir, RequesterAgentEnvFile), name: RequesterAgentEnvFile},
 	}
 }
 
@@ -253,6 +254,8 @@ func (a *Agent) refetchSecrets(seq int64) {
 
 var requesterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
+var colocatedEnvRE = regexp.MustCompile(`^R2_COLOCATED=[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?=[a-z0-9]{1,256}\n?$`)
+
 type r2StartRecord struct {
 	Name string `json:"name"`
 
@@ -291,7 +294,33 @@ func (a *Agent) startGuestRequester(seq int64, raw []byte) {
 		a.log.Warn("guest_r2_start", "seq", seq, "err", "the r2Start names no DNS label")
 		return
 	}
-	env := "R2_NAME=" + start.Name + "\nR2_AGENT=" + flag(start.Agent) + "\nR2_HOLD=" + flag(start.Hold) + "\n"
+	a.launchRequester(seq, gid, "R2_NAME="+start.Name+"\nR2_AGENT="+flag(start.Agent)+"\nR2_HOLD="+flag(start.Hold)+"\n")
+}
+
+func (a *Agent) startIdentityRequester(seq int64) {
+	a.mu.Lock()
+	gid, shared := a.sharedGID, a.shared
+	a.mu.Unlock()
+	if a.cfg.Association == nil || !shared {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(RequesterDir, RequesterStartEnvFile)); err == nil {
+		a.log.Info("guest_r2_identity", "seq", seq, "skipped", "a guest requester was already started")
+		return
+	}
+	colocated, err := os.ReadFile(filepath.Join(RequesterDir, RequesterAgentEnvFile))
+	if err != nil {
+		a.log.Warn("guest_r2_identity", "seq", seq, "err", "the atirc agent's co-located account is not in the secrets bundle yet: "+err.Error())
+		return
+	}
+	if !colocatedEnvRE.Match(colocated) {
+		a.log.Warn("guest_r2_identity", "seq", seq, "err", RequesterAgentEnvFile+" is not R2_COLOCATED=<label>=<iroh ticket>")
+		return
+	}
+	a.launchRequester(seq, gid, "R2_NAME=r2\nR2_AGENT=0\nR2_HOLD=0\nR2_IDENTITY=1\n"+string(colocated))
+}
+
+func (a *Agent) launchRequester(seq int64, gid int, env string) {
 	path := filepath.Join(RequesterDir, RequesterStartEnvFile)
 	part := path + ".part"
 	if err := os.WriteFile(part, []byte(env), 0o640); err != nil {
@@ -314,7 +343,7 @@ func (a *Agent) startGuestRequester(seq int64, raw []byte) {
 		a.log.Warn("guest_r2_start", "seq", seq, "unit", RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
 		return
 	}
-	a.log.Info("guest_r2_start", "seq", seq, "unit", RequesterUnit, "name", start.Name, "agent", start.Agent, "hold", start.Hold)
+	a.log.Info("guest_r2_start", "seq", seq, "unit", RequesterUnit)
 }
 
 func (a *Agent) releaseGuestRequester(seq int64) {

@@ -679,7 +679,13 @@ func (p *pass) colocated(ctx context.Context, plan compose.AccountPlan, pdsHandl
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		out = append(out, compose.Colocated{Name: name, Account: compose.LocalAccount{DID: did, Handle: handle, PLC: self.PLC}})
+		iroh := ""
+		for _, entry := range peer.ColocatedIroh {
+			if entry.Name == name {
+				iroh = entry.Iroh
+			}
+		}
+		out = append(out, compose.Colocated{Name: name, Account: compose.LocalAccount{DID: did, Handle: handle, PLC: self.PLC}, Iroh: iroh})
 	}
 	return out, nil
 }

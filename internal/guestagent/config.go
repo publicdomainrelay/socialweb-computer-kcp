@@ -40,6 +40,8 @@ const (
 
 	RequesterAtircEnvFile = "r2-atirc.env"
 
+	RequesterAgentEnvFile = "r2-agent.env"
+
 	RequesterGroup = "socialweb-r2"
 
 	RequesterDir = "/run/socialweb-r2"

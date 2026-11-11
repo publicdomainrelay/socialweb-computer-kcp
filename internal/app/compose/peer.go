@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -35,6 +36,8 @@ type Colocated struct {
 	Name string
 
 	Account LocalAccount
+
+	Iroh string
 }
 
 func CheckColocated(names []string) error {
@@ -143,7 +146,11 @@ func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity st
 			continue
 		}
 		keep[peerName] = true
-		if err := c.applyPeerRecord(ctx, r, ws, peerName, RepoRefIn(agent, ws), PeerNSID, other.Name+"."+ownRKey, peerRecord); err != nil {
+		own := maps.Clone(peerRecord)
+		if other.Iroh != "" {
+			own["iroh"] = other.Iroh
+		}
+		if err := c.applyPeerRecord(ctx, r, ws, peerName, RepoRefIn(agent, ws), PeerNSID, other.Name+"."+ownRKey, own); err != nil {
 			return err
 		}
 	}

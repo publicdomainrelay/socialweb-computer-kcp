@@ -39,6 +39,8 @@ const (
 
 	GuestRequesterAtircEnvFile = AssociationRefDir + "/r2-atirc.env"
 
+	GuestRequesterAgentEnvFile = AssociationRefDir + "/r2-agent.env"
+
 	GuestRequesterGroup = "socialweb-r2"
 
 	GuestRequesterDir = "/run/socialweb-r2"
@@ -335,6 +337,7 @@ set -euo pipefail
 [ "${R2_AGENT:-}" = 1 ] && args+=(--agent)
 [ "${R2_HOLD:-}" = 1 ] && args+=(--hold)
 [ -n "${R2_COLOCATED:-}" ] && args+=(--colocated "${R2_COLOCATED}")
+[ "${R2_IDENTITY:-}" = 1 ] && args+=(--identity-only)
 socialweb-computer "${args[@]}"
 if [ "${R2_AGENT:-}" = 1 ] && [ "${R2_HOLD:-}" = 1 ]; then
   exec socialweb-computer run request agent "${R2_NAME}"

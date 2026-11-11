@@ -687,7 +687,11 @@
     },
     "colocated": {
       "type": "string",
-      "description": "run request --guest-requester: comma-separated DNS labels; each is an account <label>.<the requester's handle> on the guest requester's own PDS, associated by a contract-scoped market.association in the guest requester's repo whose parent is the owner's association of the guest requester (a chain the verifiers follow), with its computer.socialweb.peer record; release deactivates every such account and tombstones its did:plc"
+      "description": "run request --guest-requester: comma-separated DNS labels, each optionally <label>=<iroh ticket>; each is an account <label>.<the requester's handle> on the guest requester's own PDS (genesis rotationKeys [renter key, PDS key], alsoKnownAs [at://handle, https://ident.link/agent-of/<guest requester DID>]), endorsed and granted (contract-scoped, the guest requester's own contract and expiresAt) in the guest requester's repo at rkey = its DID, with its computer.socialweb.peer record in its own repo (the ticket when given, else the guest requester's); release deactivates every such account and tombstones its did:plc"
+    },
+    "identity-only": {
+      "type": "boolean",
+      "description": "run request --guest-requester: post no RFP and rent no VM; keep the guest requester's PDS, its association and its co-located accounts up until the process is stopped, then retire them (the guest agent starts it this way for a run request --agent contract's atirc agent)"
     },
     "skip-ssh": {
       "type": "boolean",

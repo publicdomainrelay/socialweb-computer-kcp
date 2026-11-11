@@ -55,7 +55,7 @@ const (
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
-var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated")
+var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated", "identity-only")
 
 type requestRun struct {
 	a                 *app
@@ -89,6 +89,7 @@ type requestRun struct {
 	expectedPDSURL    string
 	awaitRefFile      string
 	guestRequester    bool
+	identityOnly      bool
 	peerSubhandle     string
 	handshakeStarted  bool
 	homeDir           string
@@ -1208,17 +1209,24 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		}
 		r.guestRequester, r.skipSSH = true, true
 		colocated := []string{}
-		for _, name := range strings.Split(vals.String("colocated"), ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				colocated = append(colocated, name)
+		var irohs []v1alpha1.ColocatedIroh
+		for _, entry := range strings.Split(vals.String("colocated"), ",") {
+			name, iroh, _ := strings.Cut(strings.TrimSpace(entry), "=")
+			if name == "" {
+				continue
+			}
+			colocated = append(colocated, name)
+			if iroh != "" {
+				irohs = append(irohs, v1alpha1.ColocatedIroh{Name: name, Iroh: iroh})
 			}
 		}
 		if err := compose.CheckColocated(colocated); err != nil {
 			return a.fail(exitRefused, "run request: --colocated: %v", err)
 		}
-		r.root.Peer = &v1alpha1.RequesterPeer{Colocated: colocated}
-	} else if vals.String("colocated") != "" {
-		return a.fail(exitRefused, "run request: --colocated is for a --guest-requester invocation")
+		r.root.Peer = &v1alpha1.RequesterPeer{Colocated: colocated, ColocatedIroh: irohs}
+		r.identityOnly = vals.Bool("identity-only")
+	} else if vals.String("colocated") != "" || vals.Bool("identity-only") {
+		return a.fail(exitRefused, "run request: --colocated and --identity-only are for a --guest-requester invocation")
 	}
 	if err := r.associationRef(network != ""); err != nil {
 		return a.fail(exitRefused, "run request: --association-ref: %v", err)
@@ -1251,7 +1259,11 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 	} else if vals.String("agent-config") != "" {
 		return a.fail(exitRefused, "run request: --agent-config needs --agent")
 	}
-	if r.contract.Association, err = associateOf(cmp.Or(vals.String("associate"), r.associate)); err != nil {
+	associate := cmp.Or(vals.String("associate"), r.associate)
+	if associate == "" && r.contract.Agent != nil {
+		associate = "guest"
+	}
+	if r.contract.Association, err = associateOf(associate); err != nil {
 		return a.fail(exitRefused, "run request: --associate: %v", err)
 	}
 	if r.contract.Association != nil && r.contract.Association.FromGuest && !slices.Contains(r.contract.GuestTools, cloudinit.GuestToolSocialwebComputer) {
@@ -1311,6 +1323,9 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		r.stop(context.WithoutCancel(ctx), false)
 		return a.fail(exitFailed, "run request: %v", err)
 	}
+	if r.identityOnly {
+		return r.holdIdentity(ctx)
+	}
 	if bundle != nil {
 		ref, err := r.kcp.PutSecrets(ctx, bundle, r.networkTimeout)
 		if err != nil {
@@ -1329,6 +1344,16 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitFailed, "run request: %v", err)
 	}
 	return r.carryOn(ctx)
+}
+
+func (r *requestRun) holdIdentity(ctx context.Context) int {
+	r.log("the guest requester runs identity-only: no RFP, no nested VM; it keeps its PDS, its co-located accounts and their records up until it is stopped, then retires them")
+	r.writeSummary(ctx, nil)
+	<-ctx.Done()
+	r.stop(context.WithoutCancel(ctx), true)
+	r.writeSummary(context.WithoutCancel(ctx), nil)
+	r.a.printJSON(r.summary)
+	return exitOK
 }
 
 func (r *requestRun) checkIdentity() error {

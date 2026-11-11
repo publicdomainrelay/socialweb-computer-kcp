@@ -29,4 +29,5 @@ func (a *Agent) startAgent(seq int64) {
 		return
 	}
 	a.log.Info("guest_agent_start", "seq", seq, "unit", unit)
+	a.startIdentityRequester(seq)
 }

@@ -13,6 +13,7 @@ import (
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/clusterlink"
 )
 
 const (
@@ -136,9 +137,21 @@ func (r *contractRunner) publishAgentPeer(ctx context.Context, contract v1alpha1
 	if identity == "" {
 		return fmt.Errorf("the handle %q and the RFP %q make no agent identity", q.handle, state.RFPURI)
 	}
-	_, fresh, err := r.agentKey(ctx, contract, envFile, nick)
+	seed, fresh, err := r.agentKey(ctx, contract, envFile, nick)
 	if err != nil {
 		return err
+	}
+	if fromGuest(contract) {
+		ticket := clusterlink.StableTicket(clusterlink.Key{Private: ed25519.NewKeyFromSeed(seed)})
+		entry := SecretEntry{Path: cloudinit.GuestRequesterAgentEnvFile, Value: "R2_COLOCATED=" + nick + "=" + ticket + "\n", Mode: "0600"}
+		if held, found, err := r.bundleEntry(ctx, contract, entry.Path); err != nil {
+			return err
+		} else if !found || held != entry {
+			if err := r.putBundleEntry(ctx, contract, entry); err != nil {
+				return err
+			}
+			fresh = true
+		}
 	}
 	r.agentPeerDone(ctx, contract, envFile, fresh, identity, "in the bundle")
 	return nil
@@ -159,7 +172,7 @@ func (r *contractRunner) agentPeerDone(ctx context.Context, contract v1alpha1.Co
 			r.log().Warn("requester_agent_peer_notify_failed", "err", err.Error())
 		}
 	}
-	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent "+identity+"'s mesh key is "+how+"; its peer record is the guest requester's co-located account's")
+	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent "+identity+"'s mesh key is "+how+"; the guest requester publishes its peer record as its co-located account "+nickOf(identity))
 }
 
 func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.ComputeContract, envFile, nick string) ([]byte, bool, error) {
@@ -221,4 +234,9 @@ func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.Compute
 	r.addSecretEntries(envEntry, keyEntry)
 	r.log().Info("requester_agent_mesh_key_written", "envFile", envFile, "keyFile", cloudinit.AgentIrohKeyFile, "mode", "0600")
 	return seed, true, nil
+}
+
+func nickOf(identity string) string {
+	nick, _, _ := strings.Cut(identity, ".")
+	return nick
 }
