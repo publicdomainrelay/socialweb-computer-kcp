@@ -96,15 +96,18 @@ func (s *Server) handleSyncGetRecord(w http.ResponseWriter, r *http.Request) {
 		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid rkey")
 		return
 	}
-	rec, err := s.repos.GetRecord(ctx, did, collection, rkey)
+	handle, err := s.repos.OpenRepo(ctx, did, nil)
 	if err != nil {
 		s.repoError(w, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, recordView{
-		URI:   fmt.Sprintf("at://%s/%s/%s", did, collection, rkey),
-		CID:   rec.CID.String(),
-		Value: rec.Value,
-	})
-
+	carBytes, err := handle.Proof(ctx, collection, rkey)
+	if err != nil {
+		s.repoError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.ipld.car")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(carBytes)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(carBytes)
 }
