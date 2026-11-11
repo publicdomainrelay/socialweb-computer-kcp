@@ -1,6 +1,6 @@
 # design: associations on ident.link, level N
 
-- status: design checkpoint 2026-11-10, not implemented
+- status: decided 2026-11-10 (owner + lead, see [Decisions](#decisions)); implementing
 - spec: https://ident.link (draft, 2026-10-22); lexicon `link.ident.endorsement` (github.com/bluesky-social/ident.link `74d22dc`; not ours: read only)
 - replaces: kcp operator claim, association mirror, `parent` chains ([../protocol/identity.md](../protocol/identity.md#associations-plan-0036)); atirc `agentOperator`/`agents` owner graph and peer `lease`; atlibs `associate`, mesh-agent lease
 - rule: no backcompat. one cut-over, old records deleted, old code removed
@@ -66,7 +66,7 @@ goat get at://did:plc:ocnuqjlzgohypj3zoznermms/link.ident.endorsement/did:plc:4v
 flowchart BT
   SA["sub-requester (VM localPDS did:plc)"] --> R2["guest requester R2 (VM localPDS did:plc)"]
   R2 --> AL["alice, root"]
-  VA["token-less VM atirc agent (key of alice, no DID)"] -.peer record.-> AL
+  VA["VM atirc agent (VM localPDS did:plc)"] --> R2
   BH["bidder host hat-9 (did:plc, own PDS)"] --> BOB["bob, root"]
   CA["own-DID atirc agent"] --> JO["john, root"]
 ```
@@ -120,26 +120,35 @@ walk(A): queue=[(A, d=0, path=[A], exp=inf)]; seen={A}; lookups=0
 
 ## Q1: Agents Without A DID
 
-| option | DID | rotation key | cost per agent | VM dies uncleaned |
-|---|---|---|---|---|
-| A. key of the renter (rec, leaf token-less VM agents) | none: subhandle + mesh key, peer record in renter repo | - | 1 put + 1 delete | peer `expiresAt` / contract |
-| B. renter-minted did:plc, no PDS | did:plc, DID doc only | renter | +2 PLC ops (genesis, tombstone; permanent public log) + 4 record ops | renter tombstones; grant expiry |
-| C. VM localPDS account (rec when it needs a repo) | did:plc on VM localPDS (R2 flow) | renter key first, localPDS key second | localPDS in the VM + 2 PLC ops + 4 record ops | grant expiry, contract Held, bidder cap |
-| D. did:web | needs one TLS host per agent (atproto did:web is host-only), no audit log | - | DNS + cert per agent | stop serving |
+- decided: every agent gets a did:plc on the VM's localPDS (atirc VM agents, sub-requesters, co-located accounts). no DID-less agents, no did:web
+- the VM runs the guest requester R2 (own did:plc + localPDS, plan 0036). an agent is a co-located account on that PDS; a VM with `--agent` starts R2 identity-only (no RFP) when nothing else asked for one
+- genesis op (one per account): `rotationKeys` = [renter rotation key, VM localPDS key], `alsoKnownAs` = [`at://<handle>`, `https://ident.link/agent-of/<principal>`]
+- principal: R2 for its co-located accounts and VM agents (R2 writes the endorsement + grant in its own repo); the renter for R2 (after the nonce check)
+- the renter's rotation key reaches the VM as a public did:key in the secrets bundle (`identity.rotationKey`); its private half never leaves the renter (Go: `plc-rotation.key`; atlibs: the host's sealed did:key)
+- release: principal deletes endorsement + grant, tombstone (localPDS key; the renter's key when the VM is gone). nothing ran: grant expiry + contract Held + bidder cap end trust
+- cost per agent: 2 PLC ops (genesis, tombstone; permanent public log), 4 record ops, localPDS share; VM RAM/boot: [measured](#vm-cost)
 
-- A: a token-less agent is not a principal of anything with a DID; it is a key the renter binds. ident.link is DID to DID, so it does not apply. the peer record carries the lifetime inline (the old self-association `lease` never verified: atlibs policy rejects operator == subject)
-- C: R2, sub-requesters, co-located accounts, any agent that endorses agents of its own. genesis carries agent-of (0 extra ops); tombstone at release exists (`run request` retire)
-- rule for every new agent DID: its principal's rotation key is first in `rotationKeys` (spec "Protecting from alterations"); the agent gets repo access only. the renter can tombstone from outside a dead VM
-- own-DID atirc agents (`/agent/login`, claude.ai connector accounts): the pair. on bsky.social the agent-of op needs the account's email token: see Owner Actions
-
-Peer record (A), renter repo, rkey = subhandle:
+Genesis (agent co-located with R2):
 
 ```json
-{"$type":"computer.socialweb.peer","iroh":"<endpoint id>","channels":["#alice"],"contract":{"uri":"at://did:plc:lpfuqerea3deuoyrn7ojser4/com.publicdomainrelay.temp.market.accept/3m5abc","cid":"bafyrei..."},"expiresAt":"2026-11-11T01:00:00Z","createdAt":"2026-11-11T00:00:00Z"}
+{"type":"plc_operation","rotationKeys":["did:key:zQ3sh...renter","did:key:zQ3sh...vmLocalPds"],"verificationMethods":{"atproto":"did:key:zQ3sh...agentSigning"},"alsoKnownAs":["at://agent-3m5abc.r2-3m5abc.<pds host>","https://ident.link/agent-of/did:plc:r2guestaaaaaaaaaaaaaaaaa"],"services":{"atproto_pds":{"type":"AtprotoPersonalDataServer","endpoint":"https://did-key-<vm key>.xrpc.fedproxy.com"}},"prev":null,"sig":"..."}
 ```
 
-- `lease` removed from `computer.socialweb.peer` (kcp, atirc, atlibs-mesh-agents copies stay byte-identical); `contract` + `expiresAt` added, both or neither
-- mesh accept: peer record live (expiry, contract Held, which atirc skips today) and the record's repo passes the owner-graph rule
+Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DID is walked.
+
+```json
+{"$type":"computer.socialweb.peer","iroh":"<endpoint id>","channels":["#johnandersen777_bsky_social"],"createdAt":"2026-11-11T00:00:00Z"}
+```
+
+- mesh accept: owner O == repo DID or O in ancestors(repo DID); peer lifetime = lifetime(repo DID)
+- own-DID atirc agents (`/agent/login`, `com.fedfork.irc.agents`): bsky.social ones retired, not migrated (none named in atirc config or docs; the atirc server state is checked at its step). new ones live on a PDS we run, principal rotation key first: no email token
+
+### VM Cost
+
+| item | reading |
+|---|---|
+| R2 + localPDS RAM | (measured at 0004/0005) |
+| boot to agent online | (measured at 0004) |
 
 ## Q2: Identities
 
@@ -152,7 +161,7 @@ Peer record (A), renter repo, rkey = subhandle:
 | hat-7 bidder | did:plc:7q5lnitxv4meizdon5fmhzrq | john | - | hat-7 `<pds stateDir>/plc-rotation.key`, sole key | 1, run on hat-7 |
 | hat-9 bidder | did:plc:4vcig7s43z3nyqrnepmcfzqt | bob | - | hat-9 `plc-rotation.key` | 1, on hat-9 |
 | hat-8 swc-bidder | did:plc:2l2wdry77c7jtucbslstagkj | bob | - | hat-8 `plc-rotation.key` | 1, on hat-8 |
-| R2 / VM accounts (C) | new did:plc per contract | spawner | their own agents | renter key, then VM localPDS key | in genesis |
+| R2, VM agents, co-located accounts | new did:plc per contract | R2 (agents), renter (R2) | R2: its agents | renter key, then VM localPDS key | genesis + tombstone |
 | own-DID atirc agents | existing accounts | owner | - | their PDS | 1 each (email token on bsky.social) |
 
 - roots only write records: no `requestPlcOperationSignature` for john, bob, alice
@@ -170,7 +179,7 @@ Peer record (A), renter repo, rkey = subhandle:
 
 | end | who | what |
 |---|---|---|
-| release | principal | delete endorsement, delete grant, tombstone agent DID (C), delete peer record (A) |
+| release | principal | delete endorsement, delete grant, delete peer record, tombstone the agent DID |
 | VM gone, nothing ran | nobody | grant/peer `expiresAt` passes; contract not Held after `vm.terminated`; verifiers drop it |
 | bidder backstop | bidder | ends the VM at lifetime(requester) + grace (as rollout 9) |
 | atirc tokens | atirc | exp clamped to lifetime; leased token dies at `vm.terminated` (as today) |
@@ -179,14 +188,36 @@ Peer record (A), renter repo, rkey = subhandle:
 
 | lang | home | used by |
 |---|---|---|
-| Go | kcp `internal/identlink` (walk, edge, cache); `internal/policyengine/trust` on it | policy snapshot, bidder cap, requester discovery, gateway |
-| Rust | crate `identlink` in atlibs `rust/src/identlink` (beside `abi`), IO trait `{resolve_did, get_record}`; native and wasm | atirc (replaces `ownership.rs` checks, `mesh/verify.rs` `lease_root`), atlibs `crates/policy`, market-status, mesh-agent |
-| JS | none of its own: the browser calls the wasm module `identlink` through atlibs | atlibs-atirc `dialable`, atlibs-webrtc `peerReceipt` (both ignore `lease` today) |
+| Go | kcp `internal/identlink`; `internal/policyengine/trust` on it | policy snapshot, bidder cap, requester discovery, gateway |
+| Rust | own repo `atlibs-identlink` (knotless, Unlicense): crate `identlink`, native + wasm, JS wrapper for browsers | atirc (`ownership.rs`, `mesh/verify.rs`), atlibs `crates/policy`, market-status, mesh-agent, atlibs-atirc, atlibs-webrtc |
 
-- one vectors file `identlink/vectors.json` (DID docs, records, expected walk); kcp keeps a byte-identical copy, pre-commit checked like `peer.json`
-- getRecord = `com.atproto.sync.getRecord`, CAR verified against the DID doc signing key (Go: `internal/atproto/repo.VerifyCommitCAR`). never listRecords
-- wasm modules have no DID doc call (only `describeRepo`, the PDS's view): add host call `identity.resolveDid` and a verified `get_record` to atlibs `abi`
 - writers (endorse, grant, unendorse) stay with each writer
+- getRecord = `com.atproto.sync.getRecord`, CAR verified (commit signature against the DID doc `#atproto` key, MST proof of the record) in every IO implementation. never listRecords
+- wasm modules: new atlibs host calls `identity.resolveDid` and a verified `get_record`; `describeRepo` (the PDS's view) is never trusted for agent-of
+
+API (both languages, same names):
+
+| item | shape |
+|---|---|
+| `IO` | `resolveDid(did) -> doc or none` (none: 404, tombstoned, deactivated); `getRecord(repo, collection, rkey) -> value or none` (verified); `contractHeld(contract strongRef, authorities []did) -> bool`; `now()` |
+| `walk(io, agent, {maxDepth=100, budget=256})` | `{agent, ancestors [{did, depth, expiresAt?}], roots [did], expiresAt?, truncated, errors [string]}` |
+| `agentOf(alsoKnownAs) -> [did]` | entries `https://ident.link/agent-of/<did>`, deduped, invalid DIDs dropped |
+| ancestor `expiresAt` | min grant `expiresAt` along the BFS path that first reached it |
+| walk `expiresAt` | min over roots (conservative); none = standing |
+| errors | an IO error leaves that edge unconfirmed and is listed; callers cache with the error TTL when `errors` is not empty |
+
+Vectors `vectors.json` (atlibs-identlink root; kcp `internal/identlink/vectors.json` byte-identical, checked by `deploy/check.sh --fast`):
+
+```json
+{"now":"2026-11-11T00:00:00Z",
+ "dids":{"did:plc:a":{"alsoKnownAs":["https://ident.link/agent-of/did:plc:p"]},"did:plc:p":{"alsoKnownAs":[]},"did:plc:gone":null},
+ "records":{"at://did:plc:p/link.ident.endorsement/did:plc:a":{"$type":"link.ident.endorsement","agent":"did:plc:a"},
+            "at://did:plc:p/com.publicdomainrelay.temp.market.association/did:plc:a":{"$type":"com.publicdomainrelay.temp.market.association","agent":"did:plc:a","createdAt":"2026-11-10T00:00:00Z"}},
+ "held":{"at://did:plc:p/com.publicdomainrelay.temp.market.accept/1":true},
+ "cases":[{"name":"one edge standing","agent":"did:plc:a","options":{},"want":{"ancestors":[{"did":"did:plc:p","depth":1}],"roots":["did:plc:p"],"truncated":false}}]}
+```
+
+- cases at least: standing, contract-scoped, expired, contract not held, pair without grant, grant without pair, endorsement `agent` mismatch, grant `agent` mismatch, two principals, cycle, depth limit, budget limit, unresolvable principal, depth 3 chain, agent-of entry with an invalid DID, duplicate entries
 
 ## Removed
 
@@ -195,8 +226,8 @@ Peer record (A), renter repo, rkey = subhandle:
 | `badgeBlueKeys` operator claim | operator | `<service>-<did with : as ->` | endorsement + standing grant |
 | `badgeBlueKeys/association` mirror, `badgeBlueKeys.proof` | subject | `association` | agent-of in the subject DID doc |
 | `market.association` old shape (`subject`, `service`, `parent`, `note`) | authority | `<service>-<did>`, `<service>-<sha256(subject)[:32]>-<accept rkey>` | grant at rkey = agent DID |
-| mesh-agent / kcp `agentpeer.go` self-association lease | renter | `requester_associate-<sha>-<accept rkey>` | peer `contract` + `expiresAt` |
-| `computer.socialweb.peer.lease`, `computer.socialweb.agents` `lease` | renter | | peer `contract` + `expiresAt` |
+| mesh-agent / kcp `agentpeer.go` self-association lease, renter-repo VM peer record | renter | `requester_associate-<sha>-<accept rkey>`, `<nick>.<handle>` | VM agent account (localPDS) + its own peer record |
+| `computer.socialweb.peer.lease`, `computer.socialweb.agents` `lease` | | | the walk of the peer record repo |
 | `com.fedfork.irc.agentOperator` | agent | `self` | agent-of in the agent DID doc |
 | `com.fedfork.irc.agents` | owner | agent DID | endorsement + grant |
 | association kinds `bskyPost`, `delvePost` (kcp, atirc `assoc_posts`) | | | none |
@@ -210,9 +241,9 @@ Peer record (A), renter repo, rkey = subhandle:
 
 | # | step | repo / host |
 |---|---|---|
-| 1 | lexicons: vendor `link.ident.endorsement` (`74d22dc`); new `market.association`; trimmed `associationRequest`; peer `contract`/`expiresAt`; drop `badgeBlueKeys.proof`, `com.fedfork.irc.agentOperator`/`agents`; OAuth `repo:link.ident.endorsement?action=create&action=delete` as an optional scope | kcp, atirc, atlibs-mesh-agents |
+| 1 | lexicons: vendor `link.ident.endorsement` (`74d22dc`); new `market.association`; trimmed `associationRequest`; peer without `lease`; drop `badgeBlueKeys.proof`, `com.fedfork.irc.agentOperator`/`agents`; OAuth `repo:link.ident.endorsement?action=create&action=delete` as an optional scope | kcp, atirc, atlibs-mesh-agents |
 | 2 | Go `identlink`, trust rework, bidder `proofExpiry` out, `agent-of add/remove`, genesis with agent-of + renter rotation key, `agentpeer.go` peer shape | kcp |
-| 3 | Rust `identlink`, abi `resolveDid` + verified get_record | atlibs |
+| 3 | Rust `identlink` + wasm/JS + vectors; atlibs host calls `identity.resolveDid`, verified `get_record` | atlibs-identlink, atlibs |
 | 4 | atirc on `identlink`; `/agent/login` writes the pair (+ PLC op flow) | atirc |
 | 5 | policy crate, market-status, mesh-agent, requester endorse, app, atlibs-atirc, atlibs-webrtc | atlibs-split |
 | 6 | bidders hat-7, hat-9, hat-8: binaries, PLC op, then john/bob endorse + grant | hosts |
@@ -225,7 +256,7 @@ Peer record (A), renter repo, rkey = subhandle:
 | runbook | proves |
 |---|---|
 | 0001 auth modes | bidder <-> operator via the pair |
-| 0004 vm atirc agent | peer record (A), mesh admission, expiry |
+| 0004 vm atirc agent | VM agent did:plc on the localPDS, pair + grant, mesh admission, expiry, tombstone; VM cost |
 | 0005 guest requester association | R2 pair + grant, nested accounts, release, tombstone |
 | 0007 bidder termination | lifetime cap from the walk |
 | 0011 atirc | owner graph |
@@ -234,24 +265,22 @@ Peer record (A), renter repo, rkey = subhandle:
 
 ## Owner Actions
 
-| # | action | when |
+- none expected. sign-ins and re-signs (optional scope `repo:link.ident.endorsement`) are done from `~/.atproto_source` (john), `~/.aliceoa_bsky_social_source`, `~/.bobvmbuilder_bsky_social_source`; one driver per account, announced before each window
+- a PLC email token only if unavoidable: the design needs none (roots never change their DID doc; bsky.social agent accounts are retired)
+
+## Decisions
+
+| # | question | decided |
 |---|---|---|
-| 1 | "go" on this design, answers to Open Decisions | now |
-| 2 | approve using john and bob sessions to write endorse + grant for hat-7 (john), hat-9 and hat-8 (bob), and delete their old claims; re-sign-in with the optional endorsement scope if the session lacks it | step 6 |
-| 3 | same for alice (R2 runs in 0005/0013; old record deletes) | step 10 |
-| 4 | list own-DID atirc agent accounts (we never listRecords `com.fedfork.irc.agents`); per bsky.social account an email token for its agent-of PLC op, or retire it | step 4 |
-| 5 | confirm hat (pds.rip, DID 404) is dead and leaves testaccounts | step 10 |
-
-## Open Decisions (recommendation first)
-
-| # | question | rec | alternative |
-|---|---|---|---|
-| 1 | leaf token-less VM agents | A: key of the renter, no DID | B: every agent a renter-minted did:plc (2 PLC ops each) |
-| 2 | pair without grant | untrusted | trusted as standing (fewer records, deletes widen) |
-| 3 | role in grant | dropped | `roles[]` |
-| 4 | chained links must be contract-scoped (kcp rule today) | drop: each standing edge is explicit | keep |
-| 5 | bidder DIDs' borrowed `at://` handle | drop | keep |
-| 6 | new own-DID agents | on a PDS we run, principal rotation key first, no email token | bsky.social + email token each |
-| 7 | owner rotation key on bidder DIDs (spec MAY) | no | add a john key above the host key |
-| 8 | record auth | `sync.getRecord` + CAR verify everywhere | `repo.getRecord` over TLS |
-| 9 | Rust crate home | atlibs `rust/src/identlink` | own repo `atlibs-identlink` |
+| 1 | VM agents | did:plc on the VM localPDS for every agent (owner); renter rotation key first; tombstone at release |
+| 2 | pair without grant | untrusted |
+| 3 | role in grant | none |
+| 4 | every chained link contract-scoped | dropped; contract Held per edge when the grant names one |
+| 5 | bidder DIDs' borrowed `at://` handle | dropped; `plcsubmit.UpdateHandle` keeps other `alsoKnownAs` entries |
+| 6 | new own-DID agents | on a PDS we run, principal rotation key first |
+| 7 | owner rotation key on bidder DIDs | no |
+| 8 | record auth | `sync.getRecord` + CAR verify everywhere |
+| 9 | Rust crate home | own repo `atlibs-identlink` (knotless, Unlicense), Rust + wasm/JS, shared vectors |
+| - | hat | dead (owner): removed from testaccounts, skipped |
+| - | bsky.social own-DID atirc agents | retired, not migrated |
+| - | found bugs | fixed in this work: atlibs `associate` TID rkey, mesh-agent self-lease, no lease check in atlibs-atirc/webrtc, atirc `lease_root` skips contract Held, bidder `proofExpiry` second walker |
