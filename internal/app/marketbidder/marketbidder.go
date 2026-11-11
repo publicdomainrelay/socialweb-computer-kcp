@@ -391,6 +391,10 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err != nil {
 		return nil, err
 	}
+	if dumbpipe == "" && p.c.Config().Record != nil && servesMarketInbound(o.Spec.Comms) {
+		return nil, errors.New("marketbidder: the instance records no dumbpipe, so the offering would carry no iroh market endpoint " +
+			"(https only on a test profile, none on prod-qr); run a release build or one from scripts/build-socialweb-computer.sh, or give --dumbpipe-path")
+	}
 	marketHTTPS := o.Spec.Profile != BidderProfileProdQr || compose.OptionValue(o.Spec.Options, "market-https") == "true"
 	var image string
 	var firecracker *v1alpha1.FirecrackerProvider
@@ -462,6 +466,10 @@ func (p *pass) marketExposures(https bool, dumbpipe string) []commonv1.LocalObje
 		out = append(out, commonv1.LocalObjectRef{Name: name + compose.ExposureIngressSuffix})
 	}
 	return out
+}
+
+func servesMarketInbound(c *v1alpha1.MarketComms) bool {
+	return c == nil || c.Mode == "" || c.Mode == v1alpha1.MarketCommsModeXRPC || c.Mode == v1alpha1.MarketCommsModeBoth
 }
 
 func (p *pass) dumbpipe() (string, error) {
