@@ -141,6 +141,7 @@ Peer record, in the agent's own repo (rkey = subhandle), no `lease`: the repo DI
 ```
 
 - mesh accept: owner O == repo DID or O in ancestors(repo DID); peer lifetime = lifetime(repo DID)
+- open: the VM agent's handle `<nick>.<R2 handle>` must resolve both ways for atirc (`whoami`, `verify.rs` `identity`, `locate`). R2's handle is `compose.PdsHandle` `<workspace label>.requester.local` (the guest R2 gets no `--atproto-handle`), and the PDS's `/.well-known/atproto-did` answers its service DID, not an account's: today neither resolves. Needs a resolvable R2 handle under the VM PDS's public host plus a per-Host `atproto-did` answer (and its routing), or atirc taking a handle that is only declared (the DID document's `at://` entry) when the DID's walk reaches a root
 - own-DID atirc agents (`/agent/login`, `com.fedfork.irc.agents`): bsky.social ones retired, not migrated (none named in atirc config or docs; the atirc server state is checked at its step). new ones live on a PDS we run, principal rotation key first: no email token
 
 ### VM Cost
