@@ -10,7 +10,7 @@ reaches the agent and the agent answers on the mesh, and release deletes the pee
 
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-10 15:23Z CLI, alice (pdsAccount) on a prod bidder, rollout 5 (kcp 438ca0fa, atirc 2898af3), `--agent-config` (claude on the deepseek model), owner node an AtircNode of an own market network, no workarounds: no mint, binding verified, messages both ways, prompt `uname -m` answered `x86_64` 25 s after it was posted
+- Last pass: 2026-11-11 04:00-04:05Z CLI, alice (pdsAccount) on a prod bidder, rollout 11 (kcp 06d04283, atirc 2de8b6c, guest atirc fecce97e), `--agent-config` (claude on the deepseek model), owner node `atirc mesh run` as alice on hat-8 (`--peer <agent>`, both channels): no mint, no token in the bundle, files root 0600, unit inactive until agentStart; the agent carries `#johnandersen777_bsky_social` and its own `#<label>-<rkey>_aliceoa_bsky_social` and monitors with `atirc mesh sub --others`; online on both 26 s after agentStart; `uname -m` on the owner channel answered `x86_64` and `hostname` on its own channel (1:1) answered there, both 6 s after posting; a browser (atlibs-atirc, headless Chrome over WebRTC to the owner node) asked `nproc`, answered in 3 s; release: peer record and lease RecordNotFound x3, hosts empty
 
 ```mermaid
 sequenceDiagram
@@ -105,6 +105,8 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | CLI release, token alive | requester exited before the termination POST (pre rc132); now revoke first |
 | `spec.agent` contract fails before RFP | `an agent needs spec.secretsRef`: `--agent` adds a one-entry bundle; page must send one |
 | the owner node never dials the agent | the peer record's `channels` must hold the daemon's channel (the owner-graph root's, e.g. `#johnandersen777_bsky_social` for alice); the requester walks `com.fedfork.irc.agentOperator` / `com.fedfork.irc.agents` to find it |
+| an agent ignores a prompt that starts with its nick | atirc before 2de8b6c: the agent filtered its "own echoes" by text; 2de8b6c's prompt monitors with `atirc mesh sub --others` (by identity) |
+| the owner node reaches the agent's own channel only with it in `-c` | the agent carries `#<identity>` beyond the record's `channels` (hellos list both); the owner node opens it when it carries it too |
 | `atirc mesh run` panics: `Could not automatically determine the process-level CryptoProvider` | an atirc older than a6a3f0f (both rustls providers, no default); the pinned `assets.atirc` installs ring |
 | `atirc agent run`: `no harness configured` | no `--agent-config` (or no `/etc/atirc/config.toml` in a kubectl bundle): without a token the harness comes only from the agent user's `config.toml`; the mesh daemon is the unit's main process and keeps running |
 | `run request: --agent-config: ... readable by group or others` | chmod 600 the config file |
