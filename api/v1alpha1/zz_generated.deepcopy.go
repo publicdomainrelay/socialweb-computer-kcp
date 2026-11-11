@@ -1269,7 +1269,7 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 	if in.Association != nil {
 		in, out := &in.Association, &out.Association
 		*out = new(commonv1alpha1.AssociationPolicy)
-		(*in).DeepCopyInto(*out)
+		**out = **in
 	}
 	if in.GuestNetwork != nil {
 		in, out := &in.GuestNetwork, &out.GuestNetwork
@@ -6035,7 +6035,7 @@ func (in *MarketBidderSpec) DeepCopyInto(out *MarketBidderSpec) {
 	if in.Association != nil {
 		in, out := &in.Association, &out.Association
 		*out = new(commonv1alpha1.AssociationPolicy)
-		(*in).DeepCopyInto(*out)
+		**out = **in
 	}
 	if in.GuestNetwork != nil {
 		in, out := &in.GuestNetwork, &out.GuestNetwork
@@ -6753,7 +6753,7 @@ func (in *MarketRequesterSpec) DeepCopyInto(out *MarketRequesterSpec) {
 	if in.Association != nil {
 		in, out := &in.Association, &out.Association
 		*out = new(commonv1alpha1.AssociationPolicy)
-		(*in).DeepCopyInto(*out)
+		**out = **in
 	}
 	if in.Options != nil {
 		in, out := &in.Options, &out.Options
@@ -9746,7 +9746,7 @@ func (in *RequesterSpec) DeepCopyInto(out *RequesterSpec) {
 	if in.Association != nil {
 		in, out := &in.Association, &out.Association
 		*out = new(commonv1alpha1.AssociationPolicy)
-		(*in).DeepCopyInto(*out)
+		**out = **in
 	}
 	if in.OAuthScopes != nil {
 		in, out := &in.OAuthScopes, &out.OAuthScopes

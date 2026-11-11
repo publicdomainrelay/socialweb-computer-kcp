@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-39.gateways.socialweb.computer
+  name: v1alpha1-40.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -260,14 +260,16 @@ spec:
                   associationRequest:
                     type: object
                     properties:
-                      authority:
+                      principal:
                         type: string
                       contract:
                         type: string
                       nonce:
                         type: string
+                      rotationKey:
+                        type: string
                     required:
-                      - authority
+                      - principal
                       - contract
                       - nonce
                   oauthClientID:
