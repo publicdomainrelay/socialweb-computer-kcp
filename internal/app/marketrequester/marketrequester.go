@@ -583,7 +583,11 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		return ctlruntime.Result{}, err
 	}
 	if req := o.Spec.Identity.AssociationRequest; req != nil {
-		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, *req); err != nil {
+		accounts := make([]string, 0, len(colocated))
+		for _, other := range colocated {
+			accounts = append(accounts, other.Account.DID)
+		}
+		if err := c.ApplyAssociationRequestRecord(ctx, r, ws, compose.RepoRefIn(did, ws), RequesterIdentity, *req, accounts); err != nil {
 			return p.fail(err)
 		}
 	}

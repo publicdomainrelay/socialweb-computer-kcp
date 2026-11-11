@@ -273,6 +273,7 @@ func (v *Association) UnmarshalJSON(b []byte) error {
 
 type AssociationRequest struct {
 	Type      string                     `json:"$type"`
+	Accounts  []string                   `json:"accounts,omitempty"`
 	Contract  string                     `json:"contract"`
 	CreatedAt string                     `json:"createdAt"`
 	Nonce     string                     `json:"nonce"`

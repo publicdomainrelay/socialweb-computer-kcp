@@ -290,6 +290,8 @@ const (
 type ContractGuestRequester struct {
 	Did string `json:"did"`
 
+	Accounts []string `json:"accounts,omitempty"`
+
 	State ContractGuestRequesterState `json:"state" apigen:"enum=Pending|Verified|Refused"`
 
 	Message string `json:"message,omitempty"`

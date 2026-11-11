@@ -13,6 +13,7 @@
           "principal": { "type": "string", "format": "did", "description": "The DID asked to write the endorsement and the grant." },
           "contract": { "type": "string", "format": "at-uri", "description": "The principal's market.accept of the contract whose guest runs this repository's requester." },
           "nonce": { "type": "string", "maxLength": 128, "description": "The nonce the principal put into that contract's secrets bundle." },
+          "accounts": { "type": "array", "maxLength": 16, "items": { "type": "string", "format": "did" }, "description": "The DIDs of the co-located accounts this repository's requester created for the contract, each with the principal's rotation key first, so the principal can tombstone them when the guest is gone." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
       }

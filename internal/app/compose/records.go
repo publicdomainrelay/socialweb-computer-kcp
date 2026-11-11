@@ -167,7 +167,7 @@ func (c *Composer) UpdateAgentOf(ctx context.Context, r Root, ws, did string, ad
 
 const AssociationRequestRecordName = "association-request"
 
-func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity string, req v1alpha1.AssociationRequest) error {
+func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws string, repo commonv1.ObjectRef, identity string, req v1alpha1.AssociationRequest, accounts []string) error {
 	principal, err := syntax.ParseDID(strings.TrimSpace(req.Principal))
 	if err != nil || principal.String() != req.Principal {
 		return fmt.Errorf("compose: spec.identity.associationRequest.principal %q is not a DID", req.Principal)
@@ -179,8 +179,12 @@ func (c *Composer) ApplyAssociationRequestRecord(ctx context.Context, r Root, ws
 	if nonce := strings.TrimSpace(req.Nonce); nonce == "" || len(nonce) > 128 || nonce != req.Nonce {
 		return fmt.Errorf("compose: spec.identity.associationRequest.nonce is not 1 to 128 characters")
 	}
-	record, err := json.Marshal(map[string]any{"$type": market.AssociationRequestNSID, "principal": req.Principal,
-		"contract": req.Contract, "nonce": req.Nonce, "createdAt": identityField(identity, "metadata.creationTimestamp")})
+	value := map[string]any{"$type": market.AssociationRequestNSID, "principal": req.Principal,
+		"contract": req.Contract, "nonce": req.Nonce, "createdAt": identityField(identity, "metadata.creationTimestamp")}
+	if len(accounts) > 0 {
+		value["accounts"] = accounts
+	}
+	record, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
