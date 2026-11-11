@@ -211,8 +211,8 @@ if [ ! -x "` + AtircBinary + `" ]; then
   echo "atirc-agent: ` + AtircBinary + ` is not installed yet (` + GuestBinariesUnit + `); the agent waits" >&2
   exit 1
 fi
-if [ -z "${ATP_USERNAME:-}" ] || [ -z "${ATIRC_NICK:-}" ] || [ ! -s "` + AgentIrohKeyFile + `" ]; then
-  echo "atirc-agent: the mesh identity (ATP_USERNAME, ATIRC_NICK, ` + AgentIrohKeyFile + `) is not in the secrets bundle yet; the agent waits" >&2
+if [ -z "${ATP_USERNAME:-}" ] || [ ! -s "` + AgentIrohKeyFile + `" ]; then
+  echo "atirc-agent: the mesh identity (ATP_USERNAME, ` + AgentIrohKeyFile + `) is not in the secrets bundle yet; the agent waits" >&2
   exit 1
 fi
 hex="$(tr -d '[:space:]' < "` + AgentIrohKeyFile + `")"

@@ -106,7 +106,7 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
    `colocated-mesh1-peer` written; `ingressproxy_iroh_dumbpipe_listening` exposure `svc-pds-pds-iroh`;
    `participant_request_crawl` relay `https://relay.mini-cloud-0002.chadig.com` ok true.
 3. From any host (helpers above, `M=<mesh1 DID>`): `rec "$R2" computer.socialweb.peer r2-<accept rkey>.<owner handle>` and
-   `rec "$M" computer.socialweb.peer mesh1.r2-<accept rkey>.<owner handle>` carry `iroh`, no `lease`;
+   `rec "$M" computer.socialweb.peer mesh1.<R2 handle>` carry `iroh`, no `lease`;
    `rec "$R2" com.publicdomainrelay.temp.market.association "$M"` (same contract + expiresAt as R2's grant) and
    `rec "$R2" link.ident.endorsement "$M"`; `curl -s https://plc.directory/$M | jq -c .alsoKnownAs` is
    [`at://mesh1.<R2 handle>`, `https://ident.link/agent-of/<R2 DID>`], `/data` rotationKeys as R2's;

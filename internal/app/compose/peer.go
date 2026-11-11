@@ -150,7 +150,7 @@ func (c *Composer) ApplyPeerRecords(ctx context.Context, r Root, ws, identity st
 		if other.Iroh != "" {
 			own["iroh"] = other.Iroh
 		}
-		if err := c.applyPeerRecord(ctx, r, ws, peerName, RepoRefIn(agent, ws), PeerNSID, other.Name+"."+ownRKey, own); err != nil {
+		if err := c.applyPeerRecord(ctx, r, ws, peerName, RepoRefIn(agent, ws), PeerNSID, other.Account.Handle, own); err != nil {
 			return err
 		}
 	}

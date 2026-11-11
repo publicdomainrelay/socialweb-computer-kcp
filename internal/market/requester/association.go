@@ -748,6 +748,7 @@ func (r *contractRunner) proveGuestRequester(ctx context.Context, state *v1alpha
 	}
 	r.log().Info("requester_guest_requester", "did", did, "request", got.URI, "accounts", state.GuestRequester.Accounts)
 	r.ensureAssociation(ctx, state.Accept, state)
+	r.ensureAgentPeer(ctx, r.snapshot(), state)
 }
 
 func contractExpiresAt(label string) string {

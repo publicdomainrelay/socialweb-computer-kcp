@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
+
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
@@ -73,7 +75,7 @@ func agentPeerReady(entries []SecretEntry, envFile string) bool {
 	for _, e := range entries {
 		switch e.Path {
 		case envFile:
-			env = atircEnvValue(e.Value, AtircNickEnv) != ""
+			env = atircEnvValue(e.Value, AtircUsernameEnv) != ""
 		case cloudinit.AgentIrohKeyFile:
 			key = strings.TrimSpace(e.Value) != ""
 		}
@@ -137,7 +139,14 @@ func (r *contractRunner) publishAgentPeer(ctx context.Context, contract v1alpha1
 	if identity == "" {
 		return fmt.Errorf("the handle %q and the RFP %q make no agent identity", q.handle, state.RFPURI)
 	}
-	seed, fresh, err := r.agentKey(ctx, contract, envFile, nick)
+	env := AtircUsernameEnv + "=" + strings.ToLower(strings.TrimSpace(q.handle)) + "\n" + AtircNickEnv + "=" + nick + "\n"
+	if fromGuest(contract) {
+		env = ""
+		if handle := r.colocatedHandle(ctx, state, nick); handle != "" {
+			env = AtircUsernameEnv + "=" + handle + "\n"
+		}
+	}
+	seed, fresh, err := r.agentKey(ctx, contract, envFile, env)
 	if err != nil {
 		return err
 	}
@@ -175,7 +184,24 @@ func (r *contractRunner) agentPeerDone(ctx context.Context, contract v1alpha1.Co
 	r.noteAgentMint(ctx, true, agentPeerPublished, "the atirc agent "+identity+"'s mesh key is "+how+"; the guest requester publishes its peer record as its co-located account "+nickOf(identity))
 }
 
-func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.ComputeContract, envFile, nick string) ([]byte, bool, error) {
+func (r *contractRunner) colocatedHandle(ctx context.Context, state *v1alpha1.NodeClaimContract, nick string) string {
+	if state == nil || state.GuestRequester == nil || state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified || r.q.deps.Directory == nil {
+		return ""
+	}
+	ident, err := r.q.deps.Directory.LookupDID(ctx, syntax.DID(state.GuestRequester.Did))
+	if err != nil {
+		r.log().Warn("requester_agent_handle_unknown", "did", state.GuestRequester.Did, "err", err.Error())
+		return ""
+	}
+	handle, err := ident.DeclaredHandle()
+	if err != nil {
+		r.log().Warn("requester_agent_handle_unknown", "did", state.GuestRequester.Did, "err", err.Error())
+		return ""
+	}
+	return nick + "." + handle.String()
+}
+
+func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.ComputeContract, envFile, env string) ([]byte, bool, error) {
 	r.bundleMu.Lock()
 	defer r.bundleMu.Unlock()
 	ref := *contract.Spec.SecretsRef
@@ -196,7 +222,6 @@ func (r *contractRunner) agentKey(ctx context.Context, contract v1alpha1.Compute
 			}
 		}
 	}
-	env := AtircUsernameEnv + "=" + strings.ToLower(strings.TrimSpace(r.q.handle)) + "\n" + AtircNickEnv + "=" + nick + "\n"
 	if seed != nil && envAt >= 0 && entries[envAt].Value == env {
 		r.addSecretEntries(entries[envAt], entries[keyAt])
 		return seed, false, nil

@@ -51,7 +51,7 @@ Every smoke that mints must show, from server logs and
   requester writes the agent's iroh key and atirc config (harness, model) into
   the guest's secrets bundle; the agent is a co-located account of the guest
   requester R2 (did:plc on the VM localPDS, `agent-of/<R2 DID>`), its
-  `computer.socialweb.peer/<name>.<R2 subhandle>` in its own repo, no `lease`;
+  `computer.socialweb.peer/<name>.<R2 handle>` (its own handle) in its own repo, no `lease`;
   R2 endorses + grants it, the renter endorses + grants R2 (kcp ident.link
   cut-over; this section is ahead of the atirc upstream copy).
 - `atirc peer show <identity>` verifies (owner = a root of the walk of the

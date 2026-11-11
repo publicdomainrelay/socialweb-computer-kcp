@@ -289,7 +289,7 @@ func (r *contractRunner) agentMintOutcome() *atircMintOutcome {
 }
 
 func (r *contractRunner) ensureGuestRequesterToken(ctx context.Context, contract v1alpha1.ComputeContract, state *v1alpha1.NodeClaimContract, association commonv1.StrongRef, deadline time.Time) error {
-	if !fromGuest(contract) || state == nil || state.Accept == nil {
+	if !fromGuest(contract) || contract.Spec.Agent != nil || state == nil || state.Accept == nil {
 		return nil
 	}
 	lease, err := contractLease(state, &association)

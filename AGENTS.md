@@ -265,12 +265,14 @@ requester's own kcp, and `install` prints both. A password never goes into reque
   - The atirc agent (plan 0035; peer to peer, no token): `spec.agent {envFile}` (default `/etc/atirc/atirc.env`)
     needs `spec.secretsRef`. After the receipt is verified the requester (`internal/market/requester/agentpeer.go`)
     generates the agent's iroh key (a 32-byte ed25519 seed) into the bundle at `/etc/atirc/iroh_key.hex` (hex, 0600),
-    writes envFile `ATP_USERNAME=<its handle>`, `ATIRC_NICK=<label>-<rfp rkey>` (0600; the
-    channel is atirc's default, the owner-graph root's), then, in its own repo, a contract-scoped market.association whose subject is its own DID
-    (expiresAt 24 h, rewritten at a receipt or restart when under 1 h is left) and `computer.socialweb.peer/<nick>.<handle>`
-    {iroh: the key's short ticket, lease: that association}; release deletes both, best effort, and the
-    expiry ends the binding without it. getSecrets and the sealed fallback serve the bundle without those two entries
-    until they are written, and the first write publishes guest.secretsUpdated so the guest fetches
+    writes envFile `ATP_USERNAME=<agent handle>` (0600) and `/etc/socialweb-computer/r2-agent.env`
+    `R2_COLOCATED=<label>-<rfp rkey>=<the key's ticket>`. The agent is a co-located account of the guest requester R2
+    (identity-only when nothing else asked for one; no atirc token is minted for R2 or the agent): R2 makes its did:plc
+    (renter rotation key first, `agent-of/<R2 DID>`), endorses and grants it in R2's repo and writes
+    `computer.socialweb.peer/<agent handle>` {iroh: that ticket} in the agent's repo. The agent handle is
+    `<label>-<rfp rkey>.<R2 handle>`, which the requester learns from R2's DID document after the nonce check. getSecrets
+    and the sealed fallback serve the bundle without the envFile and the key until the envFile names `ATP_USERNAME`,
+    and that write publishes guest.secretsUpdated so the guest fetches
 again; user_data installs `atirc-agent.service`
     and `/etc/socialweb-guest-agent/agent.json` but never starts the unit; it enables `atirc-agent-env.path`
     on the envFile, which runs `systemctl try-restart --no-block atirc-agent.service` (never a start)
