@@ -23,26 +23,17 @@ func ResolveDocument(did string, current []LogEntry) *DIDDocument {
 	alsoKnownAs := []string{}
 	services := map[string]Service{}
 
-	for _, entry := range current {
-		op := entry.Operation
-		switch op.Type {
-		case TypeOperation:
-			maps.Copy(verificationMethods, op.VerificationMethods)
-			alsoKnownAs = dedupe(append(alsoKnownAs, op.AlsoKnownAs...))
-			maps.Copy(services, op.Services)
-		case TypeCreate:
-			next := map[string]string{"atproto": op.SigningKey}
-			maps.Copy(next, verificationMethods)
-			verificationMethods = next
-			if op.Handle != "" {
-				alsoKnownAs = dedupe(append(alsoKnownAs, op.Handle))
-			}
-			nextServices := map[string]Service{
-				"atproto_pds": {Type: "AtprotoPersonalDataServer", Endpoint: op.Service},
-			}
-			maps.Copy(nextServices, services)
-			services = nextServices
+	switch op := current[len(current)-1].Operation; op.Type {
+	case TypeOperation:
+		maps.Copy(verificationMethods, op.VerificationMethods)
+		alsoKnownAs = dedupe(op.AlsoKnownAs)
+		maps.Copy(services, op.Services)
+	case TypeCreate:
+		verificationMethods["atproto"] = op.SigningKey
+		if op.Handle != "" {
+			alsoKnownAs = []string{op.Handle}
 		}
+		services["atproto_pds"] = Service{Type: "AtprotoPersonalDataServer", Endpoint: op.Service}
 	}
 
 	doc := &DIDDocument{Context: append([]string{}, didContext...), ID: did}
