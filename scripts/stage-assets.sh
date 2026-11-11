@@ -100,15 +100,40 @@ fetch_fresh() {
   curl "${dl_args[@]}" -o "$out" "$url" || die "download failed: $url"
 }
 
+key_fpr_ok() {
+  local ring="$1" fpr="$2"
+  gpg --batch --no-default-keyring --keyring "$ring" --with-colons --list-keys 2>/dev/null \
+    | awk -F: '$1=="pub"{p=1;next} p&&$1=="fpr"{print $10; p=0}' | grep -qx "$fpr"
+}
+
+fetch_key() {
+  local url="$1" fpr="$2" out="$3" candidate try
+  mkdir -p "$(dirname "$out")" "$GNUPGHOME/keys"
+  for candidate in "$url" "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$fpr" "https://keys.openpgp.org/vks/v1/by-fingerprint/$fpr"; do
+    try="$GNUPGHOME/keys/$fpr.try"
+    rm -f "$try" "$try.gpg"
+    curl "${dl_args[@]}" -o "$try" "$candidate" 2>/dev/null || { say "key $fpr: $candidate unavailable"; continue; }
+    gpg --batch --quiet --no-default-keyring --keyring "$try.gpg" --import "$try" 2>/dev/null || true
+    if key_fpr_ok "$try.gpg" "$fpr"; then
+      mv -f "$try" "$out.part.$$" && mv -f "$out.part.$$" "$out"
+      say "key $fpr: vendored from $candidate into $out"
+      return
+    fi
+    say "key $fpr: $candidate gave no importable key with that primary fingerprint"
+  done
+  die "key $fpr: no source gave it"
+}
+
 key_ring() {
-  local url="$1" fpr="$2" ring="$GNUPGHOME/keys/$2.gpg"
+  local url="$1" fpr="$2" ring="$GNUPGHOME/keys/$2.gpg" vendored="$root/internal/versions/keys/$2.asc"
   if [ ! -f "$ring" ]; then
     mkdir -p "$GNUPGHOME/keys"
-    fetch_fresh "$url" "$GNUPGHOME/keys/$fpr.asc"
-    gpg --batch --quiet --no-default-keyring --keyring "$ring" --import "$GNUPGHOME/keys/$fpr.asc" 2>/dev/null
-    gpg --batch --no-default-keyring --keyring "$ring" --with-colons --list-keys \
-      | awk -F: '$1=="pub"{p=1;next} p&&$1=="fpr"{print $10; p=0}' | grep -qx "$fpr" \
-      || die "key from $url does not carry primary fingerprint $fpr"
+    if [ ! -f "$vendored" ]; then
+      [ "$update_pins" = 1 ] || die "key $fpr is not vendored at $vendored; make pins fetches it"
+      fetch_key "$url" "$fpr" "$vendored"
+    fi
+    gpg --batch --quiet --no-default-keyring --keyring "$ring" --import "$vendored" 2>/dev/null
+    key_fpr_ok "$ring" "$fpr" || die "$vendored does not carry primary fingerprint $fpr"
   fi
   echo "$ring"
 }

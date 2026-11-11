@@ -770,7 +770,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   `units roll kcp`, `units roll cluster` and `units roll link`.
 - The release binary (prod only; the lead builds it): `scripts/build-socialweb-computer.sh` without
   `--dev` builds one commit once per release platform of `versions.json` from a clean checkout:
-  every pinned asset staged by `scripts/stage-assets.sh` and checked against its pin, the embedded
+  every pinned asset staged by `scripts/stage-assets.sh` and checked against its pin (a signed upstream is
+  verified with its key vendored at `internal/versions/keys/<fingerprint>.asc`, never fetched at build time;
+  only `make pins` fetches a key that is not vendored, from its pinned URL, keyserver.ubuntu.com or
+  keys.openpgp.org, and keeps the first that imports with the pinned primary fingerprint), the embedded
   Deno of the policy engine, then `go build -tags "release embed_deno"` with `CGO_ENABLED=0`.
   Each step is keyed by its inputs and does not run again when they did not change: asset blobs by
   their pinned inputs (assets built here by their tar bytes), socialweb-meshd by rust/ and the
