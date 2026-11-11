@@ -16,6 +16,8 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	indigorepo "github.com/bluesky-social/indigo/atproto/repo"
 	"github.com/bluesky-social/indigo/atproto/syntax"
+	"github.com/ipfs/go-cid"
+	"github.com/multiformats/go-multihash"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/repo"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/ttlcache"
@@ -184,4 +186,24 @@ func verifyRecordCAR(ctx context.Context, car []byte, did string, pub atcrypto.P
 		return nil, err
 	}
 	return atdata.UnmarshalCBOR(data)
+}
+
+func RecordCID(value map[string]any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	normal, err := atdata.UnmarshalJSON(raw)
+	if err != nil {
+		return "", err
+	}
+	data, err := atdata.MarshalCBOR(normal)
+	if err != nil {
+		return "", err
+	}
+	sum, err := cid.NewPrefixV1(cid.DagCBOR, multihash.SHA2_256).Sum(data)
+	if err != nil {
+		return "", err
+	}
+	return sum.String(), nil
 }

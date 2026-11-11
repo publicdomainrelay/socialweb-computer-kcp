@@ -1,21 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/bluesky-social/indigo/atproto/atdata"
-	"github.com/ipfs/go-cid"
-	"github.com/multiformats/go-multihash"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
@@ -49,70 +42,10 @@ type vectors struct {
 	} `json:"market"`
 }
 
-const (
-	plcURL = "https://plc.identlinkvectors.invalid"
-	pdsURL = "https://pds.identlinkvectors.invalid"
-)
-
-func reply(req *http.Request, code int, body any) *http.Response {
-	data, _ := json.Marshal(body)
-	return &http.Response{StatusCode: code, Status: fmt.Sprintf("%d %s", code, http.StatusText(code)),
-		Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(data)), Request: req}
-}
-
-func recordCID(raw json.RawMessage) (string, error) {
-	value, err := atdata.UnmarshalJSON(raw)
-	if err != nil {
-		return "", err
-	}
-	data, err := atdata.MarshalCBOR(value)
-	if err != nil {
-		return "", err
-	}
-	sum, err := cid.NewPrefixV1(cid.DagCBOR, multihash.SHA2_256).Sum(data)
-	if err != nil {
-		return "", err
-	}
-	return sum.String(), nil
-}
-
-func (v *vectors) RoundTrip(req *http.Request) (*http.Response, error) {
-	switch req.URL.Scheme + "://" + req.URL.Host {
-	case plcURL:
-		var doc identlink.Doc
-		ok, err := entry(v.DIDs, strings.TrimPrefix(req.URL.Path, "/"), &doc)
-		switch {
-		case err != nil:
-			return reply(req, http.StatusInternalServerError, map[string]any{"error": "InternalServerError"}), nil
-		case !ok:
-			return reply(req, http.StatusNotFound, map[string]any{"error": "NotFound"}), nil
-		}
-		return reply(req, http.StatusOK, map[string]any{"service": []any{map[string]any{
-			"id": "#atproto_pds", "type": "AtprotoPersonalDataServer", "serviceEndpoint": pdsURL}}}), nil
-	case pdsURL:
-		if req.URL.Path != "/xrpc/com.atproto.repo.getRecord" {
-			break
-		}
-		q := req.URL.Query()
-		uri := "at://" + q.Get("repo") + "/" + q.Get("collection") + "/" + q.Get("rkey")
-		raw, ok := v.Records[uri]
-		switch {
-		case ok && string(raw) == `"error"`:
-			return reply(req, http.StatusInternalServerError, map[string]any{"error": "InternalServerError"}), nil
-		case !ok || string(raw) == "null":
-			return reply(req, http.StatusBadRequest, map[string]any{"error": "RecordNotFound"}), nil
-		}
-		c, err := recordCID(raw)
-		if err != nil {
-			return nil, err
-		}
-		return reply(req, http.StatusOK, map[string]any{"uri": uri, "cid": c, "value": raw}), nil
-	}
-	return reply(req, http.StatusNotFound, map[string]any{"error": "NotFound"}), nil
-}
+func (v *vectors) Forget(string) {}
 
 func marketCases(v *vectors) int {
-	resolver := trust.NewResolver(trust.ResolverOptions{Client: &atproto.Client{HTTP: &http.Client{Transport: v}, PLCURL: plcURL}})
+	resolver := trust.NewResolver(trust.ResolverOptions{Source: v})
 	failed := 0
 	for _, c := range v.Market {
 		held, err := resolver.ContractHeld(context.Background(), atproto.StrongRef{URI: c.Contract.URI, CID: c.Contract.CID}, c.Authorities)

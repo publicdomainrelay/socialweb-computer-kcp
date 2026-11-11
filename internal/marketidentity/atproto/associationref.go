@@ -174,15 +174,12 @@ func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.Strong
 	case authority == subject:
 		return invalid("the association record %s is in the identity's own repo", ref.URI)
 	}
-	record, err := a.records.GetRecordAt(ctx, recordclient.StrongRef{URI: ref.URI, CID: ref.CID})
-	if errors.Is(err, recordclient.ErrRecordNotFound) {
-		return invalid("the association record %s no longer resolves", ref.URI)
-	}
+	value, reason, err := a.trust.PinnedRecord(ctx, recordclient.StrongRef{URI: ref.URI, CID: ref.CID})
 	if err != nil {
 		return refVerdict{}, err
 	}
-	if record.CID != ref.CID {
-		return invalid("the association record %s has cid %s, not the pinned %s", ref.URI, record.CID, ref.CID)
+	if reason != "" {
+		return invalid("the grant %s pinned at cid %s: %s", ref.URI, ref.CID, reason)
 	}
 	walked, err := a.trust.Walk(ctx, subject, trust.Association{})
 	if err != nil {
@@ -199,7 +196,7 @@ func (a *Accounts) verifyAssociationRef(ctx context.Context, ref commonv1.Strong
 	if at := walked.Ancestors[i].ExpiresAt; at != nil {
 		verdict.expiresAt = *at
 	}
-	if fields, ok := record.Value["contract"].(map[string]any); ok {
+	if fields, ok := value["contract"].(map[string]any); ok {
 		uri, _ := fields["uri"].(string)
 		cid, _ := fields["cid"].(string)
 		verdict.contract = &commonv1.StrongRef{URI: uri, CID: cid}

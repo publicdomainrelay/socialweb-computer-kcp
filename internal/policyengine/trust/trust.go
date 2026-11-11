@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -97,9 +98,13 @@ func (r *Resolver) Resolve(ctx context.Context, ref atproto.StrongRef) (map[stri
 			return value, nil
 		}
 	}
-	value, err := r.client.GetRecord(ctx, ref)
+	repo, collection, rkey := atproto.SplitURI(ref.URI)
+	value, err := r.source.GetRecord(ctx, repo, collection, rkey)
 	if err != nil {
 		return nil, err
+	}
+	if value == nil {
+		return nil, fmt.Errorf("%w: %s", atproto.ErrRecordNotFound, ref.URI)
 	}
 	if r.store != nil {
 		cache.WriteRecord(r.store, ref, value)
@@ -108,11 +113,7 @@ func (r *Resolver) Resolve(ctx context.Context, ref atproto.StrongRef) (map[stri
 }
 
 func (r *Resolver) getRecord(ctx context.Context, repo, collection, rkey string) (map[string]any, error) {
-	value, err := r.client.GetRecord(ctx, atproto.StrongRef{URI: "at://" + repo + "/" + collection + "/" + rkey})
-	if errors.Is(err, atproto.ErrRecordNotFound) {
-		return nil, nil
-	}
-	return value, err
+	return r.source.GetRecord(ctx, repo, collection, rkey)
 }
 
 type walkIO struct {

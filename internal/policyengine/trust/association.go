@@ -2,7 +2,6 @@ package trust
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 
@@ -38,18 +37,23 @@ func strongRefOf(value any) (*atproto.StrongRef, bool) {
 	return &atproto.StrongRef{URI: uri, CID: cid}, true
 }
 
+func (r *Resolver) PinnedRecord(ctx context.Context, ref atproto.StrongRef) (map[string]any, string, error) {
+	return r.pinnedRecord(ctx, ref)
+}
+
 func (r *Resolver) pinnedRecord(ctx context.Context, ref atproto.StrongRef) (map[string]any, string, error) {
-	record, err := r.client.GetRecordAt(ctx, ref)
-	if errors.Is(err, atproto.ErrRecordNotFound) {
-		return nil, "the record no longer resolves", nil
-	}
+	repo, collection, rkey := atproto.SplitURI(ref.URI)
+	value, err := r.source.GetRecord(ctx, repo, collection, rkey)
 	if err != nil {
 		return nil, "", err
 	}
-	if record.CID != ref.CID {
-		return nil, "the record cid changed", nil
+	if value == nil {
+		return nil, "the record no longer resolves", nil
 	}
-	return record.Value, "", nil
+	if got, err := identlink.RecordCID(value); err != nil || got != ref.CID {
+		return nil, "the record cid changed", err
+	}
+	return value, "", nil
 }
 
 func (r *Resolver) deny(reason string, contract atproto.StrongRef, meta map[string]any) (bool, error) {
@@ -85,18 +89,16 @@ func (r *Resolver) contractHeld(ctx context.Context, contract atproto.StrongRef,
 	if !strings.HasPrefix(bidder, "did:") {
 		return r.deny("the contract's bid is not in a DID repo", contract, nil)
 	}
-	receiptURI := "at://" + bidder + "/" + market.ReceiptNSID + "/" + market.ReceiptRKey(contract.URI, contract.CID)
-	receipt, err := r.client.GetRecordAt(ctx, atproto.StrongRef{URI: receiptURI})
-	if errors.Is(err, atproto.ErrRecordNotFound) {
-		return r.deny("the contract has no receipt", contract, nil)
-	}
+	receiptRKey := market.ReceiptRKey(contract.URI, contract.CID)
+	receiptURI := "at://" + bidder + "/" + market.ReceiptNSID + "/" + receiptRKey
+	receipt, err := r.getRecord(ctx, bidder, market.ReceiptNSID, receiptRKey)
 	if err != nil {
 		return false, err
 	}
-	if receipt.URI != receiptURI {
-		return r.deny("the receipt uri is not canonical", contract, map[string]any{"receipt": receipt.URI})
+	if receipt == nil {
+		return r.deny("the contract has no receipt", contract, nil)
 	}
-	if answered, ok := strongRefOf(receipt.Value["accept"]); !ok || *answered != contract {
+	if answered, ok := strongRefOf(receipt["accept"]); !ok || *answered != contract {
 		return r.deny("the receipt does not answer the contract", contract, nil)
 	}
 	released, err := r.getRecord(ctx, repo, market.ComputeEventsVMDeleteNSID, market.ReleasePayloadRKey(receiptURI))

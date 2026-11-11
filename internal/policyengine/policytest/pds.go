@@ -14,9 +14,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ipfs/go-cid"
-	"github.com/multiformats/go-multihash"
-
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
@@ -49,12 +46,11 @@ func URI(repo, collection, rkey string) string {
 }
 
 func CIDOf(value map[string]any) string {
-	data, _ := json.Marshal(value)
-	sum, err := multihash.Sum(data, multihash.SHA2_256, -1)
+	c, err := identlink.RecordCID(value)
 	if err != nil {
 		panic(err)
 	}
-	return cid.NewCidV1(cid.DagCBOR, sum).String()
+	return c
 }
 
 func (w *World) Put(uri string, value map[string]any) string {
