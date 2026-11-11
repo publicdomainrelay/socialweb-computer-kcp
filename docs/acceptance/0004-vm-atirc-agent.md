@@ -132,6 +132,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 - No `chat.atirc.mint` for the agent; no token in the bundle, a kcp object, a record, a ContractEvent or a log line
 - The key and the agent config (its apiKey) never in a kcp object, a record, an argument or a log line; `/etc/atirc/iroh_key.hex`, `/etc/atirc/atirc.env` and `/etc/atirc/config.toml` root, 0600
 - The peer record is in the agent's own repo, its `iroh` is the short ticket of the bundle key, no `lease`
+- Owner = the walk root (the renter): alice and bob are no longer john's atirc agents (retired 2026-11-11), so an alice agent carries `#aliceoa_bsky_social`, not `#johnandersen777_bsky_social`; the owner node runs as the renter
 - The agent DID doc: `agent-of/<R2 DID>`; R2's: `agent-of/<renter DID>`; rotationKeys as in the check above
 - `internal association <agent DID>` exits 0, roots = [renter DID], `expiresAt` = the grants' `expiresAt`
 - The renter repo holds no peer record and no self-association for the agent: only the grant + endorsement at rkey = R2 DID
