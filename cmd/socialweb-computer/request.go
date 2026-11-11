@@ -44,13 +44,14 @@ const (
 	requestSummaryRead  = 10 * time.Second
 	requestAttachProbe  = 10 * time.Second
 
-	requestOwnerExitWait = 5 * time.Minute
-	requestRetireWait    = 2 * time.Minute
-	requestSSHRetryRun   = 20 * time.Second
-	transportIroh        = "iroh"
-	transportWebRTC      = "webrtc"
-	sshPort              = 22
-	sshConnectionFailed  = 255
+	requestOwnerExitWait      = 5 * time.Minute
+	requestRetireWait         = 2 * time.Minute
+	requestIdentityRetireWait = time.Minute
+	requestSSHRetryRun        = 20 * time.Second
+	transportIroh             = "iroh"
+	transportWebRTC           = "webrtc"
+	sshPort                   = 22
+	sshConnectionFailed       = 255
 )
 
 var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
@@ -91,6 +92,7 @@ type requestRun struct {
 	awaitRefFile      string
 	guestRequester    bool
 	identityOnly      bool
+	retireWait        time.Duration
 	peerSubhandle     string
 	handshakeStarted  bool
 	homeDir           string
@@ -697,10 +699,11 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 }
 
 func (r *requestRun) retire(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, requestRetireWait)
+	wait := cmp.Or(r.retireWait, requestRetireWait)
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	r.log("retiring the guest requester's local accounts: peer and association records deleted, accounts deactivated, did:plc tombstoned")
-	message, err := r.kcp.Retire(ctx, requestRetireWait)
+	message, err := r.kcp.Retire(ctx, wait)
 	if err != nil {
 		r.a.log.Warn("the local accounts did not retire; their association expiry and contract checks still end their trust", "err", err.Error(), "last", message)
 		return
@@ -1396,7 +1399,9 @@ func (r *requestRun) holdIdentity(ctx context.Context) int {
 	r.log("the guest requester runs identity-only: no RFP, no nested VM; it keeps its PDS, its co-located accounts and their records up until it is stopped, then retires them")
 	r.writeSummary(ctx, nil)
 	<-ctx.Done()
+	r.retireWait = requestIdentityRetireWait
 	r.stop(context.WithoutCancel(ctx), true)
+	r.summary.Phase, r.summary.Message = string(v1alpha1.ComputeContractReleased), "identity-only: its accounts are retired and its kcp is stopped"
 	r.writeSummary(context.WithoutCancel(ctx), nil)
 	r.a.printJSON(r.summary)
 	return exitOK

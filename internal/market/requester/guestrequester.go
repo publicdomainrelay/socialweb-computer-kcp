@@ -63,7 +63,13 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 	}
 	r.writeStatus(ctx, v1alpha1.ComputeContractReleasing, "asking the guest requester to release its own contracts before the guest goes", state,
 		r.currentBids(), r.currentChosen(), "releasingGuestRequester", 1)
-	r.log().Info("requester_guest_requester_release", "contractEvent", name, "timeout", GuestRequesterReleaseTimeout.String())
+	limit := GuestRequesterReleaseTimeout
+	if _, renting := q.contractEvents.Find(func(e v1alpha1.ContractEvent) bool {
+		return e.Spec.ContractRef.Name == contract.Name && e.Spec.NSID == market.ComputeEventsGuestR2StartNSID
+	}); !renting {
+		limit = RenterTombstoneWait
+	}
+	r.log().Info("requester_guest_requester_release", "contractEvent", name, "timeout", limit.String())
 	answered := func(e MarketEvent) bool {
 		if market.NSIDFromURI(e.Payload.URI) != market.ComputeEventsGuestR2ReleasedNSID {
 			return false
@@ -88,9 +94,9 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 			return
 		}
 	}
-	wait := GuestRequesterReleaseTimeout
+	wait := limit
 	if at, err := market.ParseTime(state.R2Release.RequestedAt); err == nil {
-		wait = max(at.Add(GuestRequesterReleaseTimeout).Sub(q.now()), 0)
+		wait = max(at.Add(limit).Sub(q.now()), 0)
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
@@ -99,9 +105,9 @@ func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alp
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			r.log().Warn("requester_guest_requester_release_timeout", "after", GuestRequesterReleaseTimeout.String(),
+			r.log().Warn("requester_guest_requester_release_timeout", "after", limit.String(),
 				"next", "the guest is destroyed; the guest requester's bidders end its contracts when its association goes")
-			settle(v1alpha1.ContractR2ReleaseTimedOut, false, "no guest.r2Released within "+GuestRequesterReleaseTimeout.String()+
+			settle(v1alpha1.ContractR2ReleaseTimedOut, false, "no guest.r2Released within "+limit.String()+
 				"; the guest requester's bidders release its VMs at its association expiresAt plus 10m")
 			return
 		case e := <-events:

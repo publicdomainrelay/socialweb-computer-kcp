@@ -349,7 +349,12 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 		a.log.Warn("guest_r2_release", "seq", seq, "step", "stop "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
 	}
 	record := r2ReleasedRecord{Type: R2ReleasedNSID, Ok: true, CreatedAt: createdAt()}
-	if out, err := exec.CommandContext(a.ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
+	if env, _ := os.ReadFile(filepath.Join(RequesterDir, RequesterStartEnvFile)); strings.Contains(string(env), "\nR2_IDENTITY=1\n") {
+		record.Message = "the identity-only guest requester rents nothing; it retired its accounts when it stopped"
+		if err != nil {
+			record.Ok, record.Message = false, tail("stopping the identity-only guest requester: "+err.Error()+": "+string(out), 500)
+		}
+	} else if out, err := exec.CommandContext(a.ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
 		record.Ok, record.Message = false, tail("releasing the guest requester's contracts: "+err.Error()+": "+string(out), 500)
 	}
 	a.log.Info("guest_r2_release", "seq", seq, "ok", record.Ok, "message", record.Message)

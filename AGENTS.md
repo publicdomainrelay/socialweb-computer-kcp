@@ -497,7 +497,10 @@ again; user_data installs `atirc-agent.service`
     contracts. The bounds nest, from the constants in `internal/atproto/cloudinit`: each guest
     `run request release` gets RequestReleaseWait + RequestRevokeWait + 2 min, the release unit 1 min
     more, the cascade (GuestRequesterReleaseTimeout) the unit stop plus 1 min more, and the parent's
-    `run request release` waits the cascade plus `--contract-timeout`; the outcome is
+    `run request release` waits the cascade plus `--contract-timeout`. An identity-only guest requester (no r2Start
+    for the contract) rents nothing: the guest agent stops it (it retires its accounts on stop, bounded to 1 min,
+    and its summary says Released), skips the release unit and answers guest.r2Released at once, and the
+    parent waits for that answer only RenterTombstoneWait (2 min) before it goes on; the outcome is
     `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose
     requester's contract-scoped association expired 10 min ago (ComputeVM `spec.associationExpiresAt`,
     at most 24 h after the accept, the earliest `expiresAt` of the proof's `parent` chain, only from a proof
