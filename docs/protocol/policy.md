@@ -128,7 +128,7 @@ flowchart LR
 ```
 
 - snapshot: `trust.BuildSnapshotWith` (`internal/policyengine/trust/trust.go`); depth 1, no transitive walk
-- operator resolution (claims, associations, mirror proofs): [identity.md](identity.md#how-an-operator-is-resolved)
+- operator resolution (identlink walk): [identity.md](identity.md#walk)
 - who writes vouches: market networks declare operator vouches both ways (`internal/app/marketnetwork/vouches.go`, compose `ApplyOperatorVouch`); people write them from any client. the requester OAuth scope offers vouch write as an optional scope
 - requester discovery lists the vouches of its trusted DIDs (`internal/market/requester/discovery.go` `vouchedBy`, a listRecords that skips `denounce` and takes rkeys starting `did:`)
 

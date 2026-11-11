@@ -267,7 +267,7 @@ sequenceDiagram
 
 ## Guest Requester (R2) Events
 
-- a contract with `spec.association.fromGuest` runs a requester inside the guest; full flow: [identity.md](identity.md#associations-plan-0036)
+- a contract with `spec.association.fromGuest` runs a requester inside the guest; full flow: [identity.md](identity.md#associations-identlink)
 - `guest.requesterDid`: the guest reports the DID of its requester; the requester then reads `market.associationRequest` by one `getRecord` and writes the contract-scoped `market.association` ([lexicons-market.md](lexicons-market.md#marketassociation))
 - `guest.r2Start` starts `socialweb-r2.service` as user `r2` (`run request r2 <name>`)
 - release of the parent: `guest.r2Release` first, then wait for `guest.r2Released` (`GuestRequesterReleaseTimeout`), then atirc revokes, then `vm.delete`

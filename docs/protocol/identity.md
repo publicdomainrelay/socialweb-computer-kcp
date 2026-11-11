@@ -12,8 +12,9 @@
 | `network.attested.signature` | object (and `#signatures` array) | - | inline on every market and compute event record |
 | `network.attested.proof` | record, key `tid` | - | defined, not written |
 | `network.attested.verify` | query | - | defined, not served or called |
-| `com.publicdomainrelay.temp.badgeBlueKeys` | record, key `any` | three schemes, see [below](#badgebluekeys) | signer key binding, operator claim, association mirror, ssh key claim |
-| `com.publicdomainrelay.temp.market.association` | record | [lexicons-market.md](lexicons-market.md#marketassociation) | flow [below](#associations-plan-0036) |
+| `com.publicdomainrelay.temp.badgeBlueKeys` | record, key `any` | see [below](#badgebluekeys) | signer key binding, ssh key claim |
+| `link.ident.endorsement` | record, key `any` (ident.link `74d22dc`, vendored) | the agent DID | principal confirms an agent, [below](#associations-identlink) |
+| `com.publicdomainrelay.temp.market.association` | record | the agent DID | the grant, [below](#associations-identlink) |
 | `com.publicdomainrelay.temp.market.associationRequest` | record | [lexicons-market.md](lexicons-market.md#marketassociationrequest) | flow [below](#contract-scoped-association) |
 | `com.publicdomainrelay.temp.requester.associateConfirm` | XRPC (no lexicon file) | - | OAuth scope only, see [below](#requesterassociateconfirm) |
 | `com.publicdomainrelay.temp.market.bidderAssociation` | collection (no lexicon file) | - | OAuth scope only, see [below](#marketbidderassociation) |
@@ -62,103 +63,57 @@ flowchart LR
 |---|---|
 | NSID | `com.publicdomainrelay.temp.badgeBlueKeys` |
 | type | record, key `any` |
-| key fields | `keyId` (the bound key or subject DID), `challenge` (the repo DID it binds to, or the operator), `service` (the role), `nonce`, `proof` (strongRef, on a mirror), `name`, `createdAt` |
-| Go | `internal/atproto/market/badgeblue.go`, `internal/policyengine/trust/trust.go`, `internal/app/compose/operator.go`, `internal/app/compose/records.go` |
+| key fields | `keyId` (the bound key), `challenge` (the repo DID it binds to), `service`, `nonce`, `name`, `createdAt` |
+| Go | `internal/atproto/market/badgeblue.go` |
 
-One collection, four uses. Each has its own rkey and `service`.
+One collection, two uses. Each has its own rkey and `service`.
 
 | use | in repo of | rkey | `keyId` | `challenge` | `service` | written by | read by | step |
 |---|---|---|---|---|---|---|---|---|
 | signer key binding | the signer (bidder or requester) | `BadgeBlueKeysRkey(did, keyId)`: base58 of sha256(`did:keyId`)[:24], max 32 chars | signer `did:key` | the signer's repo DID | `bidder_attestation` (bidder), `market_requester` (requester) | bidder `internal/market/bidder/offering.go`; requester `internal/market/requester/identity.go` | `KeyBoundByBadgeBlueKey` from `participant/comms.go`, `requester/events.go` | S0, before the first signed record |
-| operator claim | the operator | `ClaimRKey`: `<service>-<subject DID with : as ->` | the subject DID | the operator DID | `bidder_associate`, `requester_associate` | `internal/app/compose/operator.go`, `scripts/associate-bidder.ts` | `trust.claimHeld`, requester `discovery.go` `operatedBy` | S1 |
-| association mirror | the subject | `association` (`trust.MirrorRKey`) | the subject DID (`status.did`) | the operator (`status.associations[0]`) | same as the claim | compose `ApplyAssociationRecord` (an AtprotoRecord fed from MarketIdentity status) | `trust.mirrorOf`, bidder `association.go`, requester `discovery.go` | S1 |
 | ssh key claim | the user | stable `keyRkey` | the ssh key | the user DID | ssh | ssh.socialweb.computer `/keys` | ssh authorizer, one getRecord per offered key (`internal/sshtransport`) | ssh sign-in |
 
-- `proof` on the mirror: the strongRef of the authority record that associates the subject (`status.associationRef`)
-- an association counts only when both repos agree: the operator's claim (or association record) AND the subject's mirror. a mirror alone never associates
-- a deleted or edited authority record revokes on the next trust refresh (trust cache TTL 5 min, `defaultTrustCacheTTL`)
-- PDS outage: fail closed, logged
-- OAuth scope: create, update, delete on requester and bidder; create only on desktop and compute SPA ([outside.md](outside.md#oauth-scopes-per-role))
+## Associations (identlink)
 
-## Associations (plan 0036)
+- design: [../design/ident-link-associations.md](../design/ident-link-associations.md); spec: https://ident.link
+- Go: `internal/identlink` (walk, `AgentOf`, `Remote`: DID docs + `com.atproto.sync.getRecord`, CAR and MST verified); `internal/policyengine/trust` on it
+- vectors: `internal/identlink/vectors.json` (byte-identical to atlibs-identlink), `go run ./hack/identlinkvectors internal/identlink/vectors.json` in `deploy/check.sh --fast`
 
-- plan: `docs/plans/0036-record-association.yaml`; runbook: `docs/acceptance/0005-guest-requester-association.md`
-- a subject is a requester or bidder repo DID; the authority (operator) declares it as its own
-- verifiers: MarketBidder checks requesters, MarketRequester checks bidders. both in `internal/policyengine/trust`
+| side | where | what |
+|---|---|---|
+| agent declares | agent DID doc `alsoKnownAs` | `https://ident.link/agent-of/<principal-did>` |
+| principal confirms | principal repo `link.ident.endorsement`, rkey = agent DID | `{agent}` |
+| principal grants | principal repo `market.association`, rkey = agent DID | `{agent, expiresAt?, contract?, createdAt}` |
 
-| kind | record | matcher (`internal/policyengine/trust/association.go`) | default |
-|---|---|---|---|
-| `claim` | `badgeBlueKeys` operator claim | `keyId` == subject, `challenge` == authority, `service` == role | on |
-| `association` | `market.association` in the authority repo | subject, service, contract, expiry | on |
-| `bskyPost` | `app.bsky.feed.post` | text == template (default `associate {did}`) and one `app.bsky.richtext.facet#mention` with did == subject | opt-in |
-| `delvePost` | `town.delve.feed.post` | same as bskyPost | opt-in |
+- edge `A -> P` holds iff all three agree and the grant is live; pair without grant: untrusted
+- contract-scoped grant: `expiresAt` required; dead once the contract is not Held (canonical receipt, no vm.delete, no vm.terminated); the accept must be in P's repo or a repo above P (`trust/association.go` `contractHeld`, checked after the walk to a fixpoint)
+- PDS or PLC outage: the edge is unconfirmed, listed in `errors`, cached 5 s
 
-### How an operator is resolved
+### Walk
 
-```mermaid
-flowchart TD
-  S["counterparty DID + role"] --> M{"mirror badgeBlueKeys/association in subject repo"}
-  M -->|none| NO["no operator"]
-  M -->|has proof| P["getRecord proof in authority repo: cid equal, kind matcher, expiry, contract held"]
-  M -->|no proof| A["standing market.association at ClaimRKey in operator repo"]
-  A -->|missing| C["operator claim badgeBlueKeys at ClaimRKey"]
-  P --> OK["operator = repo of the proof at-uri"]
-  A --> OK
-  C --> OK
-```
+| item | value |
+|---|---|
+| `identlink.Walk(ctx, io, agent, Options{MaxDepth: 100, Budget: 256})` | `Result{Agent, Ancestors [{DID, Depth, ExpiresAt}], Roots, ExpiresAt, Truncated, Errors}` |
+| roots | ancestors with no held edge up; a node that skipped a cycle or was truncated is not a root |
+| `ExpiresAt` | min grant `expiresAt` along the path; walk: min over roots; none = standing |
+| cache (`trust.Resolver`) | DID doc 5 min / 5 s; walk 5 min capped at the earliest ancestor `expiresAt` / 5 s with errors; `ApplyEvent` drops walks naming the DID |
 
-- `trust.Resolver.ResolveOperatorDidFor` / `operatorOf` (`internal/policyengine/trust/trust.go`); results cached 5 min, errors 5 s
-- scope lane and full lane of the policy both use it: [policy.md](policy.md#tangled-vouch)
-
-### Standing association
-
-- no `contract`, no `expiresAt`: valid until deleted or edited (cid pinned)
-- rkey `<service>-<subject with : as ->` (same as the claim)
-- a standing `badgeBlueKeys` claim is an independent standing grant: it associates the subject even when a contract-scoped association expired. an operator that wants scope-only association must not also hold a standing claim
+| check | rule |
+|---|---|
+| policy snapshot `operatorOf` | a root both sides share, else the first root |
+| tangled-vouch, mutuals | vouches between {self}+ancestors(self) and {cp}+ancestors(cp), at most 256 pairs, nearest first |
+| `requireContract` | every edge to the root contract-scoped (non-contract grants count as absent) |
+| bidder networked deno | roots(requester) meets roots(bidder) |
+| bidder guest lifetime cap | walk `expiresAt` of the requester |
+| requester discovery | roots(self) are operators; an operator's endorsed agents whose walk reaches it |
+| MarketIdentity associated | its DID's walk has a root other than itself; `associationRef` pins the grant (rkey = the DID) and its walk must reach the grant's repo |
 
 ### Contract-scoped association
 
-The guest requester (R2) case: a requester rents a VM that runs another requester, and vouches for it only for the life of the contract.
-
-| record | in repo of | rkey (`internal/atproto/market/guest.go` `ContractScopedRKey`) | written by |
-|---|---|---|---|
-| `market.associationRequest` | guest requester (subject) | `<service>-<sha256(authority)[:32 hex]>-<accept rkey>` | compose `ApplyAssociationRequestRecord` (`internal/app/compose/records.go`), from `spec.identity.associationRequest` {authority, contract, nonce} |
-| `market.association` | authority requester | `<service>-<sha256(subject)[:32 hex]>-<accept rkey>` | `internal/market/requester/association.go` `ensureAssociation` |
-| `badgeBlueKeys/association` (mirror, `proof` = the association) | guest requester | `association` | compose `ApplyAssociationRecord` |
-
-- `market.association` fields: `subject`, `service` (`requester_associate`), `contract` (strongRef of the authority's `market.accept`), `expiresAt` (always, the contract deadline), `createdAt`
-- valid only while: not past `expiresAt`, the contract ref resolves, the contract is still Held (canonical receipt, no vm.delete or vm.terminated) (`trust/association.go` `scopeHeld`, `contractHeld`)
-- the bidder caps the guest lifetime at the association `expiresAt` (`internal/market/bidder/association.go` `associationExpiry`)
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant R1 as authority requester
-  participant P1 as authority repo
-  participant G as guest VM
-  participant R2 as guest requester (did:plc)
-  participant P2 as guest repo
-
-  R1->>P1: S5 market.accept
-  Note over R1,G: Infra contract association.fromGuest (or subject)
-  R2->>P2: market.associationRequest {authority, contract = accept, nonce}
-  G->>R1: guest.requesterDid event (R2 DID)
-  R1->>P2: getRecord associationRequest
-  R1->>R1: authority == self, service, contract == accept, nonce (constant time)
-  R1->>P1: putRecord market.association {subject, contract, expiresAt}
-  R1->>G: secrets bundle: refFile holds the association uri and cid
-  R2->>P2: badgeBlueKeys/association mirror, proof = association
-  Note over R2: run request --association-ref (pinned getRecord bootstrap)
-  R1->>P1: S9 release: deleteRecord market.association
-```
-
-- `spec.association` takes `subject` or `fromGuest`, not both; `fromGuest` needs a `secretsRef` (`internal/market/requester/secrets.go`)
-- guest DID must be a `did:plc` and not the authority's own DID (`internal/atproto/market/guest.go`)
-- `refFile` default `/etc/socialweb-computer/association-ref` (`internal/infra/declaration.go`, `internal/atproto/cloudinit/agent.go`)
-- the guest requester bootstraps from the pinned ref (`MarketIdentity spec.associationRef {uri, cid}`, `run request --association-ref`), not from the record watch
-- release deletes the association: the only record deletion of the flow, a contract-scoped record the app wrote itself
+- the guest requester R2 is an agent of the renter for one contract: grant `contract` = the renter's `market.accept`, `expiresAt` = the contract deadline
+- `market.associationRequest {principal, contract, nonce}` in the guest repo, rkey = principal DID: the principal endorses only the DID that answered this contract's nonce
+- writers (requester `association.go`, compose `records.go`/`peer.go`, `agentpeer.go`) still write the old shapes until the writer cut-over
 - guest events of this flow (`requesterDid`, `r2Start`, `r2Release`, `r2Released`): [guest-events.md](guest-events.md)
-- atirc side: the mint carries the association strongRef in its lease; the token exp is clamped to `expiresAt`: [outside.md](outside.md#chatatirc)
 
 ## requester.associateConfirm
 

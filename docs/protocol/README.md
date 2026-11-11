@@ -37,7 +37,7 @@ Every lexicon section in this tree carries the same fields.
 | family | owner | lexicon files | kind | doc |
 |---|---|---|---|---|
 | `com.publicdomainrelay.temp.market.*` | us | `lexicons/com/publicdomainrelay/temp/market/` | records + XRPC | [market.md](market.md), [lexicons-market.md](lexicons-market.md) |
-| `com.publicdomainrelay.temp.market.association`, `associationRequest` | us | same | records | flow: [identity.md](identity.md#associations-plan-0036); rows: [lexicons-market.md](lexicons-market.md#marketassociation) |
+| `com.publicdomainrelay.temp.market.association`, `associationRequest` | us | same | records | flow: [identity.md](identity.md#associations-identlink); rows: [lexicons-market.md](lexicons-market.md#marketassociation) |
 | `com.publicdomainrelay.temp.compute.vm` | us | `lexicons/com/publicdomainrelay/temp/compute/vm.json` | record (RFP payload) | [market.md](market.md), [lexicons-market.md](lexicons-market.md) |
 | `com.publicdomainrelay.temp.compute.events.*`, `compute.guest.subscribeEvents` | us | `lexicons/com/publicdomainrelay/temp/compute/` | event payload records, subscription | [guest-events.md](guest-events.md) |
 | `com.publicdomainrelay.temp.ingress.webRTC` | us | `lexicons/com/publicdomainrelay/temp/ingress/` | record | [lexicons-market.md](lexicons-market.md) |
@@ -134,7 +134,7 @@ sequenceDiagram
 - an operator ties a bidder or requester DID to itself with a `badgeBlueKeys` claim: [identity.md](identity.md#badgebluekeys)
 - operators and users vouch for each other with `sh.tangled.graph.vouch`: [outside.md](outside.md#shtangledgraphvouch)
 - the default policy on both sides is tangled-vouch: [policy.md](policy.md#tangled-vouch)
-- standing associations and contract-scoped ones: [identity.md](identity.md#associations-plan-0036)
+- standing associations and contract-scoped ones: [identity.md](identity.md#associations-identlink)
 
 <a id="step-s2"></a>
 ### S2: declare the deployment

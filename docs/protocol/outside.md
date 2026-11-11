@@ -22,8 +22,6 @@
 | `com.atproto.sync.getRepoStatus`, `getRepo`, `getLatestCommit`, `requestCrawl` | atproto | query / procedure | call, serve (relay, PDS) | `internal/eventstream/market.go`, `internal/atproto/relay` | - |
 | `com.atproto.server.createSession`, `refreshSession`, `createAccount`, `describeServer`, `getSession`, `deleteSession` | atproto | procedure / query | call (password identities, dev accounts), serve | `internal/atproto/pdsclient/client.go`, `internal/pds/remote` | S0 |
 | `network.bsky.jetstream.subscribeEvents` | Bluesky | subscription (Jetstream v2) | subscribe | `internal/events/jetstream`, `internal/controllers/jetstreameventsource` | S3 to S9 |
-| `app.bsky.feed.post`, `app.bsky.richtext.facet#mention` | Bluesky | record, facet | read (association kind `bskyPost`) | `internal/policyengine/trust/association.go` | S1 |
-| `town.delve.feed.post` | delve | record | read (association kind `delvePost`) | same | S1 |
 | `com.fedproxy.rbac` | fedproxy | record | write (requester), read (guest control plane) | `internal/market/requester/secrets.go`, `internal/guestidentity` | S5, S8 |
 | `com.fedproxy.sshPublicKey` | fedproxy | record | scope only | `internal/atproto/oauth/scope.go` | - |
 
@@ -169,13 +167,6 @@ sequenceDiagram
 - after a commit, `com.atproto.sync.getRepoStatus` on the relay finds the author's PDS, then getRecord there (`internal/eventstream/market.go`)
 - the relay we run (`internal/atproto/relay`) serves describeServer, requestCrawl, subscribeRepos, getRepo, getRepoStatus, listRepos, listReposByCollection, getLatestCommit, listHosts, getHostStatus; its crawler dials each PDS's subscribeRepos
 - detail of the market streams: [market.md](market.md)
-
-## Bluesky Posts As Associations
-
-- association kinds `bskyPost` (`app.bsky.feed.post`) and `delvePost` (`town.delve.feed.post`), opt-in per verifier
-- match: `text` equals the template with `{did}` filled in (default `associate {did}`, trimmed) AND exactly one `app.bsky.richtext.facet#mention` whose `did` is the subject (`internal/policyengine/trust/association.go` `postMatches`)
-- posts are made from any client and pasted as an at-uri; we never ask for a feed.post scope
-- detail: [identity.md](identity.md#associations-plan-0036)
 
 ## com.fedproxy
 
