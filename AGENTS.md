@@ -29,7 +29,7 @@ needs the argument behind it. Do not read it end to end.
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
 | What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
-| The integration scenarios (no Go tests until plan 0027) | `docs/spec/integration-catalog.yaml` |
+| What the system does, end to end, and its tests | `docs/acceptance/` (the runbooks), `tests/system` (one test file per runbook), `tests/testkit/README.md` |
 
 ## Layout
 
@@ -44,6 +44,7 @@ Go:
 | `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
 | `rust/` | socialweb-meshd |
+| `tests/` | the Rust system integration tests: `testkit` (harness), `system` (runbook ports), `targets/` |
 
 TypeScript:
 
@@ -617,23 +618,40 @@ again; user_data installs `atirc-agent.service`
   `socialweb-vmexec` pin with the change, then `dev down` and `dev up` the network instead of a
   `dev restart ... core`.
 
-## Tests: none until plan 0027
+## Tests: Rust system integration tests
 
-Plan 0026 deleted every Go test. Write no Go test of any kind until plan 0027.
+- Tests are Rust system integration tests (`tests/system`, harness `tests/testkit`), plus the VMM wrapper and meshd
+  integration tests. Never unit tests: no mocks, fakes, golden files, snapshots, ratchets, inventories or source greps.
+- The runbooks (`docs/acceptance`) are the spec. Each test in `tests/system/tests/acc_NNNN_*.rs` names the runbook
+  section it implements; a runbook change and its test change land together.
+- New behavior gets a test in `tests/system`.
+- A change is done when the system tests covering it pass on staging.
+- No Go tests, except the policy engine specification tests (owner, 2026-10-30): `internal/policyengine/spec`, the
+  policy decision tests in `internal/market/bidder` and `internal/market/requester`, their harness
+  `internal/policyengine/policytest`. They must pass; no skip.
+- Tests drive a real Go requester (`run requester` / `run request`) as an account with vouches; requests use discovery
+  (no bidders list); cleanups release VMs and delete records even on failure; one driver per account.
 
-- No tests. Do not write unit tests, ratchets, allow-lists, inventories, golden files, snapshots,
-  source-grep checks, size lines or any other check of an arbitrary rule. Do not work test-first.
-  Ignore the `test_first` field of a plan item. Do not restore a deleted test.
-- Proof is the build gates plus live runs. A manual live run is proof, not a test.
-- From plan 0027 on, tests are specification tests written from `docs/spec/integration-catalog.yaml`:
-  each states what a component must do (actors, inputs, observable outcome), never how it does it.
-  Only high-level integration tests are written.
-- Rust tests under `rust/` are outside this rule and stay.
-- The policy engine specification tests are authorized by the owner (2026-10-30) and must pass:
-  `internal/policyengine/spec`, the policy decision tests in `internal/market/bidder` and
-  `internal/market/requester`, and their harness `internal/policyengine/policytest` (real engine, real
-  bundled actions in the pinned deno, a fake PDS, no network). Every case asserts that the selected
-  policy ran for the decision and that its verdict and the decision are right. No skip.
+Run (from `tests/`; the target is a target.json, `tests/targets/prod.json` for prod):
+
+```sh
+cd tests
+SWC_TARGET=$PWD/targets/prod.json SWC_DRY_RUN=1 cargo test                   # preflight; touches no account
+SWC_TARGET=<staging target.json> cargo test                                  # the full suite on staging
+SWC_TARGET=$PWD/targets/prod.json cargo test --test acc_0004_vm_atirc_agent  # prod: only in a lead-given window
+cargo run -p testkit --bin last-pass -- readings/*.json                       # passing runs onto docs/acceptance/README.md
+```
+
+Pipeline, in order; cut the rc only when both suites are green:
+
+1. Build the release of the commit (`scripts/build-socialweb-computer.sh`), `deploy/check.sh --fast`.
+2. VMM wrapper tests (QEMU default, Firecracker).
+3. Stand up staging on VMs rented from the market: own PLC, PDS with throwaway accounts, relay, Jetstream, gateway, ssh
+   gateway, bidders; it writes the staging target.json.
+4. Full suite against staging.
+5. Tear staging down.
+6. Redeploy prod.
+7. Full suite against prod.
 
 ## Prod deployments
 

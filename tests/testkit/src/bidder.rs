@@ -21,7 +21,12 @@ impl BidderKcp {
     /// None when the target names no kcp for this bidder (prod without the lead's grant).
     pub async fn connect(b: &Bidder) -> Result<Option<Self>> {
         match &b.kcp {
-            Some(ep) => Ok(Some(Self { bidder: b.clone(), kcp: Kcp::connect(ep).await.with_context(|| format!("bidder {} kcp", b.name))? })),
+            Some(ep) => Ok(Some(Self {
+                bidder: b.clone(),
+                kcp: Kcp::connect(ep)
+                    .await
+                    .with_context(|| format!("bidder {} kcp", b.name))?,
+            })),
             None => Ok(None),
         }
     }
@@ -32,7 +37,9 @@ impl BidderKcp {
         for k in VM_KINDS {
             match self.kcp.list(k).await {
                 Ok(v) => out.extend(v),
-                Err(e) if e.downcast_ref::<kube::Error>().is_some_and(|e| matches!(e, kube::Error::Api(a) if a.code == 404)) => {}
+                Err(e)
+                    if e.downcast_ref::<kube::Error>()
+                        .is_some_and(|e| matches!(e, kube::Error::Api(a) if a.code == 404)) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -41,18 +48,32 @@ impl BidderKcp {
 
     /// The VM objects whose JSON names `needle` (a receipt URI, a contract rkey, the requester DID prefix).
     pub async fn vms_of(&self, needle: &str) -> Result<Vec<Value>> {
-        Ok(self.vms().await?.into_iter().filter(|v| v.to_string().contains(needle)).collect())
+        Ok(self
+            .vms()
+            .await?
+            .into_iter()
+            .filter(|v| v.to_string().contains(needle))
+            .collect())
     }
 
     /// Pause (`spec.suspend`) and wait for the root's phase: Suspended, or Ready on resume.
     pub async fn suspend(&self, on: bool) -> Result<()> {
-        self.kcp.merge("MarketBidder", "app", &json!({ "spec": { "suspend": on } })).await?;
+        self.kcp
+            .merge("MarketBidder", "app", &json!({ "spec": { "suspend": on } }))
+            .await?;
         let phase = if on { "Suspended" } else { "Ready" };
-        self.kcp.wait_phase("MarketBidder", "app", phase, Duration::from_secs(300)).await.map(|_| ())
+        self.kcp
+            .wait_phase("MarketBidder", "app", phase, Duration::from_secs(300))
+            .await
+            .map(|_| ())
     }
 
     pub async fn did(&self) -> Result<String> {
-        let o = self.kcp.get("MarketBidder", "app").await?.context("no MarketBidder app")?;
+        let o = self
+            .kcp
+            .get("MarketBidder", "app")
+            .await?
+            .context("no MarketBidder app")?;
         Ok(o["status"]["did"].as_str().unwrap_or_default().into())
     }
 }

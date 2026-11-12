@@ -5,6 +5,9 @@ expected observations, pass criteria, cleanup, pitfalls. They change prod state
 (VMs, contracts, tokens): run only with the lead's go, announce on atirc first,
 release everything you rent.
 
+Each runbook is also a Rust system test, `tests/system/tests/acc_NNNN_*.rs` ([../../tests/testkit/README.md](../../tests/testkit/README.md));
+`cargo run -p testkit --bin last-pass` writes a passing run into the last pass column.
+
 | id | name | what it proves | hosts | how long | last pass |
 | --- | --- | --- | --- | --- | --- |
 | [0001](0001-auth-modes.md) | k8s: account modes, pause, one VM per host | localRepo + oauthQr bidders, per-component suspend, tenant k3s 0 -> 3 -> 0 nodes, one VM per host, typed settings, ACC34 | gateway, local + a temporary oauthQr bidder (hat-8), hat-9, hat-7 | ~45 min | FAIL e190a3b1 (rollout 19), 2026-11-12: sections 1-8 pass (alice + bob oauthQr, no bidders list; 1 -> 2 -> 3 -> 2 -> 1 -> 0 on local, hat-7, hat-9, A2); section 9 ACC34 restarted ssh ~64 s on all 4 bidders (cdd93727 endpoint-slice wait times out 1 min on every core start); e496cbff, 2026-11-11 (all nine sections; alice + bob oauthQr; 4 bidders, ACC34 on all 4, no bidders list); c770a887, 2026-11-10 (alice + bob; 4 nodes on 4 bidders, ACC34 on all 4); gateway re-check 5e6c4e3d, 2026-11-11 (sections 3-6, 0 -> 3 -> 0 one step at a time on hat-7, hat-8, hat-9) |

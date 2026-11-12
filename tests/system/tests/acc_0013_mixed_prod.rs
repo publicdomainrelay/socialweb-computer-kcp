@@ -18,26 +18,62 @@ fn mixed_prod(ssh_key: &str) -> String {
         .filter(|l| !l.contains("bidderDids:") && !l.contains("REPLACE-BIDDER-DID"))
         .collect::<Vec<_>>()
         .join("\n")
-        .replace("ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop", ssh_key.trim())
+        .replace(
+            "ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop",
+            ssh_key.trim(),
+        )
 }
 
 /// A4b: agent1's bundle (placeholder env file + the agent config) into the requester's own OpenBao.
 async fn agent1_bundle(ctx: &Ctx, r: &Requester) -> Result<()> {
-    let cfg = expand(ctx.target.agent_config.as_deref().context("target agentConfig")?);
+    let cfg = expand(
+        ctx.target
+            .agent_config
+            .as_deref()
+            .context("target agentConfig")?,
+    );
     check_private(&cfg)?;
     let kcp = r.kcp().await?;
-    let addr = kcp.get("OpenBaoServer", "requester").await?.context("OpenBaoServer requester")?["status"]["address"].as_str().context("no address")?.to_string();
-    let d = r.state.join("requesters").join(&r.name).join("dev").join(&r.name).join("openbaoservers/requester/openbao");
-    let runtime = std::path::PathBuf::from(std::env::var("HOME")?).join(".cache/socialweb-computer/runtime");
-    let bao = std::fs::read_dir(&runtime)?.flatten().map(|e| e.path().join("bao")).find(|p| p.is_file()).context("no bao in the runtime cache")?;
+    let addr = kcp
+        .get("OpenBaoServer", "requester")
+        .await?
+        .context("OpenBaoServer requester")?["status"]["address"]
+        .as_str()
+        .context("no address")?
+        .to_string();
+    let d = r
+        .state
+        .join("requesters")
+        .join(&r.name)
+        .join("dev")
+        .join(&r.name)
+        .join("openbaoservers/requester/openbao");
+    let runtime =
+        std::path::PathBuf::from(std::env::var("HOME")?).join(".cache/socialweb-computer/runtime");
+    let bao = std::fs::read_dir(&runtime)?
+        .flatten()
+        .map(|e| e.path().join("bao"))
+        .find(|p| p.is_file())
+        .context("no bao in the runtime cache")?;
     let bundle = ctx.dir.join("agent1-bundle.json");
     {
         use std::os::unix::fs::OpenOptionsExt;
         let v = json!([{ "path": "/etc/atirc/atirc.env", "value": "", "mode": "0600" }, { "path": "/etc/atirc/config.toml", "value": std::fs::read_to_string(&cfg)?, "mode": "0600" }]);
-        std::io::Write::write_all(&mut std::fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(&bundle)?, v.to_string().as_bytes())?;
+        std::io::Write::write_all(
+            &mut std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .mode(0o600)
+                .open(&bundle)?,
+            v.to_string().as_bytes(),
+        )?;
     }
     let env = |c: &mut tokio::process::Command| {
-        c.env("BAO_ADDR", &addr).env("BAO_CACERT", d.join("tls/ca.crt")).env("BAO_CLIENT_CERT", d.join("clients/requester/client.crt")).env("BAO_CLIENT_KEY", d.join("clients/requester/client.key"));
+        c.env("BAO_ADDR", &addr)
+            .env("BAO_CACERT", d.join("tls/ca.crt"))
+            .env("BAO_CLIENT_CERT", d.join("clients/requester/client.crt"))
+            .env("BAO_CLIENT_KEY", d.join("clients/requester/client.key"));
     };
     let mut login = tokio::process::Command::new(&bao);
     login.args(["write", "-field=token", "auth/cert/login", "name=requester"]);
@@ -45,9 +81,16 @@ async fn agent1_bundle(ctx: &Ctx, r: &Requester) -> Result<()> {
     let out = login.output().await?;
     ensure!(out.status.success(), "bao cert login failed");
     let mut put = tokio::process::Command::new(&bao);
-    put.args(["kv", "put", "-mount=requester", "contracts/einfra-mixedprod-agent1/secrets"]).arg(format!("bundle=@{}", bundle.display()));
+    put.args([
+        "kv",
+        "put",
+        "-mount=requester",
+        "contracts/einfra-mixedprod-agent1/secrets",
+    ])
+    .arg(format!("bundle=@{}", bundle.display()));
     env(&mut put);
-    put.env("BAO_TOKEN", String::from_utf8(out.stdout)?.trim()).stdout(std::process::Stdio::null());
+    put.env("BAO_TOKEN", String::from_utf8(out.stdout)?.trim())
+        .stdout(std::process::Stdio::null());
     let ok = put.status().await?.success();
     std::fs::remove_file(&bundle)?;
     ensure!(ok, "bao kv put of agent1's bundle failed");
@@ -161,22 +204,67 @@ async fn a_run_requester_mixed_prod() {
 async fn c_gateway_in_requester_kcp() {
     run("0013", "C", &[ACCOUNT], |ctx| async move {
         let did = ctx.account(ACCOUNT)?.did.clone();
-        let r = Requester::start(&ctx, ACCOUNT, "mk", SignIn::from_env(), &["--with-gateway"]).await?;
-        ensure!(!r.ready()?["gateway"].is_null(), "the ready file names no gateway");
+        let r =
+            Requester::start(&ctx, ACCOUNT, "mk", SignIn::from_env(), &["--with-gateway"]).await?;
+        ensure!(
+            !r.ready()?["gateway"].is_null(),
+            "the ready file names no gateway"
+        );
         let st = r.state.display().to_string();
-        let (ok, out) = r.bin.run(&["run", "requester", "cluster", "mk", "--cluster", "c1", "--state-dir", &st]).await?;
+        let (ok, out) = r
+            .bin
+            .run(&[
+                "run",
+                "requester",
+                "cluster",
+                "mk",
+                "--cluster",
+                "c1",
+                "--state-dir",
+                &st,
+            ])
+            .await?;
         ensure!(ok, "run requester cluster: {}", requester::tail(&out));
-        let kc = eventually("the c1 kubeconfig", 5 * MIN, Duration::from_secs(5), || async {
-            let (ok, out) = r.bin.run(&["run", "requester", "kubeconfig", "mk", "--cluster", "c1", "--state-dir", &st]).await?;
-            Ok(ok.then(|| out.lines().map(str::trim).find(|l| l.starts_with('/')).map(String::from)).flatten())
-        })
+        let kc = eventually(
+            "the c1 kubeconfig",
+            5 * MIN,
+            Duration::from_secs(5),
+            || async {
+                let (ok, out) = r
+                    .bin
+                    .run(&[
+                        "run",
+                        "requester",
+                        "kubeconfig",
+                        "mk",
+                        "--cluster",
+                        "c1",
+                        "--state-dir",
+                        &st,
+                    ])
+                    .await?;
+                Ok(ok
+                    .then(|| {
+                        out.lines()
+                            .map(str::trim)
+                            .find(|l| l.starts_with('/'))
+                            .map(String::from)
+                    })
+                    .flatten())
+            },
+        )
         .await?;
         let t = Tenant::connect(&kc).await?;
         let t_apply = ctx.t();
         let name = t.apply_deployment(&example("k8s-cluster.yaml")).await?;
         {
             let kc = kc.clone();
-            ctx.defer("delete deployment quickstart-k8s", async move { Tenant::connect(&kc).await?.delete_deployment("quickstart-k8s").await });
+            ctx.defer("delete deployment quickstart-k8s", async move {
+                Tenant::connect(&kc)
+                    .await?
+                    .delete_deployment("quickstart-k8s")
+                    .await
+            });
         }
         let pods = t.wait_ready("app=quickstart-k8s", 1, 15 * MIN).await?;
         ctx.reading("pod_ready_s", ctx.t() - t_apply);
@@ -188,10 +276,18 @@ async fn c_gateway_in_requester_kcp() {
         t.wait_nodes(0, 10 * MIN).await?;
         ctx.reading("nodes_zero_s", ctx.t() - t_del);
         // the infra mirror (computer.socialweb.infra/self, nodes-<hex>) goes with the node
-        eventually("the infra mirror records gone", 3 * MIN, Duration::from_secs(10), || async {
-            let infra: Vec<_> = requester::uris_in(&r.logs(), &did).into_iter().filter(|u| u.contains("/computer.socialweb.infra/")).collect();
-            Ok(ctx.at.still_present(&infra).await?.is_empty().then_some(()))
-        })
+        eventually(
+            "the infra mirror records gone",
+            3 * MIN,
+            Duration::from_secs(10),
+            || async {
+                let infra: Vec<_> = requester::uris_in(&r.logs(), &did)
+                    .into_iter()
+                    .filter(|u| u.contains("/computer.socialweb.infra/"))
+                    .collect();
+                Ok(ctx.at.still_present(&infra).await?.is_empty().then_some(()))
+            },
+        )
         .await?;
         ctx.reading("records_checked", ctx.records_gone(&r.logs(), &did).await?);
         ctx.check_logs(&r.logs())?;

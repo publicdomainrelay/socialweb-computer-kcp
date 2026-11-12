@@ -27,6 +27,9 @@ pub struct Target {
     #[serde(default)]
     pub bidders: Vec<Bidder>,
     pub accounts: BTreeMap<String, Account>,
+    /// a checkout of the requester page repo (atlibs-socialweb-computer-requester): scripts/page-round.mjs (0009)
+    #[serde(default)]
+    pub page_repo: Option<String>,
     /// atirc agent config (harness, model) for agent VMs; mode 0600, never printed
     #[serde(default)]
     pub agent_config: Option<String>,
@@ -113,15 +116,20 @@ pub fn expand(path: &str) -> PathBuf {
 
 impl Target {
     pub fn load() -> Result<Self> {
-        let path = std::env::var("SWC_TARGET").context("SWC_TARGET names a target.json (tests/targets/prod.json for prod)")?;
+        let path = std::env::var("SWC_TARGET")
+            .context("SWC_TARGET names a target.json (tests/targets/prod.json for prod)")?;
         let path = expand(&path);
-        let t: Target = serde_json::from_slice(&std::fs::read(&path).with_context(|| path.display().to_string())?)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let t: Target = serde_json::from_slice(
+            &std::fs::read(&path).with_context(|| path.display().to_string())?,
+        )
+        .with_context(|| format!("parsing {}", path.display()))?;
         Ok(t)
     }
 
     pub fn account(&self, name: &str) -> Result<&Account> {
-        self.accounts.get(name).with_context(|| format!("target {} has no account {name}", self.name))
+        self.accounts
+            .get(name)
+            .with_context(|| format!("target {} has no account {name}", self.name))
     }
 
     pub fn bidder_by_did(&self, did: &str) -> Option<&Bidder> {
@@ -155,7 +163,9 @@ impl Account {
             if let Some((k, v)) = line.split_once('=')
                 && k.ends_with("ATPROTO_PASSWORD")
             {
-                return Ok(Secret(v.trim().trim_matches(|c| c == '"' || c == '\'').to_string()));
+                return Ok(Secret(
+                    v.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
+                ));
             }
         }
         bail!("{}: no *ATPROTO_PASSWORD", path.display())
@@ -164,9 +174,16 @@ impl Account {
 
 pub fn check_private(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path).with_context(|| path.display().to_string())?.permissions().mode();
+    let mode = std::fs::metadata(path)
+        .with_context(|| path.display().to_string())?
+        .permissions()
+        .mode();
     if mode & 0o077 != 0 {
-        bail!("{} is mode {:o}: chmod 600 it (owner-only)", path.display(), mode & 0o777);
+        bail!(
+            "{} is mode {:o}: chmod 600 it (owner-only)",
+            path.display(),
+            mode & 0o777
+        );
     }
     Ok(())
 }

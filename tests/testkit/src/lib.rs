@@ -31,7 +31,10 @@ type Cleanup = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
 /// The kcp repository root (the runbooks, examples/, scripts/).
 pub fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }
 
 pub fn example(name: &str) -> String {
@@ -69,12 +72,18 @@ impl Ctx {
     /// Run `f` at the end whether the test passed or not, last registered first. A cleanup must be
     /// idempotent (release an already released VM, delete a deleted record).
     pub fn defer(&self, what: &str, f: impl Future<Output = Result<()>> + Send + 'static) {
-        self.cleanups.lock().unwrap().push((what.into(), Box::pin(f)));
+        self.cleanups
+            .lock()
+            .unwrap()
+            .push((what.into(), Box::pin(f)));
     }
 
     pub fn account(&self, name: &str) -> Result<&Account> {
         let a = self.target.account(name)?;
-        self.secrets.lock().unwrap().push(a.password()?.expose().to_string());
+        self.secrets
+            .lock()
+            .unwrap()
+            .push(a.password()?.expose().to_string());
         Ok(a)
     }
 
@@ -82,8 +91,16 @@ impl Ctx {
     pub fn check_logs(&self, paths: &[PathBuf]) -> Result<()> {
         let secrets = self.secrets.lock().unwrap().clone();
         for p in paths {
-            let Ok(text) = std::fs::read_to_string(p) else { continue };
-            ensure!(!secrets.iter().any(|s| !s.is_empty() && text.contains(s.as_str())), "{} holds an app password", p.display());
+            let Ok(text) = std::fs::read_to_string(p) else {
+                continue;
+            };
+            ensure!(
+                !secrets
+                    .iter()
+                    .any(|s| !s.is_empty() && text.contains(s.as_str())),
+                "{} holds an app password",
+                p.display()
+            );
             for bad in ["a=candidate", "AGE-SECRET-KEY"] {
                 ensure!(!text.contains(bad), "{} holds plaintext {bad}", p.display());
             }
@@ -93,25 +110,74 @@ impl Ctx {
 }
 
 impl Ctx {
+    /// End the test as skipped (it passes, the readings say why, last-pass writes nothing): what it needs is not in
+    /// the target (prod names no bidder kcp unless the lead grants one).
+    pub fn skip(&self, why: &str) -> Result<()> {
+        eprintln!("SKIPPED {} {}: {why}", self.runbook, self.test);
+        self.reading("skipped", why);
+        Ok(())
+    }
+
+    /// The target's bidders whose kcp it names, connected.
+    pub async fn bidder_kcps(&self) -> Result<Vec<bidder::BidderKcp>> {
+        let mut out = vec![];
+        for b in &self.target.bidders {
+            if let Some(k) = bidder::BidderKcp::connect(b).await? {
+                out.push(k);
+            }
+        }
+        Ok(out)
+    }
+
     /// Every record the logs name in `did`'s repo, less those kept by rule, answers RecordNotFound (3 reads).
     pub async fn records_gone(&self, logs: &[PathBuf], did: &str) -> Result<usize> {
-        let uris: Vec<_> = requester::uris_in(logs, did).into_iter().filter(|u| !requester::kept_by_rule(u)).collect();
+        let uris: Vec<_> = requester::uris_in(logs, did)
+            .into_iter()
+            .filter(|u| !requester::kept_by_rule(u))
+            .collect();
         let left = self.at.still_present(&uris).await?;
-        ensure!(left.is_empty(), "records left in {did}'s repo after release: {left:?}");
+        ensure!(
+            left.is_empty(),
+            "records left in {did}'s repo after release: {left:?}"
+        );
         Ok(uris.len())
     }
 
     /// The winner's host holds no VM object naming `needle` (0008 orphan check). None: the target names no
     /// kcp for that bidder, so it is not read.
     pub async fn host_empty(&self, winner: &str, needle: &str) -> Result<Option<bool>> {
-        let Some(b) = self.target.bidder_by_did(winner) else { return Ok(None) };
-        let Some(bk) = bidder::BidderKcp::connect(b).await? else { return Ok(None) };
+        let Some(b) = self.target.bidder_by_did(winner) else {
+            return Ok(None);
+        };
+        let Some(bk) = bidder::BidderKcp::connect(b).await? else {
+            return Ok(None);
+        };
         Ok(Some(bk.vms_of(needle).await?.is_empty()))
     }
 }
 
+/// The rkey of a receipt's vm.terminated record: termination-payload-<first 32 hex of sha256("terminated:<receipt>")>
+/// (market.EventRKeys(market.TerminationKey)), read with one getRecord on the bidder's repo (0008).
+pub fn termination_rkey(receipt: &str) -> String {
+    use sha2::Digest;
+    format!(
+        "termination-payload-{}",
+        &format!(
+            "{:x}",
+            sha2::Sha256::digest(format!("terminated:{receipt}"))
+        )[..32]
+    )
+}
+
+pub const VM_TERMINATED: &str = "com.publicdomainrelay.temp.compute.events.vm.terminated";
+
 /// Wait for `f` to answer Some, polling every `every`.
-pub async fn eventually<T, F: Future<Output = Result<Option<T>>>>(what: &str, timeout: Duration, every: Duration, mut f: impl FnMut() -> F) -> Result<T> {
+pub async fn eventually<T, F: Future<Output = Result<Option<T>>>>(
+    what: &str,
+    timeout: Duration,
+    every: Duration,
+    mut f: impl FnMut() -> F,
+) -> Result<T> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(v) = f().await? {
@@ -131,7 +197,11 @@ fn dry_run() -> bool {
 async fn lock_account(handle: &str) -> Result<std::fs::File> {
     let dir = home_tmp("locks");
     std::fs::create_dir_all(&dir)?;
-    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(format!("{handle}.lock")))?;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(format!("{handle}.lock")))?;
     if f.try_lock().is_err() {
         eprintln!("waiting for the lock of {handle} (another driver holds it)");
         return Ok(tokio::task::spawn_blocking(move || f.lock().map(|_| f)).await??);
@@ -172,16 +242,29 @@ where
     });
     let started_at = atlibs_host::iso_now();
     let bin = Binary::resolve(&ctx.target.requester).await.unwrap();
-    ctx.reading("requester", json!({ "spec": ctx.target.requester, "version": bin.version }));
+    ctx.reading(
+        "requester",
+        json!({ "spec": ctx.target.requester, "version": bin.version }),
+    );
     if dry_run() {
-        eprintln!("dry run {runbook} {test}: target {} ok, accounts {accounts:?} readable, requester {}", ctx.target.name, bin.version);
+        eprintln!(
+            "dry run {runbook} {test}: target {} ok, accounts {accounts:?} readable, requester {}",
+            ctx.target.name, bin.version
+        );
         return;
     }
-    let outcome = std::panic::AssertUnwindSafe(body(ctx.clone())).catch_unwind().await;
+    let outcome = std::panic::AssertUnwindSafe(body(ctx.clone()))
+        .catch_unwind()
+        .await;
     let mut failure = match outcome {
         Ok(Ok(())) => None,
         Ok(Err(e)) => Some(format!("{e:#}")),
-        Err(p) => Some(p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_else(|| "panic".into())),
+        Err(p) => Some(
+            p.downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "panic".into()),
+        ),
     };
     let cleanups: Vec<_> = std::mem::take(&mut *ctx.cleanups.lock().unwrap());
     let mut cleanup_errors = vec![];
@@ -194,9 +277,14 @@ where
     if failure.is_none() && !cleanup_errors.is_empty() {
         failure = Some(format!("cleanup: {}", cleanup_errors.join("; ")));
     }
-    let out = std::env::var("SWC_READINGS").map(PathBuf::from).unwrap_or_else(|_| repo().join("tests/readings"));
+    let out = std::env::var("SWC_READINGS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| repo().join("tests/readings"));
     std::fs::create_dir_all(&out).unwrap();
-    let file = out.join(format!("{runbook}-{test}-{}.json", started_at.replace([':', '.'], "")));
+    let file = out.join(format!(
+        "{runbook}-{test}-{}.json",
+        started_at.replace([':', '.'], "")
+    ));
     let doc = json!({
         "runbook": runbook, "test": test, "target": ctx.target.name, "startedAt": started_at, "endedAt": atlibs_host::iso_now(),
         "seconds": ctx.t(), "pass": failure.is_none(), "error": failure, "cleanupErrors": cleanup_errors,
