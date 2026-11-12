@@ -55,6 +55,7 @@ func gatewayServerFor(kcpClients component.KCPClients, nodeClaimAgent *kcpclient
 	}
 	if certs != nil {
 		certs.Recorder = store
+		server.Certs = certs
 	}
 	server.Store = store
 	server.Deny = store

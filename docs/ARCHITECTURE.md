@@ -10077,6 +10077,23 @@ postgres                     "initdb: error: cannot be run as root" -- fatal
   gateway's logs and DenoPod run directories for `PRIVATE KEY` and `client-key-data` (tls.key files
   excluded) found none after five issues.
 
+- **A no-expiry kubeconfig is revoked by its record; the web page lists and revokes them (2026-11-12).**
+  The page at `/` of `k8s.<domain>` (`internal/gatewayhttp/page.go`, one inline HTML const like the ssh
+  gateway's) calls the cookie API: `/api/clusters/{list,create,up,down,delete,kubeconfig}`, and
+  `/api/clusters/kubeconfigs` and `/api/clusters/kubeconfigs/revoke`; xrpc `listKubeconfigs` and
+  `revokeKubeconfig` are the same verbs. `ttlSeconds` 0 is `noExpiry`; `/api/config` says `noExpiry: true`.
+  Why no new credential type: the client certificate front already admits a serial only while its
+  `ClusterClientCertificate` exists and is not revoked, so the record is the per-kubeconfig revocable
+  identity; a long-lived token would add a second admission path for the same thing. Revoke sets
+  `spec.revoked` (`kcpclient.RevokeKubeconfigs`); the PKI is not touched for one serial (a cert signed
+  from the on-disk client CA has no PKI entry). `revokeCerts` (deleteCluster, revokeIdentity, and now
+  `DELETE /session`) marks every record of the cluster revoked first, then `Issuer.Revoke` the PKI ones,
+  which closes the "revoke my certificates at sign-out" gap above: signing out of the web app revokes
+  every kubeconfig of every cluster of the account, minted by the page or by xrpc. The GatewayAPI
+  component now hands its `clientcert.Issuer` to `gateway.Server.Certs` (it was unset there, so the PKI
+  revoke ran only under `serve gateway xrpc`). New xrpc methods need no new OAuth scope for the page (it
+  calls the gateway in process); scoped OAuth clients add `rpc:<nsid>?aud=*` when they call them.
+
 - **Every child object hangs from an owner that ends, and each root reports what does not (plan 0013
   M2-OWNERSHIP-TREE, 2026-10-15).** kcp's garbage collector cascades `ownerReferences` inside one
   workspace and never across workspaces, and it cascades bound resources (read: a Bid owned by a Bid went

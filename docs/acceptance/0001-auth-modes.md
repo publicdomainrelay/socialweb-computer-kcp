@@ -428,6 +428,47 @@ chmod 600 "$W/kubeconfig"
 KC=$W/kubeconfig
 ```
 
+### 3a. The page, a no-expiry kubeconfig, revoke
+
+Added 2026-11-12; not yet passed (needs the rollout carrying the k8s page). Do not press Sign out on the
+page as alice: it revokes every kubeconfig (`$KC` too) and ends the gateway's alice session.
+
+The page signs in (its own `#handle` form), mints with `ttlSeconds` 0, lists and revokes:
+
+```bash
+curl -fsS "$GW/" | grep -q '<title>socialweb.computer k8s</title>'
+curl -fsS "$GW/api/config" | jq -e .noExpiry
+deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE \
+  --url "$GW/" --done "Signed in as" --cookie-file "$W/jar.json"
+api() {
+  curl -fsS -H 'Content-Type: application/json' -d "$2" "$GW/api/clusters/$1" \
+    -H "Cookie: swc_session=$(jq -r '.[] | select(.name=="swc_session") | .value' "$W/jar.json")"
+}
+api kubeconfig "{\"name\":\"$CL\",\"ttlSeconds\":0}" | jq -r .kubeconfig > "$W/noexpiry.kubeconfig"
+chmod 600 "$W/noexpiry.kubeconfig"
+kubectl --kubeconfig "$W/noexpiry.kubeconfig" get ns
+S=$(api kubeconfigs "{\"name\":\"$CL\"}" | jq -r '[.kubeconfigs[] | select(.noExpiry and (.revoked|not))] | sort_by(.createdAt) | last | .serial')
+api kubeconfigs/revoke "{\"name\":\"$CL\",\"serial\":\"$S\"}" | jq -e .revoked
+sleep 2
+! kubectl --kubeconfig "$W/noexpiry.kubeconfig" get ns
+kubectl --kubeconfig "$KC" get ns
+```
+
+The same over xrpc:
+
+```bash
+xrpc procedure getKubeconfig name="$CL" ttlSeconds:=0 | jq -r .kubeconfig > "$W/noexpiry-xrpc.kubeconfig"
+chmod 600 "$W/noexpiry-xrpc.kubeconfig"
+kubectl --kubeconfig "$W/noexpiry-xrpc.kubeconfig" get ns
+S=$(xrpc query listKubeconfigs name=="$CL" | jq -r '[.kubeconfigs[] | select(.noExpiry and (.revoked|not))] | sort_by(.createdAt) | last | .serial')
+xrpc procedure revokeKubeconfig name="$CL" serial="$S" | jq -e .revoked
+sleep 2
+! kubectl --kubeconfig "$W/noexpiry-xrpc.kubeconfig" get ns
+```
+
+Pass: the page answers, `noExpiry` is true, each no-expiry kubeconfig lists namespaces, its serial lists
+with `noExpiry`, and after its revoke `kubectl` is refused (`Unauthorized`) while `$KC` still works.
+
 ## 4. First scale: one oauthQr VM on hat-7, then zero
 
 With hat-9 and local paused, only hat-7 can bid. The deployment uses required

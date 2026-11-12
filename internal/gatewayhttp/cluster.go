@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -27,6 +28,8 @@ const (
 	NSIDControlPlaneUp   = xrpcserver.NSIDPrefix + "controlPlaneUp"
 	NSIDControlPlaneDown = xrpcserver.NSIDPrefix + "controlPlaneDown"
 	NSIDDeleteCluster    = xrpcserver.NSIDPrefix + "deleteCluster"
+	NSIDListKubeconfigs  = xrpcserver.NSIDPrefix + "listKubeconfigs"
+	NSIDRevokeKubeconfig = xrpcserver.NSIDPrefix + "revokeKubeconfig"
 
 	ClusterNameMax = 63
 
@@ -93,6 +96,8 @@ type ClusterGateway interface {
 	Up(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
 	Down(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
 	Delete(ctx context.Context, caller ClusterCaller, name string) (ClusterPhaseResult, error)
+	Kubeconfigs(ctx context.Context, caller ClusterCaller, name string) ([]gateway.KubeconfigView, error)
+	RevokeKubeconfig(ctx context.Context, caller ClusterCaller, name, serial string) error
 }
 
 type ClusterGatewayError struct {
@@ -189,6 +194,23 @@ func (d DirectClusterGateway) Delete(ctx context.Context, c ClusterCaller, name 
 	return ClusterPhaseResult{Phase: view.Phase}, err
 }
 
+func (d DirectClusterGateway) Kubeconfigs(ctx context.Context, c ClusterCaller, name string) ([]gateway.KubeconfigView, error) {
+	server, err := d.server()
+	if err != nil {
+		return nil, err
+	}
+	return server.ListKubeconfigs(ctx, gateway.Caller(c.DID()), gateway.NameRequest{Name: name})
+}
+
+func (d DirectClusterGateway) RevokeKubeconfig(ctx context.Context, c ClusterCaller, name, serial string) error {
+	server, err := d.server()
+	if err != nil {
+		return err
+	}
+	_, err = server.RevokeKubeconfig(ctx, gateway.Caller(c.DID()), gateway.RevokeKubeconfigRequest{Name: name, Serial: serial})
+	return err
+}
+
 type XRPCClusterGateway struct {
 	BaseURL  func(context.Context) (string, error)
 	Audience string
@@ -215,7 +237,8 @@ func (x *XRPCClusterGateway) client() *http.Client {
 }
 
 func (x *XRPCClusterGateway) call(ctx context.Context, c ClusterCaller, nsid string, query bool, body any, out any) error {
-	token, err := c.ServiceAuth(ctx, x.Audience, nsid)
+	lxm, _, _ := strings.Cut(nsid, "?")
+	token, err := c.ServiceAuth(ctx, x.Audience, lxm)
 	if err != nil {
 		return &ClusterGatewayError{Status: 401, Code: "ServiceAuthUnavailable",
 			Message: "could not obtain service auth from the account's PDS: " + err.Error()}
@@ -341,6 +364,18 @@ func (x *XRPCClusterGateway) Kubeconfig(ctx context.Context, c ClusterCaller, na
 	return out, err
 }
 
+func (x *XRPCClusterGateway) Kubeconfigs(ctx context.Context, c ClusterCaller, name string) ([]gateway.KubeconfigView, error) {
+	var out struct {
+		Kubeconfigs []gateway.KubeconfigView `json:"kubeconfigs"`
+	}
+	err := x.call(ctx, c, NSIDListKubeconfigs+"?name="+url.QueryEscape(name), true, nil, &out)
+	return out.Kubeconfigs, err
+}
+
+func (x *XRPCClusterGateway) RevokeKubeconfig(ctx context.Context, c ClusterCaller, name, serial string) error {
+	return x.call(ctx, c, NSIDRevokeKubeconfig, false, map[string]any{"name": name, "serial": serial}, nil)
+}
+
 type ClusterOptions struct {
 	Gateway ClusterGateway
 
@@ -398,6 +433,8 @@ func (a *ClusterAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clusters/down", a.nameAction("down"))
 	mux.HandleFunc("POST /api/clusters/delete", a.nameAction("delete"))
 	mux.HandleFunc("POST /api/clusters/kubeconfig", a.kubeconfig)
+	mux.HandleFunc("POST /api/clusters/kubeconfigs", a.kubeconfigs)
+	mux.HandleFunc("POST /api/clusters/kubeconfigs/revoke", a.revokeKubeconfig)
 }
 
 func (a *ClusterAPI) Handler() http.Handler {
@@ -414,8 +451,9 @@ func (a *ClusterAPI) config(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, struct {
 		TTLChoicesSec       []int64 `json:"ttlChoicesSec"`
 		MaxKubeconfigTTLSec int64   `json:"maxKubeconfigTtlSec"`
+		NoExpiry            bool    `json:"noExpiry"`
 		KCPPublicHost       any     `json:"kcpPublicHost"`
-	}{a.ttlChoices, a.maxTTLSec, host})
+	}{a.ttlChoices, a.maxTTLSec, true, host})
 
 }
 
@@ -547,6 +585,9 @@ func (a *ClusterAPI) kubeconfig(w http.ResponseWriter, r *http.Request) {
 	}
 	noExpiry, _ := rawNoExpiry.(bool)
 	rawTTL, ttlPresent := req.Input["ttlSeconds"]
+	if n, ok := rawTTL.(json.Number); ok && n.String() == "0" {
+		noExpiry, ttlPresent = true, false
+	}
 	if noExpiry && ttlPresent {
 		writeFailure(w, &apiFailure{Status: http.StatusBadRequest, Error: "InvalidRequest",
 			Message: "noExpiry and ttlSeconds are mutually exclusive"})
@@ -577,6 +618,42 @@ func (a *ClusterAPI) kubeconfig(w http.ResponseWriter, r *http.Request) {
 		Kubeconfig string `json:"kubeconfig"`
 	}{req.Name, KubeconfigFilename(req.Name), grant.Kubeconfig})
 
+}
+
+func (a *ClusterAPI) kubeconfigs(w http.ResponseWriter, r *http.Request) {
+	req, ok := a.named(w, r)
+	if !ok {
+		return
+	}
+	views, err := a.opts.Gateway.Kubeconfigs(r.Context(), req.Caller, req.Name)
+	if err != nil {
+		a.failure(w, req.Caller.DID(), "kubeconfigs", err)
+		return
+	}
+	if views == nil {
+		views = []gateway.KubeconfigView{}
+	}
+	httpjson.Write(w, http.StatusOK, struct {
+		Kubeconfigs []gateway.KubeconfigView `json:"kubeconfigs"`
+	}{views})
+}
+
+func (a *ClusterAPI) revokeKubeconfig(w http.ResponseWriter, r *http.Request) {
+	req, ok := a.named(w, r)
+	if !ok {
+		return
+	}
+	serial, _ := req.Input["serial"].(string)
+	if serial == "" || len(serial) > 64 {
+		writeFailure(w, &apiFailure{Status: http.StatusBadRequest, Error: "InvalidRequest", Message: "serial is required"})
+		return
+	}
+	if err := a.opts.Gateway.RevokeKubeconfig(r.Context(), req.Caller, req.Name, serial); err != nil {
+		a.failure(w, req.Caller.DID(), "revokeKubeconfig", err)
+		return
+	}
+	a.log().Info("cluster_api_ok", "did", req.Caller.DID(), "action", "revokeKubeconfig", "name", req.Name, "serial", serial)
+	httpjson.Write(w, http.StatusOK, gateway.RevokeKubeconfigResponse{Serial: serial, Revoked: true})
 }
 
 func (a *ClusterAPI) allowedTTL(value int64) bool {

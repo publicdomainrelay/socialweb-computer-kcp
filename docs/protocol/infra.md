@@ -20,6 +20,8 @@
 | `com.publicdomainrelay.temp.cluster.controlPlaneDown` | procedure | - | [cluster](#compublicdomainrelaytempcluster) |
 | `com.publicdomainrelay.temp.cluster.deleteCluster` | procedure | - | [cluster](#compublicdomainrelaytempcluster) |
 | `com.publicdomainrelay.temp.cluster.revokeIdentity` | procedure | - | [cluster](#compublicdomainrelaytempcluster) |
+| `com.publicdomainrelay.temp.cluster.listKubeconfigs` | query | - | [cluster](#compublicdomainrelaytempcluster) |
+| `com.publicdomainrelay.temp.cluster.revokeKubeconfig` | procedure | - | [cluster](#compublicdomainrelaytempcluster) |
 | `com.publicdomainrelay.temp.cluster.subscribeClusters` | subscription | - | [cluster](#compublicdomainrelaytempcluster) |
 
 ## Objects And Records
@@ -236,12 +238,14 @@ sequenceDiagram
 | NSID | type | input | output | does |
 |---|---|---|---|---|
 | `cluster.createCluster` | procedure | `name` | `phase` | create on read, then desired state running |
-| `cluster.getKubeconfig` | procedure | `name`, `ttlSeconds` (default 28800, 60..86400, refused outside), `noExpiry` | `kubeconfig` (client cert, no exec, no token), `instance` | create on read (`spec.running=false`) |
+| `cluster.getKubeconfig` | procedure | `name`, `ttlSeconds` (default 28800, 60..86400, 0 is `noExpiry`, refused outside), `noExpiry` | `kubeconfig` (client cert, no exec, no token), `instance` | create on read (`spec.running=false`) |
 | `cluster.listClusters` | query | - | `clusters[]` `{name, phase, running, instance, teardownBlocked, server}` | the caller's own clusters only (account from the token `iss`) |
 | `cluster.controlPlaneUp` | procedure | `name` | `phase` | desired running; idempotent |
 | `cluster.controlPlaneDown` | procedure | `name` | `phase` | desired not running; store retained |
 | `cluster.deleteCluster` | procedure | `name` | `phase` `Draining` | teardown behind a finalizer gate; never blocks |
 | `cluster.revokeIdentity` | procedure | `did`, `name` | `revoked[]` `{name, state}` | deny record first, then delete the ServiceAccount; grant kept as Revoked |
+| `cluster.listKubeconfigs` | query | `name` | `kubeconfigs[]` `{serial, createdAt, notAfter, noExpiry, revoked, revokedAt}` | the ClusterClientCertificate records; no key |
+| `cluster.revokeKubeconfig` | procedure | `name`, `serial` | `serial`, `revoked` | sets `spec.revoked`; the front refuses the cert |
 | `cluster.subscribeClusters` | subscription | `name` | frames `#cluster`, `#member`, `#nodeClaim`, `#info` (`SnapshotComplete`) | connect snapshot, then changes |
 
 - phases: `Unavailable` (cold, store kept), `Initializing`, `Ready`, `Draining`
@@ -249,7 +253,7 @@ sequenceDiagram
 - served command: `socialweb-computer serve gateway xrpc`
 - auth: the same service-auth check (`lxm` = the NSID)
 - callers: `internal/gatewayhttp/cluster.go` `XRPCClusterGateway` (service auth per audience and NSID); the web `/api/clusters/*` routes call the gateway directly, not over XRPC
-- OAuth scopes: `rpc:com.publicdomainrelay.temp.cluster.<method>?aud=*` in the gateway scope (`internal/app/compose/atprotoscope.go` `clusterScope`) and `K8sOAuthScope` (`internal/atproto/oauth/scope.go`). `revokeIdentity` and `subscribeClusters` are not in those sets
+- OAuth scopes: `rpc:com.publicdomainrelay.temp.cluster.<method>?aud=*` in the gateway scope (`internal/app/compose/atprotoscope.go` `clusterScope`) and `K8sOAuthScope` (`internal/atproto/oauth/scope.go`). `revokeIdentity`, `subscribeClusters`, `listKubeconfigs` and `revokeKubeconfig` are not in those sets
 - node scaling: a NodeClaim rents a market VM through the same RFP flow: [market.md](market.md); the system view: [../SYSTEM.md](../SYSTEM.md#tenant-kubernetes-clusters-gateway)
 
 ## See Also

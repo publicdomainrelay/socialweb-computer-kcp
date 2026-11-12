@@ -7,7 +7,7 @@ What the script drives, every option, the per-mode notes and how to recover.
 The credential file (mode 0600) exports `<ACCOUNT>_ATPROTO_HANDLE` and `<ACCOUNT>_ATPROTO_PASSWORD`.
 
 ```bash
-# the gateway user (alice) signs in to the API-only gateway; do this after every fresh gateway deploy
+# the gateway user (alice) signs in to the gateway; do this after every fresh gateway deploy
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE \
   --url https://k8s.socialweb.computer/ --start-api
 # an oauthBrowser identity reports a visitUrl in status.pendingAction
@@ -18,7 +18,7 @@ U=$(kubectl --kubeconfig $K get marketidentity <name> -o jsonpath='{.status.pend
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE --url "$U"
 ```
 
-The gateway is API-only. `--start-api` posts the handle to `POST /oauth/start`, keeps the
+`--start-api` posts the handle to `POST /oauth/start`, keeps the
 `swc_oauth_state` cookie, then drives the authorization server. Without `--start-api` the script opens
 the given url directly.
 

@@ -50,6 +50,8 @@ const (
 	nsidDeleteCluster    = NSIDPrefix + "deleteCluster"
 	nsidListClusters     = NSIDPrefix + "listClusters"
 	nsidRevokeIdentity   = NSIDPrefix + "revokeIdentity"
+	nsidListKubeconfigs  = NSIDPrefix + "listKubeconfigs"
+	nsidRevokeKubeconfig = NSIDPrefix + "revokeKubeconfig"
 
 	nsidKubectlApplyServerSide = K8sNSIDPrefix + "kubectlApplyServerSide"
 	nsidGetJob                 = K8sNSIDPrefix + "getJob"
@@ -150,6 +152,13 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		{nsid: nsidRevokeIdentity, input: &gateway.RevokeRequest{},
 			call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
 				return s.gateway.RevokeIdentity(ctx, c, *(in.(*gateway.RevokeRequest)))
+			}},
+		{nsid: nsidListKubeconfigs, call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
+			return s.gateway.ListKubeconfigs(ctx, c, *(in.(*gateway.NameRequest)))
+		}},
+		{nsid: nsidRevokeKubeconfig, input: &gateway.RevokeKubeconfigRequest{},
+			call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
+				return s.gateway.RevokeKubeconfig(ctx, c, *(in.(*gateway.RevokeKubeconfigRequest)))
 			}},
 		{nsid: nsidKubectlApplyServerSide, input: &gateway.ApplyRequest{}, maxBody: maxManifestBody,
 			call: func(ctx context.Context, c gateway.Caller, in any) (any, error) {
@@ -254,7 +263,7 @@ func (s *Server) xrpc(r route) http.HandlerFunc {
 		}
 
 		out, err := r.call(req.Context(), caller, in)
-		if r.nsid == nsidGetKubeconfig {
+		if r.nsid == nsidGetKubeconfig || r.nsid == nsidListKubeconfigs {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if err != nil {
@@ -345,6 +354,8 @@ func checkClusterName(out any) error {
 		return labelOrInvalidRequest(t.Cluster)
 	case *gateway.JobRequest:
 		return labelOrInvalidRequest(t.Cluster)
+	case *gateway.RevokeKubeconfigRequest:
+		return labelOrInvalidRequest(t.Name)
 	case *gateway.RevokeRequest:
 		if t.Name == "" {
 			return nil
@@ -432,6 +443,11 @@ func shape(nsid string, out any) any {
 		return phaseOutput{Phase: v.Phase}
 	case *gateway.RevokeResponse:
 		return revokeIdentityOutput{Revoked: v.Revoked}
+	case []gateway.KubeconfigView:
+		if v == nil {
+			v = []gateway.KubeconfigView{}
+		}
+		return listKubeconfigsOutput{Kubeconfigs: v}
 	case []gateway.ClusterView:
 		items := make([]clusterItem, 0, len(v))
 		for _, c := range v {
@@ -470,6 +486,10 @@ type clusterItem struct {
 	Instance        string `json:"instance"`
 	TeardownBlocked bool   `json:"teardownBlocked,omitempty"`
 	Server          string `json:"server"`
+}
+
+type listKubeconfigsOutput struct {
+	Kubeconfigs []gateway.KubeconfigView `json:"kubeconfigs"`
 }
 
 type listClustersOutput struct {

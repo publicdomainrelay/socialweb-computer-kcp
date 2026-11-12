@@ -47,6 +47,9 @@ A bidder bids only when its operator vouches for you and you vouch for it:
 [docs/quickstart-prod.md](docs/quickstart-prod.md#2-vouches-on-prod). More (agents, `kubectl apply` of `Infra`,
 a requester as a systemd unit): [docs/quickstart-prod.md](docs/quickstart-prod.md).
 
+Kubernetes clusters: [k8s.socialweb.computer](https://k8s.socialweb.computer/) (sign in, create, get a
+kubeconfig, revoke it); CLI: [docs/gateway.md](docs/gateway.md#kubernetes-clusters).
+
 ## Host a bidder
 
 Linux with `/dev/kvm`. [docs/bidder.md](docs/bidder.md): prerequisites, sign-in, foreground, installed, upgrade.

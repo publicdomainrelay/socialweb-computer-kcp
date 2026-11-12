@@ -119,7 +119,32 @@ type Store interface {
 	List(ctx context.Context, caller Caller) ([]ClusterView, error)
 	SetRunning(ctx context.Context, caller Caller, name string, running bool) (ClusterView, error)
 	Delete(ctx context.Context, caller Caller, name string) (ClusterView, error)
+
+	Kubeconfigs(ctx context.Context, caller Caller, name string) ([]KubeconfigView, error)
+	RevokeKubeconfigs(ctx context.Context, caller Caller, name, serial string) (int, error)
 }
+
+type KubeconfigView struct {
+	Serial    string `json:"serial"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	NotAfter  string `json:"notAfter"`
+	NoExpiry  bool   `json:"noExpiry,omitempty"`
+	Revoked   bool   `json:"revoked,omitempty"`
+	RevokedAt string `json:"revokedAt,omitempty"`
+}
+
+type RevokeKubeconfigRequest struct {
+	Name string
+
+	Serial string
+}
+
+type RevokeKubeconfigResponse struct {
+	Serial  string `json:"serial"`
+	Revoked bool   `json:"revoked"`
+}
+
+var ErrKubeconfigNotFound = &XRPCError{"KubeconfigNotFound", "no kubeconfig with that serial in this cluster", 404}
 
 type Revoker interface {
 	WriteDeny(ctx context.Context, did string) error
@@ -164,6 +189,9 @@ type GetKubeconfigResponse struct {
 }
 
 func (s *Server) GetKubeconfig(ctx context.Context, caller Caller, req KubeconfigRequest) (*GetKubeconfigResponse, error) {
+	if req.TTLSeconds != nil && *req.TTLSeconds == 0 {
+		req.TTLSeconds, req.NoExpiry = nil, true
+	}
 	if req.NoExpiry && req.TTLSeconds != nil {
 		return nil, ErrInvalidRequest
 	}
@@ -295,7 +323,54 @@ func (s *Server) DeleteCluster(ctx context.Context, caller Caller, req NameReque
 	return s.Store.Delete(ctx, caller, req.Name)
 }
 
+func (s *Server) ListKubeconfigs(ctx context.Context, caller Caller, req NameRequest) ([]KubeconfigView, error) {
+	if _, err := s.lookup(ctx, caller, req); err != nil {
+		return nil, err
+	}
+	return s.Store.Kubeconfigs(ctx, caller, req.Name)
+}
+
+func (s *Server) RevokeKubeconfig(ctx context.Context, caller Caller, req RevokeKubeconfigRequest) (*RevokeKubeconfigResponse, error) {
+	if req.Serial == "" {
+		return nil, ErrInvalidRequest
+	}
+	if _, err := s.lookup(ctx, caller, NameRequest{Name: req.Name}); err != nil {
+		return nil, err
+	}
+	n, err := s.Store.RevokeKubeconfigs(ctx, caller, req.Name, req.Serial)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrKubeconfigNotFound
+	}
+	slog.Info("revokeKubeconfig: revoked", "caller", string(caller), "name", req.Name, "serial", req.Serial)
+	return &RevokeKubeconfigResponse{Serial: req.Serial, Revoked: true}, nil
+}
+
+func (s *Server) RevokeAllKubeconfigs(ctx context.Context, caller Caller) error {
+	if caller == "" || s.Store == nil {
+		return nil
+	}
+	ctx = context.WithoutCancel(ctx)
+	views, err := s.Store.List(ctx, caller)
+	if err != nil {
+		return fmt.Errorf("revokeAllKubeconfigs: %w", err)
+	}
+	for _, v := range views {
+		s.revokeCerts(ctx, "signOut", caller, v.Name)
+	}
+	return nil
+}
+
 func (s *Server) revokeCerts(ctx context.Context, verb string, caller Caller, cluster string) {
+	if s.Store != nil {
+		if n, err := s.Store.RevokeKubeconfigs(ctx, caller, cluster, ""); err != nil {
+			slog.Warn(verb+": the kubeconfig records were not all revoked", "caller", string(caller), "name", cluster, "err", err)
+		} else {
+			slog.Info(verb+": kubeconfig records revoked", "caller", string(caller), "name", cluster, "count", n)
+		}
+	}
 	if s.Certs == nil {
 		return
 	}

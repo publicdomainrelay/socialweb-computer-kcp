@@ -16,6 +16,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/clusterhome"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/gateway"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 )
@@ -111,6 +112,62 @@ func (c *Client) MarkCertificateRevoked(ctx context.Context, did, cluster, seria
 		return fmt.Errorf("kcpclient: the revokedAt of the certificate record %s in %s: %w", name, home, err)
 	}
 	return nil
+}
+
+func (c *Client) certificates(ctx context.Context, caller gateway.Caller, cluster string) ([]v1alpha1.ClusterClientCertificate, error) {
+	home, err := c.homePath(caller, cluster)
+	if err != nil {
+		return nil, err
+	}
+	r, err := c.resource(home, socialwebResource)
+	if err != nil {
+		return nil, err
+	}
+	items, _, err := source[v1alpha1.ClusterClientCertificate]{r: r, resource: clusterClientCertificates, where: home}.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := items[:0]
+	for _, it := range items {
+		if it.Spec.Did == string(caller) {
+			out = append(out, it)
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) Kubeconfigs(ctx context.Context, caller gateway.Caller, cluster string) ([]gateway.KubeconfigView, error) {
+	items, err := c.certificates(ctx, caller, cluster)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gateway.KubeconfigView, 0, len(items))
+	for _, it := range items {
+		out = append(out, gateway.KubeconfigView{Serial: CertSerialKey(it.Spec.Serial), CreatedAt: it.CreationTimestamp.UTC().Format(time.RFC3339),
+			NotAfter: it.Spec.NotAfter, NoExpiry: it.Spec.NoExpiry, Revoked: it.Spec.Revoked, RevokedAt: it.Status.RevokedAt})
+	}
+	return out, nil
+}
+
+func (c *Client) RevokeKubeconfigs(ctx context.Context, caller gateway.Caller, cluster, serial string) (int, error) {
+	items, err := c.certificates(ctx, caller, cluster)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, it := range items {
+		if serial != "" && CertSerialKey(it.Spec.Serial) != CertSerialKey(serial) {
+			continue
+		}
+		n++
+		if it.Spec.Revoked {
+			continue
+		}
+		if err := c.MarkCertificateRevoked(ctx, string(caller), cluster, it.Spec.Serial); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 func certificateDoc(name string) map[string]any {

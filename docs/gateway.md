@@ -31,9 +31,48 @@ BINARY=<release binary> SHA256=<its sha256> SSH_KEY=~/.ssh/id_ed25519_no_passwor
 | `GATEWAY_SPEC_FILE` | A YAML `GatewaySpec`, shipped as the Gateway spec. | |
 | `ALLOW_DEV_BINARY` | Pass `--allow-dev-binary` to `install gateway` and `upgrade`. | off |
 
-The script installs the gateway on its first run. On every later run it upgrades the gateway, then runs `install gateway` again with the new `bin/current`, which re-renders the unit files and restarts a core whose unit changed. `k8s.<domain>` proxies the gateway's web-app front on `127.0.0.1:8788`, which serves the GatewayAPI component: `/oauth/*`, `/session`, `/api/*`, `/xrpc/computer.socialweb.k8s.*` and `/downloads/*`. The gateway is API-only; `/` answers 404.
+The script installs the gateway on its first run. On every later run it upgrades the gateway, then runs `install gateway` again with the new `bin/current`, which re-renders the unit files and restarts a core whose unit changed. `k8s.<domain>` proxies the gateway's web-app front on `127.0.0.1:8788`, which serves the GatewayAPI component: the page at `/`, `/oauth/*`, `/session`, `/api/*`, `/xrpc/*` and `/downloads/*`.
 
 After a fresh deploy the requester account has no gateway session, so cluster claims fail with a `no oauth session stored` message. Sign in with [OAuth sign-in](oauth.md), `--url https://k8s.socialweb.computer/` and `--start-api`.
+
+## Kubernetes clusters
+
+Browser: [k8s.socialweb.computer](https://k8s.socialweb.computer/). Sign in, create a cluster, pick a
+lifetime (1, 8 or 24 hours, or no expiry), get the kubeconfig, revoke it.
+
+CLI, with a `goat account login` session:
+
+```sh
+GW=https://k8s.socialweb.computer
+AUD=did:web:k8s.socialweb.computer
+N=com.publicdomainrelay.temp.cluster
+CL=my-cluster
+xrpc() {
+  verb=$1
+  method=$2
+  shift 2
+  goat xrpc "$verb" "$GW" "$N.$method" "$@" "Authorization:Bearer $(goat account service-auth --aud "$AUD" --lxm "$N.$method")"
+}
+xrpc procedure createCluster name="$CL"
+until xrpc query listClusters | jq -e --arg n "$CL" '.clusters[] | select(.name==$n and .phase=="Ready")' >/dev/null; do sleep 5; done
+umask 077
+xrpc procedure getKubeconfig name="$CL" ttlSeconds:=0 | jq -r .kubeconfig > "$CL.kubeconfig.yaml"
+KUBECONFIG=./$CL.kubeconfig.yaml kubectl get ns
+```
+
+`ttlSeconds:=0` (or `noExpiry:=true`) never expires; `ttlSeconds:=3600`, `28800` or `86400` do.
+
+Revoke the newest:
+
+```sh
+xrpc query listKubeconfigs name=="$CL" | jq '.kubeconfigs[] | select(.revoked|not)'
+S=$(xrpc query listKubeconfigs name=="$CL" | jq -r '[.kubeconfigs[] | select(.revoked|not)] | sort_by(.createdAt) | last | .serial')
+xrpc procedure revokeKubeconfig name="$CL" serial="$S"
+```
+
+Every kubeconfig of a cluster is also revoked by deleting the cluster, by `revokeIdentity`, and by signing
+out on the page. A kubeconfig works only while its `ClusterClientCertificate` record exists and is not
+revoked ([ARCHITECTURE.md](ARCHITECTURE.md), "A no-expiry kubeconfig is revoked by its record").
 
 ## See also
 

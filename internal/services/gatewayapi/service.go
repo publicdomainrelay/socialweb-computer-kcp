@@ -228,8 +228,11 @@ func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn
 		SignIn:        signIn,
 		PublicOrigin:  s.publicOrigin,
 		PostSignInURL: s.spec.PostSignInURL,
-		Tasks:         tasks,
-		Log:           log,
+		OnSignedOut: func(ctx context.Context, u *gatewayhttp.WebUser) error {
+			return s.server.RevokeAllKubeconfigs(ctx, gateway.Caller(u.DID))
+		},
+		Tasks: tasks,
+		Log:   log,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -257,6 +260,7 @@ func (s *Service) buildHandler(ctx context.Context, signIn gatewayhttp.WebSignIn
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", gatewayhttp.Page)
 	cluster.Register(mux)
 	oauth.Register(mux)
 	downloads.Register(mux)
