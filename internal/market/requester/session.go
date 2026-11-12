@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/cloudinit"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contractmarket "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
@@ -69,7 +70,7 @@ func (q *Requester) RunCommand(ctx context.Context, account sshtransport.Authori
 	delete(lc, SessionAtircEnv)
 	delete(lc, sessionAtircTokenEnv)
 	if name := strings.TrimSpace(lc["LC_SESSION"]); name != "" {
-		return q.runHeldCommand(ctx, account, name, command, lc, io)
+		return q.runHeldCommand(ctx, account, name, command, lc, atirc, io)
 	}
 	return q.runTransientCommand(ctx, account, command, lc, atirc, io)
 }
@@ -201,6 +202,8 @@ type heldSession struct {
 
 	target *SessionTarget
 
+	atirc bool
+
 	timer *time.Timer
 
 	generation uint64
@@ -219,6 +222,7 @@ func (h *heldSession) clear() {
 	h.target = nil
 	h.privateKeyPath = ""
 	h.contract = ""
+	h.atirc = false
 }
 
 func (q *Requester) heldSession(key string) *heldSession {
@@ -338,6 +342,7 @@ func (q *Requester) sweepHeldContract(contract v1alpha1.ComputeContract) {
 		return
 	}
 	held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, target.VMName, keyPath, target, contract.Name
+	held.atirc = strings.Contains(contract.Spec.UserData, cloudinit.AgentExecPath)
 	held.mu.Unlock()
 	q.armHeldSessionFor(key, held, until.Sub(q.now()))
 	q.log.Info("requester_held_session_adopted", "contract", contract.Name, "until", until.UTC().Format(time.RFC3339))
@@ -370,7 +375,8 @@ func (q *Requester) releaseHeldSession(key string, held *heldSession, generation
 	_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
 }
 
-func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, io sshtransport.CommandIO) error {
+func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.AuthorizedAccount, name, command string, lc map[string]string, atirc bool,
+	io sshtransport.CommandIO) error {
 	policyName, policyArgs, err := q.sessionPolicy(lc)
 	if err != nil {
 		return commandFailed(io, "provisioning failed: ", err)
@@ -386,13 +392,26 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 	if err != nil {
 		return commandFailed(io, "guest session failed: ", err)
 	}
+	agent := ""
+	if sub, ok := sessionAgentRun(command); ok && atirc {
+		if agent, err = agentSubhandle(sub, q.handle); err != nil {
+			return commandFailed(io, "atirc agent run: ", err)
+		}
+	}
 	contractName := heldContractName(account.DID, name)
 	provision := func() (*SessionTarget, string, error) {
 		publicKey, privateKeyPath, err := sshtransport.GenerateGuestKeypair(q.guestKeyDir(), vmName)
 		if err != nil {
 			return nil, "", err
 		}
-		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, "", heldContractTTLSeconds, nil)
+		userData := ""
+		if atirc {
+			if userData, err = sessionAtircUserData(defaultUserData([]string{publicKey})); err != nil {
+				_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
+				return nil, "", fmt.Errorf("the guest atirc agent: %w", err)
+			}
+		}
+		target, err := q.provisionHeldContract(ctx, contractName, vmName, account.DID, publicKey, policyName, policyArgs, userData, heldContractTTLSeconds, nil)
 		if err != nil {
 			q.releaseHeldContract(contractName)
 			_ = sshtransport.RemoveGuestKeypair(privateKeyPath)
@@ -444,6 +463,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		}
 		contract = contractName
 		held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, vmName, privateKeyPath, target, contract
+		held.atirc = atirc
 	}
 	ready := false
 	if ticket, ticketErr := ValidateTicket(target.Address); ticketErr == nil {
@@ -460,6 +480,7 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		}
 		contract = contractName
 		held.name, held.vmName, held.privateKeyPath, held.target, held.contract = name, vmName, privateKeyPath, target, contract
+		held.atirc = atirc
 		fresh = true
 		ticket, ticketErr := ValidateTicket(target.Address)
 		if ticketErr != nil {
@@ -485,10 +506,29 @@ func (q *Requester) runHeldCommand(ctx context.Context, account sshtransport.Aut
 		held.mu.Unlock()
 		return commandFailed(io, "guest session failed: ", err)
 	}
+	if atirc && !held.atirc {
+		held.mu.Unlock()
+		q.armHeldSession(key, held)
+		return commandFailed(io, "atirc: ", fmt.Errorf("the held session %s runs a VM started without atirc; start another LC_SESSION with LC_ATIRC=1 (or an atirc command) to get one", name))
+	}
 	q.recordHeld(contract, name, privateKeyPath, q.cfg.SessionCap+q.cfg.SessionIdle)
+	minted, err := q.sessionAtirc(ctx, account, atirc, agent, q.contractState(contract), io)
+	if err != nil {
+		held.mu.Unlock()
+		q.armHeldSession(key, held)
+		io.Exit(1)
+		return err
+	}
+	switch {
+	case minted != nil && agent != "":
+		command = atircCommand(sessionAgentCommand)
+	case minted != nil:
+		command = atircCommand(command)
+	}
 	code := func() int {
 		defer held.mu.Unlock()
-		return provider.RunSession(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), io, target.HostKeys)
+		defer q.revokeSessionAtirc(ctx, minted)
+		return provider.RunSessionEnv(ctx, privateKeyPath, ticket, renderExecCommand(command, lc), minted.env(), io, target.HostKeys)
 	}()
 	q.armHeldSession(key, held)
 	io.Exit(code)
