@@ -168,10 +168,15 @@ func (m *Manager) awaitEndpoints(ctx context.Context, export string) {
 		if err != nil && !apierrors.IsNotFound(err) {
 			return
 		}
-		ready := err == nil && slices.ContainsFunc(s.Status.Conditions, func(c conditionsv1alpha1.Condition) bool {
-			return c.Type == apisv1alpha1.APIExportEndpointSliceURLsReady && string(c.Status) == "True"
-		})
-		if ready && !slices.ContainsFunc(s.Status.APIExportEndpoints, func(e apisv1alpha1.APIExportEndpoint) bool { return !serves(e.URL) }) {
+		var ready bool
+		if err == nil {
+			urls := s.Status.APIExportEndpoints
+			ready = len(urls) > 0 && !slices.ContainsFunc(urls, func(e apisv1alpha1.APIExportEndpoint) bool { return !serves(e.URL) }) ||
+				len(urls) == 0 && slices.ContainsFunc(s.Status.Conditions, func(c conditionsv1alpha1.Condition) bool {
+					return c.Type == apisv1alpha1.APIExportEndpointSliceURLsReady && string(c.Status) == "True"
+				})
+		}
+		if ready {
 			if waiting {
 				m.log.Info("the APIExport's virtual workspace serves discovery", "export", export)
 			}
