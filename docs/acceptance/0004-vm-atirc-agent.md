@@ -16,7 +16,11 @@ endorsements and grants and tombstones both DIDs.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-12 17:16-17:29Z, kcp 60d0d3b7 (release 0b68ceeb, rollout 15), atirc 9e83813, alice by QR
+- Last pass: 2026-11-12 18:38-18:44Z, kcp cdd93727 (release 6380eee4, rollout 16), alice by QR, winner hat-8: the release
+  answers at once: `r2Released` posted by the guest 8 s after release, `requester_guest_requester_released` 18:44:05Z,
+  Released 0.7 s later, the CLI stops 5.5 s after Released; records 14/14, RecordNotFound x6, both DIDs `plc_tombstone` by
+  the guest; requester `core.log` 0 ERROR (no startup noise). The full flow before it: 2026-11-12 17:16-17:29Z, kcp
+  60d0d3b7 (release 0b68ceeb, rollout 15), atirc 9e83813, alice by QR
   (`cli-agent-1794503795`), no bidders list (winner hat-8), `--agent-config` (claude on the deepseek model), no workaround.
   Held 17:18:24Z; before agentStart both units inactive, `/etc/atirc/*` root 0600, r2 RSS 12.8 MiB. agentStart 17:18:36Z;
   R2 reported 17:19:13Z, `requester_association_written` 17:19:14Z (grant contract-scoped, `expiresAt` accept + 24 h,
@@ -26,7 +30,7 @@ endorsements and grants and tombstones both DIDs.
   lists the agent; `<nick> online` 17:22:47Z; messages both ways; `<nick>: uname -m` answered `x86_64` in 3.2 s. Release:
   grant + endorsement RecordNotFound x3, both DIDs `plc_tombstone` by the guest (4 s after release), records 14/14, hosts
   empty; the CLI stops 5 s after Released (`the guest's DIDs are tombstoned`). Open: the renter waits the full 3 min
-  (`requester_guest_requester_release_timeout`) because the bidder refuses the guest's `r2Released` (pitfalls).
+  (`requester_guest_requester_release_timeout`) because the bidder refused the guest's `r2Released` (fixed in 36b05233).
   On rollout 14 (kcp f482083c, 2026-11-11 16:07-16:21Z) the same flow passed with the renter tombstoning both DIDs after
   2 min. Before: 2026-11-11 12:49-13:50Z, kcp e496cbff, **FAIL** (OAuth renters could not endorse R2, the association ref
   was never mirrored, release waited 24 min; fixed in 94c4b74b, 982ba545, 51a9bbb8, 66339480)
@@ -188,7 +192,7 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | harness never answers | the harness exited (journalctl -u atirc-agent), claude still installing (give it ~1 min), or a wrong model / baseUrl / apiKey in the agent config |
 | `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | kcp e496cbff wrote the endorsement with putRecord; fixed in 94c4b74b (createRecord), passed 2026-11-11 |
 | R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | kcp e496cbff mirrored the ref only with a non-empty `r2-atirc.env`; fixed in 982ba545, passed 2026-11-11 |
-| release waits 3 min, `requester_guest_requester_release_timeout`; guest journal `the bidder refused a guest event` `r2Released` 400 `message is printable ASCII of at most 512 bytes` | the identity-only R2 retires in ~7 s, but the bidder's report check (`internal/guestidentity` `printableASCII`) rejects the space in the guest's `r2Released` message; harmless (the DIDs are already tombstoned), fix pending (bidder rollout) |
+| release waits 3 min, `requester_guest_requester_release_timeout`; guest journal `the bidder refused a guest event` `r2Released` 400 `message is printable ASCII of at most 512 bytes` | the identity-only R2 retires in ~7 s, but the bidder's report check (`internal/guestidentity` `printableASCII`) rejected the space in the guest's `r2Released` message (kcp 60d0d3b7 and before); fixed in 36b05233, passed 2026-11-12 (8.5 s) |
 | the CLI waits 3 min after Released and logs `the guest's DIDs are not tombstoned` though they are | kcp before 978ef53a checked for HTTP 410; plc.directory answers 404 for a tombstone; fixed (reads `log/last`) |
 | guest journal during release | `run request ssh` ends when the contract leaves Held; stream it with plain `ssh` through the same `dumbpipe connect <ticket>` ProxyCommand the CLI's own ssh process uses |
 | release after page reload slow (20-38 s) | requester start after boot + release not first; fixed rc134 (release-first on resume, ~17 s click -> Released) |

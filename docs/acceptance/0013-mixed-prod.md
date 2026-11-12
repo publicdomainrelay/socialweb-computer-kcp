@@ -9,7 +9,12 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: 2026-11-12 17:47-18:08Z on prod as bob, kcp 60d0d3b7 (release 0b68ceeb, rollout 15), path A, NO
+- Last pass: 2026-11-12 18:46-19:00Z on prod as bob, kcp cdd93727 (release 6380eee4, rollout 16), A and C, no pin (winner
+  hat-8): agent1 online, `uname -m` answered in 2.9 s, delete in 12 s (`r2Released` 8.8 s), 45/45 RecordNotFound, `core.log`
+  0 ERROR; C: node Ready, `quickstart-k8s-ok`, nodes 0 in 156 s, `computer.socialweb.infra/{self,nodes-...}` gone with the
+  cluster (none left after the stop). Open: C's requester logs `Reconciler error` `bus: no accepted ComponentLink allows
+  root:EventStream.../watch-infra-nodes-<hex>` (and `watch-infraindex-<repo>`) `events.subscribe` x18 while the node lives.
+  Before: 2026-11-12 17:47-18:08Z, kcp 60d0d3b7 (release 0b68ceeb, rollout 15), path A, NO
   `bidderDids` pin (requester discovery; winners hat-8, then hat-9): vm1 iroh + webrtc, sbx1, agent1 with its harness from
   the pre-written bundle (step A4b): association written 36 s after agent-start, `online` +136 s, messages both ways,
   `uname -m` answered in 2.9 s; delete: every contract record and agent1's grant + endorsement RecordNotFound x3, both
