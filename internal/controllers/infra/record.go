@@ -602,6 +602,9 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 		r.c.log.Info("infra_record_ended", append(attrs, "endedAt", decoded.EndedAt, "endReason", decoded.EndReason)...)
 		return true, nil
 	}
+	if mirror(v) {
+		return true, r.dropMirror(ctx, req, v, ar, repo, rkey, got, attrs)
+	}
 	own := []string{strings.TrimSpace(stored.CID)}
 	if ar != nil && arInSync(ar) {
 		own = append(own, strings.TrimSpace(ar.Status.Cid))
@@ -609,9 +612,6 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 	if !slices.Contains(own, got.CID) {
 		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID)...)
 		return true, nil
-	}
-	if mirror(v) {
-		return true, r.dropMirror(ctx, req, v, ar, repo, rkey, got.CID, attrs)
 	}
 	observed := r.finalObserved(v)
 	if ar != nil {
@@ -895,7 +895,8 @@ func mirror(v view) bool {
 }
 
 func (r *reconciler[T]) dropMirror(ctx context.Context, req ctlruntime.Request, v view, ar *v1alpha1.AtprotoRecord, repo commonv1.ObjectRef,
-	rkey, cid string, attrs []any) error {
+	rkey string, got atprotorepo.Record, attrs []any) error {
+	cid := got.CID
 	dyn, err := r.c.dynamic(req.Workspace)
 	if err != nil {
 		return err
@@ -904,7 +905,7 @@ func (r *reconciler[T]) dropMirror(ctx context.Context, req ctlruntime.Request, 
 	if ar != nil && ar.DeletionTimestamp.IsZero() {
 		held := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
 			ObjectMeta: metav1.ObjectMeta{Name: ar.Name, Labels: ar.Labels, OwnerReferences: ar.OwnerReferences}, Spec: ar.Spec}
-		held.Spec.DeletionPolicy, held.Spec.SwapCid = v1alpha1.RecordDeletionRetain, cid
+		held.Spec.DeletionPolicy, held.Spec.SwapCid, held.Spec.Record = v1alpha1.RecordDeletionRetain, cid, got.Value
 		if _, err := kube.Apply[v1alpha1.AtprotoRecord](ctx, records, held, kube.ApplyOptions{FieldManager: r.manager, Force: true}); err != nil {
 			return fmt.Errorf("infra: holding the AtprotoRecord %s at cid %s: %w", ar.Name, cid, err)
 		}
