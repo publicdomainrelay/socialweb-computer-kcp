@@ -83,7 +83,8 @@ func (p *pass) requesterDesired(mr *v1alpha1.MarketRequester) ([]compose.Desired
 	}
 	market := &v1alpha1.GatewayNodeMarket{HomeWorkspace: p.ws, ContractWorkspace: ws,
 		NodePolicy: compose.OptionValue(o.Spec.Options, GatewayNodePolicy), NodePolicyArgs: compose.OptionValue(o.Spec.Options, GatewayNodePolicyArgs),
-		InfraRecord: &v1alpha1.GatewayInfraRecord{RepoWorkspace: ws}, VaultMount: requesterNodeVaultMount}
+		InfraRecord: &v1alpha1.GatewayInfraRecord{RepoWorkspace: ws, EventSourceRefs: compose.OwnerRecordSources(ws, network)},
+		VaultMount:  requesterNodeVaultMount}
 	api := compose.Desired{Kind: compose.ComponentKindGatewayAPI, Name: GatewayAPIComponent, Spec: v1alpha1.GatewayAPISpec{
 		ComponentSpec:     compose.NewComponentSpec(compose.ComponentCRStateDir(stateRoot, compose.ComponentKindGatewayAPI, GatewayAPIComponent), network),
 		RequesterRef:      compose.ComponentRefFor(compose.ComponentKindRequester, marketrequester.RequesterComponent),
