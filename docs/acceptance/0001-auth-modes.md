@@ -83,7 +83,7 @@ hat-9 and hat-8 -> bob): agent-of only, endorsement `{agent}`, grant without `ex
 Bidder `true Ready`. Section 2: bob signed in by QR (page "Session transferred"; the `--done` text
 waits 60 s for "close this window", the page says "close this page": harmless), root Ready 4/4,
 EventStream `gateway-pds` Running, offering `["iroh","webrtc"]`. Section 3: Cluster Ready 34 s after
-createCluster (`get --raw /readyz` answers NotFound through the kcp front; namespaces list fine).
+createCluster (a bare `get --raw /readyz` asks the host root, not the cluster: NotFound; namespaces list fine).
 Section 4: first VM on the oauthQr bidder, pod Ready 76 s after the apply; zero nodes 139 s after the
 scale. Section 5: oauthQr (73 s), local (52 s), hat-9 (80 s), hat-7 (77 s): four pods on four distinct
 nodes. Section 6 (A2, all four winners paused): 4 -> 3 -> 2 -> 1 -> 0 released hat-9, oauthQr, hat-7,
@@ -132,7 +132,7 @@ gone and hat-7 is localRepo, receiving over the relay and Jetstream), so section
 Cluster Ready 36 s after createCluster; the kubeconfig of `getKubeconfig` and of
 the web `POST /api/clusters/kubeconfig` both name
 `https://kcp.socialweb.computer/clusters/root:2wjeqtgx:<cluster>:clusters`, a
-client certificate and no CA data; `get --raw /readyz` ok, k3s v1.36.4+k3s1,
+client certificate and no CA data; `get --raw /readyz` ok (the host root then still answered), k3s v1.36.4+k3s1,
 namespaces `default kube-node-lease kube-public kube-system users`
 (`/api/config` reports `kcpPublicHost: null`: the GatewayAPI does not pass it
 to the cluster API; the kubeconfig takes it from `SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST`).
@@ -426,6 +426,10 @@ done
 xrpc procedure getKubeconfig name="$CL" ttlSeconds:=28800 | jq -r .kubeconfig > "$W/kubeconfig"
 chmod 600 "$W/kubeconfig"
 KC=$W/kubeconfig
+# `get --raw` takes an absolute path on the host: prefix the kubeconfig's /clusters/... server path, or it asks
+# kcp.socialweb.computer/readyz itself (404 since the client certificate front, kcp e496cbff)
+P=$(kubectl --kubeconfig "$KC" config view --minify -o jsonpath='{.clusters[0].cluster.server}' | sed 's#https://[^/]*##')
+kubectl --kubeconfig "$KC" get --raw "$P/readyz"   # ok
 ```
 
 ### 3a. The page, a no-expiry kubeconfig, revoke
@@ -433,8 +437,8 @@ KC=$W/kubeconfig
 Last pass: 2026-11-12 20:13-20:17Z, kcp ac51b91e (rollout 18), alice, headless Chrome (`scripts/oauth-signin.ts
 --start-api --cookie-file`, then the page's own `/api/*` calls in the page context, puppeteer-core): consent page
 `k8s.socialweb.computer` for `@aliceoa.bsky.social`; cluster `r18c1` Ready 36 s after create; a 1 h and a no-expiry
-kubeconfig (`notAfter` 9999-12-31, `noExpiry: true`) both list namespaces (5) (`get --raw /readyz` answers NotFound
-through the kcp front for either: use `get ns`); `kubeconfigs` lists both; revoking the no-expiry one: `kubectl`
+kubeconfig (`notAfter` 9999-12-31, `noExpiry: true`) both list namespaces (5) and `get --raw "$P/readyz"` (the
+server path prefixed, section 3) answers ok; a bare `/readyz` asks the host root: NotFound); `kubeconfigs` lists both; revoking the no-expiry one: `kubectl`
 refused at once (`You must be logged in to the server`), listed `revoked: true`, the 1 h one still works; deleting the
 cluster: the 1 h one refused within 1 s, the cluster list empty 16 s later. Do not press Sign out on the
 page as alice: it revokes every kubeconfig (`$KC` too) and ends the gateway's alice session (`DELETE /session` did
