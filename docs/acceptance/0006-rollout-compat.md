@@ -13,7 +13,30 @@ Run after every rollout; it is the gate before "tests may resume".
   (`config.json.bak-rollout10-*`): version, readyz ok, MarketBidder Ready, offering `["iroh","webrtc"]`, 0 ERROR from
   start, three `ingress.offer` stream dials, mesh UDP listener, hosts empty. Rollback: `bin/previous` = d1f19736 (rollout 9).
   Proof round: [0007](0007-bidder-termination.md) last expiry pass
-- Last pass: 2026-11-10, rollout 8 (5e6c4e3d, published sha256 b7b286df94b4) on every component. Bidders hat-9 19:19Z,
+- Last pass: 2026-11-12 21:35-21:56Z, rollout 19 (kcp e190a3b1, release sha256 66f3bd4dc927) on every component (rolled
+  21:10-21:20Z by the lead). Bidders hat-7 (unit start 21:10:30Z), hat-9 (21:10:44Z), hat-8 `swc-bidder` (21:10:57Z):
+  version `v0.0.0-rc99.0.20261112201800-e190a3b1c7ee`, `bin/current` sha256 66f3bd4dc927, `bidder.json` ready=true,
+  MarketIdentity Ready (hat-7 SignedIn=True; hat-8, hat-9 localRepo), no `pendingAction`, `bidder-tangled-vouch`,
+  MarketBidder `app` Ready, offering `self` `["iroh","webrtc"]` with no `endpointUrl`, 0 ERROR / 0 unsupported from start,
+  `ingress.offer` dial lines (hat-8 11, hat-9 3, hat-7 3), mesh UDP 31001 / 31002, hosts empty. Gateway (unit start
+  21:18:44Z) and `swc-ssh-gateway.service` (21:20:15Z), both `bin/current` 66f3bd4dc927, NRestarts 0 after 30 min: Gateway
+  Ready ("every component is ready"), SshGateway `app` Ready, SshServer Ready, `owner-3b4d61ac074e291a` and
+  `owner-748258c72ce18fe0` Ready SignedIn, `bao-ssh-gateway` and `iroh-dial` Running; ssh gateway 0 ERROR from start;
+  gateway 7 ERROR from start (21:29:59-21:30:33Z), all `Reconciler error` of the pre-existing `root:app` AtprotoRecord
+  `testaccount-alice-atirc-operator` (Failed since 2026-10-31, ScopeMissing `com.fedfork.irc.agentOperator`, see 0001);
+  k8s, root, ssh /healthz, atlibs, shell 200, kcp 403. The gateway host also lists a failed
+  `socialweb-hp-gw-pg-2wjeqtgx-r19c1.service` (a tenant cluster's pg HostProcess left from an earlier run; not touched)
+- Compat smoke on rollout 19, alice, no bidders list, 2026-11-12: CLI of rollout 18 (ac51b91e, binary 3421208fa716, hat-8)
+  `run request --hold --exec id -- --atproto-oauth-qr` 21:45:27Z: QR sign-in (consent page: qr.fedfork.com for
+  @aliceoa.bsky.social), 3 bids, winner hat-8, Held 21:48:25Z, `uid=0(root)`; `run request release` -> Released 21:50:16Z,
+  `requester_contract_records_deleted` 4/4 (rfp, accept RecordNotFound), but the release `market.event` and its
+  `compute.events.vm.delete` stayed in alice's repo (deleted by hand; pitfalls). The prod page files
+  (https://shell.socialweb.computer/, last-modified 2026-11-11 10:35Z, `modules/requester.wasm` sha256 305329f484b5) in the
+  requester repo's `scripts/page-round.mjs` (`PAGE_ROOT`, no bidder: discovery) 21:55:12Z: 3 ingress offers (one per bidder),
+  https `submit*` 0, winner hat-8, receipt, shell `Linux fc-lpfuqerea3de-1d26077f ... uid=0(root)` over the guest
+  datachannel, release, 7 records getRecord 400, 0 offers left, 48 s, hosts empty. The harness needed `identlink` passed to
+  the WebrtcCubit as the page's `main.js` does (pitfalls). No atirc token on either contract (atirc check n/a)
+- Previous pass: 2026-11-10, rollout 8 (5e6c4e3d, published sha256 b7b286df94b4) on every component. Bidders hat-9 19:19Z,
   hat-7 19:20Z, hat-8 `swc-bidder` 19:21Z (`main/<commit>/binaries` checked against SHA256SUMS, `infra/hosts/hat-N.sh
   --apply`, hat-8 `SSH_TARGET=hat-8 infra/bidder/deploy.sh --apply`): version, MarketBidder Ready 6/6, no `pendingAction`,
   `bidder-tangled-vouch`, offering `["iroh","webrtc"]` with no `endpointUrl`, 0 ERROR / 0 unsupported from start, three
@@ -81,7 +104,7 @@ kb get computevms.socialweb.computer,firecrackervms.socialweb.computer --no-head
 
 Compat smoke (unchanged clients vs new servers):
 
-- Page: one short prod run as alice on a fresh profile (`page-check.ts`, see [0009](0009-browser-page.md) A6): Request VM -> Held -> 60 s -> reload -> Release. Announce "no parallel alice runs"
+- Page: the deployed page files (`index.html`, `*.js`, `stage.json`, `modules/` of https://shell.socialweb.computer/) in the requester repo's `scripts/page-round.mjs` with `PAGE_ROOT` set to them and no bidder (discovery), as alice ([0009](0009-browser-page.md) A3 / A6): offers > 0, https `submit*` 0, receipt, shell, release, every record 400. Announce "no parallel alice runs"
 - CLI: `run request --hold --exec "id"` (previous rc CLI if the RFP / bid shape changed), Held, Released
 - atirc-dev confirms revoke via=account before release in `revocations.ndjson`
 
@@ -135,3 +158,5 @@ Timings: one bidder restart ~2 min (VMs survive the upgrade); rc154 whole rollou
 | bidder ERROR `bus: no accepted ComponentLink allows root:RemoteRepo...` every 5 min | an account RemoteRepo left behind by a pdsAccount -> localRepo switch; fixed in 1c01bcbb (pruned) |
 | prod page run fails after the receipt, ~176 s in: `the guest did not report what via "webrtc" needs` (1 in 2, 2026-11-10 19:46Z) | the guest reports vm.onNetwork for ssh and shell a few ms apart; the bidder's guest recorder (`internal/guestidentity/guestrecord.go` OnNetwork, read-modify-write on a cached ComputeVM) dropped one tag, so only one onNetwork record was published (bidder journal: one `a market report StateSync is created` for vm.onNetwork per VM). Page side: requester 84ffaf9 takes any tag's fingerprint; the page's webrtc watch reads ssh and shell. Bidder side: fixed in rollout 9 |
 | kubectl `connection refused` on a bidder host | the snippet picked a stale handle's kubeconfig; pick the handle with the newest `front.json` (381a186f) |
+| `page-round.mjs`: every bid `denied by policy (scope): scope denied by requester-tangled-vouch` (2026-11-12) | the harness builds the WebrtcCubit without `identlink`; the page's `main.js` passes it (`import * as identlink from '@publicdomainrelay/identlink'`). Without it the policy's identlink walk (`com.fedfork.exec.sync.getRecord`) is not available. Pass `identlink` as `main.js` does |
+| CLI release leaves the release `market.event` and its `compute.events.vm.delete` in the requester repo (rollout 19, 2026-11-12) | `finishRelease` calls `deleteContractRecords` before `writeStatus`; `deleteMarketRecords` reads `r.stateCopy()`, which does not carry `state.Release` yet (`releaseEnvelope` sets it on the release path's copy). Open; delete both by hand after a CLI round |

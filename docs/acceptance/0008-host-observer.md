@@ -10,7 +10,22 @@ acceptance (0001-0006, 0009, 0010) uses these posts as its host-side evidence.
   hat-7's old bob handle `53eff7074d` is archived in `/var/lib/socialweb-computer/handle-53eff7074d-*.tgz`
 - Watchers: the host watcher agent per host, lead (local), gateway agent (gateway kcps)
 - Adapted from the hat-7 watcher's observer protocol
-- Last pass: 2026-11-10 15:14Z, rollout 5 438ca0fa: hat-7 and hat-9 CONFIRMED + host empty; hat-9 VM timeline + pin, orphan check 0/0/0
+- Last pass: 2026-11-12 21:35-22:23Z, rollout 19 (kcp e190a3b1, release 66f3bd4d), read by the lead (not posted on atirc):
+  hat-7, hat-9, hat-8 `swc-bidder` CONFIRMED (version, `bidder.json` ready=true, MarketIdentity Ready, no `pendingAction`,
+  0 unsupported / 0 ERROR since the 21:10Z restarts) + host empty. hat-8 VM timelines (all three rounds won by hat-8):
+  0006 compat CLI (rollout 18 CLI) bid 21:47:26.46 -> accept 21:47:33.58 -> prepared 1.07 s -> Running 21:47:36.41 ->
+  hostKeys 21:48:22.64 (46 s after Running) -> onNetwork 21:48:25.18; term 21:50:15.75 -> released 21:50:17.33 ->
+  finalizer 21:50:17.53, pinned `termination-payload-be1703ace14c23b5ccf7659606906ba6` (cid
+  `bafyreiep26viujvvyiwv7xx7iww3xls2pn3nnret3f2kc4v55bfv5t7xae`, `deleted_on_request`, `vm.delete` ref); page round bid
+  21:55:27.71 -> accept 21:55:31.46 -> prepared 0.88 s -> Running 21:55:33.60 -> hostKeys 21:55:46.29 -> onNetwork x2
+  21:55:46.98; term 21:56:00.26 -> released 21:56:01.91 -> finalizer 21:56:01.99, pinned
+  `termination-payload-7c26af7fa0551c8a7c0410a50178d673` (cid `bafyreiclmsz66antgymtrkjfa35mpn6cku7rck7ygzmrnmrtdp2robks7a`,
+  `deleted_on_request`, `vm.delete` ref); 0007 rounds below. Orphan check 0/0/0 on all three after each release.
+  Anomalies: hat-8 one ERROR at 21:50:17.01Z in the compat release (`firecrackervm` update of HostProcess
+  `vm-fc-lpfuqerea3de-be063eb5`: `the object has been modified`, retried in 500 ms, released 0.3 s later; 3 such on hat-8
+  since 2026-11-11, 0 on hat-7 / hat-9); hat-8 WARN `refreshing the guest OIDC document failed ... keys document is empty`
+  12 times since its restart
+- Previous pass: 2026-11-10 15:14Z, rollout 5 438ca0fa: hat-7 and hat-9 CONFIRMED + host empty; hat-9 VM timeline + pin, orphan check 0/0/0
 
 ```mermaid
 stateDiagram-v2

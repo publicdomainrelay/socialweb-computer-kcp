@@ -7,7 +7,17 @@ token leased to the contract dies.
 
 - Procedure: [bidder.md, End a VM](../bidder.md#end-a-vm)
 - Used on prod: R2 orphan (hat-7, 2026-10-30), iOS cross-restart retry VM (hat-7, 2026-10-31 02:07Z), stray debug VM (hat-7, 2026-10-31 18:11Z)
-- Last pass: 2026-11-11 12:45-12:48Z (kcp e496cbff, release d9438c15, ident.link; CLI requester with no bidders list, the
+- Last pass: 2026-11-12 21:56-22:01Z (kcp e190a3b1, release 66f3bd4d, rollout 19; CLI requester with no bidders list,
+  winner hat-8 `swc-bidder`): alice (QR; consent page qr.fedfork.com for @aliceoa.bsky.social) `run request --hold`, Held
+  21:59:40Z; `kb delete` of `fc-lpfuqerea3de-8c5c62ad` (DID prefix + created 21:58:43Z) 22:00:16.634Z -> gone in 1.4 s;
+  bidder journal: termination StateSync 22:00:16.703Z, `Running -> Releasing`, `released` 22:00:17.854Z, `released: the
+  backend is gone and the finalizer is dropped` 22:00:17.925Z (the holding CLI was still up: no submit WARN); `vm.terminated`
+  pinned (`termination-payload-ba7bdc172f501a0786f7acac21396e45`, cid
+  `bafyreibdqzdkpvh2jczmb2jtonc6prex5g5aujgrhrvauvq4u3z6lcxxf4`, `deleted_on_request`, no `request` ref); the holding CLI
+  itself went Released "the bidder ended the contract: deleted_on_request" at 22:00:17Z, `requester_contract_records_deleted`
+  4/4, accept and rfp RecordNotFound x3, nothing of the contract left in alice's repo; hosts 0 ComputeVM / 0 firecracker /
+  `vms/` empty. No atirc token exists for such a contract (token check n/a)
+- Previous pass: 2026-11-11 12:45-12:48Z (kcp e496cbff, release d9438c15, ident.link; CLI requester with no bidders list, the
   winner was hat-8 `swc-bidder`): bob (pdsAccount) `run request --hold`, Held 12:47:13Z; `kb delete` of
   `fc-ocnuqjlzgohy-5ecb1d26` -> gone in 4.1 s; bidder journal: termination StateSync 12:47:23.041Z, WARN `submitting the
   market event to the requester failed` (the CLI had exited), `released` 12:47:26.850Z, `released: the backend is gone and
@@ -15,7 +25,15 @@ token leased to the contract dies.
   `bafyreicq6udf5vhetwxcvfyn4h6ilzknvslmaeturf5fkabbgz4nuzb64y`, `deleted_on_request`, no `request` ref); requester `release` ->
   Released "the bidder ended the contract: deleted_on_request", `requester_contract_records_deleted` 4/4, accept and rfp
   RecordNotFound x3; hosts 0 ComputeVM / 0 firecracker. No atirc token exists for such a contract (token check n/a)
-- Last expiry pass: 2026-11-11 12:48-13:02Z (same release, hat-8 won): bob `run request --hold --expires-in 3m`; walk of bob
+- Last expiry pass: 2026-11-12 22:09-22:23Z (same release, hat-8 won): alice `run request --hold --expires-in 3m` (QR,
+  same consent page); walk of alice roots [alice], no `expiresAt`; `bidder_lifetime_capped` 22:11:56.98Z (expiresAt
+  22:12:57Z, source `compute.vm expiresAt`), Held 22:13:08Z; `bidder_association_expired_release` 22:22:57.006Z, released
+  22:22:58.281Z, finalizer 22:22:58.347Z; `vm.terminated` pinned (`termination-payload-0f6c3f9e19d47e9cacf22705ad0f1272`,
+  cid `bafyreig2ab5p6ywrlt3ii4ixehfce22vqaz2vlt6pcwx4wxoy7qvk2sgue`, `expired`, no `request` ref); the holding CLI went
+  Released "the bidder ended the contract: expired", records 4/4 deleted, accept and rfp RecordNotFound x3; hosts empty.
+  A first try (22:00:58Z) failed `no bids received within 30s`: the QR url came 2+ min late, sign-in at 22:08:49Z was past
+  the 3 m `expiresAt`, every bidder `bidder_payload_invalid` (pitfalls); its 3/3 records deleted
+- Previous expiry pass: 2026-11-11 12:48-13:02Z (same release, hat-8 won): bob `run request --hold --expires-in 3m`; walk of bob
   roots [bob], no `expiresAt`; `bidder_lifetime_capped` 12:48:59Z (expiresAt 12:51:23Z, source `compute.vm expiresAt`);
   `bidder_association_expired_release` 13:01:23.006Z, released 13:01:24.055Z; `vm.terminated` pinned
   (`termination-payload-2e7931213cd951bfa81d1fcea1906bed`, cid `bafyreiaayfwhrzrokc6ux4idsq5eg3sgaapph6nes34ytsootligd4nlui`,
@@ -113,3 +131,4 @@ Bidder journal, in order (hat-7 example, 2026-10-31 22:51Z):
 | token still answers | token was plain (pre-lease or test mint); revoke it by subhandle |
 | ComputeVM `Lost` after `uninstall --force` | expected: forced uninstall does not run the finalizer path; do not use it to end one VM |
 | requester resumes later and re-releases | harmless: release is idempotent; the contract is already Released |
+| `--expires-in` round fails `no bids received within 30s`; bidder `bidder_payload_invalid` "the RFP payload's expiresAt ... has passed" (2026-11-12) | the CLI fixes `expiresAt` when the invocation starts, before the QR sign-in; a sign-in later than the duration expires the RFP. Sign in right when the QR url appears (it can take 2+ min) |
