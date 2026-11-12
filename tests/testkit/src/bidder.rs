@@ -22,7 +22,11 @@ impl BidderKcp {
     pub async fn connect(b: &Bidder) -> Result<Option<Self>> {
         match &b.kcp {
             Some(ep) => Ok(Some(Self {
-                bidder: b.clone(),
+                // admin credentials of a prod bidder: owner-only copies
+                bidder: {
+                    crate::target::check_private(&crate::target::expand(&ep.kubeconfig))?;
+                    b.clone()
+                },
                 kcp: Kcp::connect(ep)
                     .await
                     .with_context(|| format!("bidder {} kcp", b.name))?,
@@ -54,6 +58,28 @@ impl BidderKcp {
             .into_iter()
             .filter(|v| v.to_string().contains(needle))
             .collect())
+    }
+
+    /// The ComputeVM of a receipt this test's own contract got (`spec.contract.receipt.uri`): fault injection on prod
+    /// touches only VMs the test created.
+    pub async fn own_vm(&self, receipt: &str) -> Result<String> {
+        let vms: Vec<_> = self
+            .kcp
+            .list("ComputeVM")
+            .await?
+            .into_iter()
+            .filter(|v| v["spec"]["contract"]["receipt"]["uri"] == receipt)
+            .collect();
+        anyhow::ensure!(
+            vms.len() == 1,
+            "{} ComputeVMs of {receipt} on {}",
+            vms.len(),
+            self.bidder.name
+        );
+        Ok(vms[0]["metadata"]["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// Pause (`spec.suspend`) and wait for the root's phase: Suspended, or Ready on resume.

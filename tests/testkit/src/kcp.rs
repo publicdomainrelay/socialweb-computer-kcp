@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use kube::api::{
     Api, ApiResource, DeleteParams, DynamicObject, GroupVersionKind, ListParams, Patch, PatchParams,
 };
@@ -17,8 +17,21 @@ const MANAGER: &str = "swc-system-tests";
 
 pub struct Kcp {
     pub client: kube::Client,
-    /// the dumbpipe forward of an iroh transport; killed on drop
-    _pipe: Option<tokio::process::Child>,
+    /// the forward of a non-direct transport (a child, or a bridge task); ends on drop
+    _forward: Option<Forward>,
+}
+
+pub enum Forward {
+    Child(#[allow(dead_code)] tokio::process::Child),
+    Bridge(tokio::task::JoinHandle<()>),
+}
+
+impl Drop for Forward {
+    fn drop(&mut self) {
+        if let Forward::Bridge(h) = self {
+            h.abort();
+        }
+    }
 }
 
 fn plural(kind: &str) -> String {
@@ -44,6 +57,59 @@ async fn free_port() -> Result<u16> {
         .port())
 }
 
+/// A child that forwards 127.0.0.1:<local> to the kcp; waits until the port accepts.
+async fn forward_child(
+    mut cmd: tokio::process::Command,
+    local: u16,
+    what: &str,
+) -> Result<Forward> {
+    let child = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("{what} on PATH"))?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while tokio::net::TcpStream::connect(("127.0.0.1", local))
+        .await
+        .is_err()
+    {
+        if Instant::now() > deadline {
+            bail!("the {what} forward to the kcp did not open in 30 s");
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    Ok(Forward::Child(child))
+}
+
+/// Listen on 127.0.0.1; each connection runs `argv` and pipes the TCP stream through its stdin/stdout.
+pub async fn stdio_bridge(argv: Vec<String>) -> Result<(u16, Forward)> {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let port = l.local_addr()?.port();
+    let task = tokio::spawn(async move {
+        while let Ok((mut tcp, _)) = l.accept().await {
+            let argv = argv.clone();
+            tokio::spawn(async move {
+                let Ok(mut child) = tokio::process::Command::new(&argv[0])
+                    .args(&argv[1..])
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .spawn()
+                else {
+                    return;
+                };
+                let mut pipe =
+                    tokio::io::join(child.stdout.take().unwrap(), child.stdin.take().unwrap());
+                let _ = tokio::io::copy_bidirectional(&mut tcp, &mut pipe).await;
+            });
+        }
+    });
+    Ok((port, Forward::Bridge(task)))
+}
+
 impl Kcp {
     pub async fn kubeconfig(path: &str) -> Result<Self> {
         Self::connect(&KcpEndpoint {
@@ -63,46 +129,50 @@ impl Kcp {
         let host = url
             .host()
             .context("kubeconfig server has no host")?
+            .trim_matches(|c| c == '[' || c == ']')
             .to_string();
         let port = url.port_u16().unwrap_or(443);
         let mut path_q = url.path().trim_end_matches('/').to_string();
         if let Some(ws) = &ep.workspace {
             path_q = format!("/clusters/{ws}");
         }
-        let mut pipe = None;
+        let mut forward = None;
         let authority = match &ep.via {
             Via::Direct => format!("{host}:{port}"),
             Via::Overlay { name } => format!("{name}:{port}"),
-            Via::Iroh { ticket } => {
+            Via::Ssh { host: through } => {
                 let local = free_port().await?;
-                let child = tokio::process::Command::new("dumbpipe")
-                    .args([
-                        "connect-tcp",
-                        "--addr",
-                        &format!("127.0.0.1:{local}"),
-                        ticket,
-                    ])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .kill_on_drop(true)
-                    .spawn()
-                    .context("dumbpipe on PATH")?;
-                pipe = Some(child);
-                let deadline = Instant::now() + Duration::from_secs(30);
-                while tokio::net::TcpStream::connect(("127.0.0.1", local))
-                    .await
-                    .is_err()
-                {
-                    if Instant::now() > deadline {
-                        bail!("dumbpipe forward to the kcp did not open in 30 s");
-                    }
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
+                let mut c = tokio::process::Command::new("ssh");
+                c.args([
+                    "-N",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ExitOnForwardFailure=yes",
+                    "-L",
+                ])
+                .arg(format!("127.0.0.1:{local}:{host}:{port}"))
+                .arg(through);
+                forward = Some(forward_child(c, local, "ssh").await?);
                 format!("127.0.0.1:{local}")
             }
-            // ponytail: no WebRTC connector yet; add atlibs-webrtc as a hyper connector when a kcp is only reachable so.
-            Via::WebRtc { signal } => {
-                bail!("kcp over WebRTC ({signal}): the atlibs-webrtc connector is not wired yet")
+            Via::Iroh { ticket } => {
+                let local = free_port().await?;
+                let mut c = tokio::process::Command::new("dumbpipe");
+                c.args([
+                    "connect-tcp",
+                    "--addr",
+                    &format!("127.0.0.1:{local}"),
+                    ticket,
+                ]);
+                forward = Some(forward_child(c, local, "dumbpipe").await?);
+                format!("127.0.0.1:{local}")
+            }
+            Via::WebRtc { proxy } => {
+                ensure!(!proxy.is_empty(), "via webRtc: an empty proxy command");
+                let (local, f) = stdio_bridge(proxy.clone()).await?;
+                forward = Some(f);
+                format!("127.0.0.1:{local}")
             }
         };
         cfg.cluster_url = format!("https://{authority}{path_q}").parse()?;
@@ -111,7 +181,7 @@ impl Kcp {
         }
         Ok(Self {
             client: kube::Client::try_from(cfg)?,
-            _pipe: pipe,
+            _forward: forward,
         })
     }
 

@@ -113,9 +113,8 @@ async fn b_colocated_and_out_of_band_loss() {
         };
         match bk {
             Some(bk) => {
-                let prefix = format!("fc-{}", &renter.trim_start_matches("did:plc:")[..12]);
-                let vm = bk.kcp.list("ComputeVM").await?.into_iter().find(|v| v["metadata"]["name"].as_str().is_some_and(|n| n.starts_with(&prefix))).context("the outer ComputeVM")?;
-                let vm_name = vm["metadata"]["name"].as_str().unwrap().to_string();
+                let receipt = s["contract"]["receiptUri"].as_str().context("no receipt")?;
+                let vm_name = bk.own_vm(receipt).await?;
                 bk.kcp.delete("ComputeVM", &vm_name).await?;
                 bk.kcp.wait_gone("ComputeVM", &vm_name, 2 * MIN).await?;
                 rr.wait_log("requester_tombstoned", 5 * MIN).await?;

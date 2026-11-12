@@ -37,29 +37,7 @@ async fn operator_delete_ends_the_vm() {
         let Some(bk) = BidderKcp::connect(b).await? else {
             return ctx.skip(&format!("the target names no kcp for {}", b.name));
         };
-        let prefix = format!("fc-{}", &did.trim_start_matches("did:plc:")[..12]);
-        // name = fc-<first 12 chars of the requester DID>-<hash>; more than one: the one naming the receipt
-        let mut vms: Vec<_> = bk
-            .kcp
-            .list("ComputeVM")
-            .await?
-            .into_iter()
-            .filter(|v| {
-                v["metadata"]["name"]
-                    .as_str()
-                    .is_some_and(|n| n.starts_with(&prefix))
-            })
-            .collect();
-        if vms.len() > 1 {
-            vms.retain(|v| v.to_string().contains(receipt.rsplit('/').next().unwrap()));
-        }
-        ensure!(
-            vms.len() == 1,
-            "{} candidate ComputeVMs of this run on {}",
-            vms.len(),
-            b.name
-        );
-        let vm = vms[0]["metadata"]["name"].as_str().unwrap().to_string();
+        let vm = bk.own_vm(&receipt).await?;
         let t = ctx.t();
         bk.kcp.delete("ComputeVM", &vm).await?;
         bk.kcp.wait_gone("ComputeVM", &vm, 2 * MIN).await?;

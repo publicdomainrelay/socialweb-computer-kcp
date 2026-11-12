@@ -88,8 +88,11 @@ pub enum Via {
     Overlay { name: String },
     /// a dumbpipe ticket that forwards to the kcp front
     Iroh { ticket: String },
-    /// atlibs-webrtc signaling URL
-    WebRtc { signal: String },
+    /// an ssh forward through `host` (an ssh alias) to the kubeconfig's host:port (a bidder's front on its loopback)
+    Ssh { host: String },
+    /// WebRTC: a command that pipes stdin/stdout through a datachannel to the kcp's port, one run per connection.
+    /// Requester::webrtc_proxy builds it (`run requester proxy --contract <cc> --tag <tag>`: the Go requester's offerer)
+    WebRtc { proxy: Vec<String> },
 }
 
 #[derive(Debug, Deserialize)]

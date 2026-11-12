@@ -444,6 +444,16 @@ impl Requester {
         self.wait_ready(Duration::from_secs(300)).await
     }
 
+    /// The WebRTC transport to a port a Held contract's guest tunnels as `tag` (a kcp in the guest): this requester's
+    /// `run requester proxy` dials the datachannel (signalling through its own kcp) once per connection.
+    pub fn webrtc_proxy(&self, contract: &str, tag: &str) -> crate::target::Via {
+        let mut proxy = vec![self.bin.path.display().to_string()];
+        proxy.extend(["run", "requester", "proxy", &self.name, "--state-dir"].map(String::from));
+        proxy.push(self.state.display().to_string());
+        proxy.extend(["--contract", contract, "--tag", tag].map(String::from));
+        crate::target::Via::WebRtc { proxy }
+    }
+
     /// `run requester ssh <name> --contract <cc> [--transport webrtc] --exec <cmd>`.
     pub async fn ssh(&self, contract: &str, transport: Option<&str>, exec: &str) -> Result<String> {
         let state = self.state.display().to_string();

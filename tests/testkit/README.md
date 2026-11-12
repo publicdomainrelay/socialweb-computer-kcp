@@ -56,8 +56,17 @@ recovery the runbooks describe (0007, 0006, 0001 section 7).
 | --- | --- |
 | `direct` | the kubeconfig's server URL |
 | `overlay` | the same port on a meshd overlay name (its DNS), TLS name kept |
+| `ssh` | an `ssh -L` forward through `host` (an ssh alias) to the kubeconfig's host:port: a bidder's front on its loopback |
 | `iroh` | a `dumbpipe connect-tcp` forward of the kcp front's ticket, TLS name kept |
-| `webRtc` | atlibs-webrtc; not wired yet (the test fails, naming it) |
+| `webRtc` | `proxy`: a command piping stdin/stdout through a datachannel, one run per TCP connection (`kcp::stdio_bridge`); `Requester::webrtc_proxy(contract, tag)` builds it from the orchestrator's `run requester proxy` (the Go requester's WebRTC offerer, signalled through its kcp) for a kcp a guest tunnels as `tag` |
+
+atlibs-webrtc's Rust crate is the answerer (`webrtc-peer`) only; its offerer is JavaScript (pages). The Go
+requester's offerer is the one a native test drives; a Rust offerer (str0m) replaces it when the harness must
+dial without a requester.
+
+Prod bidder kcps (`targets/prod.json`): owner-only copies of each bidder's admin kubeconfig under
+`~/.config/swc-system-tests/kcp/<bidder>.kubeconfig` on the runner (refused unless 0600). Fault injection on prod
+touches only VMs and contracts the test itself created (`BidderKcp::own_vm` matches the test's own receipt).
 
 A requester elsewhere is driven the same way: the ssh gateway's per-user requester is a kcp (its endpoint in the
 target); the browser requester (shell.socialweb.computer) is the atlibs requester wasm module in the page, driven by

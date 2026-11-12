@@ -147,6 +147,16 @@ async fn a_run_requester_mixed_prod() {
         // A6, A7
         ensure!(r.ssh("einfra-mixedprod-vm1", None, "cat /root/mixedprod").await?.contains("mixedprod-vm-ok"));
         ensure!(r.ssh("einfra-mixedprod-vm1", Some("webrtc"), "uname -m").await?.contains("x86_64"));
+        // the WebRTC transport of testkit (a kcp in a guest is reached the same way): vm1's ssh tag through
+        // `run requester proxy`, the bridge carries the guest sshd's banner
+        {
+            let testkit::target::Via::WebRtc { proxy } = r.webrtc_proxy("einfra-mixedprod-vm1", "ssh") else { unreachable!() };
+            let (port, _bridge) = testkit::kcp::stdio_bridge(proxy).await?;
+            let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+            let mut banner = [0u8; 8];
+            tokio::time::timeout(2 * MIN, tokio::io::AsyncReadExt::read_exact(&mut tcp, &mut banner)).await??;
+            ensure!(&banner == b"SSH-2.0-", "the WebRTC bridge did not carry the guest's ssh banner");
+        }
         let sbx = kcp.get("ComputeContract", "einfra-mixedprod-sbx1").await?.context("sbx1")?;
         let sb = &sbx["status"]["contract"]["sandbox"];
         ensure!(sb["exitCode"] == 0 && sb["stdout"].as_str().is_some_and(|s| s.contains("mixedprod-deno-ok sum=10 on linux/x86_64")), "sbx1 sandbox {sb}");
