@@ -30,6 +30,10 @@ import (
 const (
 	TerminatedSessionExitCode = 255
 
+	GuestCommandTermGrace = 5 * time.Second
+
+	guestCommandKillWait = 2 * time.Second
+
 	GuestPollInterval = 5 * time.Second
 
 	DefaultGuestConnectTimeout = 30 * time.Second
@@ -583,6 +587,7 @@ func (p *GuestSessionProvider) RunSessionEnv(ctx context.Context, privateKeyPath
 	watching.Go(func() {
 		select {
 		case <-ctx.Done():
+			p.endGuestCommand(session, done, target)
 			client.Close()
 		case <-done:
 		}
@@ -616,4 +621,23 @@ func (f writeFunc) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+func (p *GuestSessionProvider) endGuestCommand(session *ssh.Session, done <-chan struct{}, target string) {
+	for _, step := range []struct {
+		signal ssh.Signal
+		wait   time.Duration
+	}{{ssh.SIGTERM, GuestCommandTermGrace}, {ssh.SIGKILL, guestCommandKillWait}} {
+		if err := session.Signal(step.signal); err != nil {
+			p.log().Info("guest_command_signal_failed", "target", target, "signal", string(step.signal), "err", err.Error())
+			return
+		}
+		select {
+		case <-done:
+			p.log().Info("guest_command_ended", "target", target, "signal", string(step.signal))
+			return
+		case <-time.After(step.wait):
+		}
+	}
+	p.log().Warn("guest_command_outlived_kill", "target", target, "after", (GuestCommandTermGrace + guestCommandKillWait).String())
 }
