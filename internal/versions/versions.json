@@ -417,16 +417,16 @@
       }
     },
     "atirc": {
-      "version": "0.1.0-9e83813",
-      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit 9e838139956669a60c07f608de73c3fbe4245fb7 (2026-11-10, owner graph on the ident.link pair + grant walk of atlibs-identlink aa7cacc, verified sync.getRecord reads; co-located handles under an ancestor's verified handle, ATIRC_DID, --peer <handle>@<did>), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
+      "version": "0.1.0-e962ee8",
+      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit e962ee81a50acbbd83dfff66acaafc635976f9ea (2026-11-12, agent run takes its agent config on stdin or --config, so the ssh gateway path runs; agent run spawns the harness and removes its workdir on exit; on 9e83813: owner graph on the ident.link pair + grant walk of atlibs-identlink aa7cacc, ATIRC_DID, --peer <handle>@<did>), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
       "verify": "the source archive's sha256 is pinned here and its top directory must name the pinned commit; the build runs in a private mount namespace with remapped paths, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a cargosrc change re-pins it)",
       "executables": {
         "atirc": "atirc"
       },
       "cargosrc": {
-        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/9e838139956669a60c07f608de73c3fbe4245fb7",
-        "sha256": "4a7494a05ea7fd3f3013f7d8c0b7e35e19b40df7de4383f502250768f6e76646",
-        "commit": "9e838139956669a60c07f608de73c3fbe4245fb7",
+        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/e962ee81a50acbbd83dfff66acaafc635976f9ea",
+        "sha256": "140a09eec7827f50c26024195f9e0d74009728f4015fd14dd1f89c06ef9f0477",
+        "commit": "e962ee81a50acbbd83dfff66acaafc635976f9ea",
         "toolchain": "1.97.0",
         "manifest": "cli/Cargo.toml",
         "package": "atirc",
@@ -448,14 +448,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "68ed1f3bc786a8a27cee426af09fc775cb464b5f49c6bd7bd7f7897b032d7f2b",
-          "rawBytes": 53788000,
-          "zstdBytes": 11896332
+          "treeSha256": "aa5365d5d06a8359575ec8d250d13be897766ee89914b9acd436c4f4da5f17a4",
+          "rawBytes": 53976824,
+          "zstdBytes": 11950849
         },
         "linux/arm64": {
-          "treeSha256": "902a588c92e25e4d12ade976ef0a35a7323121d4675e4766a442831037c2f342",
-          "rawBytes": 51294496,
-          "zstdBytes": 11712465
+          "treeSha256": "274f3ee8438cf7dc2a2cfed3b76be8d72309c7f31449a106fb8c90682cf038e6",
+          "rawBytes": 51437392,
+          "zstdBytes": 11744950
         }
       }
     },
@@ -1541,14 +1541,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "391003455c27a0b879b9e10777247a45dd9bd88406c664ab41afede0a0769671",
-          "rawBytes": 111721702,
-          "zstdBytes": 32107840
+          "treeSha256": "4a623d439ff326b6a678242a88f2f08fa6db063fb6ecc1717a6ce6baf3f98599",
+          "rawBytes": 111910526,
+          "zstdBytes": 32162963
         },
         "linux/arm64": {
-          "treeSha256": "391003455c27a0b879b9e10777247a45dd9bd88406c664ab41afede0a0769671",
-          "rawBytes": 111721702,
-          "zstdBytes": 32107840
+          "treeSha256": "4a623d439ff326b6a678242a88f2f08fa6db063fb6ecc1717a6ce6baf3f98599",
+          "rawBytes": 111910526,
+          "zstdBytes": 32162963
         }
       }
     }
