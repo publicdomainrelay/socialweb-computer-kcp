@@ -1,0 +1,15 @@
+# One test file per acceptance runbook (tests/acc_NNNN_*.rs); each test names the runbook section it implements.
+[package]
+name = "system"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+serde_json.workspace = true
+testkit.workspace = true
+tokio.workspace = true
