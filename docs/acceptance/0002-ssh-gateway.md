@@ -57,10 +57,11 @@ goat get "at://$REQ/sh.tangled.graph.vouch/$OP" | jq -r .kind     # vouch
 
 1. Announce on atirc: `linux-kcp -> all: ssh gateway test as <handle> now; watchers: where does it land?`
 2. New host key once after the deno -> Go switch: `ssh-keygen -R socialweb.computer`
-3. Transient run (VM lives for the command):
+3. Transient run (VM lives for the command); the agent config (harness, model; the format `atirc config agent` writes) on
+   stdin, else the guest's `atirc agent run` exits `no harness configured`:
 
    ```bash
-   ssh <handle>@socialweb.computer atirc agent run <name>
+   ssh <handle>@socialweb.computer atirc agent run <name> < ~/.config/atirc/config.toml
    ```
 
 4. Held run (session name pinned, survives a gateway restart until expiry):

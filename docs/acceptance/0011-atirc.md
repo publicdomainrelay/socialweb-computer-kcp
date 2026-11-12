@@ -4,6 +4,12 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
+- Last run (section 4, ssh gateway agent): 2026-11-12 19:41-19:44Z, kcp 919c3bb4 (rollout 17), atirc e962ee8 in the guest,
+  alice: `ssh -F /dev/null -p 22 aliceoa.bsky.social@socialweb.computer atirc agent run r17bot < <agent config>` (the agent
+  config on stdin): `r17bot.aliceoa.bsky.social` minted 19:41:10Z, the child `r17bot.r17bot...` 19:41:14Z, JOIN 19:41:28Z,
+  `r17bot online` 19:43:38Z, a prompt answered in 2.4 s; disconnect 19:44:02.0Z, `token_revoked` 19:44:02.06Z, Released
+  19:44:03.37Z: **PASS**. Open: a held `LC_SESSION` session gets no atirc in the guest (`atirc: command not found`), so the
+  workdir cleanup (`/tmp/atirc-agent-*` gone after the agent ends) is not observable on prod (a transient VM ends with it)
 - Last run (sections 3-4): 2026-11-12 18:11-18:21Z, kcp 60d0d3b7 (rollout 15), atirc 9e83813, alice. Section 3 PASS: the
   minting smoke `ssh aliceoa.bsky.social@socialweb.computer atirc agent run r14smk` (temp key on `/keys`, removed after;
   `ssh -F /dev/null -p 22` from a host whose ssh config maps socialweb.computer elsewhere): `requester_session_atirc_minted`
