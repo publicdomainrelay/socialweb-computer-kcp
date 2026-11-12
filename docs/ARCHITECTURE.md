@@ -2391,8 +2391,49 @@ by `RouteTable::compute` from a Node list and unit-tested on Node lists:
 - `socialweb.computer/mesh-addrs` (comma-separated `ip:port`) is a read-only dialing hint; meshd never
   writes it. It is how the tests dial directly with discovery off.
 
-`--peers-file` replaces the kube source with a NodeList JSON file (`kubectl get nodes -o json` shape),
-re-read when its mtime changes, and writes nothing. It exists for the network-namespace proof.
+**The roster: plain VMs on the same overlay.** `--roster <path or http(s) URL>`, re-read every 5 s:
+
+```json
+{"peers": [
+  {"name": "bidder-1", "endpoint": "<64 hex>", "cidrs": ["10.44.0.11/32"],
+   "addrs": ["203.0.113.7:47001"], "names": ["hat-9"]}
+]}
+```
+
+- Without `--kubeconfig` (a plain VM) the roster is the peer list and this node is the entry with its
+  own endpoint (`--node-name` not needed). Each own cidr's network address goes on the tun (a `/32` is
+  the VM's overlay IP); every other cidr is routed through it. Same `RouteTable::compute`, same rejections.
+- With `--kubeconfig` the roster adds the entries no Node names (by name or `mesh-endpoint`). Without
+  `--roster`, meshd follows its own Node's `socialweb.computer/mesh-roster` annotation, so a cluster
+  admin points market nodes at a roster with no user_data change:
+  `kubectl annotate node --all socialweb.computer/mesh-roster=<url>`.
+- An http(s) body with `value` (a `com.atproto.repo.getRecord` response) is unwrapped: one record at a
+  computed rkey (`getRecord?repo=<did>&collection=<nsid>&rkey=<run>`) is a run's roster, no listRecords.
+  TLS verifies against the webpki roots; 1 MiB cap. Unreadable is retried, logged once per distinct error.
+- One writer (the orchestrator) keeps the roster: plain VMs from `socialweb-meshd identity`, k3s nodes
+  from `kubectl get nodes` (`mesh-endpoint`, podCIDR). Removing an entry removes its routes everywhere
+  and makes that VM not ready; adding it back restores both (proved).
+- Not measured: a market node's pod-egress SNAT (`! -d 10.42.0.0/16`) also applies to VM destinations.
+
+**DNS on the overlay.** `--dns-zone Z --dns-listen ip:port[,...] [--dns-upstream ip:port[,...]]`:
+hickory-server, authoritative for `Z` from the roster (`<name>.Z` and each `<names>.Z` answer each cidr's
+network address, TTL 5 s), everything else forwarded to the upstreams (none: REFUSED). UDP and TCP;
+bound once the address exists, so it listens on the node's own overlay address. Every member serves the
+same zone. A plain VM: `nameserver <own overlay IP>` in resolv.conf. Pods: add to the
+`socialweb-node-dns` Corefile (re-add after a bootstrap reapplies the baseline):
+
+```
+staging.internal:53 {
+    bind 169.254.20.10
+    forward . 10.44.0.1
+}
+```
+
+Proofs (hat-8, `cargo test` with sudo; meshd keeps its integration tests in `rust/socialweb-meshd/tests/`): `tests/standalone.rs` (`SOCIALWEB_MESHD_NETNS=1`): three VMs
+behind three NATs (UDP port forward), one on an http getRecord-shaped roster, ping and TCP all six ways,
+every name from every member's DNS, forwarding to a dnsmasq upstream, resolv.conf, leave and rejoin.
+`tests/kube_k3s.rs` (`SOCIALWEB_MESHD_K3S=1`): a kube-mode node following its annotation and a plain VM
+on one overlay, pod and node to VM and back, each side's DNS answering the other's names.
 
 **The node authorizer does NOT let a node list Nodes.** Measured against k3s v1.36.4+k3s1 with a
 `system:node:node-a` client certificate minted from the cluster client CA: `list nodes` answers 403
@@ -2455,7 +2496,7 @@ max datagram size, installed kernel routes, rejections, counters), `/metrics` (P
 `/healthz` on `--metrics-listen`, default `127.0.0.1:9469` (a non-loopback address is warned about).
 Ready - and `READY=1` to `$NOTIFY_SOCKET` - means the tun is up, the own Node is seen with a pod CIDR,
 its annotations are visible through the watch (kube mode), and the routes synced. Exit codes:
-0 SIGTERM/SIGINT, 1 a task ended, 2 usage, 3 secret or peers file, 4 kubeconfig refused or own-Node
+0 SIGTERM/SIGINT, 1 a task ended, 2 usage, 3 secret file, 4 kubeconfig refused or own-Node
 patch forbidden, 5 tun create/up/read, 6 iroh bind, 7 status bind. A missing kubeconfig, an
 unreachable apiserver, a forbidden list and an unregistered own Node are retried, not fatal.
 

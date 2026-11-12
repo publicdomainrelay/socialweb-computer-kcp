@@ -18,15 +18,20 @@ struct Rig {
     ns: String,
     dir: PathBuf,
     children: Vec<Child>,
+    extra: Vec<String>,
 }
 
 impl Drop for Rig {
     fn drop(&mut self) {
-        stop_namespace_processes(&self.ns);
+        for ns in self.extra.iter().chain([&self.ns]) {
+            stop_namespace_processes(ns);
+        }
         for child in &mut self.children {
             reap(child, Duration::from_secs(20));
         }
-        let _ = sudo(&["ip", "netns", "del", &self.ns]);
+        for ns in self.extra.iter().chain([&self.ns]) {
+            let _ = sudo(&["ip", "netns", "del", ns]);
+        }
         let _ = sudo(&["rm", "-rf", self.dir.to_str().unwrap()]);
     }
 }
@@ -142,6 +147,7 @@ fn start_meshd(
     kubeconfig: &Path,
     secret: &Path,
     log: &Path,
+    extra: &[&str],
 ) -> usize {
     let file = File::create(log).unwrap();
     let child = Command::new("sudo")
@@ -153,6 +159,7 @@ fn start_meshd(
         .arg(secret)
         .args(["--relay", "disabled", "--discovery", "none"])
         .args(["--metrics-listen", "127.0.0.1:9469"])
+        .args(extra)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(file))
@@ -175,20 +182,7 @@ fn installed(ns: &str) -> String {
     must(&["ip", "-n", ns, "route", "show", "dev", "swmesh0"])
 }
 
-#[test]
-fn with_a_kubelet_identity_meshd_annotates_its_own_node_and_follows_the_node_list() {
-    if !gate(GATE) {
-        return;
-    }
-    let bin_path = common::meshd_bin();
-    let bin = bin_path.as_str();
-    let dir = scratch_dir("k3s");
-    let mut rig = Rig {
-        ns: format!("swmesh-{}-k3s", std::process::id()),
-        dir,
-        children: Vec::new(),
-    };
-    must(&["ip", "netns", "add", &rig.ns]);
+fn start_k3s(rig: &mut Rig) {
     must(&["ip", "-n", &rig.ns, "link", "set", "lo", "up"]);
     must(&[
         "ip", "-n", &rig.ns, "link", "add", "uplink0", "type", "dummy",
@@ -244,8 +238,26 @@ fn with_a_kubelet_identity_meshd_annotates_its_own_node_and_follows_the_node_lis
         .expect("spawn k3s");
     rig.children.push(k3s);
     eventually(K3S_READY_WAIT, "k3s apiserver /readyz", || {
-        kubectl(&rig, &["get", "--raw", "/readyz"]).status.success()
+        kubectl(rig, &["get", "--raw", "/readyz"]).status.success()
     });
+}
+
+#[test]
+fn with_a_kubelet_identity_meshd_annotates_its_own_node_and_follows_the_node_list() {
+    if !gate(GATE) {
+        return;
+    }
+    let bin_path = common::meshd_bin();
+    let bin = bin_path.as_str();
+    let dir = scratch_dir("k3s");
+    let mut rig = Rig {
+        ns: format!("swmesh-{}-k3s", std::process::id()),
+        dir,
+        children: Vec::new(),
+        extra: Vec::new(),
+    };
+    must(&["ip", "netns", "add", &rig.ns]);
+    start_k3s(&mut rig);
 
     let secret_a = rig.dir.join("a.secret");
     let (endpoint_a, did_a) = identity(bin, &secret_a);
@@ -264,7 +276,15 @@ fn with_a_kubelet_identity_meshd_annotates_its_own_node_and_follows_the_node_lis
     let kubeconfig_a = mint_node_credentials(&rig, "node-a");
 
     let log_a = rig.dir.join("meshd-a.log");
-    let a = start_meshd(&mut rig, bin, "node-a", &kubeconfig_a, &secret_a, &log_a);
+    let a = start_meshd(
+        &mut rig,
+        bin,
+        "node-a",
+        &kubeconfig_a,
+        &secret_a,
+        &log_a,
+        &[],
+    );
     let before_rbac = wait_for_log(
         &mut rig.children[a],
         &log_a,
@@ -327,6 +347,7 @@ fn with_a_kubelet_identity_meshd_annotates_its_own_node_and_follows_the_node_lis
         &kubeconfig_a,
         &secret_wrong,
         &log_wrong,
+        &[],
     );
     let code = wait_exit(&mut rig.children[wrong], Duration::from_secs(30));
     let text = std::fs::read_to_string(&log_wrong).unwrap_or_default();
@@ -345,4 +366,200 @@ fn stop_namespace_processes_named(rig: &Rig, name: &str) {
             let _ = sudo(&["kill", "-TERM", pid]);
         }
     }
+}
+
+fn ip(ns: &str, args: &[&str]) {
+    let mut full = vec!["ip", "-n", ns];
+    full.extend_from_slice(args);
+    must(&full);
+}
+
+fn netns_exec(ns: &str, args: &[&str]) -> std::process::Output {
+    let mut full = vec!["ip", "netns", "exec", ns];
+    full.extend_from_slice(args);
+    sudo(&full)
+}
+
+fn ping_ok(ns: &str, target: &str) {
+    let out = netns_exec(
+        ns,
+        &["ping", "-n", "-c", "3", "-i", "0.2", "-W", "3", target],
+    );
+    assert!(
+        out.status.success(),
+        "ping {target} from {ns}: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+fn dig(ns: &str, server: &str, name: &str) -> String {
+    let out = netns_exec(
+        ns,
+        &[
+            "dig",
+            "+short",
+            "+time=2",
+            "+tries=2",
+            &format!("@{server}"),
+            name,
+        ],
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn a_kube_mode_node_and_a_standalone_vm_share_one_overlay_and_one_zone() {
+    if !gate(GATE) {
+        return;
+    }
+    let bin_path = common::meshd_bin();
+    let bin = bin_path.as_str();
+    let dir = scratch_dir("k3s-roster");
+    let pid = std::process::id();
+    let vm_ns = format!("swmesh-{pid}-k3sr-vm");
+    let pod_ns = format!("swmesh-{pid}-k3sr-pod");
+    let mut rig = Rig {
+        ns: format!("swmesh-{pid}-k3sr"),
+        dir,
+        children: Vec::new(),
+        extra: vec![vm_ns.clone(), pod_ns.clone()],
+    };
+    for ns in [&rig.ns, &vm_ns, &pod_ns] {
+        must(&["ip", "netns", "add", ns]);
+    }
+    start_k3s(&mut rig);
+    let node_ns = rig.ns.clone();
+    for ns in [&vm_ns, &pod_ns] {
+        ip(ns, &["link", "set", "lo", "up"]);
+    }
+    ip(
+        &node_ns,
+        &[
+            "link", "add", "u0", "type", "veth", "peer", "name", "u0", "netns", &vm_ns,
+        ],
+    );
+    ip(&node_ns, &["addr", "add", "10.251.0.1/24", "dev", "u0"]);
+    ip(&node_ns, &["link", "set", "u0", "up"]);
+    ip(&vm_ns, &["addr", "add", "10.251.0.2/24", "dev", "u0"]);
+    ip(&vm_ns, &["link", "set", "u0", "up"]);
+    ip(
+        &pod_ns,
+        &[
+            "link", "add", "eth0", "type", "veth", "peer", "name", "pod0", "netns", &node_ns,
+        ],
+    );
+    ip(&pod_ns, &["addr", "add", "10.42.1.2/24", "dev", "eth0"]);
+    ip(&pod_ns, &["link", "set", "eth0", "up"]);
+    ip(&pod_ns, &["route", "add", "default", "via", "10.42.1.1"]);
+    ip(&node_ns, &["addr", "add", "10.42.1.1/24", "dev", "pod0"]);
+    ip(&node_ns, &["link", "set", "pod0", "up"]);
+    must(&[
+        "ip",
+        "netns",
+        "exec",
+        &node_ns,
+        "sysctl",
+        "-qw",
+        "net.ipv4.ip_forward=1",
+    ]);
+
+    let secret_a = rig.dir.join("a.secret");
+    let secret_s = rig.dir.join("s.secret");
+    let (endpoint_a, _) = identity(bin, &secret_a);
+    let (endpoint_s, _) = identity(bin, &secret_s);
+    let roster = rig.dir.join("roster.json");
+    std::fs::write(
+        &roster,
+        serde_json::json!({"peers": [
+            {"name": "node-a", "endpoint": endpoint_a, "cidrs": ["10.42.1.0/24"],
+             "addrs": ["10.251.0.1:47001"], "names": ["k3s-a"]},
+            {"name": "vm-s", "endpoint": endpoint_s, "cidrs": ["10.44.0.9/32"],
+             "addrs": ["10.251.0.2:47001"], "names": ["svc"]},
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+
+    let rbac = Path::new(env!("CARGO_MANIFEST_DIR")).join("deploy/node-reader-rbac.yaml");
+    kubectl_ok(&rig, &["apply", "-f", rbac.to_str().unwrap()]);
+    let mut node = node_manifest("node-a", "10.42.1.0/24", None);
+    node["metadata"]["annotations"]["socialweb.computer/mesh-roster"] =
+        roster.to_string_lossy().into_owned().into();
+    apply(&rig, "node-a.json", &node);
+    let kubeconfig_a = mint_node_credentials(&rig, "node-a");
+
+    let log_a = rig.dir.join("meshd-a.log");
+    let a = start_meshd(
+        &mut rig,
+        bin,
+        "node-a",
+        &kubeconfig_a,
+        &secret_a,
+        &log_a,
+        &[
+            "--bind",
+            "10.251.0.1:47001",
+            "--dns-zone",
+            "staging.internal",
+            "--dns-listen",
+            "10.42.1.0:53",
+        ],
+    );
+    let log_s = rig.dir.join("meshd-s.log");
+    rig.children.push(
+        Command::new("sudo")
+            .args(["-n", "ip", "netns", "exec", &vm_ns, bin, "run"])
+            .arg("--roster")
+            .arg(&roster)
+            .arg("--secret-file")
+            .arg(&secret_s)
+            .args(["--relay", "disabled", "--discovery", "none"])
+            .args(["--bind", "10.251.0.2:47001"])
+            .args(["--metrics-listen", "127.0.0.1:9469"])
+            .args(["--dns-zone", "staging.internal"])
+            .args(["--dns-listen", "10.44.0.9:53"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(File::create(&log_s).unwrap()))
+            .spawn()
+            .expect("spawn standalone meshd"),
+    );
+    let s = rig.children.len() - 1;
+    wait_for_log(
+        &mut rig.children[a],
+        &log_a,
+        "\"event\":\"ready\"",
+        READY_WAIT,
+    );
+    wait_for_log(
+        &mut rig.children[s],
+        &log_s,
+        "\"event\":\"ready\"",
+        READY_WAIT,
+    );
+    eventually(Duration::from_secs(15), "the roster reaches node-a", || {
+        route_nodes(&node_ns) == vec!["vm-s"]
+    });
+    assert_eq!(route_nodes(&vm_ns), vec!["node-a"]);
+    assert_eq!(status(&vm_ns)["node"], "vm-s");
+    assert!(installed(&node_ns).contains("10.44.0.9"));
+
+    ping_ok(&pod_ns, "10.44.0.9");
+    ping_ok(&vm_ns, "10.42.1.2");
+    ping_ok(&node_ns, "10.44.0.9");
+    eventually(Duration::from_secs(15), "the node's DNS answers", || {
+        dig(&vm_ns, "10.42.1.0", "svc.staging.internal") == "10.44.0.9"
+    });
+    assert_eq!(
+        dig(&pod_ns, "10.42.1.0", "k3s-a.staging.internal"),
+        "10.42.1.0"
+    );
+    assert_eq!(
+        dig(&pod_ns, "10.44.0.9", "vm-s.staging.internal"),
+        "10.44.0.9"
+    );
+    assert_eq!(
+        dig(&node_ns, "10.44.0.9", "node-a.staging.internal"),
+        "10.42.1.0"
+    );
 }

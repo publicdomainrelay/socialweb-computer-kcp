@@ -13,7 +13,7 @@ pub const DEFAULT_METRICS_LISTEN: &str = "127.0.0.1:9469";
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_RUNTIME: i32 = 1;
 pub const EXIT_USAGE: i32 = 2;
-pub const EXIT_IDENTITY_OR_PEERS: i32 = 3;
+pub const EXIT_IDENTITY: i32 = 3;
 pub const EXIT_KUBE: i32 = 4;
 pub const EXIT_NETWORK_DEVICE: i32 = 5;
 pub const EXIT_ENDPOINT: i32 = 6;
@@ -23,8 +23,8 @@ pub const EXIT_CODES_HELP: &str = "\
 Exit codes:
   0  stopped by SIGTERM or SIGINT
   1  a running task ended (a source task or the outbound loop stopped)
-  2  usage error
-  3  the secret file or the peers file is unreadable or malformed
+  2  usage error (including an invalid --dns-zone)
+  3  the secret file is unreadable or malformed
   4  the kubeconfig is malformed or refused (insecure-skip-tls-verify, no CA), or patching
      this node's own Node was forbidden (--node-name is not the kubeconfig's node)
   5  the tun device could not be created, brought up or read (needs CAP_NET_ADMIN and
@@ -33,17 +33,27 @@ Exit codes:
   6  the iroh endpoint could not bind
   7  the --metrics-listen address could not bind
 Not fatal, retried: a missing kubeconfig, an unreachable apiserver, a list forbidden by
-the node authorizer, an own Node not yet registered or without a podCIDR.";
+the node authorizer, an own Node not yet registered or without a podCIDR, an unreadable
+roster, a --dns-listen address that does not exist yet.";
 
-pub const RUN_HELP: &str = "\
-Node annotations written (kube mode) and read on every Node:
+pub const RUN_HELP: &str = r#"Node annotations written (kube mode) and read on every Node:
   socialweb.computer/mesh-endpoint  iroh endpoint id, 64 hex chars
   socialweb.computer/mesh-did       did:key of the same ed25519 key
   socialweb.computer/mesh-addrs     optional, read only: comma-separated direct ip:port hints
+  socialweb.computer/mesh-roster    optional, read only on this node's own Node: the roster
+                                    location when --roster is not given
+
+Roster (--roster, a file path or an http(s) URL, re-read every 5 s; a getRecord response's
+"value" is taken as the roster):
+  {"peers": [{"name": "vm-a", "endpoint": "<64 hex>", "cidrs": ["10.44.0.1/32"],
+              "addrs": ["203.0.113.7:47001"], "names": ["plc"]}]}
+Without --kubeconfig the roster is the whole peer list and this node is the entry with its
+own endpoint; with --kubeconfig the roster adds the entries no Node names (by name or endpoint).
+DNS (--dns-zone): <name>.<zone> and <names>.<zone> answer each cidr's network address.
 
 Status (loopback): GET /status (JSON), /metrics (Prometheus text), /healthz (200 once ready).
 Ready means: tun up, own Node seen with a podCIDR, own annotations visible (kube mode), routes
-synced. READY=1 is sent to $NOTIFY_SOCKET then (systemd Type=notify).";
+synced. READY=1 is sent to $NOTIFY_SOCKET then (systemd Type=notify)."#;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -112,28 +122,55 @@ pub fn parse_relay(text: &str) -> Result<RelayChoice, String> {
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("source").required(true).args(["kubeconfig", "peers_file"])))]
 pub struct RunArgs {
     #[arg(
         long,
         env = "SOCIALWEB_MESHD_NODE_NAME",
-        help = "This node's Kubernetes Node name (the kubelet's --hostname-override / node name)"
+        help = "This node's Kubernetes Node name (the kubelet's --hostname-override / node name); without --kubeconfig only a label until the roster names this endpoint"
     )]
-    pub node_name: String,
+    pub node_name: Option<String>,
 
     #[arg(
         long,
         env = "SOCIALWEB_MESHD_KUBECONFIG",
+        requires = "node_name",
         help = "Kubelet kubeconfig: reads all Nodes, patches its own Node's annotations"
     )]
     pub kubeconfig: Option<PathBuf>,
 
     #[arg(
         long,
-        env = "SOCIALWEB_MESHD_PEERS_FILE",
-        help = "Test mode instead of --kubeconfig: a NodeList JSON file (kubectl get nodes -o json shape), re-read when it changes; nothing is written"
+        env = "SOCIALWEB_MESHD_ROSTER",
+        required_unless_present = "kubeconfig",
+        help = "Roster file path or http(s) URL; the peer list without --kubeconfig, extra peers with it"
     )]
-    pub peers_file: Option<PathBuf>,
+    pub roster: Option<String>,
+
+    #[arg(
+        long,
+        env = "SOCIALWEB_MESHD_DNS_ZONE",
+        requires = "dns_listen",
+        help = "Serve the roster's names under this zone"
+    )]
+    pub dns_zone: Option<String>,
+
+    #[arg(
+        long,
+        env = "SOCIALWEB_MESHD_DNS_LISTEN",
+        value_delimiter = ',',
+        requires = "dns_zone",
+        help = "DNS listen address(es), UDP and TCP; bound once the address exists"
+    )]
+    pub dns_listen: Vec<SocketAddr>,
+
+    #[arg(
+        long,
+        env = "SOCIALWEB_MESHD_DNS_UPSTREAM",
+        value_delimiter = ',',
+        requires = "dns_zone",
+        help = "Forward names outside the zone to these ip:port; none answers REFUSED"
+    )]
+    pub dns_upstream: Vec<SocketAddr>,
 
     #[arg(long, env = "SOCIALWEB_MESHD_SECRET_FILE", default_value = DEFAULT_SECRET_FILE, help = "ed25519 secret as 64 hex chars (the IROH_SECRET encoding); generated 0600 if absent")]
     pub secret_file: PathBuf,
@@ -187,12 +224,11 @@ mod tests {
     }
 
     #[test]
-    fn run_needs_exactly_one_of_kubeconfig_and_peers_file() {
+    fn run_needs_a_kubeconfig_or_a_roster() {
         let base = ["socialweb-meshd", "run", "--node-name", "a"];
         assert!(Cli::try_parse_from(base).is_err());
-        let mut both = base.to_vec();
-        both.extend(["--kubeconfig", "k", "--peers-file", "p"]);
-        assert!(Cli::try_parse_from(both).is_err());
+        assert!(Cli::try_parse_from(["socialweb-meshd", "run", "--roster", "r"]).is_ok());
+        assert!(Cli::try_parse_from(["socialweb-meshd", "run", "--kubeconfig", "k"]).is_err());
         let mut kube = base.to_vec();
         kube.extend([
             "--kubeconfig",

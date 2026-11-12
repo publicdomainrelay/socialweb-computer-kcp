@@ -1,16 +1,16 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use tokio::sync::watch;
 
 use crate::kube::{KubeClient, KubeError, NodeEvent};
-use crate::nodes::{NodeList, NodeSet};
+use crate::nodes::{Node, NodeSet};
+use crate::roster::{ANNOTATION_ROSTER, Roster};
 use crate::routes::{ANNOTATION_DID, ANNOTATION_ENDPOINT, EndpointBytes, RouteTable};
 use crate::stats::Stats;
 
-pub const PEERS_FILE_POLL: Duration = Duration::from_secs(2);
 pub const KUBE_RETRY_MIN: Duration = Duration::from_secs(1);
 pub const KUBE_RETRY_MAX: Duration = Duration::from_secs(30);
 pub const ANNOTATE_RETRY: Duration = Duration::from_secs(5);
@@ -40,16 +40,13 @@ impl std::fmt::Display for SourceError {
 }
 
 fn publish(
+    self_name: &str,
     me: &SelfIdentity,
-    nodes: &NodeSet,
+    nodes: &[Node],
     tx: &watch::Sender<Arc<RouteTable>>,
     stats: &Stats,
 ) -> Arc<RouteTable> {
-    let table = Arc::new(RouteTable::compute(
-        &me.node_name,
-        &me.endpoint,
-        &nodes.to_vec(),
-    ));
+    let table = Arc::new(RouteTable::compute(self_name, &me.endpoint, nodes));
     Stats::bump(&stats.node_list_updates);
     let changed = **tx.borrow() != *table;
     if changed {
@@ -64,37 +61,60 @@ fn publish(
     table
 }
 
-pub fn read_peers_file(path: &Path) -> Result<NodeList, String> {
-    let bytes = std::fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|err| format!("parse {} as a NodeList: {err}", path.display()))
-}
-
-fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok()
-}
-
-pub async fn run_peers_file(
-    path: PathBuf,
+pub async fn run_routes(
     me: SelfIdentity,
+    mut kube: Option<watch::Receiver<Arc<Vec<Node>>>>,
+    mut roster: watch::Receiver<Arc<Roster>>,
+    location: Option<watch::Sender<Option<String>>>,
     tx: watch::Sender<Arc<RouteTable>>,
     stats: Arc<Stats>,
-    first: NodeList,
 ) {
-    let mut seen = modified(&path);
-    publish(&me, &NodeSet::from_list(first), &tx, &stats);
     loop {
-        tokio::time::sleep(PEERS_FILE_POLL).await;
-        let now = modified(&path);
-        if now == seen {
-            continue;
-        }
-        seen = now;
-        match read_peers_file(&path) {
-            Ok(list) => {
-                publish(&me, &NodeSet::from_list(list), &tx, &stats);
+        let current = Arc::clone(&roster.borrow_and_update());
+        match kube.as_mut() {
+            Some(kube) => {
+                let nodes = Arc::clone(&kube.borrow_and_update());
+                let table = publish(
+                    &me.node_name,
+                    &me,
+                    &current.beside(&nodes, &me.endpoint_hex),
+                    &tx,
+                    &stats,
+                );
+                if !table.self_view.seen {
+                    tracing::info!(event = "own_node_waiting", node = %me.node_name);
+                }
+                if let Some(location) = &location {
+                    let wanted = nodes
+                        .iter()
+                        .find(|node| node.metadata.name == me.node_name)
+                        .and_then(|node| node.annotation(ANNOTATION_ROSTER))
+                        .map(str::to_string);
+                    location.send_if_modified(|old| {
+                        let changed = *old != wanted;
+                        *old = wanted.clone();
+                        changed
+                    });
+                }
             }
-            Err(err) => tracing::warn!(event = "peers_file_unreadable", error = %err),
+            None => match current.self_name(&me.endpoint_hex) {
+                Some(name) => {
+                    publish(&name, &me, &current.nodes(), &tx, &stats);
+                }
+                None => {
+                    publish(&me.node_name, &me, &[], &tx, &stats);
+                }
+            },
+        }
+        let kube_changed = async {
+            match kube.as_mut() {
+                Some(kube) => kube.changed().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            changed = kube_changed => if changed.is_err() { return },
+            changed = roster.changed() => if changed.is_err() { return },
         }
     }
 }
@@ -159,9 +179,7 @@ pub async fn run_annotator(
 
 pub async fn run_kube(
     kubeconfig: PathBuf,
-    me: SelfIdentity,
-    tx: watch::Sender<Arc<RouteTable>>,
-    stats: Arc<Stats>,
+    tx: watch::Sender<Arc<Vec<Node>>>,
 ) -> Result<(), SourceError> {
     let mut retry = KUBE_RETRY_MIN;
     loop {
@@ -197,10 +215,7 @@ pub async fn run_kube(
         retry = KUBE_RETRY_MIN;
         let version = list.metadata.resource_version.clone().unwrap_or_default();
         let mut nodes = NodeSet::from_list(list);
-        let table = publish(&me, &nodes, &tx, &stats);
-        if !table.self_view.seen {
-            tracing::info!(event = "own_node_waiting", node = %me.node_name);
-        }
+        tx.send_replace(Arc::new(nodes.to_vec()));
 
         let watch_started = tokio::time::Instant::now();
         let watched = client
@@ -217,7 +232,7 @@ pub async fn run_kube(
                     NodeEvent::Bookmark(_) | NodeEvent::Gone => false,
                 };
                 if dirty {
-                    publish(&me, &nodes, &tx, &stats);
+                    tx.send_replace(Arc::new(nodes.to_vec()));
                 }
             })
             .await;

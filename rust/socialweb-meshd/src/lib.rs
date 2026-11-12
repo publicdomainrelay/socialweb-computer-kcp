@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod daemon;
+pub mod dns;
 pub mod identity;
 pub mod kube;
 pub mod mesh;
@@ -7,6 +8,7 @@ pub mod netconf;
 pub mod nodes;
 pub mod notify;
 pub mod packet;
+pub mod roster;
 pub mod routes;
 pub mod source;
 pub mod stats;

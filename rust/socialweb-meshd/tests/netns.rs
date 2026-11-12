@@ -24,7 +24,6 @@ struct Side {
     secret: PathBuf,
     log: PathBuf,
     endpoint: String,
-    did: String,
     child: Option<Child>,
 }
 
@@ -163,17 +162,12 @@ fn plumb(side: &Side, peer_underlay_ns: Option<&str>) {
     ]);
 }
 
-fn node_json(side: &Side) -> serde_json::Value {
+fn peer_json(side: &Side) -> serde_json::Value {
     serde_json::json!({
-        "metadata": {
-            "name": side.node_name,
-            "annotations": {
-                "socialweb.computer/mesh-endpoint": side.endpoint,
-                "socialweb.computer/mesh-did": side.did,
-                "socialweb.computer/mesh-addrs": format!("{}:47001", side.underlay),
-            }
-        },
-        "spec": {"podCIDR": side.pod_cidr, "podCIDRs": [side.pod_cidr]}
+        "name": side.node_name,
+        "endpoint": side.endpoint,
+        "cidrs": [side.pod_cidr],
+        "addrs": [format!("{}:47001", side.underlay)],
     })
 }
 
@@ -181,8 +175,7 @@ fn start(bin: &str, side: &mut Side, peers: &Path) {
     let log = File::create(&side.log).expect("log file");
     let child = Command::new("sudo")
         .args(["-n", "ip", "netns", "exec", &side.node_ns, bin, "run"])
-        .args(["--node-name", side.node_name])
-        .arg("--peers-file")
+        .arg("--roster")
         .arg(peers)
         .arg("--secret-file")
         .arg(&side.secret)
@@ -245,7 +238,6 @@ fn side(dir: &Path, tag: &str, node_name: &'static str, underlay: &'static str, 
         secret: dir.join(format!("{tag}.secret")),
         log: dir.join(format!("{tag}.log")),
         endpoint: String::new(),
-        did: String::new(),
         child: None,
     }
 }
@@ -259,7 +251,7 @@ fn two_meshd_in_two_netns_carry_ping_between_two_pod_cidrs() {
     let bin = bin_path.as_str();
     let dir = scratch_dir("netns");
     let mut rig = Rig {
-        peers: dir.join("peers.json"),
+        peers: dir.join("roster.json"),
         a: side(&dir, "a", "node-a", "10.199.0.1", 1),
         b: side(&dir, "b", "node-b", "10.199.0.2", 2),
         dir,
@@ -271,13 +263,9 @@ fn two_meshd_in_two_netns_carry_ping_between_two_pod_cidrs() {
     plumb(&rig.a, Some(&b_ns));
     plumb(&rig.b, None);
 
-    (rig.a.endpoint, rig.a.did) = identity(bin, &rig.a.secret);
-    (rig.b.endpoint, rig.b.did) = identity(bin, &rig.b.secret);
-    let peers = serde_json::json!({
-        "apiVersion": "v1",
-        "kind": "NodeList",
-        "items": [node_json(&rig.a), node_json(&rig.b)],
-    });
+    rig.a.endpoint = identity(bin, &rig.a.secret).0;
+    rig.b.endpoint = identity(bin, &rig.b.secret).0;
+    let peers = serde_json::json!({"peers": [peer_json(&rig.a), peer_json(&rig.b)]});
     std::fs::write(&rig.peers, peers.to_string()).unwrap();
 
     let peers_path = rig.peers.clone();

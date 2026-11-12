@@ -16,7 +16,6 @@ pub const REQUEST_LIMIT: usize = 8192;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct StatusInfo {
-    pub node: String,
     pub endpoint_hex: String,
     pub did: String,
     pub tun: String,
@@ -69,7 +68,7 @@ impl StatusInfo {
             .unwrap_or_default();
         serde_json::json!({
             "ready": self.is_ready(),
-            "node": self.node,
+            "node": table.self_node,
             "endpoint": self.endpoint_hex,
             "did": self.did,
             "tun": self.tun,

@@ -6,13 +6,15 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 
 use crate::cli::{
-    EXIT_ENDPOINT, EXIT_IDENTITY_OR_PEERS, EXIT_KUBE, EXIT_NETWORK_DEVICE, EXIT_OK, EXIT_RUNTIME,
-    EXIT_STATUS_LISTEN, IdentityArgs, RunArgs,
+    EXIT_ENDPOINT, EXIT_IDENTITY, EXIT_KUBE, EXIT_NETWORK_DEVICE, EXIT_OK, EXIT_RUNTIME,
+    EXIT_STATUS_LISTEN, EXIT_USAGE, IdentityArgs, RunArgs,
 };
+use crate::dns::{self, DnsOptions};
 use crate::identity::{self, Loaded};
 use crate::mesh::{self, Connections, EndpointOptions, Mesh};
 use crate::netconf::NetConf;
 use crate::notify::sd_notify;
+use crate::roster::{self, Roster};
 use crate::routes::RouteTable;
 use crate::source::{self, SelfIdentity, SourceError};
 use crate::stats::Stats;
@@ -53,7 +55,7 @@ pub fn identity(args: &IdentityArgs) -> i32 {
         }
         Err(err) => {
             eprintln!("socialweb-meshd: {err}");
-            EXIT_IDENTITY_OR_PEERS
+            EXIT_IDENTITY
         }
     }
 }
@@ -81,27 +83,30 @@ fn ready_now(table: &RouteTable, me: &SelfIdentity, kube: bool) -> bool {
 pub async fn run(args: RunArgs) -> i32 {
     let loaded = match identity::load_or_create(&args.secret_file) {
         Ok(loaded) => loaded,
-        Err(err) => return fatal(EXIT_IDENTITY_OR_PEERS, "secret_unusable", err),
+        Err(err) => return fatal(EXIT_IDENTITY, "secret_unusable", err),
     };
     if matches!(loaded, Loaded::Created(_)) {
         tracing::info!(event = "secret_created", path = %args.secret_file.display());
     }
     let id = loaded.identity().clone();
     let me = SelfIdentity {
-        node_name: args.node_name.clone(),
+        node_name: args
+            .node_name
+            .clone()
+            .unwrap_or_else(|| id.endpoint_id_hex()),
         endpoint: id.public(),
         endpoint_hex: id.endpoint_id_hex(),
         did: id.did_key(),
     };
     tracing::info!(event = "identity", node = %me.node_name, endpoint = %me.endpoint_hex, did = %me.did);
 
-    let first_peers = match &args.peers_file {
-        Some(path) => match source::read_peers_file(path) {
-            Ok(list) => Some(list),
-            Err(err) => return fatal(EXIT_IDENTITY_OR_PEERS, "peers_file_unusable", err),
-        },
-        None => None,
+    let http = match roster::http_client() {
+        Ok(http) => http,
+        Err(err) => return fatal(EXIT_RUNTIME, "http_client_failed", err),
     };
+    if let Some(Err(err)) = args.dns_zone.as_deref().map(dns::origin) {
+        return fatal(EXIT_USAGE, "dns_zone_invalid", err);
+    }
     if let Some(Err(err)) = args.kubeconfig.as_deref().map(source::kube_client) {
         return fatal(EXIT_KUBE, "kubeconfig_unusable", err);
     }
@@ -174,16 +179,16 @@ pub async fn run(args: RunArgs) -> i32 {
     let (routes_tx, routes_rx) = watch::channel(Arc::new(initial));
 
     let info = Arc::new(StatusInfo {
-        node: me.node_name.clone(),
         endpoint_hex: me.endpoint_hex.clone(),
         did: me.did.clone(),
         tun: tun.name().to_string(),
         mtu: args.mtu,
-        source: if args.kubeconfig.is_some() {
-            "kube".to_string()
-        } else {
-            "peers-file".to_string()
-        },
+        source: match (&args.kubeconfig, &args.roster) {
+            (Some(_), Some(_)) => "kube+roster",
+            (Some(_), None) => "kube",
+            _ => "roster",
+        }
+        .to_string(),
         ready: Default::default(),
         routes: routes_rx.clone(),
         connections: Arc::clone(&connections),
@@ -210,30 +215,40 @@ pub async fn run(args: RunArgs) -> i32 {
             routes_rx.clone(),
         ))
     });
-    let mut source_task = match (&args.kubeconfig, first_peers) {
-        (Some(path), _) => tokio::spawn(source::run_kube(
-            path.clone(),
-            me.clone(),
-            routes_tx,
-            Arc::clone(&stats),
-        )),
-        (None, Some(first)) => {
-            let path = args.peers_file.clone().unwrap_or_default();
-            let me = me.clone();
-            let stats = Arc::clone(&stats);
-            tokio::spawn(async move {
-                source::run_peers_file(path, me, routes_tx, stats, first).await;
-                Ok::<(), SourceError>(())
-            })
+    let (roster_tx, roster_rx) = watch::channel(Arc::new(Roster::default()));
+    let (location_tx, location_rx) = watch::channel(args.roster.clone());
+    let (kube_tx, kube_rx) = watch::channel(Arc::new(Vec::new()));
+    let kubeconfig = args.kubeconfig.clone();
+    let routes = source::run_routes(
+        me.clone(),
+        kube_mode.then_some(kube_rx),
+        roster_rx.clone(),
+        (kube_mode && args.roster.is_none()).then_some(location_tx),
+        routes_tx,
+        Arc::clone(&stats),
+    );
+    let mut source_task = tokio::spawn(async move {
+        tokio::select! {
+            () = routes => Ok(()),
+            () = roster::run(http, location_rx, roster_tx) => Ok(()),
+            result = async {
+                match kubeconfig {
+                    Some(path) => source::run_kube(path, kube_tx).await,
+                    None => std::future::pending().await,
+                }
+            } => result,
         }
-        (None, None) => {
-            return fatal(
-                EXIT_RUNTIME,
-                "no_source",
-                "neither --kubeconfig nor --peers-file",
-            );
-        }
-    };
+    });
+    let mut dns_task = args.dns_zone.clone().map(|zone| {
+        tokio::spawn(dns::run(
+            DnsOptions {
+                listen: args.dns_listen.clone(),
+                zone,
+                upstream: args.dns_upstream.clone(),
+            },
+            roster_rx.clone(),
+        ))
+    });
 
     let sync_info = Arc::clone(&info);
     let sync_stats = Arc::clone(&stats);
@@ -296,6 +311,16 @@ pub async fn run(args: RunArgs) -> i32 {
                 None => std::future::pending().await,
             }
         } => source_exit(result, "annotator"),
+        result = async {
+            match dns_task.as_mut() {
+                Some(handle) => handle.await,
+                None => std::future::pending().await,
+            }
+        } => match result {
+            Ok(Ok(())) => fatal(EXIT_RUNTIME, "task_stopped", "dns ended"),
+            Ok(Err(err)) => fatal(EXIT_RUNTIME, "dns_failed", err),
+            Err(err) => fatal(EXIT_RUNTIME, "task_panicked", format!("dns: {err}")),
+        },
     };
     let _ = sd_notify("STOPPING=1");
     connections.close_all();
