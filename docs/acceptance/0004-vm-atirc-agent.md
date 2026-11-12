@@ -16,23 +16,20 @@ endorsements and grants and tombstones both DIDs.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last run: 2026-11-11 12:49-13:50Z, kcp e496cbff (release d9438c15), atirc 9e83813, no bidders list (winner hat-8): **FAIL**.
-  (1) alice by QR (`cli-agent-1794401350`): Held 12:50:51Z; mesh key + association request entry in the bundle, `/etc/atirc/*`
-  root 0600, unit inactive until agentStart (12:56:26Z); R2 reported 12:57:00Z, then `requester_association_failed` x10:
-  `link.ident.endorsement/<R2>: ScopeMissingError: Missing required scope "repo:link.ident.endorsement?action=update"` (the
-  renter writes the endorsement with putRecord; the optional scope is create + delete): no OAuth renter can endorse R2.
-  (2) alice pdsAccount (`cli-agent-1794402927`): Held 13:16:49Z, agentStart 13:17:06Z, `requester_association_written`
-  13:17:36Z (grant contract-scoped, `expiresAt` accept + 24 h, endorsement `{agent}`), `requester_agent_identity` 13:17:36Z; but
-  the guest's `/run/socialweb-r2/association-ref` stays empty (`/etc/socialweb-computer/association-ref` holds the ref): the
-  guest agent mirrors the ref only when `r2-atirc.env` is non-empty, and a token-less `--agent` contract has none, so R2 waits
-  for the ref forever and never writes the agent's grant, endorsement and peer record (walk of the agent: roots [agent]).
-  With the ref copied by hand (a workaround: not a pass) the chain verified in 7 s (ancestors R2 depth 1, alice depth 2,
-  `expiresAt` = the grant's), `atirc peer show` owner alice, the agent came online after the owner node was restarted with
-  `--peer`, messages crossed both ways and `<nick>: uname -m` was answered in 3.9 s. Release: the renter waited the full
-  `GuestRequesterReleaseTimeout` (24 min, `requester_guest_requester_release_timeout`: identity-only R2 never answers
-  r2Release; both runs), then deleted the endorsement and grant (RecordNotFound x3) and tombstoned R2 and the agent with its
-  rotation key (`requester_tombstoned ... by=the renter rotation key`; 2 PLC ops per DID, `plc_tombstone`); hosts empty.
-  Also: the pdsAccount renter's RemoteRepo controller logs `Reconciler error` AuthMissing 401 (15x)
+- Last pass: 2026-11-12 17:16-17:29Z, kcp 60d0d3b7 (release 0b68ceeb, rollout 15), atirc 9e83813, alice by QR
+  (`cli-agent-1794503795`), no bidders list (winner hat-8), `--agent-config` (claude on the deepseek model), no workaround.
+  Held 17:18:24Z; before agentStart both units inactive, `/etc/atirc/*` root 0600, r2 RSS 12.8 MiB. agentStart 17:18:36Z;
+  R2 reported 17:19:13Z, `requester_association_written` 17:19:14Z (grant contract-scoped, `expiresAt` accept + 24 h,
+  endorsement `{agent}`), `requester_agent_identity` 17:19:14Z; the ref reached `/run/socialweb-r2` (no hand copy). Walk of
+  the agent: R2 depth 1, alice depth 2, roots [alice]; `atirc peer show` owner alice, `expiresAt` = the grant's; peer
+  record in the agent repo, no `lease`; rotationKeys [renter key, VM localPDS key] on both DIDs. The owner node (`--peer`)
+  lists the agent; `<nick> online` 17:22:47Z; messages both ways; `<nick>: uname -m` answered `x86_64` in 3.2 s. Release:
+  grant + endorsement RecordNotFound x3, both DIDs `plc_tombstone` by the guest (4 s after release), records 14/14, hosts
+  empty; the CLI stops 5 s after Released (`the guest's DIDs are tombstoned`). Open: the renter waits the full 3 min
+  (`requester_guest_requester_release_timeout`) because the bidder refuses the guest's `r2Released` (pitfalls).
+  On rollout 14 (kcp f482083c, 2026-11-11 16:07-16:21Z) the same flow passed with the renter tombstoning both DIDs after
+  2 min. Before: 2026-11-11 12:49-13:50Z, kcp e496cbff, **FAIL** (OAuth renters could not endorse R2, the association ref
+  was never mirrored, release waited 24 min; fixed in 94c4b74b, 982ba545, 51a9bbb8, 66339480)
 - Earlier pass: 2026-11-11 04:00-04:05Z CLI, alice (pdsAccount) on a prod bidder, rollout 11 (kcp 06d04283, atirc 2de8b6c, guest atirc fecce97e), `--agent-config` (claude on the deepseek model), owner node `atirc mesh run` as alice on hat-8 (`--peer <agent>`, both channels): no mint, no token in the bundle, files root 0600, unit inactive until agentStart; the agent carries `#johnandersen777_bsky_social` and its own `#<label>-<rkey>_aliceoa_bsky_social` and monitors with `atirc mesh sub --others`; online on both 26 s after agentStart; `uname -m` on the owner channel answered `x86_64` and `hostname` on its own channel (1:1) answered there, both 6 s after posting; a browser (atlibs-atirc, headless Chrome over WebRTC to the owner node) asked `nproc`, answered in 3 s; release: peer record and lease RecordNotFound x3, hosts empty. That pass predates the ident.link cut-over (renter-repo peer record + lease): not yet re-run on the flow below
 
 ```mermaid
@@ -189,7 +186,9 @@ wait the event `Published`, see the agent in the owner node's peers, **Release**
 | guest has no `atirc mesh` | the bidder serves an older socialweb-guest-downloads; roll the bidder to a build with the `assets.atirc` cargosrc pin |
 | oauthQr bidder SessionExpired after rollout | scope added to Bidder/RequesterOAuthScope: re-sign every OAuth identity (announce before tagging) |
 | harness never answers | the harness exited (journalctl -u atirc-agent), claude still installing (give it ~1 min), or a wrong model / baseUrl / apiKey in the agent config |
-| `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | the renter writes the endorsement with putRecord; the optional scope grants create + delete only (kcp e496cbff, OAuth renters); fixed in 94c4b74b (createRecord), re-run pending |
-| R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | the guest agent mirrors the ref only when `r2-atirc.env` is non-empty; `--agent` contracts are token-less (kcp e496cbff); fixed in 982ba545, re-run pending |
-| release takes 24 min, `requester_guest_requester_release_timeout` | an identity-only R2 never answers r2Release (kcp e496cbff); fixed in 51a9bbb8 (answer on stop, renter waits 2 min), re-run pending |
+| `requester_association_failed` `Missing required scope "repo:link.ident.endorsement?action=update"` | kcp e496cbff wrote the endorsement with putRecord; fixed in 94c4b74b (createRecord), passed 2026-11-11 |
+| R2 `waiting for the association ref` forever, `/run/socialweb-r2/association-ref` empty | kcp e496cbff mirrored the ref only with a non-empty `r2-atirc.env`; fixed in 982ba545, passed 2026-11-11 |
+| release waits 3 min, `requester_guest_requester_release_timeout`; guest journal `the bidder refused a guest event` `r2Released` 400 `message is printable ASCII of at most 512 bytes` | the identity-only R2 retires in ~7 s, but the bidder's report check (`internal/guestidentity` `printableASCII`) rejects the space in the guest's `r2Released` message; harmless (the DIDs are already tombstoned), fix pending (bidder rollout) |
+| the CLI waits 3 min after Released and logs `the guest's DIDs are not tombstoned` though they are | kcp before 978ef53a checked for HTTP 410; plc.directory answers 404 for a tombstone; fixed (reads `log/last`) |
+| guest journal during release | `run request ssh` ends when the contract leaves Held; stream it with plain `ssh` through the same `dumbpipe connect <ticket>` ProxyCommand the CLI's own ssh process uses |
 | release after page reload slow (20-38 s) | requester start after boot + release not first; fixed rc134 (release-first on resume, ~17 s click -> Released) |

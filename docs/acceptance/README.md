@@ -31,7 +31,7 @@ release everything you rent.
 - Policies: `bidder-tangled-vouch` on every prod bidder, `requester-tangled-vouch` on requesters; never `open` unless the owner sets it
 - Evidence comes from three sides: requester log, host watcher ([0008](0008-host-observer.md)), atirc-dev (`revocations.ndjson`); plus requester-repo getRecord at computed keys (RecordNotFound after release or termination)
 - Token order: revoke strictly before `vm.terminated`; the lease kills it anyway once termination exists
-- No secrets anywhere: no tokens, passwords, cookies, sign-in URLs, creds file contents; creds files stay mode 0600 and are read only inside the one signing command
+- No secrets anywhere: no tokens, passwords, cookies, session secrets or creds file contents in any log, terminal or post; never paste a sign-in URL anywhere (the CLI's own log prints the short-lived QR sign-in URL by design); creds files stay mode 0600 and are read only inside the one signing command
 - A workaround is reported as one; the run is re-done without it before the item counts as passed
 
 ## Which runbook for which change

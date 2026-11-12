@@ -39,6 +39,8 @@ spec:
     - tag: ssh
       port: 22
       transport: webrtc
+    sshAuthorizedKeys:
+    - ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop
     agent:
       envFile: /etc/atirc/atirc.env
   secrets:

@@ -4,6 +4,17 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
+- Last run (sections 3-4): 2026-11-12 18:11-18:21Z, kcp 60d0d3b7 (rollout 15), atirc 9e83813, alice. Section 3 PASS: the
+  minting smoke `ssh aliceoa.bsky.social@socialweb.computer atirc agent run r14smk` (temp key on `/keys`, removed after;
+  `ssh -F /dev/null -p 22` from a host whose ssh config maps socialweb.computer elsewhere): `requester_session_atirc_minted`
+  = `token_minted` `r14smk.aliceoa.bsky.social` 18:19:00.96Z, the guest's child `r14smk.r14smk.aliceoa.bsky.social`
+  18:19:02.95Z, `requester_session_atirc_revoked` = `token_revoked` 18:19:05.62Z (revocations.ndjson), the bidder's
+  termination 18:19:06.86Z (revoke 1.2 s before), Released 18:19:06.88Z. Section 4 ssh gateway agent: **FAIL** on the
+  JOIN: the guest's `atirc agent run` exits `no harness configured` (the ssh gateway path gives the guest no agent config).
+  Page / CLI token-less: covered by kcp [0004](0004-vm-atirc-agent.md) 2026-11-12 (no mint; this section's text still
+  describes the pre-ident.link peer record in the requester repo with a lease: upstream doc fix pending). Web chat: `/chat`
+  200 signed out with no session injected, root links it, revoke 401 without auth and with a foreign Origin. Not run:
+  send/recv pipes, lease death
 - Last run: 2026-11-11 13:11-13:22Z, atirc 9e83813 (upstream doc at 9e83813 run as well): section 1 pass on hat-8 (`cargo fmt`
   clean, `cargo test` 17 + 238 passed, 0 failed; `.githooks/pre-commit` green: `mesh::` 17 passed, `test_mesh_loopback.py`
   2 OK, webrtc loopback skipped without an atlibs-webrtc checkout); section 2 pass on irc.fedfork.com (`GET /` curl 200

@@ -9,7 +9,12 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: 2026-11-10 on prod as bob (bidder hat-9): A, B and C pass (readings 2026-11-10 below); earlier
+- Last pass: 2026-11-12 17:47-18:08Z on prod as bob, kcp 60d0d3b7 (release 0b68ceeb, rollout 15), path A, NO
+  `bidderDids` pin (requester discovery; winners hat-8, then hat-9): vm1 iroh + webrtc, sbx1, agent1 with its harness from
+  the pre-written bundle (step A4b): association written 36 s after agent-start, `online` +136 s, messages both ways,
+  `uname -m` answered in 2.9 s; delete: every contract record and agent1's grant + endorsement RecordNotFound x3, both
+  DIDs `plc_tombstone`, hosts empty. 2026-11-11 (kcp f482083c, no pin): A, B (hat-7) and C (hat-8) pass except agent1 (no
+  association on a declarative contract: fixed in 60d0d3b7). Earlier: 2026-11-10 as bob (bidder hat-9): A, B and C;
   2026-11-01: A and C on rc159 (`ec0f4849`), B on the rc160 CLI (`840f0437`). Prod readings below
 
 ```mermaid
@@ -73,6 +78,22 @@ minutes before the first apply when a contract was denied before (verdicts are c
    operator sign-in of [../bidder.md](../bidder.md)), or `goat` from the operator account; check with `goat get
    "at://<operator did>/sh.tangled.graph.vouch/<requester did>" | jq -r .kind` -> `vouch`. When the write needs the
    owner's account, it is owner-only: ask the owner to write it; an agent does not.
+4b. agent1's harness (optional; without it the agent joins the mesh but nothing answers): write agent1's bundle into the
+   requester's own OpenBao before the apply, with the placeholder `/etc/atirc/atirc.env` and an atirc agent config (as
+   [0004](0004-vm-atirc-agent.md) `--agent-config`; mode 0600 file, never printed) at `/etc/atirc/config.toml`; a
+   bundle that is there is kept, and the requester adds the association entries itself:
+
+   ```bash
+   D=$ST/requesters/mp/dev/mp/openbaoservers/requester/openbao
+   BAO=$(find ~/.cache/socialweb-computer/runtime -maxdepth 2 -name bao -type f | head -1)
+   export BAO_ADDR=$(kubectl get openbaoservers.socialweb.computer requester -o jsonpath='{.status.address}')
+   export BAO_CACERT=$D/tls/ca.crt BAO_CLIENT_CERT=$D/clients/requester/client.crt BAO_CLIENT_KEY=$D/clients/requester/client.key
+   (umask 077; jq -n --rawfile c ~/.config/atirc/config.toml '[{path: "/etc/atirc/atirc.env", value: "", mode: "0600"},
+     {path: "/etc/atirc/config.toml", value: $c, mode: "0600"}]' > "$ST/agent1-bundle.json")
+   BAO_TOKEN=$($BAO write -field=token auth/cert/login name=requester) \
+     $BAO kv put -mount=requester contracts/einfra-mixedprod-agent1/secrets bundle=@"$ST/agent1-bundle.json" >/dev/null
+   rm -f "$ST/agent1-bundle.json"
+   ```
 5. Apply: `sed -e "s|ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop|$(cat "$(jq -r .sshPublicKey
    "$ST/requesters/mp/ready.json")")|" -e "s/REPLACE-BIDDER-DID/<bidder did>/" examples/infra/mixed-prod.yaml | kubectl
    apply -f -`; `kubectl wait ephemeralinfras.socialweb.computer/mixedprod --for=jsonpath='{.status.phase}'=Deployed
@@ -86,8 +107,9 @@ minutes before the first apply when a contract was denied before (verdicts are c
    at rkey = the in-VM R2 DID; the agent's peer record is R2's co-located account's, no record in the requester repo
    names it, [0004](0004-vm-atirc-agent.md)); then `sed -e
    's/quickstart-agent-agent1-start/mixedprod-agent1-start/' -e 's/einfra-quickstart-agent-agent1/einfra-mixedprod-agent1/'
-   examples/infra/agent-start.yaml | kubectl apply -f -` (ContractEvent `Submitted`). The owner mesh node's view of the
-   agent (`atirc mesh peers`, pub/sub both ways) is [0004](0004-vm-atirc-agent.md).
+   examples/infra/agent-start.yaml | kubectl apply -f -` (ContractEvent `Submitted`). The owner mesh node (`atirc mesh run --peer <requester_agent_identity peer>` as the requester
+   account) lists the agent and sees `online: <nick>`; pub/sub both ways and a prompt as [0004](0004-vm-atirc-agent.md)
+   (agent1 has `sshAuthorizedKeys` for the guest side). Without step A4b the agent has no harness and never answers.
 9. Restart mid-run: Ctrl-C (`kill -INT` the `run requester`): the ready file is removed, the kcp stops, the state stays;
    start the same command again (the same options before `--`, such as `--network`; nothing after `--` is needed): same DID, ready file rewritten, every contract still
    Held, step 6 ssh works again, the agent still answers.
@@ -213,7 +235,7 @@ it; no second release is needed.
 - a Ctrl-C (A) or unit restart (B) mid-run keeps the DID and every Held contract Held
 - delete: every agent token revoked before `vm.terminated` (0004 pass criteria), the bidder host empty, every contract
   record of the requester RecordNotFound at its key, both vouch records still present
-- no token, password, key, cookie or sign-in URL on any terminal or in any log (plaintext check 0 on every log file)
+- no tokens, passwords or session secrets in any log (plaintext check 0 on every log file); the short-lived QR sign-in URL is printed by design
 
 ## Cleanup
 

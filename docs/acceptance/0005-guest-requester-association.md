@@ -12,17 +12,18 @@ is tombstoned.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md)
 
 - Plan [0036](../plans/0036-record-association.yaml) item V1 (A4-A8)
-- Last run: 2026-11-11 13:32-13:38Z, kcp e496cbff (release d9438c15), no bidders list (winner hat-8), alice pdsAccount (QR
-  renters cannot endorse R2 on this release: [0004](0004-vm-atirc-agent.md) last run (1)): **FAIL**. Outer Held 13:34:01Z;
-  no `requester_atirc_minted` (no r2 token any more); `run request r2 --r2-name r2-v1 --agent --hold` 13:34:03Z; R2 reported
-  13:34:31Z; `requester_association_written` 13:34:32Z (grant contract-scoped + endorsement at rkey = R2 DID). R2 then waits
-  for the ref forever: `/run/socialweb-r2/association-ref` stays empty because the guest agent mirrors it only when
-  `r2-atirc.env` is non-empty (same bug as 0004). With the ref copied by hand (a workaround: not a pass) R2 verified in 3 s
-  and went Ready, and its `--agent` contract failed at once: `refused: the atirc agent needs a requester handle that resolves
-  to <R2 DID>` (R2 handles never resolve, design decision 10); R2 exited and retired. Release of the outer contract:
-  `requester_guest_requester_released` true in 2.3 s, `requester_association_deleted`, `requester_guest_dids_tombstoned`,
-  `requester_contract_records_deleted` 14/14; the grant and endorsement RecordNotFound x3; R2 `plc_tombstone` (2 PLC ops);
-  host empty. Part B not run (blocked by the same mirror)
+- Last pass: 2026-11-11 16:22-16:46Z, kcp f482083c (release 4656466c, rollout 14), alice by QR, no bidders list
+  (winner hat-8 for every VM), no workaround. A (`cli-v1-1794414131`): outer Held 16:23:52Z; `run request r2 --r2-name r2-v1
+  --agent --hold` 16:24:09Z; R2 reported 16:24:39Z, `requester_association_written` 16:24:40Z, R2 Ready 16:24:46Z, its
+  `--agent` contract Held on the nested VM 16:25:52Z (no handle refusal); chain alice -> R2 -> nested R3 (identity-only) ->
+  nested agent, roots [alice]; the owner node lists the nested agent. Outer-only release: R2 released first
+  (`requester_guest_requester_released` ok after 5m24s: the nested identity-only R3 never answered its r2Release, see
+  pitfalls), `requester_guest_dids_tombstoned by=the guest`, records 14/14, grant + endorsement RecordNotFound x3, R2, R3
+  and the agent `plc_tombstone`, hosts empty. B (`cli-v1-1794415120`): R2 with `R2_COLOCATED=mesh1` Held 16:42:08Z; iroh
+  dumbpipe listening, crawl, R2 and mesh1 peer records (`iroh`, no `lease`), R2's grant + endorsement of mesh1, mesh1
+  `alsoKnownAs` [at://mesh1.<R2 handle>, agent-of/R2], walk roots [alice]; release: `r2Released` in 24 s, records 12/12,
+  both DIDs `plc_tombstone`. Step 5 (out-of-band loss) not re-run. Before: 2026-11-11 13:32-13:38Z, kcp e496cbff, **FAIL**
+  (ref never mirrored, R2's agent check wanted a resolving handle; fixed in 982ba545, e9f1de4a)
 - Earlier pass: part A rc128 cascade 2026-10-30 20:34Z (atirc-dev confirmed server-side); part B 2026-11-10 (see its end).
   Both predate the ident.link cut-over (old-shape association, mirror, peer `lease`): not yet re-run on the records below
 
@@ -117,7 +118,7 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
 2. R2's core log: AtprotoRecords `peer`, `colocated-mesh1-grant`, `colocated-mesh1-endorsement`,
    `colocated-mesh1-peer` written; `ingressproxy_iroh_dumbpipe_listening` exposure `svc-pds-pds-iroh`;
    `participant_request_crawl` relay `https://relay.mini-cloud-0002.chadig.com` ok true.
-3. From any host (helpers above, `M=<mesh1 DID>`): `rec "$R2" computer.socialweb.peer r2-<accept rkey>.<owner handle>` and
+3. From any host (helpers above, `M=<mesh1 DID>`): `rec "$R2" computer.socialweb.peer <R2 handle>` (`<label>-<rfp rkey>.<renter handle>`) and
    `rec "$M" computer.socialweb.peer mesh1.<R2 handle>` carry `iroh`, no `lease`;
    `rec "$R2" com.publicdomainrelay.temp.market.association "$M"` (same contract + expiresAt as R2's grant) and
    `rec "$R2" link.ident.endorsement "$M"`; `curl -s https://plc.directory/$M | jq -c .alsoKnownAs` is
@@ -180,6 +181,7 @@ bidder queues the guest event for R2's nested VM, and the release again leaves n
 | R2 token alive after release | revoke ran in a goroutine after Released and the CLI stopped kcp (rc126); fixed rc127 |
 | cross-contract clobber / impersonation via authority vouch | review HIGHs fixed: nonce proof record in the R2 repo; a grant at rkey = R2 DID bound to another contract is refused (`is bound to another contract`) |
 | R2 Ready but its RFPs denied, `internal association <R2>` no roots | the renter's endorsement is missing: `requester_endorsement_skipped` (the optional scope); sign the renter in again |
-| R2 waits for the association ref forever | `/run/socialweb-r2/association-ref` empty: the guest agent mirrors the ref only with a non-empty `r2-atirc.env` (kcp e496cbff); fixed in 982ba545, re-run pending |
-| R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | the requester's agent check still wants a resolving handle; R2 handles never resolve (kcp e496cbff); fixed in e9f1de4a (identlink.HandleOK), re-run pending |
+| R2 waits for the association ref forever (`/run/socialweb-r2/association-ref` empty) | kcp e496cbff mirrored the ref only with a non-empty `r2-atirc.env`; fixed in 982ba545, passed 2026-11-11 |
+| R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | kcp e496cbff; fixed in e9f1de4a (identlink.HandleOK), passed 2026-11-11 |
+| the cascade takes minutes; R2's log has the nested contract waiting on its own guest requester | a nested identity-only R2 (the `--agent` of R2's contract) answers `r2Release`, but the bidder refuses the message (`printableASCII` rejects spaces), so its renter waits its timeout ([0004](0004-vm-atirc-agent.md) pitfalls); fix pending |
 | denied accept, no receipt, guest stays | bounded denied-accept release (A8) |
