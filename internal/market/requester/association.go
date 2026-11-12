@@ -532,19 +532,22 @@ func (r *contractRunner) deleteAssociationRecord(ctx context.Context, rkey strin
 	r.log().Info("requester_association_deleted", "rkey", rkey)
 }
 
-func (r *contractRunner) deleteContractRecords(ctx context.Context) {
+func (r *contractRunner) deleteContractRecords(ctx context.Context, state *v1alpha1.NodeClaimContract) {
 	r.deleteRBAC(ctx)
 	r.deleteAssociation(ctx)
-	r.deleteMarketRecords(ctx)
+	r.deleteMarketRecords(ctx, state)
 }
 
-func (r *contractRunner) deleteMarketRecords(ctx context.Context) {
+func (r *contractRunner) deleteMarketRecords(ctx context.Context, state *v1alpha1.NodeClaimContract) {
 	q := r.q
 	if q.repo == nil {
 		return
 	}
+	if state == nil {
+		state = r.stateCopy()
+	}
 	var refs []commonv1.StrongRef
-	if state := r.stateCopy(); state != nil {
+	if state != nil {
 		if state.Release != nil {
 			refs = append(refs, state.Release.Event, state.Release.Payload)
 		}
