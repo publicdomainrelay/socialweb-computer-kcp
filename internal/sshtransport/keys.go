@@ -202,11 +202,21 @@ func (k *Keys) create(w http.ResponseWriter, r *http.Request) {
 		"createdAt": time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	agent := k.opts.Agents.AgentFor(who)
-	if _, err := agent.CreateRecord(r.Context(), who.DID, BadgeBlueKeysNSID, rkey, record); err != nil {
-		if !recordAlreadyExists(err) {
+	held, err := agent.GetRecord(r.Context(), who.DID, BadgeBlueKeysNSID, rkey)
+	switch {
+	case err != nil:
+		k.failed(w, who.DID, "read the key", err)
+		return
+	case held == nil:
+		if _, err := agent.CreateRecord(r.Context(), who.DID, BadgeBlueKeysNSID, rkey, record); err != nil {
 			k.failed(w, who.DID, "register the key", err)
 			return
 		}
+	case sameKeyRecord(held.Value, record):
+		k.log.Info("keys_already_registered", "did", who.DID, "rkey", rkey)
+		httpjson.Write(w, http.StatusOK, map[string]any{"rkey": rkey})
+		return
+	default:
 		writes := []gatewayhttp.Write{{Action: "update", Collection: BadgeBlueKeysNSID, Rkey: rkey, Record: record}}
 		if err := agent.ApplyWrites(r.Context(), who.DID, writes); err != nil {
 			k.failed(w, who.DID, "register the key", err)
@@ -255,9 +265,13 @@ func keyRkey(did string, parsed parsedPublicKey) string {
 	return string(out)
 }
 
-func recordAlreadyExists(err error) bool {
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "recordalreadyexists") || strings.Contains(text, "record already exists")
+func sameKeyRecord(held, want map[string]any) bool {
+	for _, field := range []string{"$type", "keyId", "name", "challenge", "service"} {
+		if stringOf(held[field]) != stringOf(want[field]) {
+			return false
+		}
+	}
+	return true
 }
 
 func stringOf(value any) string {

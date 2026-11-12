@@ -683,6 +683,26 @@ func (a *custodyAgent) ListRecords(ctx context.Context, did, collection string, 
 	return out, nil
 }
 
+func (a *custodyAgent) GetRecord(ctx context.Context, did, collection, rkey string) (*gatewayhttp.Record, error) {
+	client, err := a.xrpcClient()
+	if err != nil {
+		return nil, err
+	}
+	const nsid = "com.atproto.repo.getRecord"
+	payload, err := xrpc.Query[struct {
+		URI   string         `json:"uri"`
+		CID   string         `json:"cid"`
+		Value map[string]any `json:"value"`
+	}](ctx, client, nsid, url.Values{"repo": {did}, "collection": {collection}, "rkey": {rkey}})
+	if xerr, ok := errors.AsType[*xrpc.Error](err); ok && xerr.Name == "RecordNotFound" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, custodyXRPCError(http.MethodGet, nsid, err)
+	}
+	return &gatewayhttp.Record{URI: payload.URI, CID: payload.CID, Value: payload.Value}, nil
+}
+
 func (a *custodyAgent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
 	body := map[string]any{"repo": did, "collection": collection, "rkey": rkey, "record": record}
 	payload, err := custodyProcedure[struct {

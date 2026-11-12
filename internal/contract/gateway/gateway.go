@@ -59,6 +59,7 @@ type Write struct {
 type WebAccountAgent interface {
 	GetServiceAuth(ctx context.Context, aud, lxm string) (string, error)
 	ListRecords(ctx context.Context, did, collection string, limit int) ([]Record, error)
+	GetRecord(ctx context.Context, did, collection, rkey string) (*Record, error)
 	CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (RecordRef, error)
 	ApplyWrites(ctx context.Context, did string, writes []Write) error
 }

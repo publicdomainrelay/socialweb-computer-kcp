@@ -155,6 +155,25 @@ func (a *agent) ListRecords(ctx context.Context, did, collection string, limit i
 	return out, nil
 }
 
+func (a *agent) GetRecord(ctx context.Context, did, collection, rkey string) (*gatewayhttp.Record, error) {
+	repo, err := a.owners.repo(a.did)
+	if err != nil {
+		return nil, err
+	}
+	record, err := repo.GetRecord(ctx, did, collection, rkey)
+	if errors.Is(err, atprotorepo.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var value map[string]any
+	if err := json.Unmarshal(record.Value, &value); err != nil {
+		return nil, err
+	}
+	return &gatewayhttp.Record{URI: record.URI, CID: record.CID, Value: value}, nil
+}
+
 func (a *agent) CreateRecord(ctx context.Context, did, collection, rkey string, record map[string]any) (gatewayhttp.RecordRef, error) {
 	repo, err := a.bound(did)
 	if err != nil {
@@ -209,6 +228,10 @@ func (Unavailable) GetServiceAuth(ctx context.Context, aud, lxm string) (string,
 }
 
 func (Unavailable) ListRecords(ctx context.Context, did, collection string, limit int) ([]gatewayhttp.Record, error) {
+	return nil, ErrNoSession
+}
+
+func (Unavailable) GetRecord(ctx context.Context, did, collection, rkey string) (*gatewayhttp.Record, error) {
 	return nil, ErrNoSession
 }
 
