@@ -9,7 +9,10 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass: 2026-11-12 18:46-19:00Z on prod as bob, kcp cdd93727 (release 6380eee4, rollout 16), A and C, no pin (winner
+- Last run C: 2026-11-12 20:02-20:10Z, kcp ac51b91e (rollout 18): node Ready, `quickstart-k8s-ok`, the requester logs 0
+  ERROR (no ComponentLink errors: fixed in 363dd814); nodes 0 in 156 s; but the emptied
+  `computer.socialweb.infra/nodes-<hex>` mirror stayed in the repo (`infra_record_replaced` with 0 nodes; deleted by
+  hand), `self` went. Last pass: 2026-11-12 18:46-19:00Z on prod as bob, kcp cdd93727 (release 6380eee4, rollout 16), A and C, no pin (winner
   hat-8): agent1 online, `uname -m` answered in 2.9 s, delete in 12 s (`r2Released` 8.8 s), 45/45 RecordNotFound, `core.log`
   0 ERROR; C: node Ready, `quickstart-k8s-ok`, nodes 0 in 156 s, `computer.socialweb.infra/{self,nodes-...}` gone with the
   cluster (none left after the stop). Open: C's requester logs `Reconciler error` `bus: no accepted ComponentLink allows

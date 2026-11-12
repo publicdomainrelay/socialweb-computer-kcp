@@ -430,8 +430,18 @@ KC=$W/kubeconfig
 
 ### 3a. The page, a no-expiry kubeconfig, revoke
 
-Added 2026-11-12; not yet passed (needs the rollout carrying the k8s page). Do not press Sign out on the
-page as alice: it revokes every kubeconfig (`$KC` too) and ends the gateway's alice session.
+Last pass: 2026-11-12 20:13-20:17Z, kcp ac51b91e (rollout 18), alice, headless Chrome (`scripts/oauth-signin.ts
+--start-api --cookie-file`, then the page's own `/api/*` calls in the page context, puppeteer-core): consent page
+`k8s.socialweb.computer` for `@aliceoa.bsky.social`; cluster `r18c1` Ready 36 s after create; a 1 h and a no-expiry
+kubeconfig (`notAfter` 9999-12-31, `noExpiry: true`) both list namespaces (5) (`get --raw /readyz` answers NotFound
+through the kcp front for either: use `get ns`); `kubeconfigs` lists both; revoking the no-expiry one: `kubectl`
+refused at once (`You must be logged in to the server`), listed `revoked: true`, the 1 h one still works; deleting the
+cluster: the 1 h one refused within 1 s, the cluster list empty 16 s later. Do not press Sign out on the
+page as alice: it revokes every kubeconfig (`$KC` too) and ends the gateway's alice session (`DELETE /session` did
+that on this pass; alice signed in again at once with `oauth-signin.ts --start-api`).
+
+![consent](img/0001-k8s-page-consent.png) ![cluster ready](img/0001-k8s-page-02-cluster-ready.png)
+![kubeconfigs](img/0001-k8s-page-03-kubeconfigs.png) ![revoked](img/0001-k8s-page-04-revoked.png)
 
 The page signs in (its own `#handle` form), mints with `ttlSeconds` 0, lists and revokes:
 
