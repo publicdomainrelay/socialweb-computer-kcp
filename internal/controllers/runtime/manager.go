@@ -191,6 +191,7 @@ func (m *Manager) addExport(name string) {
 func (m *Manager) serveExport(ctx context.Context, name string) {
 	logger := m.logr.WithValues("export", name)
 	m.awaitKinds(ctx, name)
+	m.awaitEndpoints(ctx, name)
 	retry := newBackoff(ExportRetryFirst, DefaultBackoffMax)
 	for failures := 0; ctx.Err() == nil; failures++ {
 		p, err := apiexport.New(clusterConfig(m.base, m.exportWorkspace), name, apiexport.Options{Scheme: m.scheme, Log: &logger})

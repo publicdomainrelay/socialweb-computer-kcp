@@ -3,11 +3,12 @@ package kcpgvr
 import "k8s.io/apimachinery/pkg/runtime/schema"
 
 var (
-	Workspaces         = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
-	APIBindings        = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"}
-	APIExports         = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apiexports"}
-	APIResourceSchemas = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha1", Resource: "apiresourceschemas"}
-	LogicalClusters    = schema.GroupVersionResource{Group: "core.kcp.io", Version: "v1alpha1", Resource: "logicalclusters"}
+	Workspaces              = schema.GroupVersionResource{Group: "tenancy.kcp.io", Version: "v1alpha1", Resource: "workspaces"}
+	APIBindings             = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apibindings"}
+	APIExports              = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha2", Resource: "apiexports"}
+	APIResourceSchemas      = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha1", Resource: "apiresourceschemas"}
+	APIExportEndpointSlices = schema.GroupVersionResource{Group: "apis.kcp.io", Version: "v1alpha1", Resource: "apiexportendpointslices"}
+	LogicalClusters         = schema.GroupVersionResource{Group: "core.kcp.io", Version: "v1alpha1", Resource: "logicalclusters"}
 
 	ConfigMaps      = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 	Secrets         = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}

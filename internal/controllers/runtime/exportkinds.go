@@ -3,20 +3,29 @@ package runtime
 import (
 	"context"
 	"maps"
+	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	apisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 	apisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
+	conditionsv1alpha1 "github.com/kcp-dev/sdk/apis/third_party/conditions/apis/conditions/v1alpha1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/kcpgvr"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/kube"
 )
 
-const ExportKindsTimeout = time.Minute
+const (
+	ExportKindsTimeout = time.Minute
+
+	exportEndpointPoll = 200 * time.Millisecond
+)
 
 func (m *Manager) addKind(export string, obj client.Object) {
 	gvks, _, err := m.scheme.ObjectKinds(obj)
@@ -127,5 +136,58 @@ func (m *Manager) awaitBound(ctx context.Context, ws, export string, resources [
 	}
 	if _, err := kube.AwaitList(ctx, bindings, metav1.ListOptions{}, ExportKindsTimeout, boundAll); err != nil {
 		m.log.Warn("the APIExport provider starts before its binding serves every kind", "export", export, "workspace", ws, "err", err.Error())
+	}
+}
+
+func (m *Manager) awaitEndpoints(ctx context.Context, export string) {
+	c, err := kube.New(clusterConfig(m.base, m.exportWorkspace))
+	if err != nil {
+		return
+	}
+	hc, err := rest.HTTPClientFor(m.base)
+	if err != nil {
+		return
+	}
+	serves := func(url string) bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(url, "/")+"/clusters/*/apis", nil)
+		if err != nil {
+			return false
+		}
+		resp, err := hc.Do(req)
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}
+	endpointSlices := c.Resource(kcpgvr.APIExportEndpointSlices)
+	deadline := time.Now().Add(ExportKindsTimeout)
+	waiting := false
+	for ctx.Err() == nil {
+		s, err := kube.Get[apisv1alpha1.APIExportEndpointSlice](ctx, endpointSlices, export)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return
+		}
+		ready := err == nil && slices.ContainsFunc(s.Status.Conditions, func(c conditionsv1alpha1.Condition) bool {
+			return c.Type == apisv1alpha1.APIExportEndpointSliceURLsReady && string(c.Status) == "True"
+		})
+		if ready && !slices.ContainsFunc(s.Status.APIExportEndpoints, func(e apisv1alpha1.APIExportEndpoint) bool { return !serves(e.URL) }) {
+			if waiting {
+				m.log.Info("the APIExport's virtual workspace serves discovery", "export", export)
+			}
+			return
+		}
+		if !time.Now().Before(deadline) {
+			m.log.Warn("the APIExport provider starts before its virtual workspace serves discovery", "export", export, "timeout", ExportKindsTimeout.String())
+			return
+		}
+		if !waiting {
+			waiting = true
+			m.log.Info("the APIExport provider waits for its virtual workspace to serve discovery", "export", export)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(exportEndpointPoll):
+		}
 	}
 }
