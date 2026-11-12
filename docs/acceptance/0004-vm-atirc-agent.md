@@ -16,7 +16,9 @@ endorsements and grants and tombstones both DIDs.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-12 18:38-18:44Z, kcp cdd93727 (release 6380eee4, rollout 16), alice by QR, winner hat-8: the release
+- Last pass: 2026-11-12 21:13-21:18Z, kcp e190a3b1 (release 66f3bd4d, rollout 19), alice by QR, winner hat-8: association
+  +103 s, online +180 s, answer 3.0 s, `r2Released` 8.8 s after release, the CLI stops 5.3 s after Released, 0 ERROR.
+  Before: 2026-11-12 18:38-18:44Z, kcp cdd93727 (release 6380eee4, rollout 16), alice by QR, winner hat-8: the release
   answers at once: `r2Released` posted by the guest 8 s after release, `requester_guest_requester_released` 18:44:05Z,
   Released 0.7 s later, the CLI stops 5.5 s after Released; records 14/14, RecordNotFound x6, both DIDs `plc_tombstone` by
   the guest; requester `core.log` 0 ERROR (no startup noise). The full flow before it: 2026-11-12 17:16-17:29Z, kcp

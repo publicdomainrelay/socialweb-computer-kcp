@@ -4,6 +4,10 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
+- Last run (section 4, held session): 2026-11-12 21:25-21:33Z, kcp e190a3b1 (rollout 19): `ssh -o SetEnv=LC_SESSION=r19s
+  ... atirc agent run r19bot < <agent config>`: atirc in the guest, JOIN 21:27:34Z, answer 3.0 s; disconnect -> the
+  per-command token revoked 10 ms later; idle release 21:33:21Z -> Released (revoke 5.5 min before); the agent process
+  outlived the disconnect in the held VM (its token dead); SIGTERM removed `/tmp/atirc-agent-*` within 1 s.
 - Last run (section 4, ssh gateway agent): 2026-11-12 19:41-19:44Z, kcp 919c3bb4 (rollout 17), atirc e962ee8 in the guest,
   alice: `ssh -F /dev/null -p 22 aliceoa.bsky.social@socialweb.computer atirc agent run r17bot < <agent config>` (the agent
   config on stdin): `r17bot.aliceoa.bsky.social` minted 19:41:10Z, the child `r17bot.r17bot...` 19:41:14Z, JOIN 19:41:28Z,

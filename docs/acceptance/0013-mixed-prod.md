@@ -9,7 +9,8 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last run C: 2026-11-12 20:02-20:10Z, kcp ac51b91e (rollout 18): node Ready, `quickstart-k8s-ok`, the requester logs 0
+- Last pass C: 2026-11-12 21:12-21:19Z, kcp e190a3b1 (rollout 19, rc165 candidate): 0 ERROR, the infra `self` and
+  `nodes-<hex>` mirror gone 20 s after nodes 0 (8e849b42). Before: 2026-11-12 20:02-20:10Z, kcp ac51b91e (rollout 18): node Ready, `quickstart-k8s-ok`, the requester logs 0
   ERROR (no ComponentLink errors: fixed in 363dd814); nodes 0 in 156 s; but the emptied
   `computer.socialweb.infra/nodes-<hex>` mirror stayed in the repo (`infra_record_replaced` with 0 nodes; deleted by
   hand), `self` went. Last pass: 2026-11-12 18:46-19:00Z on prod as bob, kcp cdd93727 (release 6380eee4, rollout 16), A and C, no pin (winner
