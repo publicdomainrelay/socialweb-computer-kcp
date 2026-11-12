@@ -9,6 +9,8 @@ SSH_KEY="${SSH_KEY:-}"
 DOMAIN="${DOMAIN:-socialweb.computer}"
 ORIGIN="${ORIGIN:-k8s.${DOMAIN}}"
 KCP_ORIGIN="${KCP_ORIGIN:-kcp.${DOMAIN}}"
+SSH_ORIGIN="${SSH_ORIGIN-ssh.${DOMAIN}}"
+SSH_WEB_PORT="${SSH_WEB_PORT:-8789}"
 ACCOUNT="${ACCOUNT:-socialweb}"
 STATE_DIR="${STATE_DIR:-/var/lib/socialweb-computer/${ACCOUNT}}"
 GATEWAY_ENV_FILE="${GATEWAY_ENV_FILE:-}"
@@ -61,7 +63,7 @@ if [ -n "$GATEWAY_SPEC_FILE" ]; then
   ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "cat > $(q "$INCOMING.spec")" < "$GATEWAY_SPEC_FILE"
 fi
 
-REMOTE_ENV="ALLOW_DEV_BINARY=$(q "$ALLOW_DEV_BINARY") ACCOUNT=$(q "$ACCOUNT") STATE_DIR=$(q "$STATE_DIR") INCOMING=$(q "$INCOMING") SHA256=$(q "$SHA256") ORIGIN=$(q "$ORIGIN") KCP_ORIGIN=$(q "$KCP_ORIGIN") WEB_APP_PORT=$(q "$WEB_APP_PORT") KCP_PORT=$(q "$KCP_PORT") GATEWAY_TLS_PORT=$(q "$GATEWAY_TLS_PORT") CERT_FRONT_PORT=$(q "$CERT_FRONT_PORT")"
+REMOTE_ENV="ALLOW_DEV_BINARY=$(q "$ALLOW_DEV_BINARY") ACCOUNT=$(q "$ACCOUNT") STATE_DIR=$(q "$STATE_DIR") INCOMING=$(q "$INCOMING") SHA256=$(q "$SHA256") ORIGIN=$(q "$ORIGIN") KCP_ORIGIN=$(q "$KCP_ORIGIN") SSH_ORIGIN=$(q "$SSH_ORIGIN") SSH_WEB_PORT=$(q "$SSH_WEB_PORT") WEB_APP_PORT=$(q "$WEB_APP_PORT") KCP_PORT=$(q "$KCP_PORT") GATEWAY_TLS_PORT=$(q "$GATEWAY_TLS_PORT") CERT_FRONT_PORT=$(q "$CERT_FRONT_PORT")"
 
 ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$REMOTE_ENV bash -s" <<'REMOTE_EOF'
 set -euo pipefail
@@ -172,7 +174,10 @@ install -d -m 0755 /etc/caddy/sites
 cat > "/etc/caddy/sites/${ORIGIN}.caddy" <<SITE
 ${ORIGIN} {
   handle {
-    reverse_proxy http://127.0.0.1:${WEB_APP_PORT}
+    reverse_proxy http://127.0.0.1:${WEB_APP_PORT} {
+      lb_try_duration 120s
+      lb_try_interval 1s
+    }
   }
 }
 SITE
@@ -188,6 +193,8 @@ ${KCP_ORIGIN} {
     reverse_proxy https://127.0.0.1:${CERT_FRONT_PORT} {
       header_up X-Socialweb-Client-Certificate {tls_client_certificate_der_base64}
       flush_interval -1
+      lb_try_duration 120s
+      lb_try_interval 1s
       transport http {
         tls_trusted_ca_certs ${CA_DIR}/gateway.crt
         tls_client_auth ${CA_DIR}/edge-client.crt ${CA_DIR}/edge-client.key
@@ -201,6 +208,8 @@ ${KCP_ORIGIN} {
     reverse_proxy https://127.0.0.1:${CERT_FRONT_PORT} {
       header_up -X-Socialweb-Client-Certificate
       flush_interval -1
+      lb_try_duration 120s
+      lb_try_interval 1s
       transport http {
         tls_trusted_ca_certs ${CA_DIR}/gateway.crt
         tls_client_auth ${CA_DIR}/edge-client.crt ${CA_DIR}/edge-client.key
@@ -213,6 +222,8 @@ ${KCP_ORIGIN} {
     reverse_proxy https://127.0.0.1:${KCP_PORT} {
       header_up -X-Socialweb-Client-Certificate
       flush_interval -1
+      lb_try_duration 120s
+      lb_try_interval 1s
       transport http {
         tls_trusted_ca_certs ${CA_DIR}/kcp.crt
         tls_server_name 127.0.0.1
@@ -222,6 +233,16 @@ ${KCP_ORIGIN} {
   }
 }
 SITE
+if [ -n "$SSH_ORIGIN" ]; then
+  cat > "/etc/caddy/sites/${SSH_ORIGIN}.caddy" <<SITE
+${SSH_ORIGIN} {
+  reverse_proxy http://127.0.0.1:${SSH_WEB_PORT} {
+    lb_try_duration 120s
+    lb_try_interval 1s
+  }
+}
+SITE
+fi
 if ! grep -qE '^[[:space:]]*import[[:space:]]+/etc/caddy/sites/\*\.caddy' /etc/caddy/Caddyfile; then
   cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s)"
   printf '\nimport /etc/caddy/sites/*.caddy\n' >> /etc/caddy/Caddyfile
