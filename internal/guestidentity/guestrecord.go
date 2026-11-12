@@ -533,8 +533,8 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
 			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
 		}
-		if len(r.Message) > 512 || !printableASCII(r.Message) && r.Message != "" {
-			return "", fmt.Errorf("%w: message is printable ASCII of at most 512 bytes", ErrReportRefused)
+		if len(r.Message) > 512 || !proseASCII(r.Message) {
+			return "", fmt.Errorf("%w: message is printable ASCII text (spaces, tabs and newlines too) of at most 512 bytes", ErrReportRefused)
 		}
 	case market.ComputeEventsGuestSecretsUpdatedNSID:
 		r, err := market.ParseComputeEventsGuestSecretsUpdated(record)
@@ -585,6 +585,15 @@ func checkGuestEventFields(tag, kind string, maxKind int, createdAt string) erro
 func printableASCII(value string) bool {
 	for i := 0; i < len(value); i++ {
 		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func proseASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if c := value[i]; (c < 0x20 || c > 0x7e) && c != '\t' && c != '\n' {
 			return false
 		}
 	}
