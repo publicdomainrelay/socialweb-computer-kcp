@@ -402,7 +402,7 @@ func (r *reconciler[T]) indexEnd(ctx context.Context, req ctlruntime.Request, v 
 	ended := infra.IndexEnded{Collection: target.key.Collection, Rkey: target.key.Rkey, EndReason: strings.ToLower(string(observed.EndReason))}
 	ended.EndedAt, _ = time.Parse(time.RFC3339, observed.EndedAt)
 	r.c.setWant(k, &indexWant{workspace: req.Workspace, did: target.did, key: target.key})
-	if reason, message, _ := r.mutateIndex(ctx, req, v, target, infra.IndexChange{Remove: &ended}, time.Now()); reason != "" && reason != "Removed" {
+	if reason, message, _ := r.mutateIndex(ctx, req, v, target, infra.IndexChange{Remove: &ended, Forget: mirror(v)}, time.Now()); reason != "" && reason != "Removed" {
 		r.c.log.Info("infra_index_end_skipped", "kind", v.kind, "workspace", req.Workspace, "name", req.Name, "reason", reason, "err", message)
 	}
 }
@@ -481,7 +481,14 @@ func (r *reconciler[T]) mutateIndex(ctx context.Context, req ctlruntime.Request,
 		}
 		var ref commonv1.StrongRef
 		var werr error
-		if cache.present {
+		if value == nil {
+			if werr = deleteIndex(ctx, writer, cache.cid); werr == nil {
+				cache = indexCache{}
+				r.c.storeIndex(req.Cluster, target.did, cache)
+				r.c.log.Info("infra_index_deleted", append(attrs, "attempt", attempt, "reason", "no deployment is left in it")...)
+				break
+			}
+		} else if cache.present {
 			ref, werr = swapper.PutRecordSwap(ctx, record.InfraNSID, infra.ReservedRkey, value, cache.cid)
 		} else {
 			ref, werr = writer.CreateRecord(ctx, record.InfraNSID, infra.ReservedRkey, value)
@@ -614,4 +621,11 @@ func (c *Controller) probe(ctx context.Context, reader atprotorepo.RecordReader,
 	}
 	c.mu.Unlock()
 	return out
+}
+
+func deleteIndex(ctx context.Context, writer atprotorepo.RecordWriter, cid string) error {
+	if d, ok := writer.(atprotorepo.SwapDeleter); ok && cid != "" {
+		return d.DeleteRecordSwap(ctx, record.InfraNSID, infra.ReservedRkey, cid)
+	}
+	return writer.DeleteRecord(ctx, record.InfraNSID, infra.ReservedRkey)
 }

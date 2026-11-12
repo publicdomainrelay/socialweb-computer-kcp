@@ -598,7 +598,7 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 	switch {
 	case errors.Is(derr, infra.ErrReserved):
 		return true, nil
-	case decoded.Ended():
+	case decoded.Ended() && !mirror(v):
 		r.c.log.Info("infra_record_ended", append(attrs, "endedAt", decoded.EndedAt, "endReason", decoded.EndReason)...)
 		return true, nil
 	}
@@ -609,6 +609,9 @@ func (r *reconciler[T]) finalWrite(ctx context.Context, req ctlruntime.Request, 
 	if !slices.Contains(own, got.CID) {
 		r.c.log.Info("infra_record_replaced", append(attrs, "storedCid", stored.CID)...)
 		return true, nil
+	}
+	if mirror(v) {
+		return true, r.dropMirror(ctx, req, v, ar, repo, rkey, got.CID, attrs)
 	}
 	observed := r.finalObserved(v)
 	if ar != nil {
@@ -885,4 +888,43 @@ func (c *Controller) setUnwritten(k indexKey, pending bool) {
 		return
 	}
 	delete(c.unwritten, k)
+}
+
+func mirror(v view) bool {
+	return v.kind == infra.KindInfra && v.spec.ClusterRef != nil
+}
+
+func (r *reconciler[T]) dropMirror(ctx context.Context, req ctlruntime.Request, v view, ar *v1alpha1.AtprotoRecord, repo commonv1.ObjectRef,
+	rkey, cid string, attrs []any) error {
+	dyn, err := r.c.dynamic(req.Workspace)
+	if err != nil {
+		return err
+	}
+	records := dyn.Resource(v1alpha1.AtprotoRecordGVR)
+	if ar != nil && ar.DeletionTimestamp.IsZero() {
+		held := &v1alpha1.AtprotoRecord{TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "AtprotoRecord"},
+			ObjectMeta: metav1.ObjectMeta{Name: ar.Name, Labels: ar.Labels, OwnerReferences: ar.OwnerReferences}, Spec: ar.Spec}
+		held.Spec.DeletionPolicy, held.Spec.SwapCid = v1alpha1.RecordDeletionRetain, cid
+		if _, err := kube.Apply[v1alpha1.AtprotoRecord](ctx, records, held, kube.ApplyOptions{FieldManager: r.manager, Force: true}); err != nil {
+			return fmt.Errorf("infra: holding the AtprotoRecord %s at cid %s: %w", ar.Name, cid, err)
+		}
+		if err := records.Delete(ctx, ar.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	writer, err := bus.Resolve[atprotorepo.RecordWriter](ctx, r.c.bus, r.self(req), repo,
+		bus.Capability{Name: atprotorepo.CapabilityWrite, Scope: []string{v.kind.NSID()}})
+	if err != nil {
+		return err
+	}
+	if d, ok := writer.(atprotorepo.SwapDeleter); ok {
+		err = d.DeleteRecordSwap(ctx, v.kind.NSID(), rkey, cid)
+	} else {
+		err = writer.DeleteRecord(ctx, v.kind.NSID(), rkey)
+	}
+	if err != nil && !errors.Is(err, atprotorepo.ErrNotFound) {
+		return fmt.Errorf("infra: deleting the cluster mirror record %s: %w", v.status.Record.URI, err)
+	}
+	r.c.log.Info("infra_record_deleted", append(attrs, "reason", "the record mirrors the nodes of a cluster")...)
+	return nil
 }

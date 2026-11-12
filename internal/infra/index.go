@@ -90,6 +90,8 @@ type IndexChange struct {
 
 	Remove *IndexEnded
 
+	Forget bool
+
 	Dead []IndexDead
 }
 
@@ -199,7 +201,7 @@ func (v IndexView) Settled(ch IndexChange) bool {
 		i := slices.IndexFunc(v.Live, func(e IndexEntry) bool { return e.Key() == ch.Add.Key() })
 		return i >= 0 && (!ch.Refresh || sameEntry(v.Live[i], *ch.Add)) && !slices.Contains(v.Ended, ch.Add.Key())
 	case ch.Remove != nil:
-		return !IndexHolds(v.Live, ch.Remove.Key())
+		return !IndexHolds(v.Live, ch.Remove.Key()) && (!ch.Forget || !slices.Contains(v.Ended, ch.Remove.Key()))
 	}
 	return true
 }
@@ -219,6 +221,9 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 	now = now.UTC()
 	var r record.Infra
 	changed := false
+	if raw == nil && ch.Forget {
+		return nil, false, nil
+	}
 	if raw == nil {
 		r = record.Infra{Type: record.InfraNSID, CreatedAt: stamp(now), Description: IndexDescription, Index: &record.InfraIndex{}}
 	} else {
@@ -244,7 +249,9 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 		switch {
 		case !validKey(key) || entry.AddedAt.IsZero() || entry.CreatedAt.IsZero():
 		case ch.Remove != nil && key == ch.Remove.Key():
-			ended = append(ended, endedRecord(*ch.Remove, now))
+			if !ch.Forget {
+				ended = append(ended, endedRecord(*ch.Remove, now))
+			}
 		case ch.Add != nil && key == ch.Add.Key():
 			if ch.Refresh && !sameEntry(entry, *ch.Add) {
 				e.ExpiresAt = stamp(ch.Add.ExpiresAt)
@@ -287,6 +294,8 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 		case slices.ContainsFunc(ended, func(n record.InfraIndexEnded) bool { return endedKey(n) == key }):
 		case full == nil && ch.Add != nil && key == ch.Add.Key():
 			changed = true
+		case ch.Forget && ch.Remove != nil && key == ch.Remove.Key():
+			changed = true
 		default:
 			recent = append(recent, e)
 		}
@@ -296,6 +305,9 @@ func ApplyIndex(raw json.RawMessage, ch IndexChange, now time.Time) (json.RawMes
 	}
 	if !changed {
 		return raw, false, full
+	}
+	if ch.Forget && len(live) == 0 && len(recent) == 0 {
+		return nil, true, nil
 	}
 	index := *r.Index
 	index.Live, index.RecentEnded, index.UpdatedAt = live, recent, stamp(now)

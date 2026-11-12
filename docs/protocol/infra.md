@@ -215,6 +215,7 @@ sequenceDiagram
 - `unbindRecord` forces the child AtprotoRecord to `Retain` before it deletes the child object
 - the atprotorecord finalizer never calls `deleteRecord` for `computer.socialweb.infra` or `ephemeralInfra` (`keptCollections`, `internal/controllers/atprotorecord/controller.go`)
 - a deletion that gives up, or an orphaned repo, leaves the record with its last status
+- one exception, the cluster mirror: an Infra with `spec.clusterRef` (the gateway's `nodes-<hex>`, `internal/controllers/nodeclaim/infra.go`) mirrors a tenant Cluster's nodes and is not a deployment anyone declared. Its end (delete, or unbind when the Cluster goes) pins the child AtprotoRecord to the record's cid, deletes the child, then deletes the record with swap cid (`dropMirror`); `indexEnd` drops its entry without a `recentEnded` line (`IndexChange.Forget`), and deletes `self` when no live or ended entry is left
 - see [README.md](README.md#records-policy-all-families)
 
 ## computer.socialweb.k8s
