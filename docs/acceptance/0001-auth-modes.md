@@ -71,7 +71,52 @@ sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-ki
   (`AUD` below) is unchanged.
 - Every market read is one getRecord at a computable key; no step lists records.
 
-Last pass: 2026-11-11 11:54-12:45Z, every bidder and the gateway on kcp e496cbff
+Last pass: 2026-11-12 22:25-23:35Z, every bidder and the gateway on kcp e190a3b1 (release 66f3bd4d,
+rollout 19), CLI 66f3bd4d on hat-8, alice requester, bob oauthQr bidder `swc-qr0001` on hat-8 (installed for
+the pass, removed after), no bidders list anywhere. **Section 9 FAIL** (restart time); every other section
+passes. Preconditions: requester `did:plc:jjcsg5fg3ujd22ywuxg4lr72` `Associated=True`, phase Ready, roots
+[alice], `approvedAssociations` empty; three bidders `bidder-tangled-vouch`; both vouches; the three bidder
+pairs agent-of only, roots [operator]. Section 1: hat-9, local and hat-7 `Suspended`
+`{"desired":6,"notReady":0,"ready":5,"suspended":1}`, Bidder `true Ready`. Section 2: bob by QR (consent
+qr.fedfork.com for @bobvmbuilder.bsky.social; the `--done` text timeout is harmless), root Ready 4/4,
+EventStream `gateway-pds` Running, offering `["iroh","webrtc"]`, no `endpointUrl`. Section 3: Cluster Ready
+40 s after createCluster, `get --raw "$P/readyz"` ok, 5 namespaces, k3s v1.36.4+k3s1. Section 3a: title and
+`noExpiry` ok; page sign-in by its own `#handle` form (consent `k8s.socialweb.computer`); the runbook's curl
+`api()` got 401 until it sent `Origin: $GW` (gateway WARN `web_origin_refused`, empty origin: a cookie POST
+needs the page origin; the block now sends it). Then the page no-expiry kubeconfig (`notAfter` 9999-12-31)
+lists 5 namespaces, `$P/readyz` ok, lists `noExpiry`, revoke -> refused (`You must be logged in`), `$KC`
+still works; the same over xrpc. Section 4: first VM on the oauthQr bidder, pod Ready 90 s after the apply, 0
+nodes 134 s after the scale, claims empty. Sections 5-6 (the oauthQr bidder paused after section 4 so the
+three VMs land on three hosts): 1 -> local (98 s), 2 -> hat-7 (104 s), 3 -> hat-9 (83 s), each winner paused
+before the next step: 3 pods on 3 distinct nodes, 3 distinct winners. A2 with all three winners paused:
+3 -> 2 released hat-9 (155 s), 2 -> 1 hat-7 (155 s), 1 -> 0 local (144 s); each step one node gone, the
+released host at 0 ComputeVM / FirecrackerVM / firecracker, `vm.terminated` `deleted_on_request` with a
+`vm.delete` request ref; gateway 3 `requester_released` + 3 `requester_contract_records_deleted` (6 each);
+cluster deleted. Section 7 (oauthQr): heartbeat frozen at 22:59:29Z for 180 s, root Ready
+`{"desired":4,"notReady":0,"ready":3,"suspended":1}`, GuestControlPlane and `ingress-iroh` Ready, healthz
+200; advanced 5 s after resume. Section 8 (hat-7): `applied:true` (generation 39), heartbeat every 5 s,
+offering cid unchanged for 60 s, four offerings `["iroh","webrtc"]` without `endpointUrl`, drift reverted
+(`ChildEditReverted`, then `NoDrift`), typo `Failed` / `InvalidKey`, child generation unchanged. Section 9
+(ACC34, fresh / restarted; consent qr.fedfork.com for @aliceoa.bsky.social): oauthQr 2.5 / 64.0 s, local
+3.2 / 64.2 s, hat-9 2.6 / 67.2 s, hat-7 2.6 / 63.0 s; Held, `Linux` + `uid=0` both times, winner = `$HOST`,
+0 plaintext signaling lines, `Released`, `requester_contract_records_deleted` 12/12, every logged record URI
+RecordNotFound three times, hosts empty. FAIL: the restarted invocation takes ~64 s, not ~3-7 s. Root cause
+(cdd93727, `internal/controllers/runtime/exportkinds.go` `awaitEndpoints`): every core start waits for each
+APIExportEndpointSlice's `EndpointURLsReady` condition, which kcp v0.33.0 never sets on these slices (they
+carry only `APIExportValid` and `PartitionValid`, with the URL in `status.endpoints`). So all 10 exports log
+"waits for its virtual workspace" at kcp ready + 0.2 s and "starts before its virtual workspace serves
+discovery" (1m0s) at + 60.2 s, with 0 "serves discovery" successes (30 waits / 30 timeouts / 0 successes
+over the 3 core starts of each invocation). The virtual workspace answers `<url>/clusters/*/apis` 200 the
+whole time. Every core start pays it: CLI invocations, bidders (11 WARNs each at the 21:10Z restart), the
+gateway (13). Also seen: each CLI release left its release `market.event` and `compute.events.vm.delete`
+in alice's repo (the 0006 bug); the 8 records were deleted by hand. Bidder ERROR 0 on hat-7 and hat-9; hat-8 1
+(`firecrackervm` write conflict on a HostProcess, retried, 0006). Gateway ERROR only the pre-existing
+`com.fedfork.irc.agentOperator` ScopeMissing retries, plus 2 `xrpc: unmapped error` from a malformed
+`name==` query (the runner's own mistake; the gateway does not map it to a 400). Cleanup: `swc-qr0001`
+uninstalled `--purge`, `userdel`; bob's `market.offering/self`, `market.heartbeat/self` and
+`computer.socialweb.ingress.listen/market` RecordNotFound; badgeBlueKeys, vouches, endorsements kept.
+
+Previous pass: 2026-11-11 11:54-12:45Z, every bidder and the gateway on kcp e496cbff
 (release d9438c15, ident.link associations), CLI d9438c15 on hat-8, alice requester,
 bob oauthQr bidder `swc-qr0001` on hat-8 (installed for the pass, removed after),
 no bidders list anywhere (the gateway env names only a deny list). Association: requester
@@ -454,8 +499,8 @@ curl -fsS "$GW/" | grep -q '<title>socialweb.computer k8s</title>'
 curl -fsS "$GW/api/config" | jq -e .noExpiry
 deno run -A --no-lock scripts/oauth-signin.ts --creds ~/.aliceoa_bsky_social_source --account ALICE \
   --url "$GW/" --done "Signed in as" --cookie-file "$W/jar.json"
-api() {
-  curl -fsS -H 'Content-Type: application/json' -d "$2" "$GW/api/clusters/$1" \
+api() {  # a cookie POST without Origin: $GW is refused (401, gateway WARN web_origin_refused)
+  curl -fsS -H 'Content-Type: application/json' -H "Origin: $GW" -d "$2" "$GW/api/clusters/$1" \
     -H "Cookie: swc_session=$(jq -r '.[] | select(.name=="swc_session") | .value' "$W/jar.json")"
 }
 api kubeconfig "{\"name\":\"$CL\",\"ttlSeconds\":0}" | jq -r .kubeconfig > "$W/noexpiry.kubeconfig"
