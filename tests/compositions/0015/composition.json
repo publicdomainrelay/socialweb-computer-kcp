@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0015",
+	"description": "Acceptance 0015: this run's VM fills ~95% of its RAM and writes with fsync for 5 min, and lives through it. (docs/acceptance/0015-vm-memory.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0015"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "the contract records RecordNotFound after the release"
+		}
+	]
+}
+

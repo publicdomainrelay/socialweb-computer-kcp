@@ -1,0 +1,27 @@
+{
+	"name": "acc-0015",
+	"description": "Acceptance 0015: this run's VM fills ~95% of its RAM and writes with fsync for 5 min, and lives through it.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0015",
+			"description": "The fill, the VM still Held and Running, then the release."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"com.atproto.repo.getRecord",
+		"com.atproto.repo.listRecords",
+		"com.fedfork.exec.kube.list",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "the contract records RecordNotFound after the release"
+		}
+	]
+}
