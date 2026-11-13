@@ -174,17 +174,21 @@ func (ctl *Controller) remoteNetwork(n *v1alpha1.MarketNetworkValue) error {
 		}
 		return ip.IsLoopback()
 	}
+	var errs []error
 	for _, h := range n.Hosts {
+		if h.Name != v1alpha1.NetworkDispatcherHost && h.Name != v1alpha1.NetworkIngressHost && !strings.HasSuffix(h.Name, ".localhost") {
+			continue
+		}
 		host, port, err := net.SplitHostPort(h.Address)
 		if ip := net.ParseIP(host); err != nil || ip == nil || local(ip) {
 			continue
 		}
 		// ponytail: one bidder per host joins a remote network; a second one's loopback ports collide, share one host-level forward if that is needed
 		if err := ctl.forwards.Ensure(net.JoinHostPort("127.0.0.1", port), h.Address); err != nil {
-			return fmt.Errorf("the loopback path to the network's %s at %s: %w", h.Name, h.Address, err)
+			errs = append(errs, fmt.Errorf("the loopback path to the network's %s at %s: %w", h.Name, h.Address, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o *v1alpha1.MarketBidder) (ctlruntime.Result, error) {
@@ -199,13 +203,15 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 		ctl.forwards.Close()
 		return p.delete(ctx)
 	}
-	if err := ctl.remoteNetwork(o.Spec.Network); err != nil {
-		return p.wait(err.Error())
-	}
+	forwardErr := ctl.remoteNetwork(o.Spec.Network)
 	if c.Parked(r) {
 		return ctlruntime.Result{}, nil
 	}
 	res, err := p.reconcile(ctx)
+	if err == nil && forwardErr != nil {
+		p.log().Warn("the guests' loopback path to the network; retrying with backoff", "err", forwardErr.Error())
+		err = forwardErr
+	}
 	if errors.Is(err, vaultctl.ErrUnbound) {
 		p.log().Info("the bidder waits for its vault to bind; the bind wakes it", "err", err.Error())
 		return p.wait("waiting for its vault to bind: " + err.Error())

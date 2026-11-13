@@ -45,7 +45,7 @@ const (
 
 	NetworkPlcHost        = "plc.default.global.svc.kcp.local"
 	NetworkRelayHost      = v1alpha1.NetworkRelayHost
-	NetworkIngressHost    = "dispatcher.default.relay.svc.kcp.local"
+	NetworkIngressHost    = v1alpha1.NetworkIngressHost
 	NetworkDispatcherHost = v1alpha1.NetworkDispatcherHost
 	NetworkAlicePdsHost   = "pds.default.alice.svc.kcp.local"
 	NetworkBobPdsHost     = "pds.default.bob.svc.kcp.local"

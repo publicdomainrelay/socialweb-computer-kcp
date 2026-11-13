@@ -26,6 +26,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/webrtc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tcpforward"
 	core "github.com/johnandersen777/socialweb-computer-kcp/internal/market/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
@@ -81,6 +82,8 @@ type Deps struct {
 
 type Service struct {
 	spec v1alpha1.BidderSpec
+
+	crawlForward tcpforward.Set
 
 	deps Deps
 
@@ -249,6 +252,7 @@ func (s *Service) halt(ctx context.Context) {
 
 func (s *Service) stopWith(ctx context.Context) error {
 	s.stopOnce.Do(func() {
+		s.crawlForward.Close()
 		s.mu.Lock()
 		cancel, relay := s.cancel, s.relay
 		peer := s.marketPeer

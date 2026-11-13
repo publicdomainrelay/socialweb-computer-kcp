@@ -40,6 +40,8 @@ type NetworkHost struct {
 const (
 	NetworkDispatcherHost = "dispatcher-tls.default.relay.svc.kcp.local"
 
+	NetworkIngressHost = "dispatcher.default.relay.svc.kcp.local"
+
 	NetworkRelayHost = "relay.default.relay.svc.kcp.local"
 
 	GuestTLSHost = "relay.localhost"

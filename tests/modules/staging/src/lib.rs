@@ -240,7 +240,7 @@ fn write_file(path: &str, text: &str) -> Result<String, String> {
 fn bidder_poll(handle: &str) -> String {
     let k = format!("/home/stg/.local/state/socialweb-computer/dev/b-{}/kcp/admin.kubeconfig", handle.replace('.', "-"));
     format!(
-        "K={k}; [ -f $K ] || {{ echo none; exit 0; }}; T=$(awk '/ token:/{{print $2; exit}}' $K); S=$(awk '/ server:/{{print $2; exit}}' $K); \
+        "[ -f /home/stg/bidder.rc ] && {{ echo exited $(cat /home/stg/bidder.rc); tail -c 1500 /home/stg/bidder.log; exit 0; }}; K={k}; [ -f $K ] || {{ echo none; exit 0; }}; T=$(awk '/ token:/{{print $2; exit}}' $K); S=$(awk '/ server:/{{print $2; exit}}' $K); \
          U=$S/clusters/root/apis/socialweb.computer/v1alpha1/marketbidders/app; \
          curl -fsSk -X PATCH -H \"Authorization: Bearer $T\" -H 'Content-Type: application/merge-patch+json' $U -d '{{\"spec\":{{\"identity\":{{\"association\":\"Skip\"}}}}}}' >/dev/null || true; \
          curl -fsSk -H \"Authorization: Bearer $T\" $U | python3 -c 'import json,sys; s=json.load(sys.stdin).get(\"status\",{{}}); print(s.get(\"phase\",\"-\"), s.get(\"did\",\"-\"), s.get(\"message\",\"\"))'"
@@ -425,6 +425,9 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     let mut words = text.split_whitespace();
                     let (phase, did) = (words.next().unwrap_or_default(), words.next().unwrap_or_default());
                     s.st["readings"]["bidders"][&v] = json!(text.trim());
+                    if phase == "exited" {
+                        return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{v}: run bidder exited: {text}") })));
+                    }
                     if phase == "Ready" && did.starts_with("did:") {
                         s.flag(&format!("ready:{v}"));
                         s.st["readings"]["bidderReadyS"][&v] = json!(s.since("bidders"));

@@ -8,6 +8,7 @@ import (
 	peatproto "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 	"net"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -469,10 +470,39 @@ func (s *Service) publicPDS(ctx context.Context) string {
 	return ident.PDSEndpoint()
 }
 
+func (s *Service) crawlAddress() string {
+	local := s.inputs.Address(pdsExposure)
+	relays := s.spec.Network.Relays()
+	u, err := url.Parse(local)
+	if local == "" || len(relays) == 0 || err != nil || u.Host == "" {
+		return local
+	}
+	r, err := url.Parse(relays[0])
+	if err != nil || net.ParseIP(r.Hostname()) == nil || net.ParseIP(r.Hostname()).IsLoopback() {
+		return local
+	}
+	route, err := net.Dial("udp", r.Host)
+	if err != nil {
+		return local
+	}
+	src := route.LocalAddr().(*net.UDPAddr).IP
+	_ = route.Close()
+	if src.IsLoopback() || src.Equal(net.ParseIP(r.Hostname())) {
+		return local
+	}
+	listen := net.JoinHostPort(src.String(), u.Port())
+	if err := s.crawlForward.Ensure(listen, u.Host); err != nil {
+		s.log.Warn("the PDS is not reachable from the network relay's host", "listen", listen, "err", err.Error())
+		return local
+	}
+	u.Host = listen
+	return u.String()
+}
+
 func (s *Service) crawl() participant.Crawl {
 	return participant.Crawl{
 		Relays:        append([]string(nil), s.spec.Network.Relays()...),
-		Address:       func() string { return s.inputs.Address(pdsExposure) },
+		Address:       s.crawlAddress,
 		PublicRelays:  s.publicCrawlRelays(),
 		PublicAddress: s.publicPDS,
 		Crawled: func(ctx context.Context) {
