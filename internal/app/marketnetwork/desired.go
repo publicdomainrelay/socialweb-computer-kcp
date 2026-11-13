@@ -66,6 +66,7 @@ func networkValueFromLeases(leases map[string]component.PortLease, caBundle stri
 		PLCDirectoryURL:  "http://" + plc.Address(),
 		IngressProxyHost: GuestTLSHost + ":" + strconv.Itoa(int(leasePort(ingress))),
 		CABundle:         caBundle,
+		XRPCFront:        dispatcher.Address(),
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plc.Address()},
 			{Name: NetworkRelayHost, Address: relay.Address()},
@@ -83,6 +84,7 @@ func boundValue(value v1alpha1.MarketNetworkValue, leases map[string]component.P
 	}
 	at := func(name string) string { return net.JoinHostPort(bind, strconv.Itoa(int(leasePort(leases[name])))) }
 	value.PLCDirectoryURL = "http://" + at(NetworkPortPlc)
+	value.XRPCFront = at(NetworkPortDispatcher)
 	value.Hosts = []v1alpha1.NetworkHost{
 		{Name: NetworkPlcHost, Address: at(NetworkPortPlc)},
 		{Name: NetworkRelayHost, Address: at(NetworkPortRelay)},
@@ -197,6 +199,7 @@ func networkValueFromExposures(snap compose.Snapshot, caBundle string) (v1alpha1
 		PLCDirectoryURL:  plcURL,
 		IngressProxyHost: GuestTLSHost + ":" + portFromValue(ingressHost),
 		CABundle:         caBundle,
+		XRPCFront:        dispatcherHost,
 		Hosts: []v1alpha1.NetworkHost{
 			{Name: NetworkPlcHost, Address: plcHost},
 			{Name: NetworkRelayHost, Address: relayHost},

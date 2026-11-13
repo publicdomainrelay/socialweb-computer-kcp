@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-41.gateways.socialweb.computer
+  name: v1alpha1-42.gateways.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -42,6 +42,8 @@ spec:
                   qrOrigin:
                     type: string
                   caBundle:
+                    type: string
+                  xrpcFront:
                     type: string
                   hosts:
                     type: array

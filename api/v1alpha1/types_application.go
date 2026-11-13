@@ -20,6 +20,8 @@ type MarketNetworkValue struct {
 
 	CABundle string `json:"caBundle,omitempty"`
 
+	XRPCFront string `json:"xrpcFront,omitempty"`
+
 	Hosts []NetworkHost `json:"hosts,omitempty" apigen:"listType=map,listMapKey=name"`
 
 	Comms *MarketComms `json:"comms,omitempty"`

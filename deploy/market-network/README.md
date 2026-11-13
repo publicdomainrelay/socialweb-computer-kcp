@@ -633,6 +633,7 @@ The network value (`status.network`, copied onto each child's root object):
 | `ingressProxyHost` | the dispatcher's host and port, `relay.localhost:<port>` |
 | `qrOrigin` | the QR session-transfer origin; the market network leaves it empty |
 | `caBundle` | the CA bundle the children trust, inline PEM |
+| `xrpcFront` | the network's one XRPC entry for outside clients (tests, the watch page), `host:port` of `DispatcherTLS dispatcher-tls` (the `--network-bind` address when set): it serves the PLC, the relay and every PDS by their ingress names (`*.relay.localhost`, TLS SNI and Host), trusting `caBundle` |
 | `hosts` | the network's service names and their loopback addresses |
 | `comms` | the market comms mode |
 | `ingress` | the network's PDS ingress selection: provider, the `dispatcher` ingress ref, and any xrpc or opentunnel settings; children inherit it |
