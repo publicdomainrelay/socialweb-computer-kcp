@@ -86,6 +86,7 @@ const FLAGS: &[&str] = &[
     "--nested-virt",
     "--cpus",
     "--mem",
+    "--image",
 ];
 
 pub struct Swc {

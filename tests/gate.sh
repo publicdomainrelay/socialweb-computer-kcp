@@ -12,7 +12,7 @@ target=$(realpath "${1:?usage: gate.sh <target.json> [--account <name>] [<runboo
 account=bob
 if [ "${1:-}" = --account ]; then account=$2; shift 2; fi
 all="0001:run 0001:s2 0002:run 0003:run 0004:run 0005:run 0005:b 0005:r2fail 0006:run 0006:compat 0007:run 0008:run
-  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b"
+  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b 0016:run 0016:badsha"
 ids=${*:-$all}
 cd "$(dirname "$0")"
 unset ATPROTO_HANDLE ATPROTO_PASSWORD ATP_USERNAME ATP_PASSWORD ATPROTO_PDS
@@ -39,7 +39,9 @@ for id in $ids; do
   elif [ ! -f "compositions/$r/composition.json" ]; then
     res=SKIP note="no composition"
   else
-    "$host" "compositions/$r" --account "$account" --entry "$e" --on-fail freeze --freeze-ttl "${GATE_FREEZE_TTL:-900}" \
+    input=()
+    case $r in 0016) input=(--input "$(jq -c '{image: {url, sha256}, marker}' ../deploy/vm-images/ci-toolchain.json)") ;; esac
+    "$host" "compositions/$r" --account "$account" --entry "$e" --on-fail freeze --freeze-ttl "${GATE_FREEZE_TTL:-900}" "${input[@]}" \
       > "$out/$r-$e.json" 2> "$out/$r-$e.log" < /dev/null
     rc=$?
     doc=$(cat "$out/$r-$e.json")

@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0016",
+	"description": "Acceptance 0016: a VM rented with a requester-chosen image boots it and reports its marker; a wrong sha256 is refused before boot. (docs/acceptance/0016-vm-image.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0016"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "the contract records RecordNotFound after the release"
+		}
+	]
+}
+

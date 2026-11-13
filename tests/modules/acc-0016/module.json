@@ -1,0 +1,29 @@
+{
+	"name": "acc-0016",
+	"description": "Acceptance 0016: a VM rented with a requester-chosen image boots it and reports its marker; a wrong sha256 is refused before boot.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0016",
+			"description": "Rent with the image (input image {url, sha256} and marker): Held, /etc/swc-image is the marker, the toolchain answers, then the release."
+		},
+		{
+			"entry": "badsha",
+			"label": "Run 0016 bad sha",
+			"description": "Rent with the image's sha256 changed: no bidder takes it, the contract fails cleanly before any VM, nothing is held."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "the contract records RecordNotFound after the release"
+		}
+	]
+}
