@@ -201,6 +201,7 @@ type Runtime interface {
 	Watch(ctx context.Context, handle string) (<-chan hostsvc.UnitEvent, error)
 	Load(handle, name string) (RuntimeRef, error)
 	CollectImages(ctx context.Context, keep map[string]string) (guestimage.GCReport, error)
+	EnsureImage(ctx context.Context) error
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)

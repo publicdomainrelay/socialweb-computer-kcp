@@ -80,6 +80,7 @@ type Deps struct {
 	NestedVirt bool
 
 	ImageTarget string
+	ImageReady  func(context.Context) error
 }
 
 type Service struct {

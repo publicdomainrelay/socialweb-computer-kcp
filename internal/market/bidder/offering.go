@@ -9,6 +9,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 )
 
@@ -49,6 +50,9 @@ func (b *Bidder) bindBadgeBlueKey(ctx context.Context) {
 }
 
 func (b *Bidder) serveMarket(ctx context.Context) {
+	if !b.awaitImage(ctx) {
+		return
+	}
 	if err := b.ensureOffering(ctx); err != nil {
 		b.log.Warn("creating the market offering failed", "err", err)
 	}
@@ -91,6 +95,32 @@ func (b *Bidder) serveMarket(ctx context.Context) {
 			continue
 		}
 		b.verifyVisibility(ctx)
+	}
+}
+
+func (b *Bidder) awaitImage(ctx context.Context) bool {
+	if b.cfg.ImageReady == nil || !b.servesKind(string(v1alpha1.ComputeKindVM)) {
+		return true
+	}
+	for withdrawn := false; ; {
+		err := b.cfg.ImageReady(ctx)
+		if err == nil {
+			b.imageErr.Store(nil)
+			b.log.Info("bidder_guest_image_ready")
+			return true
+		}
+		msg := err.Error()
+		b.imageErr.Store(&msg)
+		b.log.Error("bidder_guest_image_unready: the pinned guest image does not verify; the offering is withdrawn and no RFP is bid until it does", "err", msg)
+		if !withdrawn {
+			b.withdraw(ctx)
+			withdrawn = true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(ImageRetry):
+		}
 	}
 }
 

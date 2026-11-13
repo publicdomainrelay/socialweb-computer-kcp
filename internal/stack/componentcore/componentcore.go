@@ -308,7 +308,7 @@ func (c *Core) register() error {
 			deps := bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks, Sandbox: newSandbox()}
 			if c.cfg.Compute != nil && c.cfg.Compute.Runtime != nil {
 				caps := c.cfg.Compute.Runtime.Capabilities()
-				deps.NestedVirt, deps.ImageTarget = caps.NestedVirt, caps.ImageTarget
+				deps.NestedVirt, deps.ImageTarget, deps.ImageReady = caps.NestedVirt, caps.ImageTarget, c.cfg.Compute.Runtime.EnsureImage
 			}
 			return bidder.New(ctx, spec, deps)
 		})},

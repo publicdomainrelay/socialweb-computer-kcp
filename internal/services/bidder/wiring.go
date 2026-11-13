@@ -163,6 +163,7 @@ func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*cor
 		StateDir:            s.stateDir(),
 		Sandbox:             s.deps.Sandbox,
 		NestedVirt:          s.deps.NestedVirt,
+		ImageReady:          s.deps.ImageReady,
 	}
 	if s.spec.RequesterImages == nil || *s.spec.RequesterImages {
 		cfg.ImageTarget = s.deps.ImageTarget
