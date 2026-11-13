@@ -95,6 +95,10 @@ func IsGuestMemoryEventNSID(nsid string) bool {
 	return nsid == ComputeEventsGuestMemoryPressureNSID || nsid == ComputeEventsGuestOOMKillNSID
 }
 
+func IsMemoryEventNSID(nsid string) bool {
+	return IsGuestMemoryEventNSID(nsid) || nsid == ComputeEventsVMMemoryPressureNSID || nsid == ComputeEventsVMOOMKilledNSID
+}
+
 func ValidGuestRequesterDID(did, authority string) error {
 	parsed, err := syntax.ParseDID(strings.TrimSpace(did))
 	switch {

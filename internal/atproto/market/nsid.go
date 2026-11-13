@@ -44,6 +44,8 @@ const (
 	ComputeEventsVMTerminatedNSID       = "com.publicdomainrelay.temp.compute.events.vm.terminated"
 	ComputeEventsVMHostKeysNSID         = "com.publicdomainrelay.temp.compute.events.vm.hostKeys"
 	ComputeEventsVMRegisterIdentityNSID = "com.publicdomainrelay.temp.compute.events.vm.registerIdentity"
+	ComputeEventsVMMemoryPressureNSID   = "com.publicdomainrelay.temp.compute.events.vm.memoryPressure"
+	ComputeEventsVMOOMKilledNSID        = "com.publicdomainrelay.temp.compute.events.vm.oomKilled"
 
 	GuestEventNSIDPrefix                   = "com.publicdomainrelay.temp.compute.events.guest."
 	ComputeEventsGuestPublicKeyNSID        = GuestEventNSIDPrefix + "publicKey"

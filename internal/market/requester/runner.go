@@ -1048,6 +1048,7 @@ func (r *contractRunner) checkTermination(ctx context.Context, state *v1alpha1.N
 	if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
 		return false, true
 	}
+	r.q.reportMarketEvent(r.log(), parsed)
 	applyTermination(state, parsed.Termination, r.q.nowISO())
 	r.log().Info("requester_termination_resumed", "bidder", bidderDID, "receipt", state.Receipt.URI, "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
 	return true, true
@@ -1193,7 +1194,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
 	handle := func(event MarketEvent) bool {
-		if nsid := market.NSIDFromURI(event.Payload.URI); guestEventSeen(seen, event) || isContractEventNSID(nsid) || market.IsGuestMemoryEventNSID(nsid) {
+		if guestEventSeen(seen, event) || isContractEventNSID(market.NSIDFromURI(event.Payload.URI)) {
 			return false
 		}
 		parsed, err := r.q.parseGuestEvent(ctx, event, receiptURI)
@@ -1231,7 +1232,11 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 				Payload:    commonv1.StrongRef{URI: parsed.Payload.URI, CID: parsed.Payload.CID},
 			}
 			r.log().Info("requester_guest_host_keys", "keys", len(parsed.HostKeys))
+		case market.ComputeEventsGuestMemoryPressureNSID, market.ComputeEventsGuestOOMKillNSID, market.ComputeEventsVMMemoryPressureNSID, market.ComputeEventsVMOOMKilledNSID:
+			r.q.reportMarketEvent(r.log(), parsed)
+			return false
 		case market.ComputeEventsVMTerminatedNSID:
+			r.q.reportMarketEvent(r.log(), parsed)
 			applyTermination(state, parsed.Termination, r.q.nowISO())
 			r.deleteContractRecords(ctx, state)
 			r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
@@ -1321,7 +1326,8 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		switch nsid {
 		case market.ComputeEventsVMTerminatedNSID, market.ComputeEventsVMOnNetworkNSID,
 			market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
-			market.ComputeEventsGuestRequesterDIDNSID:
+			market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsGuestMemoryPressureNSID, market.ComputeEventsGuestOOMKillNSID,
+			market.ComputeEventsVMMemoryPressureNSID, market.ComputeEventsVMOOMKilledNSID:
 		default:
 			return false
 		}
@@ -1330,6 +1336,10 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 			if nsid == market.ComputeEventsVMOnNetworkNSID {
 				r.log().Warn("requester_guest_event_refused", "uri", event.Event.URI, "err", err)
 			}
+			return false
+		}
+		if market.IsMemoryEventNSID(parsed.Kind) {
+			r.q.reportMarketEvent(r.log(), parsed)
 			return false
 		}
 		if parsed.Kind == market.ComputeEventsVMOnNetworkNSID {
@@ -1356,6 +1366,7 @@ func (r *contractRunner) waitForRelease(ctx context.Context, state *v1alpha1.Nod
 		if parsed.Kind != market.ComputeEventsVMTerminatedNSID {
 			return false
 		}
+		r.q.reportMarketEvent(r.log(), parsed)
 		applyTermination(state, parsed.Termination, r.q.nowISO())
 		r.deleteContractRecords(ctx, state)
 		r.writeStatus(ctx, v1alpha1.ComputeContractReleased, terminationMessage(parsed.Termination), state, r.currentBids(), r.currentChosen(), "terminated", 1)
@@ -1462,6 +1473,7 @@ func (r *contractRunner) applyReleaseBacklog(ctx context.Context, state *v1alpha
 		case market.ComputeEventsGuestRequesterDIDNSID:
 			r.recordGuestRequester(ctx, state, parsed)
 		case market.ComputeEventsVMTerminatedNSID:
+			r.q.reportMarketEvent(r.log(), parsed)
 			if applyTermination(state, parsed.Termination, r.q.nowISO()) {
 				r.log().Info("requester_release_found_termination", "event", parsed.Event.URI, "reason", parsed.Termination.Reason)
 			}

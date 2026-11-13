@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -70,7 +71,27 @@ func isGuestEventNSID(nsid string) bool {
 		market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsGuestR2ReleasedNSID:
 		return true
 	}
-	return isContractEventNSID(nsid)
+	return isContractEventNSID(nsid) || market.IsMemoryEventNSID(nsid)
+}
+
+func (q *Requester) reportMarketEvent(log *slog.Logger, parsed *GuestEvent) {
+	if _, dup := q.reported.LoadOrStore(parsed.Event.URI, true); dup {
+		return
+	}
+	payload := map[string]any{}
+	for k, v := range parsed.Payload.Value {
+		if k != "$type" && k != "signatures" {
+			payload[k] = v
+		}
+	}
+	kill := parsed.Kind == market.ComputeEventsGuestOOMKillNSID || parsed.Kind == market.ComputeEventsVMOOMKilledNSID ||
+		(parsed.Kind == market.ComputeEventsVMTerminatedNSID && payload["reason"] == "oom")
+	level := slog.LevelInfo
+	if kill || market.IsMemoryEventNSID(parsed.Kind) {
+		level = slog.LevelWarn
+	}
+	log.Log(context.Background(), level, "requester_market_event", "event", strings.TrimPrefix(parsed.Kind, "com.publicdomainrelay.temp.compute.events."),
+		"kill", kill, "uri", parsed.Event.URI, "payload", payload)
 }
 
 func isContractEventNSID(nsid string) bool {
@@ -221,6 +242,8 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 			Stderr: stringOf(event.Payload.Value["stderr"]), ObservedAt: stringOf(event.Payload.Value["createdAt"])}
 		out.Sandbox = sandbox
 		out.ObservedAt = sandbox.ObservedAt
+	case market.ComputeEventsGuestMemoryPressureNSID, market.ComputeEventsGuestOOMKillNSID, market.ComputeEventsVMMemoryPressureNSID, market.ComputeEventsVMOOMKilledNSID:
+		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
 	case market.ComputeEventsVMTerminatedNSID:
 		termination, err := reportedTermination(event)
 		if err != nil {

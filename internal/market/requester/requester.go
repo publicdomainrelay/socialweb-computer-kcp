@@ -216,6 +216,8 @@ type Requester struct {
 
 	inboxed sync.Map
 
+	reported sync.Map
+
 	synced atomic.Bool
 
 	startedAt atomic.Pointer[time.Time]
