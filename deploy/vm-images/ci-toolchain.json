@@ -1,0 +1,5 @@
+{
+  "url": "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/vm-images/ci-toolchain/c14aeda4d02157ae8594d23ad8066dadf98d0a24bceded92eedc6118e9c9ea89",
+  "sha256": "c14aeda4d02157ae8594d23ad8066dadf98d0a24bceded92eedc6118e9c9ea89",
+  "marker": "ci-toolchain base=3edacb6a2537704a13f66f91880ce916eb0be299d514be523beb5e907e5de947 kcp=632db54182d438bbedf772014f7a074f3eb67ab6 toolchain=db422b4ab242d13b6c25d523459ab2b568f2f49ce1c55852e93b07f08da13b4c"
+}
