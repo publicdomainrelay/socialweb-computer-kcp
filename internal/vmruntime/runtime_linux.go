@@ -92,7 +92,8 @@ func ForHost(cfg Config) (Runtime, error) {
 
 func (r *hostRuntime) Capabilities() Capabilities {
 	c := r.cfg.Manager.Capabilities()
-	return Capabilities{Backend: c.Backend, Hypervisor: r.cfg.VMM, EnforcesLimits: c.EnforcesLimits, GracefulStop: GracefulStop()}
+	return Capabilities{Backend: c.Backend, Hypervisor: r.cfg.VMM, EnforcesLimits: c.EnforcesLimits, GracefulStop: GracefulStop(),
+		NestedVirt: r.cfg.VMM == VMMQEMU && HostNestedVirt()}
 }
 
 func (r *hostRuntime) imagePin() (guestimage.Pin, error) { return guestimage.PinFor(r.target) }

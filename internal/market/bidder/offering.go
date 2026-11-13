@@ -170,7 +170,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	if prior != nil {
 		createdAt = prior.CreatedAt
 		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, endpoints) && sameStrings(prior.AppliesTo, appliesTo) &&
-			prior.MaxCpus == limits.cpus && prior.MaxMem == limits.mem() {
+			prior.MaxCpus == limits.cpus && prior.MaxMem == limits.mem() && prior.NestedVirt == limits.nestedVirt {
 			if b.legacyStale {
 				b.mirrorLegacy(ctx, *prior)
 			}
@@ -182,7 +182,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	if err != nil {
 		return err
 	}
-	record.MaxCpus, record.MaxMem = limits.cpus, limits.mem()
+	record.MaxCpus, record.MaxMem, record.NestedVirt = limits.cpus, limits.mem(), limits.nestedVirt
 	uri, err := b.putOffering(ctx, record)
 	if err != nil {
 		return err

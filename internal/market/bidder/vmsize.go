@@ -16,6 +16,8 @@ type vmLimits struct {
 	cpus int64
 
 	memMiB int
+
+	nestedVirt bool
 }
 
 func (l vmLimits) mem() string {
@@ -29,7 +31,7 @@ func (b *Bidder) vmLimits() vmLimits {
 	if !b.servesKind(string(v1alpha1.ComputeKindVM)) {
 		return vmLimits{}
 	}
-	return vmLimits{cpus: int64(runtime.NumCPU()), memMiB: hostMemMiB()}
+	return vmLimits{cpus: int64(runtime.NumCPU()), memMiB: hostMemMiB(), nestedVirt: b.cfg.NestedVirt}
 }
 
 func hostMemMiB() int {
@@ -57,6 +59,9 @@ func (b *Bidder) sizeRefused(record vmRecord) string {
 		return ""
 	}
 	limits := b.vmLimits()
+	if record.NestedVirt && !limits.nestedVirt {
+		return "the RFP asks for nestedVirt; this bidder's offering does not set it (its VMM is not QEMU or its host has KVM nested virtualization off)"
+	}
 	if limits.cpus > 0 && int64(record.CPUs) > limits.cpus {
 		return fmt.Sprintf("the RFP asks for %d vCPUs; this bidder offers at most %d (its offering's maxCpus)", record.CPUs, limits.cpus)
 	}

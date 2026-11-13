@@ -34,6 +34,7 @@ sudo scripts/host-nested-kvm.sh --apply
   next boot
 - `check-host -role bidder` runs at the end of an install and before a foreground start
 - VM size: the offering advertises `maxCpus` / `maxMem` (the host's CPUs and memory); an RFP asking for more is refused
+- `nestedVirt`: the offering sets it when the VMM is QEMU and nested virtualization (above) is on; an RFP asking for it is refused otherwise
 
 ## Identity
 

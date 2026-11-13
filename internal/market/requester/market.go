@@ -47,6 +47,8 @@ type Bidder struct {
 	Endpoint string
 
 	Audience string
+
+	NestedVirt bool
 }
 
 type BidRecord struct {
@@ -109,6 +111,7 @@ const (
 	dropNoEndpoint     = "the offering names no endpoint"
 	dropOfferingsRead  = "offerings read failed: "
 	dropEndpoint       = "offering endpoint refused: "
+	dropNoNestedVirt   = "the offering does not set nestedVirt"
 
 	maxDropsInMessage = 5
 )
@@ -152,6 +155,19 @@ func (d Discovery) Without(deny []string) Discovery {
 			denied[bidder.DID] = true
 			out.Dropped = append(out.Dropped, BidderDrop{DID: bidder.DID, Reason: dropContractDenied})
 		}
+	}
+	return out
+}
+
+func (d Discovery) NestedVirtOnly() Discovery {
+	out := d.clone()
+	out.Bidders = out.Bidders[:0]
+	for _, bidder := range d.Bidders {
+		if bidder.NestedVirt {
+			out.Bidders = append(out.Bidders, bidder)
+			continue
+		}
+		out.Dropped = append(out.Dropped, BidderDrop{DID: bidder.DID, Reason: dropNoNestedVirt})
 	}
 	return out
 }
@@ -392,6 +408,7 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	if !ok {
 		return nil, dropNoEndpoint
 	}
+	bidder.NestedVirt = offering.NestedVirt
 	return []Bidder{bidder}, dropNoOffering
 }
 

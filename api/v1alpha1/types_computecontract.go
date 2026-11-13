@@ -46,6 +46,8 @@ type ComputeContractTemplate struct {
 
 	Mem string `json:"mem,omitempty" apigen:"pattern=^[0-9]+[KMGTkmgt]?i?[Bb]?$"`
 
+	NestedVirt bool `json:"nestedVirt,omitempty"`
+
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	Agent *ComputeContractAgent `json:"agent,omitempty"`

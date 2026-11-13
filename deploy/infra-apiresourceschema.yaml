@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-15.infras.socialweb.computer
+  name: v1alpha1-16.infras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -86,6 +86,8 @@ spec:
                     mem:
                       type: string
                       pattern: ^[0-9]+[KMGTkmgt]?i?[Bb]?$
+                    nestedVirt:
+                      type: boolean
                     tunnels:
                       type: array
                       items:
