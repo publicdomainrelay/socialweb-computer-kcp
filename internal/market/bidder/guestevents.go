@@ -40,6 +40,10 @@ func (b *Bidder) PublishGuestEvent(ctx context.Context, event guestcp.GuestEvent
 			return nil
 		}
 	}
+	if event.Collection == market.ComputeEventsGuestImageNSID && b.guestEventSent(vm, event.Collection) {
+		b.log.Warn("a second guest.image event is dropped", "computevm", vm.Name)
+		return nil
+	}
 	name, err := b.ensureGuestEventSync(ctx, vm, event.Collection, event.Tag, event.Kind, record)
 	if err != nil {
 		return err
@@ -47,6 +51,15 @@ func (b *Bidder) PublishGuestEvent(ctx context.Context, event guestcp.GuestEvent
 	b.log.Info("a guest event is published to the requester", "computevm", vm.Name, "collection", event.Collection,
 		"tag", event.Tag, "kind", event.Kind, "stateSync", name)
 	return nil
+}
+
+func (b *Bidder) guestEventSent(vm *v1alpha1.ComputeVM, collection string) bool {
+	for _, sync := range b.syncs.List() {
+		if b.guests.SyncVM(&sync) == vm.Name && strings.HasPrefix(sync.Spec.IdempotencyKey, guestEventSyncKeyPrefix+collection+":") {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Bidder) memoryEventCapped(vm *v1alpha1.ComputeVM, collection, tag, kind string) string {
