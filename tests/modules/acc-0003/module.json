@@ -1,0 +1,21 @@
+{
+	"name": "acc-0003",
+	"description": "Acceptance 0003 (0001 section 9, ACC34): CLI ssh over WebRTC fresh and restarted (<= 10 s), no plaintext, records gone, host empty; per host with --per-host.",
+	"actions": [{ "entry": "run", "label": "Run 0003", "description": "Discovery, or each host in turn with --per-host." }],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.checkLogs",
+		"computer.socialweb.test.request.records",
+		"com.fedfork.exec.kube.get",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.patch",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "every record of the run RecordNotFound" },
+		{ "nsid": "computer.socialweb.test.request.start", "required": true, "entries": ["run"], "reason": "run request --hold over WebRTC" }
+	]
+}
