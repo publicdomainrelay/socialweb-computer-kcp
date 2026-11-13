@@ -11,6 +11,20 @@ iroh/webrtc-only bidders).
   deployed by its `scripts/deploy-page.sh`. It replaced the kcp-wasm page (kcp compiled to js/wasm, branch
   `kcp-wasm-memory-storage-1`), whose Go requester dials only https endpoints; that page's snapshot-restore (old
   A4) and schema-upgrade (old A5) checks retired with it (cut-over, no backcompat)
+- Last pass: 2026-11-13 02:39-02:53Z, rollout 20 (kcp v0.0.0-rc165-pre1 038bd32e, binary 24a8b530) on every bidder,
+  prod page files as deployed 2026-11-11 (requester repo 35c405b, atlibs 0.6.0, atlibs-webrtc 0.4.0, identlink 0.2.0),
+  alice, no bidders list (each bidder targeted by pausing the other two, as 0001 section 9 does), headless Chrome on
+  hat-8. A1: 57/57 (`node --test web/webrtc/*.test.mjs modules/requester/test.mjs`) from fresh clones at the README's
+  sibling pins. A2: the page's own form, consent page `shell.socialweb.computer/oauth/requester/client-metadata.json`
+  for @aliceoa.bsky.social, page shows `aliceoa.bsky.social (did:plc:lpfuqerea3deuoyrn7ojser4)`. A3 + A6
+  (`scripts/page-round.mjs`, a temp copy that passes `identlink` like `main.js` and drops `bidders`): hat-7 47 s,
+  hat-9 47 s, local 45 s; each: 1 ingress offer, https `submit*` 0, receipt from the unpaused bidder, shell `Linux ...
+  uid=0(root)`, release, 7 records getRecord 400, 0 offers left, 0 market.event / vm.delete / rfp / accept left (fix 13),
+  host empty. The first hat-9 round (02:41:23Z) failed `submitRfp: ICE disconnected` (pitfalls: mDNS on hat-9, and the
+  answerer off its leased port); it passed at 02:45:45Z once hat-9 allowed mdns. A7 (`webchat-check.ts`, alice + bob,
+  consent `irc.fedfork.com` for each): session injected (`#aliceoa_bsky_social`), ws `?format=json` text frames only,
+  member list, post shown; no join/leave lines (the second tab is the same session; bob lands in his own per-handle
+  channel)
 - Last pass vs hat-7 after market-https came off (offering iroh + webrtc, rollout 6): 2026-11-10 16:49Z A3 headless
   (`scripts/page-round.mjs`, the deployed page files) in 45 s, alice: 1 ingress offer, https `submit*` 0, shell `Linux ...
   uid=0(root)` over the guest datachannel, release, 7 records answer getRecord 400, 0 offers left, hat-7 empty
@@ -96,6 +110,14 @@ either side fails (no TURN, by design).
 ## Known gaps
 
 - None open for this page. (The kcp iOS app reaches webrtc-only bidders since eb018e0e; 0010 passed 2026-11-10.)
+
+## Pitfalls
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `submitRfp: ICE disconnected: a symmetric NAT on either side defeats STUN-only WebRTC` against one bidder from a browser on its LAN (hat-9, 2026-11-13 02:41:23Z; hat-9 answered at 02:41:40Z, the page's only pairs were srflx) | hat hosts must allow mdns (the FedoraServer firewalld zone doesn't by default): headless/real Chrome on the bidder's LAN hides host candidates behind `.local` names, and pion's default QueryOnly mDNS needs the reply on udp 5353, else only srflx pairs and ICE disconnects without hairpin NAT. hat-9 now allows `mdns`; the 02:45:45Z round paired host to host |
+| the bidder's answer offers an ephemeral UDP port, outside 31000-31999 (hat-9 53721), journal `webrtc_mesh_udp_port_unbound ... address already in use` | every bidder service restart (a pause / resume) builds a new mesh that cannot bind its leased port: the old mesh's UDP listener is never closed (`Service.mesh`, `webrtc.NewMesh`, since 4ccc3bd6), so the answerer falls back to an ephemeral port and one socket leaks per cycle. A firewall that opens only the webrtc range then drops the page's checks unless the bidder sends first (mDNS above). Fix pending |
+| every bid refused by the page's bidder-trust policy in a `page-round.mjs` round | the repo's `scripts/page-round.mjs` does not pass `identlink` to `WebrtcCubit` as `main.js` does; use a copy that does (requester repo fix pending) |
 
 ## Rules
 
