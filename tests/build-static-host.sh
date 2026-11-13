@@ -8,7 +8,7 @@ zig="${ZIG:-$(ls ~/.cache/socialweb-meshd-zig/*/zig 2>/dev/null | head -1)}"
 t=x86_64-unknown-linux-musl
 w="${TMPDIR:-$HOME/.tmp}/swc-static-host-zig"
 mkdir -p "$w"
-printf '#!/bin/sh\nfor a do shift; case "$a" in --target=*) ;; *) set -- "$@" "$a" ;; esac; done\nexec %s cc -target x86_64-linux-musl "$@"\n' "$zig" > "$w/cc"
+printf '#!/bin/sh\nfor a do shift; case "$a" in --target=*) ;; *) set -- "$@" "$a" ;; esac; done\nexec %s cc -target x86_64-linux-musl -fno-sanitize=undefined "$@"\n' "$zig" > "$w/cc"
 printf '#!/bin/sh\nexec %s ar "$@"\n' "$zig" > "$w/ar"
 chmod +x "$w/cc" "$w/ar"
 rustup target add "$t" >/dev/null
