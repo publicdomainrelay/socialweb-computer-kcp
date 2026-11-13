@@ -215,7 +215,7 @@ const INNER_DUMP: &str = r#"
 echo "--- outer guest: $(date -u +%T) uptime: $(uptime)"; free -m | head -2
 cat > /tmp/milestones.py <<'PY'
 import json, re, sys
-keep = re.compile(r"guest ComputeVM is applied|prepared|handed to its placement|unit watch|onNetwork|on-network|guest_image|receipt|provision|lost|failed|fetch|image|submitAccept|accept|release|bids|winner", re.I)
+keep = re.compile(r"guest ComputeVM is applied|prepared|handed to its placement|unit watch|onNetwork|on-network|guest_image|receipt|provision|lost|failed|fetch|image|submitAccept|accept|release|bids|winner|offering|discovery|heartbeat|serves the market|building the service", re.I)
 for line in open(sys.argv[1], errors="replace"):
     try:
         d = json.loads(line)
@@ -268,12 +268,17 @@ fn qemu_guest_hosts_a_market_network_bidder() {
     // stg's own cwd (dev stats it); cmd has no single quotes
     let as_stg = |cmd: &str| format!("sudo runuser -u stg -- sh -c 'cd /home/stg && HOME=/home/stg XDG_RUNTIME_DIR=/run/user/$(id -u stg) {cmd}' 2>&1");
     let st = "--instance g --state-dir /home/stg/s";
-    let up = guest.sh_in(&as_stg(&format!("/home/stg/swc dev up {st} --profile market-network --bidders 1 --host-backend proc --network-timeout 15m")), b"", Duration::from_secs(1200));
-    eprintln!("dev up: {}", &up[up.len().saturating_sub(300)..]);
-    // the inner guest's console outlives its release (the bidder removes the work dir): copy it every 2 s
+    // the inner guest's console outlives its release (the bidder removes the work dir) and the image store's .fetch-* dirs are sampled: both from before dev up, every 2 s
     const KEEP_CONSOLE: &str = "while :; do for f in $(find /home/stg/s -name console.log 2>/dev/null); do cp $f /tmp/con-$(basename $(dirname $f)).log; done; d=$(find /home/stg/s -maxdepth 9 -type d -name '.fetch-*' 2>/dev/null); [ -n \"$d\" ] && echo \"$(date -u +%T) $(du -sm $d 2>/dev/null | tr '\\n' ' ')\" >> /tmp/fetches.log; sleep 2; done\n";
     guest.sh_in("cat > /tmp/keep-console.sh && chmod 0644 /tmp/keep-console.sh", KEEP_CONSOLE.as_bytes(), Duration::from_secs(30));
     guest.sh_in(&as_stg("setsid sh /tmp/keep-console.sh </dev/null >/dev/null 2>&1 &"), b"", Duration::from_secs(30));
+    let up = guest.sh_in(&as_stg(&format!("/home/stg/swc dev up {st} --profile market-network --bidders 1 --host-backend proc --network-timeout 15m")), b"", Duration::from_secs(1200));
+    eprintln!("dev up: {}", &up[up.len().saturating_sub(300)..]);
+    const WAIT_IMAGE: &str = "for i in $(seq 300); do grep -q bidder_guest_image_ready /home/stg/s/dev/g/apps/dev/g-bidder-1/logs/core.log 2>/dev/null && echo ready && exit 0; sleep 2; done; echo image-not-ready\n";
+    guest.sh_in("cat > /tmp/wait-image.sh && chmod 0644 /tmp/wait-image.sh", WAIT_IMAGE.as_bytes(), Duration::from_secs(30));
+    let ready = guest.sh_in(&as_stg("sh /tmp/wait-image.sh"), b"", Duration::from_secs(700));
+    eprintln!("the inner bidder's guest image check: {ready}");
+    assert!(ready.ends_with("ready") && !ready.contains("not-ready"), "the inner bidder never verified its guest image within 10 min");
     let req = guest.sh_in(&as_stg("/home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec \"uname -r\""), b"", Duration::from_secs(900));
     let held = !req.contains("fencing the guest") && req.contains("Held");
     if !held || std::env::var("SWC_VMM_DUMP").is_ok() {
