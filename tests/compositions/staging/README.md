@@ -65,6 +65,10 @@ Four small VMs on one meshd overlay (10.44.0.1-4), joined by the atproto VM's ne
 `ttlSeconds` the deadline, its record `computer.socialweb.ephemeralInfra/stg-<run>`); the module's ssh and put go
 through `run requester ssh --contract einfra-stg-<run>-<layer>`, and the teardown deletes the EphemeralInfra (its
 finalizer releases every contract).
+A failed contract (a refused accept, a guest off network) is requested again as `<layer>-r<n>` (twice at most) with
+`denyBidderDids` naming the bidder that failed it. As the guest requester R2 (an account with `guestRequester`), the run
+requester is `run requester --guest-requester` (one R2 DID for all four contracts); it needs its own
+`XDG_RUNTIME_DIR` (`loginctl enable-linger r2`, then `XDG_RUNTIME_DIR=/run/user/$(id -u r2)`).
 
 ```sh
 SWC_MESHD=<static socialweb-meshd x86_64> SWC_TARGET=~/.tmp/target-staging.json \
