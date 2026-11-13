@@ -20,8 +20,8 @@ anyhow = "1"
 atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "6e113df320bc705ec93da7b299ef14093f5fdb6d" }
 # iroh tickets of offering / onNetwork addresses; its raw `dumbpipe connect` is the iroh stream
 atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "e1cdf12970f6f0a14c1b8c3a04e362af07904743" }
-atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "f8971d83033e655f22b7ccd7d70296a163f5516f" }
-atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "2955839d4e82b744b11cf2c40e815d8585c1e867" }
+atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "bb476dc89260a590499f207c0f299f76940ab37a" }
+atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "0a40e59a93d5d6a417eed63aa2d259423aff6855" }
 # ident.link walks over verified sync.getRecord, the market's computed rkeys
 identlink = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-identlink", rev = "aa7cacc3b355b217d7087cb3a95eb61ab16c8ad7", features = ["native"] }
 futures = "0.3"

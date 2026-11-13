@@ -19,6 +19,9 @@ use testkit::requester::{Binary, SignIn, identity_args, kept_by_rule, tail, uris
 use testkit::target::{Account, Target, check_private, expand};
 use tokio::sync::mpsc;
 
+#[path = "more.rs"]
+mod more;
+
 const P: &str = "computer.socialweb.test.";
 pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.requester.start",
@@ -32,6 +35,22 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.atirc.meshSub",
     "computer.socialweb.test.atirc.meshPub",
     "computer.socialweb.test.atirc.meshPeers",
+    "computer.socialweb.test.kube.addCluster",
+    "computer.socialweb.test.page.signin",
+    "computer.socialweb.test.page.fetch",
+    "computer.socialweb.test.page.round",
+    "computer.socialweb.test.ssh.tempKey",
+    "computer.socialweb.test.atirc.observer",
+    "computer.socialweb.test.atirc.observerPub",
+    "computer.socialweb.test.atirc.observerRevoke",
+    "computer.socialweb.test.requester.ssh",
+    "computer.socialweb.test.requester.restart",
+    "computer.socialweb.test.requester.cluster",
+    "computer.socialweb.test.requester.bundle",
+    "computer.socialweb.test.requester.records",
+    "computer.socialweb.test.requester.events",
+    "computer.socialweb.test.root.exec",
+    "computer.socialweb.test.root.putBinary",
     "com.fedfork.exec.identlink.walk",
     "com.fedfork.exec.identlink.plc",
 ];
@@ -60,6 +79,8 @@ pub struct Swc {
     requests: Mutex<HashMap<String, PathBuf>>,
     env_files: Mutex<Vec<PathBuf>>,
     http: reqwest::Client,
+    ssh: Arc<atlibs_ssh::Ssh>,
+    extra: more::Extra,
 }
 
 fn input_of(r: &Request) -> Value {
@@ -82,6 +103,7 @@ impl Swc {
         dir: PathBuf,
         kube: Arc<Kube>,
         receipts: Arc<Mutex<Vec<String>>>,
+        ssh: Arc<atlibs_ssh::Ssh>,
     ) -> Arc<Self> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -98,6 +120,8 @@ impl Swc {
             requests: Default::default(),
             env_files: Default::default(),
             http,
+            ssh,
+            extra: Default::default(),
         })
     }
 
@@ -175,6 +199,7 @@ impl Swc {
             self.acct()?,
             SignIn::AppPassword,
         ));
+        self.extra.argv.lock().unwrap().insert(name.clone(), args.clone());
         let log =
             std::fs::File::create(state.join(format!("{name}.log"))).map_err(|e| e.to_string())?;
         let child = self
@@ -530,13 +555,16 @@ impl Swc {
                 self.plc(input["did"].as_str().ok_or("did is required")?)
                     .await
             }
-            _ => Err(format!("{nsid}: not a call of this host")),
+            other => match self.more(other, &input).await {
+                Some(r) => r,
+                None => Err(format!("{nsid}: not a call of this host")),
+            },
         }
     }
 
     /// Release every invocation, stop every requester (Ctrl-C), remove the password env files. The errors.
     pub async fn cleanup(&self) -> Vec<String> {
-        let mut errors = vec![];
+        let mut errors = self.more_cleanup().await;
         let names: Vec<String> = self.requests.lock().unwrap().keys().cloned().collect();
         for n in names {
             if let Err(e) = self.release(&n).await {
@@ -610,7 +638,11 @@ impl Call for Swc {
                     });
                     Ok(Sub { messages, commands })
                 }
-                _ => Err(format!("{nsid} is not a subscription of this host")),
+                Some(other) => match self.more_sub(other, &input).await {
+                    Some(r) => r,
+                    None => Err(format!("{nsid} is not a subscription of this host")),
+                },
+                None => Err(format!("{nsid} is not a subscription of this host")),
             }
         })
     }

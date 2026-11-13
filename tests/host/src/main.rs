@@ -131,6 +131,7 @@ async fn main_() -> Result<bool> {
         dir.clone(),
         kube.clone(),
         receipts,
+        ssh.clone(),
     );
     let transports = vec![
         kube.transport(),
