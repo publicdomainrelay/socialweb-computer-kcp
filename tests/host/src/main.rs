@@ -191,14 +191,19 @@ async fn run_dir_cmd(cmd: &str, args: &[String]) -> Result<bool> {
             // prints every run's state; --modules <dir>: the wasm of another build (tests/modules by default)
             let meta: Value =
                 serde_json::from_slice(&std::fs::read(dir.join("run.json")).context("run.json")?)?;
-            let manifest: Value = serde_json::from_slice(&std::fs::read(
-                PathBuf::from(
-                    meta["composition"]
-                        .as_str()
-                        .context("run.json composition")?,
-                )
-                .join("composition.json"),
-            )?)?;
+            // the composition where the run had it, else this checkout's of the same name (a CI run's artifacts
+            // name the CI VM's checkout)
+            let recorded = PathBuf::from(meta["composition"].as_str().context("run.json composition")?);
+            let comp = match recorded.join("composition.json").exists() {
+                true => recorded.join("composition.json"),
+                false => testkit::repo()
+                    .join("tests/compositions")
+                    .join(recorded.file_name().context("run.json composition")?)
+                    .join("composition.json"),
+            };
+            let manifest: Value = serde_json::from_slice(
+                &std::fs::read(&comp).with_context(|| comp.display().to_string())?,
+            )?;
             let modules = flag(args, "--modules")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| testkit::repo().join("tests/modules"));

@@ -661,13 +661,16 @@ Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.js
 
 ```sh
 # 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to
-#    the owner and collaborators, kept 14 days); a knotless CLI built from the fork (runner-atlibs-composition)
+#    the owner and collaborators, kept 14 days); a knotless CLI built from the fork (runner-atlibs-composition),
+#    logged in again once it asks for dev.knotless.getArtifact (`knotless login <you>`). The check's log shows the
+#    run as it goes: one swc-test-host line per tick (event, calls, timers, `done pass=`)
 export KNOTLESS_APPVIEW=https://knotless.socialweb.computer
-knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha>                    # list
-knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha> --out ./artifacts  # or --pull <pull at-uri>
+knotless run artifacts knotless://johnandersen777.bsky.social/socialweb-computer-kcp --workflow test --commit <sha>    # list
+knotless run artifacts knotless://johnandersen777.bsky.social/socialweb-computer-kcp --workflow test --commit <sha> --out ./artifacts
 R=./artifacts/runs/<runbook>-composition-<ms>       # locally: ~/.tmp/swc-system-tests/runs/<...>
 jq . "$R/failure.json"
-# 2. replay it offline: the first diverging tick, then the states there
+# 2. replay it offline (from tests/, after `cargo wasm` in tests/modules; a CI run's composition is this checkout's of
+#    the same name): the first diverging tick, then the states there
 cd tests && SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- replay "$R"
 cargo run -q -p swc-test-host -- replay "$R" --to <seq> | jq .statesAt
 # 3. a frozen run: attach (MCP on stdio; the CI route over the check's iroh ticket: TODO with the CI freeze), then the
