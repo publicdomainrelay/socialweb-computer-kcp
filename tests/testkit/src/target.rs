@@ -21,7 +21,7 @@ pub struct Target {
     pub gateway: Gateway,
     #[serde(default)]
     pub atirc: Option<String>,
-    /// the requester binary: "release" (newest v* tag), "release:<tag>", "sha:<commit>", "path:<file>"
+    /// the requester binary: "release" (newest v* tag), "release:<tag>", "sha:<commit>", "local:<commit>", "path:<file>"
     #[serde(default = "default_requester")]
     pub requester: String,
     #[serde(default)]

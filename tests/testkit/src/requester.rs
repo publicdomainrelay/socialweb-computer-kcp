@@ -76,16 +76,17 @@ async fn newest_tag() -> Result<String> {
 }
 
 impl Binary {
-    /// "release" | "release:<tag>" | "sha:<full commit>" | "path:<file>"; downloads are checked against SHA256SUMS
+    /// "release" | "release:<tag>" | "sha:<full commit>" | "local:<full commit>" (a hand build, local/<commit>) | "path:<file>"; downloads are checked against SHA256SUMS
     /// and cached under ~/.tmp/swc-system-tests/bin.
     pub async fn resolve(spec: &str) -> Result<Self> {
         let prefix = match spec.split_once(':') {
             _ if spec == "release" => format!("releases/{}", newest_tag().await?),
             Some(("release", tag)) => format!("releases/{tag}"),
             Some(("sha", sha)) => format!("main/{sha}"),
+            Some(("local", sha)) => format!("local/{sha}"),
             Some(("path", p)) => return Self::at(expand(p)),
             _ => bail!(
-                "requester {spec:?}: want release, release:<tag>, sha:<commit> or path:<file>"
+                "requester {spec:?}: want release, release:<tag>, sha:<commit>, local:<commit> or path:<file>"
             ),
         };
         let file = format!("socialweb-computer-{}", arch());

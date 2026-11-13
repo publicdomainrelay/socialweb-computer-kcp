@@ -22,7 +22,8 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
 Input `fault: "status"` makes step 4 fail (`dev status` of an instance the VM does not have): the proof of a failed
 run's `logs/` (only the run's own VM is touched).
 
-The target's `requester` picks the binary: `release:<tag>` or `sha:<commit>` (a bare `release` is refused).
+The target's `requester` picks the binary: `release:<tag>`, `sha:<commit>` (CI's `main/<commit>`) or `local:<commit>` (a hand build
+published to `local/<commit>/binaries/` with `scripts/publish-spaces.ts`); a bare `release` is refused.
 
 ```sh
 cd tests/modules && cargo wasm && cd ..

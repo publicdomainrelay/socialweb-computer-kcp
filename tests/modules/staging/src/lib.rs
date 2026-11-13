@@ -16,12 +16,13 @@ fn dev_up(bidders: u64) -> String {
     format!("--profile market-network --bidders {bidders} --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m")
 }
 
-/// The bucket prefix of a binary spec: releases/<tag> or main/<commit>.
+/// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build).
 fn prefix(spec: &str) -> Result<String, String> {
     match spec.split_once(':') {
         Some(("release", tag)) => Ok(format!("releases/{tag}")),
         Some(("sha", sha)) => Ok(format!("main/{sha}")),
-        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag> or sha:<commit> (got {spec:?})")),
+        Some(("local", sha)) => Ok(format!("local/{sha}")),
+        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag>, sha:<commit> or local:<commit> (got {spec:?})")),
     }
 }
 
