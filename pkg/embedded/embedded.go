@@ -53,6 +53,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vaultmemory"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	contractexposure "github.com/johnandersen777/socialweb-computer-kcp/internal/exposure"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/oauthcallback"
 	sandboxembedded "github.com/johnandersen777/socialweb-computer-kcp/internal/sandbox/embedded"
@@ -124,6 +125,9 @@ type Config struct {
 	ProviderIdentities []byte
 
 	BeforeRequester func(ctx context.Context) error
+
+	// Network is the market network the requester follows (PLC, caBundle, comms); nil is the public network.
+	Network *v1alpha1.MarketNetworkValue
 
 	Log *slog.Logger
 }
@@ -271,7 +275,8 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 		return err
 	}
 	r.exposure = exposureCtl
-	directory := Directory()
+	plcURL, netHTTP := cfg.plc()
+	directory := &identity.BaseDirectory{PLCURL: plcURL, HTTPClient: *netHTTP, PLCClient: netHTTP}
 	secrets := func(ws string) atproto.SecretStore { return vaultmemory.NewSecrets(vaultCtl.Provider().Store(ws)) }
 	callbacks := oauthcallback.NewRegistry()
 	identityCtl, err := marketidentity.Register(r.manager, marketidentity.Options{
@@ -279,14 +284,14 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 		Vault:      secrets,
 		Bus:        r.bus,
 		Log:        log,
-		HTTPClient: http.DefaultClient,
+		HTTPClient: netHTTP,
 		OAuth: atproto.OAuthOptions{
 			ClientID:    cfg.OAuthClientID,
 			RedirectURI: cfg.OAuthRedirectURI,
 			Scopes:      oauth.RequesterOAuthScope,
 			StateRef:    &commonv1.SecretRef{Mount: IdentityName, Path: "oauth/" + IdentityName},
 			Directory:   directory,
-			HTTPClient:  http.DefaultClient,
+			HTTPClient:  netHTTP,
 		},
 	})
 	if err != nil {
@@ -305,7 +310,7 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 		Dynamic: func(workspace string) (*kube.Client, error) {
 			return kube.ForWorkspace(cfg.Rest, workspace)
 		},
-		Network: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: directory, HTTP: http.DefaultClient}),
+		Network: reporemote.NewNetwork(reporemote.NetworkConfig{Directory: directory, HTTP: netHTTP}),
 		Pds:     func(string, string) (*atpds.Server, bool) { return nil, false },
 		Secrets: func(ctx context.Context, workspace string, ref commonv1.SecretRef) (map[string]any, error) {
 			return secrets(workspace).Get(ctx, ref)
@@ -342,9 +347,10 @@ func (r *Requester) register(ctx context.Context, cfg Config, composer *compose.
 
 func (r *Requester) registerEvents(ctx context.Context, cfg Config, log *slog.Logger) (func(context.Context) error, error) {
 	watchChildren, watchRepos, watchValues := eventsctl.RecordWatch(workspaceClients(cfg.Rest))
+	plcURL, netHTTP := cfg.plc()
 	return eventsctl.Register(ctx, r.manager, eventsctl.Options{
 		Bus: r.bus, Dynamic: kube.NewFactory(cfg.Rest), Resolver: &pdsclient.Resolver{Handlers: r.bus},
-		PLCURL: PLCDirectoryURL, HTTPClient: http.DefaultClient, StateDir: cfg.StateDir,
+		PLCURL: plcURL, HTTPClient: netHTTP, StateDir: cfg.StateDir,
 		RecordWatchChildren: watchChildren, RecordWatchRepos: watchRepos, RecordWatchValues: watchValues, Scope: inRoot, Log: log,
 	})
 }
@@ -455,7 +461,7 @@ func (r *Requester) createRoot(ctx context.Context, cfg Config) error {
 			PdsURL:           cfg.PDSURL,
 			Association:      v1alpha1.AssociationSkip,
 		},
-		Network:         &v1alpha1.MarketNetworkValue{PLCDirectoryURL: PLCDirectoryURL},
+		Network:         cmp.Or(cfg.Network, &v1alpha1.MarketNetworkValue{PLCDirectoryURL: PLCDirectoryURL}),
 		Comms:           comms,
 		SecretsFallback: v1alpha1.SecretsFallbackSealed,
 		Components:      components,
@@ -544,6 +550,20 @@ func Directory() identity.Directory {
 		HTTPClient: *client,
 		PLCClient:  client,
 	}
+}
+
+// plc is the network's PLC directory (else the public one) and an HTTP client that trusts its caBundle.
+func (cfg Config) plc() (string, *http.Client) {
+	url, client := PLCDirectoryURL, &http.Client{Timeout: 10 * time.Second}
+	if n := cfg.Network; n != nil {
+		url = cmp.Or(strings.TrimRight(strings.TrimSpace(n.PLCDirectoryURL), "/"), url)
+		if ca := strings.TrimSpace(n.CABundle); ca != "" {
+			if c, err := httpclient.TLSClient(httpclient.TLSOptions{CAPEM: []byte(ca), Timeout: 10 * time.Second}); err == nil {
+				client = c
+			}
+		}
+	}
+	return url, client
 }
 
 func inRoot(ws string) bool { return ws == RootWorkspace || strings.HasPrefix(ws, RootWorkspace+":") }

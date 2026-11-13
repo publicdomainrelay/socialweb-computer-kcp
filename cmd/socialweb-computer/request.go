@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/requester"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/marketidentity/atproto"
@@ -1068,13 +1070,18 @@ func (r *requestRun) awaitGuestTombstones(ctx context.Context, c *v1alpha1.Compu
 	if len(dids) == 0 {
 		return
 	}
-	plcURL := requester.PublicPLCDirectoryURL
+	plcURL, plcHTTP := requester.PublicPLCDirectoryURL, (*http.Client)(nil)
 	if n := r.root.Network; n != nil && strings.TrimSpace(n.PLCDirectoryURL) != "" {
 		plcURL = strings.TrimRight(strings.TrimSpace(n.PLCDirectoryURL), "/")
+		if ca := strings.TrimSpace(n.CABundle); ca != "" {
+			if c, err := httpclient.TLSClient(httpclient.TLSOptions{CAPEM: []byte(ca), Timeout: time.Minute}); err == nil {
+				plcHTTP = c
+			}
+		}
 	}
 	r.log("waiting for the guest's DIDs to be tombstoned (by the guest, else by the renter rotation key) before the kcp stops",
 		"dids", dids, "timeout", (requester.RenterTombstoneWait + time.Minute).String())
-	directory, err := statusstate.NewHTTPPLCClient(plcURL, nil)
+	directory, err := statusstate.NewHTTPPLCClient(plcURL, plcHTTP)
 	if err != nil {
 		r.a.log.Warn("the PLC directory URL is not usable; not waiting for the guest's tombstones", "plc", plcURL, "err", err.Error())
 		return
