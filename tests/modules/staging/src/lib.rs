@@ -371,7 +371,7 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
             // the ephemeralInfra record's per-contract status (what the watch page draws): at Deployed and after the end
             if id == "infra:record-deployed" || id == "infra:record-ended" {
                 let c: Vec<Value> = o["value"]["status"]["contracts"].as_array().into_iter().flatten()
-                    .map(|c| json!(format!("{} {} {} {}", c["name"].as_str().unwrap_or("-"), c["phase"].as_str().unwrap_or("-"), c["winner"].as_str().map(|w| &w[w.len().saturating_sub(6)..]).unwrap_or("-"), if c["receiptUri"].is_string() { "receipt" } else { "-" })))
+                    .map(|c| json!(format!("{} {} {} {}", c["name"].as_str().unwrap_or("-"), c["phase"].as_str().unwrap_or("-"), c["winner"].as_str().map(|w| &w[w.len().saturating_sub(6)..]).unwrap_or("-"), if c["receipt"].is_string() { "receipt" } else { "-" })))
                     .collect();
                 s.st["readings"][&id[6..]] = json!({ "phase": o["value"]["status"]["phase"], "contracts": c });
                 if id == "infra:record-ended" {
