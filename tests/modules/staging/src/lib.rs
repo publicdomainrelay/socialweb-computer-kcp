@@ -67,6 +67,9 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
     let ssh = |id: &str, exec: String| host(id, "request.ssh", json!({ "name": name, "exec": exec }));
     // dev down before the result, however it ended (the host then releases the VM)
     let down = |s: &mut S, h: Handle, result: Value| {
+        if s.is("down") {
+            return s.keep(h);
+        }
         s.st["result"] = result;
         s.set("down");
         s.keep(h.call(ssh("down", bg("down", swc(&format!("dev down {INST}"))))))

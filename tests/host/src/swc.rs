@@ -199,9 +199,9 @@ impl Swc {
     /// suite (a tar.gz of tests/compositions, tests/targets and the module wasm and module.json files).
     async fn request_put(&self, input: &Value) -> Result<Value, String> {
         let name = str_of(input, "name")?;
-        let remote = str_of(input, "remote")?;
-        if !remote.starts_with('/') || remote.contains('\'') {
-            return Err(format!("remote {remote:?}: an absolute path without quotes"));
+        let remote = input["remote"].as_str().unwrap_or_default();
+        if !remote.starts_with('/') || remote.contains(['\'', ' ', '\n']) {
+            return Err(format!("remote {remote:?}: an absolute path without quotes or spaces"));
         }
         let bytes = match str_of(input, "what")? {
             "testHost" => {
