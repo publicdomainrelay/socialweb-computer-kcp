@@ -860,21 +860,24 @@ impl Swc {
         let mut errors = self.knotless_cleanup().await;
         errors.extend(self.more_cleanup().await);
         let names: Vec<String> = self.requests.lock().unwrap().keys().cloned().collect();
-        for n in names {
+        // every invocation at once (a multi-VM run's four, a guest requester's slow ones), each said with its time
+        let released = futures::future::join_all(names.iter().map(|n| async move {
+            let t = Instant::now();
             // an owner that is settling a release of its own (0005 B's out-of-band loss) stops its kcp under our ask:
             // ask again once it is gone
-            let mut r = self.release(&n).await;
+            let mut r = self.release(n).await;
             for _ in 0..3 {
                 if r.is_ok() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_secs(20)).await;
-                r = self.release(&n).await;
+                r = self.release(n).await;
             }
-            if let Err(e) = r {
-                errors.push(e);
-            }
-        }
+            eprintln!("cleanup: {n} released in {:.0} s{}", t.elapsed().as_secs_f64(), r.as_ref().err().map(|e| format!(": {e}")).unwrap_or_default());
+            r
+        }))
+        .await;
+        errors.extend(released.into_iter().filter_map(Result::err));
         for (name, (_, mut c)) in self.requesters.lock().await.drain() {
             if let Ok(None) = c.try_wait() {
                 if let Some(pid) = c.id() {
