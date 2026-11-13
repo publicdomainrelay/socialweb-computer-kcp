@@ -3,8 +3,7 @@
 # run's dump is an artifact (runs/), kept on failure.
 # TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
 # then `after: [build]` and its artifacts again (build.yml).
-# A run rents, as R2, the multi-VM staging layout: atproto 2/4, gateway 4/8, two 4/8 nested bidders (nestedVirt: the
-# temp bidder until every hat offers it) on one meshd overlay: pushes to knotless-ci only,
+# A run rents, as R2, a 4 vCPU / 8 GB nested-virt staging VM (only the temp bidder offers one): pushes to knotless-ci only,
 # and when asked at main (`knotless run rerun knotless://<owner>/socialweb-computer-kcp --ref refs/heads/main --workflow test`).
 on:
   push:
@@ -76,10 +75,11 @@ steps:
       jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
       rc=0
-      # the multi-VM layout (tests/compositions/staging): atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay
+      # the single-VM layout; `"layout": "multi"` (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay)
+      # once R2 rents through one long-lived requester (a guest requester holds one contract)
       (cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" \
         SWC_MESHD=/usr/local/bin/socialweb-meshd CI=1 target/release/swc-test-host compositions/staging --account r2 --on-fail freeze \
-        --freeze-ttl 3600 --input '{"suite": false, "layout": "multi"}') || rc=$?
+        --freeze-ttl 3600 --input '{"suite": false}') || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc
