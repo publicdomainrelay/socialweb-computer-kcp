@@ -120,6 +120,9 @@ func (b *Bidder) reservedFor(key, vm string) {
 	defer b.reserveMu.Unlock()
 	if held, ok := b.reserved[key]; ok {
 		held.vm = vm
+		if seen := b.now().Add(ReservedVMSeenGrace); held.until.After(seen) {
+			held.until = seen
+		}
 		b.reserved[key] = held
 	}
 }

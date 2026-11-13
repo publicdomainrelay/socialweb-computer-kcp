@@ -35,6 +35,8 @@ const (
 
 	AcceptReserveHold = 10 * time.Minute
 
+	ReservedVMSeenGrace = time.Minute
+
 	PublishStallThreshold = 3
 
 	StatusMessageLimit = 512
