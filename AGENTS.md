@@ -292,7 +292,7 @@ again; user_data installs `atirc-agent.service`
     only in `spec.passwordEnvFile`, never argv; the key at `<configDir>/iroh_key`, 0600). The ssh session mints below sign with `atircSigning` of the `requester_service_auth` log (atirc only; the market
     callbacks keep `signing`): the OAuth session, the owner MarketIdentity for pdsAccount (`owner-identity`), or for
     localRepo its own Pds component (`local-pds`, a `pds.serviceauth` ComponentLink Requester -> Pds the MarketRequester
-    composes only when the DID is on `https://plc.directory` and the Pds is public through its ingress,
+    composes only when the Pds is public through its ingress (the DID may be on any PLC: atirc resolves it with its own `--plc-directory-url`),
     `role.LocalPdsSignsAtirc`); else `none` with `atircReason`. Before the RFP of a spec.agent contract (no
     `spec.atircParentRef`) the requester writes the placeholder bundle (one empty entry at envFile, 0600) when
     the secretsRef path holds none (`requester_agent_bundle_placeholder`), then refuses the contract (Failed `refused:

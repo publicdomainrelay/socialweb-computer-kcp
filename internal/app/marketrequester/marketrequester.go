@@ -566,7 +566,7 @@ func (p *pass) local(ctx context.Context, plan compose.AccountPlan, id *v1alpha1
 		repoLinks = append(repoLinks, compose.RecordWriteLink(ws, r.Owner(), compose.RepoRefIn(other.Account.DID, ws), compose.ScopeAll))
 	}
 	repoLinks = append(repoLinks, compose.InfraLinks(ws, compose.RepoRefIn(did, ws))...)
-	if requireIngress && localPdsSignsAtirc(o.Spec.Network, pdsPublicURL) {
+	if requireIngress && localPdsSignsAtirc(pdsPublicURL) {
 		repoLinks = append(repoLinks, compose.ServiceAuthLink(p.self(), compose.AppRef(compose.ComponentKindPds, compose.PdsComponent, ws), did))
 	}
 	if err := c.ApplyLinks(ctx, r, "repo", repoLinks); err != nil {
@@ -714,11 +714,8 @@ func (p *pass) retire(ctx context.Context, self compose.LocalAccount, colocated 
 	return p.write(v1alpha1.ApplicationPhaseProvisioning, "retired: the local accounts are deactivated and tombstoned")
 }
 
-func localPdsSignsAtirc(network *v1alpha1.MarketNetworkValue, pdsPublicURL string) bool {
-	if network == nil {
-		return false
-	}
-	ok, _ := role.LocalPdsSignsAtirc(network.PLCDirectoryURL, pdsPublicURL)
+func localPdsSignsAtirc(pdsPublicURL string) bool {
+	ok, _ := role.LocalPdsSignsAtirc(pdsPublicURL)
 	return ok
 }
 

@@ -24,10 +24,7 @@ const PublicPLCDirectoryURL = "https://plc.directory"
 
 var errAgentWithoutSecrets = errors.New("an agent needs spec.secretsRef: the secrets bundle writes the agent's envFile and mesh key on the guest")
 
-func LocalPdsSignsAtirc(plcURL, pdsURL string) (bool, string) {
-	if strings.TrimRight(strings.ToLower(strings.TrimSpace(plcURL)), "/") != PublicPLCDirectoryURL {
-		return false, fmt.Sprintf("the DID is on %q, not %s, so irc.fedfork.com cannot resolve it", plcURL, PublicPLCDirectoryURL)
-	}
+func LocalPdsSignsAtirc(pdsURL string) (bool, string) {
 	parsed, err := url.Parse(strings.TrimSpace(pdsURL))
 	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
 		return false, fmt.Sprintf("the Pds public URL %q is not https", pdsURL)
