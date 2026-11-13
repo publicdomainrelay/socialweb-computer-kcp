@@ -45,6 +45,8 @@ socialweb-computer run request release vm2
 
 A bigger VM: `--cpus 4 --mem 8G` (default 2 and 4G; a bidder refuses more than its offering's `maxCpus` / `maxMem`).
 
+A VM that runs VMs: `--nested-virt` (only bidders whose offering sets `nestedVirt`: QEMU on a host with KVM nested virtualization on).
+
 A bidder bids only when its operator vouches for you and you vouch for it:
 [docs/quickstart-prod.md](docs/quickstart-prod.md#2-vouches-on-prod). More (agents, `kubectl apply` of `Infra`,
 a requester as a systemd unit): [docs/quickstart-prod.md](docs/quickstart-prod.md).

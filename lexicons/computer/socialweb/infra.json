@@ -50,6 +50,7 @@
         "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 },
         "cpus": { "type": "integer", "minimum": 0, "description": "vCPUs of the VM (unset: the requester's default, 2)." },
         "mem": { "type": "string", "description": "Memory of the VM, such as 8G (unset: the requester's default, 4G)." },
+        "nestedVirt": { "type": "boolean", "description": "The VM must run VMs of its own; only a bidder whose offering sets nestedVirt is asked." },
         "tunnels": {
           "type": "array",
           "items": { "type": "ref", "ref": "#tunnel" },

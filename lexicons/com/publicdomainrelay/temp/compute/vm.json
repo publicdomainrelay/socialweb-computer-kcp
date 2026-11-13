@@ -14,6 +14,7 @@
           "kind": { "type": "string", "knownValues": ["vm", "deno"], "description": "What the bidder runs for this request: a firecracker virtual machine (the default when absent), or a deno sandbox that runs user_data as its program and reports its output as a guest event." },
           "cpus": { "type": "integer", "minimum": 1 },
           "mem": { "type": "string", "description": "Memory size, such as 4G." },
+          "nestedVirt": { "type": "boolean", "description": "The VM must run VMs of its own; only a bidder whose offering sets nestedVirt runs it." },
           "disk": { "type": "string", "description": "Disk size, such as 50G." },
           "network": { "type": "string", "description": "Network transfer allowance, such as 500G." },
           "location": { "type": "ref", "ref": "#location" },

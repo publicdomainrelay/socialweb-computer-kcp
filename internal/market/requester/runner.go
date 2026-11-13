@@ -414,7 +414,8 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
-			Cpus: int64(cmp.Or(contract.Spec.Cpus, DefaultComputeCPUs)), Mem: cmp.Or(strings.TrimSpace(contract.Spec.Mem), DefaultComputeMem), Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
+			Cpus: int64(cmp.Or(contract.Spec.Cpus, DefaultComputeCPUs)), Mem: cmp.Or(strings.TrimSpace(contract.Spec.Mem), DefaultComputeMem), NestedVirt: contract.Spec.NestedVirt,
+			Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
 			ExpiresAt: contractExpiresAt(contract.Labels[ContractExpiresAtLabel])})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)
@@ -493,6 +494,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
 	discovery = discovery.Without(spec.DenyBidderDids)
+	if spec.NestedVirt {
+		discovery = discovery.NestedVirtOnly()
+	}
 	bidders := discovery.Bidders
 	noBidders := ""
 	if len(bidders) == 0 {
@@ -1073,11 +1077,18 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, workflo
 	window := time.NewTimer(max(q.cfg.BidWindow, 0))
 	defer window.Stop()
 	byURI := map[string]BidRecord{}
-	deny := r.snapshot().Spec.DenyBidderDids
+	spec := r.snapshot().Spec
+	deny, nestedVirt := spec.DenyBidderDids, spec.NestedVirt
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
 			if bid.URI == "" || slices.Contains(deny, bid.DID) {
 				continue
+			}
+			if nestedVirt {
+				if bidder, ok := q.bidderForDID(ctx, bid.DID); !ok || !bidder.NestedVirt {
+					r.log().Info("requester_bid_without_nested_virt", "bidder", bid.DID, "bid", bid.URI)
+					continue
+				}
 			}
 			if len(only) > 0 && !slices.Contains(only, bid.DID) {
 				r.log().Info("requester_bid_outside_contract_bidders", "bidder", bid.DID, "bid", bid.URI)

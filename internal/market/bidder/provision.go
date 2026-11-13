@@ -74,6 +74,8 @@ type vmRecord struct {
 
 	Net bool `json:"net"`
 
+	NestedVirt bool `json:"nestedVirt"`
+
 	ExpiresAt string `json:"expiresAt"`
 }
 

@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
@@ -67,6 +69,16 @@ func ParseVMM(s string) (string, error) {
 	return "", fmt.Errorf("vmruntime: vmm %q is not qemu or firecracker", s)
 }
 
+func HostNestedVirt() bool {
+	for _, module := range []string{"kvm_intel", "kvm_amd"} {
+		b, err := os.ReadFile("/sys/module/" + module + "/parameters/nested")
+		if v := strings.TrimSpace(string(b)); err == nil && (v == "Y" || v == "1") {
+			return true
+		}
+	}
+	return false
+}
+
 func VMMExecutable(vmm string) string {
 	if vmm == VMMFirecracker {
 		return "firecracker"
@@ -102,6 +114,7 @@ type Capabilities struct {
 	Hypervisor     string          `json:"hypervisor"`
 	EnforcesLimits bool            `json:"enforcesLimits"`
 	GracefulStop   bool            `json:"gracefulStop"`
+	NestedVirt     bool            `json:"nestedVirt,omitempty"`
 }
 
 type VMSpec struct {
