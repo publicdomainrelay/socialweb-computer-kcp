@@ -628,6 +628,9 @@ again; user_data installs `atirc-agent.service`
 - Tests are atlibs compositions: step-loop modules (`tests/modules`, `tests/compositions/<runbook>`), host handlers
   in Rust (atlibs-kube, atlibs-ssh, `tests/host`); `tests/testkit/README.md`. A runbook's Rust test stays until its
   composition passes on staging and prod.
+- A failed composition run freezes (outside CI): attach with `swc-test-host attach <run dir>` (MCP), read `failure`,
+  `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then `cleanup`; `swc-test-host replay <run dir>` reruns the
+  module's decisions offline. Never leave a frozen run past its TTL by hand.
 - A change is done when the system tests covering it pass on staging.
 - No Go tests, except the policy engine specification tests (owner, 2026-10-30): `internal/policyengine/spec`, the
   policy decision tests in `internal/market/bidder` and `internal/market/requester`, their harness

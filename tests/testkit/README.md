@@ -118,5 +118,31 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/000
 | `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain |
 | `acc-0004` | `tests/modules/acc-0004`, `tests/compositions/0004` | the runbook as a state machine |
 
+### Freeze, inspect, replay
+
+A failure (pass false, a run error, the module's deadline) freezes the run when `--on-fail freeze` (the default
+outside CI; `CI` set: cleanup): no more events reach the module, every VM, requester and kube object stays, and the
+run dir holds the dump. `--freeze-at <step|phase>` (repeatable) is a breakpoint; `kill -USR1 <pid>` freezes a live
+run. A freeze ends at `continue` / `cleanup` or its TTL (`--freeze-ttl`, default 7200 s), then cleanup runs.
+
+| file in the run dir | what |
+| --- | --- |
+| `events.ndjson` | every handler input and output by step (replay's input), freezes and thaws |
+| `state.json`, `failure.json` | the module's state; the failure with the last events |
+| `resources.json` | requesters (state dir, pid, cluster), invocations (receipt, winner, logs, ssh command), kube objects, clusters (kubeconfig paths), temporary keys, observer nicks: paths only, no secret |
+| `run.json`, `control.sock` | what ran; the control socket (MCP, 0600) while the run lives |
+
+```sh
+swc-test-host attach <run dir>     # stdio MCP: state, events, failure, freeze, step, continue, inject_event,
+                                   # resources, kube_get, kube_list, kube_logs, ssh_exec, requester_ssh,
+                                   # record_get, run_assert, cleanup, thaw, abort
+swc-test-host replay <run dir> [--upto <step>]   # {steps, same, differ}: the module's decisions again, no network
+swc-test-host cleanup <run dir>    # from resources.json, when the host died
+```
+
+Checked 2026-11-13 (signed out, the 0004 composition's `assert` instance): a breakpoint before step 2 froze it, attach
+listed the tools and `state`, `events`, `resources` answered, `continue` finished it, replay 7/7 same, cleanup
+clean; a failure froze it with `failure.json`, the `cleanup` tool ended it.
+
 The host passes the guard: a test deletes only VMs of its own receipts, patches a bidder root only to have it restored.
 Budgets: calls, events and wall time unlimited per run (each module bounds itself with a deadline timer).

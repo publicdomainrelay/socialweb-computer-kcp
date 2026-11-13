@@ -166,7 +166,7 @@ dependencies = [
 [[package]]
 name = "atlibs-host"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=6e113df320bc705ec93da7b299ef14093f5fdb6d#6e113df320bc705ec93da7b299ef14093f5fdb6d"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21#52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21"
 dependencies = [
  "aes-gcm",
  "atproto-identity",
@@ -177,6 +177,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "identlink",
  "k256 0.13.4",
  "p256 0.13.2",
  "rand_core 0.6.4",
@@ -196,7 +197,7 @@ dependencies = [
 [[package]]
 name = "atlibs-iroh"
 version = "0.2.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh?rev=e1cdf12970f6f0a14c1b8c3a04e362af07904743#e1cdf12970f6f0a14c1b8c3a04e362af07904743"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh?rev=82afc70af108b5aac8cac9270f111162365468fa#82afc70af108b5aac8cac9270f111162365468fa"
 dependencies = [
  "atlibs-host",
  "base64 0.22.1",
@@ -209,11 +210,12 @@ dependencies = [
 [[package]]
 name = "atlibs-kube"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-kube?rev=f8971d83033e655f22b7ccd7d70296a163f5516f#f8971d83033e655f22b7ccd7d70296a163f5516f"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-kube?rev=75983c6f04b286f35116a1aeeac3a192ff08c91e#75983c6f04b286f35116a1aeeac3a192ff08c91e"
 dependencies = [
  "atlibs-host",
  "atlibs-iroh",
  "futures",
+ "http",
  "k8s-openapi",
  "kube",
  "serde",
@@ -225,7 +227,7 @@ dependencies = [
 [[package]]
 name = "atlibs-ssh"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh?rev=2955839d4e82b744b11cf2c40e815d8585c1e867#2955839d4e82b744b11cf2c40e815d8585c1e867"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh?rev=345c7d3f574d94184d6dfbe85f1e944588a84cb3#345c7d3f574d94184d6dfbe85f1e944588a84cb3"
 dependencies = [
  "atlibs-host",
  "serde",

@@ -10,7 +10,7 @@ license = "Unlicense"
 publish = false
 
 [workspace.dependencies]
-abi = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "6e113df320bc705ec93da7b299ef14093f5fdb6d" }
+abi = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21" }
 serde_json = "1"
 
 [profile.release]

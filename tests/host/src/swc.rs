@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 
 #[path = "more.rs"]
 mod more;
+pub use more::cleanup_from_disk;
 
 const P: &str = "computer.socialweb.test.";
 pub const NSIDS: &[&str] = &[
@@ -199,7 +200,11 @@ impl Swc {
             self.acct()?,
             SignIn::AppPassword,
         ));
-        self.extra.argv.lock().unwrap().insert(name.clone(), args.clone());
+        self.extra
+            .argv
+            .lock()
+            .unwrap()
+            .insert(name.clone(), args.clone());
         let log =
             std::fs::File::create(state.join(format!("{name}.log"))).map_err(|e| e.to_string())?;
         let child = self
@@ -596,14 +601,22 @@ impl Swc {
 
 impl Call for Swc {
     fn call(&self, nsid: String, request: Request) -> BoxFut<'_, Result<Option<Value>, String>> {
-        Box::pin(async move { self.handle(&nsid, input_of(&request)).await.map(Some) })
+        Box::pin(async move {
+            let r = self.handle(&nsid, input_of(&request)).await.map(Some);
+            self.write_resources().await;
+            r
+        })
     }
 
     fn subscribe(&self, nsid: String, request: Request) -> BoxFut<'_, Result<Sub, String>> {
         Box::pin(async move {
             let input = input_of(&request);
             match nsid.strip_prefix(P) {
-                Some("request.start") => self.request_start(&input).await,
+                Some("request.start") => {
+                    let r = self.request_start(&input).await;
+                    self.write_resources().await;
+                    r
+                }
                 Some("atirc.meshSub") => {
                     let (bin, dir) = self.mesh_node(&input).await?;
                     let mut child = tokio::process::Command::new(bin)
