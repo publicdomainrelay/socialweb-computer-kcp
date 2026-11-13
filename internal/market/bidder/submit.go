@@ -192,6 +192,10 @@ func (b *Bidder) eventEndpoint(ctx context.Context, requesterDID, serviceRef str
 }
 
 func (b *Bidder) SubmitAccept(ctx context.Context, acceptURI, acceptCID, issuer string) (string, error) {
+	if refused := b.submittedAcceptRefused(ctx, acceptURI, acceptCID); refused != "" {
+		b.log.Warn("bidder_accept_refused_capacity", "accept", acceptURI, "reason", refused)
+		return "", fmt.Errorf("%w: %s", ErrCapacity, refused)
+	}
 	payload := provisionPayload{RequesterDID: issuer}
 	payload.Accept.URI, payload.Accept.CID = acceptURI, acceptCID
 	return b.ensureProvisionSync(ctx, payload)

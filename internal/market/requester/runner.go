@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -40,6 +41,8 @@ type contractRunner struct {
 	bids []v1alpha1.ContractBid
 
 	chosen *v1alpha1.ContractChosen
+
+	declined []string
 
 	release *v1alpha1.ComputeContractRelease
 
@@ -300,6 +303,14 @@ func (r *contractRunner) Run(ctx context.Context) {
 		return
 	}
 	err := r.requestOnce(ctx)
+	for replaced := 0; err != nil && replaced < MaxAcceptReplacements && !r.released() && !r.q.stopping(); replaced++ {
+		if errors.Is(err, ErrAcceptDeclined) {
+			r.replaceDeclined(ctx, err)
+		} else if !r.reRFPAfterRefusals(ctx, err) {
+			break
+		}
+		err = r.requestOnce(ctx)
+	}
 	if err == nil {
 		return
 	}
@@ -321,6 +332,60 @@ func (r *contractRunner) Run(ctx context.Context) {
 		}
 	}
 	r.recordFailure(ctx, r.stateCopy(), err, 1)
+}
+
+const MaxAcceptReplacements = 3
+
+func (r *contractRunner) denied(deny []string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append(slices.Clone(deny), r.declined...)
+}
+
+func (r *contractRunner) replaceDeclined(ctx context.Context, cause error) {
+	state := r.stateCopy()
+	if state == nil {
+		return
+	}
+	did := winnerDID(state)
+	r.log().Warn("requester_accept_declined_replace", "bidder", did, "err", cause.Error())
+	if state.Accept != nil && state.Accept.URI != "" {
+		r.deleteRecord(ctx, state.Accept.URI)
+	}
+	r.mu.Lock()
+	if did != "" {
+		r.declined = append(r.declined, did)
+	}
+	r.chosen = nil
+	r.mu.Unlock()
+	state.Accept, state.AcceptURI, state.AcceptPending, state.Bid, state.Winner = nil, "", nil, nil, nil
+	state.Phase = v1alpha1.ContractRFPSubmitted
+	r.setState(state)
+}
+
+func (r *contractRunner) reRFPAfterRefusals(ctx context.Context, cause error) bool {
+	state := r.stateCopy()
+	if state == nil || state.Outcome != v1alpha1.ContractOutcomeNoBids || len(r.denied(nil)) == 0 {
+		return false
+	}
+	r.log().Warn("requester_bids_exhausted_new_rfp", "declined", r.denied(nil), "err", cause.Error())
+	if state.RFP != nil && state.RFP.URI != "" {
+		r.deleteRecord(ctx, state.RFP.URI)
+	}
+	state.RFP, state.RFPURI, state.Outcome, state.Error, state.Bids = nil, "", "", "", nil
+	state.Phase = v1alpha1.ContractRFPSubmitted
+	r.setState(state)
+	return true
+}
+
+func (r *contractRunner) deleteRecord(ctx context.Context, uri string) {
+	aturi, err := syntax.ParseATURI(uri)
+	if err != nil {
+		return
+	}
+	if err := r.q.repo.DeleteRecord(ctx, r.q.repoDID, aturi.Collection().String(), aturi.RecordKey().String()); err != nil && !errors.Is(err, market.ErrNotFound) {
+		r.log().Warn("requester_superseded_record_delete_failed", "uri", uri, "err", err)
+	}
 }
 
 func (r *contractRunner) recordFailure(ctx context.Context, state *v1alpha1.NodeClaimContract, err error, attempts int32) {
@@ -493,7 +558,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if err != nil {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
-	discovery = discovery.Without(spec.DenyBidderDids)
+	discovery = discovery.Without(r.denied(spec.DenyBidderDids))
 	if spec.NestedVirt {
 		discovery = discovery.NestedVirtOnly()
 	}
@@ -1079,7 +1144,7 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, workflo
 	defer window.Stop()
 	byURI := map[string]BidRecord{}
 	spec := r.snapshot().Spec
-	deny, nestedVirt := spec.DenyBidderDids, spec.NestedVirt
+	deny, nestedVirt := r.denied(spec.DenyBidderDids), spec.NestedVirt
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
 			if bid.URI == "" || slices.Contains(deny, bid.DID) {

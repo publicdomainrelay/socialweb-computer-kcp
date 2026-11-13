@@ -33,6 +33,8 @@ const (
 
 	WonUnboundWait = time.Hour
 
+	AcceptReserveHold = 10 * time.Minute
+
 	PublishStallThreshold = 3
 
 	StatusMessageLimit = 512
@@ -74,6 +76,8 @@ var (
 	ErrEventForbidden = errors.New("bidder: not the accept author")
 
 	ErrEventInvalid = errors.New("bidder: the market event is invalid")
+
+	ErrCapacity = errors.New("bidder: no capacity for the accepted VM")
 )
 
 type Config struct {
@@ -286,6 +290,10 @@ type Bidder struct {
 	ingressLive map[string]bool
 
 	sandboxMu sync.Mutex
+
+	reserveMu sync.Mutex
+
+	reserved map[string]reservation
 
 	sandboxes map[string]*sandboxRun
 

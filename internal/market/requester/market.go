@@ -39,6 +39,8 @@ const (
 
 var ErrBidderUnreachable = errors.New("requester: the bidder's market endpoint is not reachable yet")
 
+var ErrAcceptDeclined = errors.New("requester: the winning bidder declined the accept")
+
 const bidderSuspendedError = "Suspended"
 
 type Bidder struct {

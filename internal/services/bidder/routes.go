@@ -186,6 +186,10 @@ func (s *Service) handleSubmitAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := bidder.SubmitAccept(r.Context(), body.AcceptURI, body.AcceptCID, issuer)
+	if errors.Is(err, core.ErrCapacity) {
+		participant.WriteXRPCError(w, http.StatusConflict, "CapacityExceeded", err.Error())
+		return
+	}
 	if err != nil {
 		participant.WriteXRPCError(w, http.StatusInternalServerError, "InternalError", "the provisioning intent could not be recorded: "+err.Error())
 		return

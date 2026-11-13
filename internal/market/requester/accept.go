@@ -3,6 +3,7 @@ package requester
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -195,7 +196,7 @@ func (q *Requester) submitAcceptAndWait(ctx context.Context, bidder Bidder, acce
 			if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI, acceptCID); err == nil && receipt != nil {
 				return receipt, nil
 			}
-			return nil, nil
+			return nil, fmt.Errorf("%w: %s answered HTTP %d: %v", ErrAcceptDeclined, bidder.DID, reply.Status, reply.Body)
 		}
 		if receipt, err := q.readReceipt(ctx, winnerDID, acceptURI, acceptCID); err == nil && receipt != nil {
 			return receipt, nil

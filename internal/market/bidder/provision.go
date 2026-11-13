@@ -140,8 +140,8 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err := b.checkCapacity(); err != nil {
 		return "", err
 	}
-	if refused := b.sizeRefused(record); refused != "" {
-		return "", fmt.Errorf("bidder: %s: %w", refused, participant.ErrRejected)
+	if refused := b.reserve(req.rfpURI, record, AcceptReserveHold); refused != "" {
+		return "", fmt.Errorf("bidder: %s: %w: %w", refused, ErrCapacity, participant.ErrRejected)
 	}
 	name, err := vmNameForAccept(req.requesterDID, acceptKey)
 	if err != nil {
@@ -240,6 +240,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		}
 		return "", err
 	}
+	b.reservedFor(req.rfpURI, name)
 	b.log.Info("a guest ComputeVM is applied", "computevm", name, "cpus", record.CPUs, "role", record.Role, "requester", req.requesterDID)
 	return name, nil
 }

@@ -265,7 +265,7 @@ func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time
 			return nil, nil
 		}
 	}
-	refused, err := b.payloadRefused(ctx, rfp)
+	refused, err := b.payloadRefused(ctx, bid.Spec.Rfp.URI, rfp)
 	if err != nil {
 		return nil, err
 	}
@@ -348,6 +348,7 @@ func (b *Bidder) failBid(ctx context.Context, bid *v1alpha1.Bid, reason, message
 	if bid.Status.Phase == v1alpha1.BidPhaseFailed {
 		return
 	}
+	b.unreserve(bid.Spec.Rfp.URI)
 	message = statusError(errors.New(message))
 	status := cloneBidStatus(bid.Status)
 	status.Phase = v1alpha1.BidPhaseFailed

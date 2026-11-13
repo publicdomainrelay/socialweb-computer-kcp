@@ -616,6 +616,10 @@ func (b *Bidder) acceptContract(ctx context.Context, request participant.OutboxR
 	if out.vmPayload, err = b.records.Resolve(ctx, market.RecordRef{URI: out.rfp.Payload.URI, CID: out.rfp.Payload.CID}); err != nil {
 		return out, nil, fmt.Errorf("bidder: resolving the RFP payload: %w", err)
 	}
+	if refused := b.acceptRefused(accept.RFP.URI, payload.Accept.URI, payload.Accept.CID, out.vmPayload); refused != "" {
+		b.log.Warn("bidder_accept_refused_capacity", "accept", payload.Accept.URI, "reason", refused)
+		return out, nil, fmt.Errorf("bidder: %s: %w: %w", refused, ErrCapacity, participant.ErrRejected)
+	}
 	bidResolved, err := b.records.Resolve(ctx, market.RecordRef{URI: accept.Bid.URI, CID: accept.Bid.CID})
 	if err != nil {
 		return out, nil, fmt.Errorf("bidder: resolving the accepted bid: %w", err)
