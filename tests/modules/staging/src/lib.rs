@@ -1,7 +1,7 @@
 // tests/compositions/staging/README.md as a state machine: rent one nested-virt VM, install the socialweb-computer
 // under test on it, `dev up --profile market-network` there (own PLC, relay, PDSes, bidders, gateway), read `dev
 // status`, `dev down`. Input {name (the run), requester (the target's binary spec: release:<tag> | sha:<commit>),
-// cpus?, mem? (default 16, 32G), fault? ("status": that step fails)}.
+// cpus?, mem? (default 16, 32G), bidders? (dev up's, default 3), fault? ("status": that step fails)}.
 // Result {pass, error?, phase, readings}. The host releases the VM however it ends.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
@@ -11,8 +11,10 @@ const BUCKET: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
 const BIN: &str = "socialweb-computer-linux-amd64";
 /// the instance on the VM, as the account stg (dev refuses root; a short state dir: socket paths fit in 107 bytes)
 const INST: &str = "--instance stg --state-dir /home/stg/stg/s";
-/// dev up's market network: 3 bidders (nested VMs), the gateway, vm and deno compute
-const DEV_UP: &str = "--profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m";
+/// dev up's market network: `bidders` bidders (nested VMs), the gateway, vm and deno compute
+fn dev_up(bidders: u64) -> String {
+    format!("--profile market-network --bidders {bidders} --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m")
+}
 
 /// The bucket prefix of a binary spec: releases/<tag> or main/<commit>.
 fn prefix(spec: &str) -> Result<String, String> {
@@ -101,7 +103,10 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
         Event::Message { id, data, .. } if id == "req" => {
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("vm"),
-                "contract" if data["phase"] == "Failed" => return Ok(s.fail(format!("the VM contract failed: {data}"))),
+                "contract" if data["phase"] == "Failed" => {
+                    let asked = format!("{} vCPU, {}, nestedVirt", args["cpus"].as_u64().unwrap_or(16), args["mem"].as_str().unwrap_or("32G"));
+                    return Ok(s.fail(format!("the VM contract failed ({asked}): {}", data["message"].as_str().unwrap_or_default())));
+                }
                 "exited" if !s.has("vm") => return Ok(s.fail(format!("run request exited before the VM was Held: {data}"))),
                 "exited" => s.flag("exited"),
                 // a guest requester's held `run request` keeps its kcp and PDS up (for request.ssh and the release):
@@ -124,7 +129,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
                     s.mark("installed");
                     s.set("up");
-                    h = h.call(ssh("up", bg("up", swc(&format!("dev up {INST} {DEV_UP}")))));
+                    h = h.call(ssh("up", bg("up", swc(&format!("dev up {INST} {}", dev_up(args["bidders"].as_u64().unwrap_or(3)))))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
                 "up" | "down" if o["ok"] == true => h = h.timer(&format!("poll-{id}"), 10_000),

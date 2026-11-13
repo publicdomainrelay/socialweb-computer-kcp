@@ -131,6 +131,9 @@ fn progress(event: &Value, out: &Value) {
     }
     if out["done"] == true {
         line += &format!(" done pass={}", out["result"]["pass"]);
+        if let Some(e) = out["result"]["error"].as_str() {
+            line += &format!(" error: {}", swc::redact_log(e).trim_end());
+        }
     }
     println!("{line}");
 }

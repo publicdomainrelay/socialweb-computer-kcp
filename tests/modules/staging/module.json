@@ -46,6 +46,12 @@
 			"description": "minutes for the whole run (default 180)"
 		},
 		{
+			"key": "bidders",
+			"label": "bidders",
+			"type": "integer",
+			"description": "dev up's bidders on the VM (default 3)"
+		},
+		{
 			"key": "fault",
 			"label": "fault",
 			"type": "string",

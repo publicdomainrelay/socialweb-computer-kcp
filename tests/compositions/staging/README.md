@@ -14,7 +14,7 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
    the binary under test in `/home/stg/stg`: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
    checked against `SHA256SUMS`. `dev` refuses root.
 3. As `stg`, detached from the ssh session and polled (`/home/stg/up.rc`): `dev up --instance stg --state-dir /home/stg/stg/s
-   --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
+   --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc` (input `bidders`).
 4. `dev status --instance stg --state-dir /home/stg/stg/s`.
 5. Always: `dev down` (detached, polled; `--keep-state` when the run failed); the host copies a failed run's logs into
    the dump's `logs/` (redacted), then releases the VM.
