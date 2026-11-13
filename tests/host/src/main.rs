@@ -538,7 +538,12 @@ async fn main_() -> Result<bool> {
     .unwrap()
     .clone();
     if let Some(i) = flag(&args, "--input") {
-        input = serde_json::from_str(&i)?;
+        // the root run's --input adds to what it knows of the target (`{"suite": false}`); another entry's is all of it
+        let given: serde_json::Map<String, Value> = serde_json::from_str(&i)?;
+        match signed_in || acc.guest_requester {
+            true if flag(&args, "--instance").is_none() => input.extend(given),
+            _ => input = given,
+        }
     }
     let ran = compose::run_compose(
         comp,

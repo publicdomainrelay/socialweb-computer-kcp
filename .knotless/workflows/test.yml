@@ -23,6 +23,7 @@ steps:
   - name: staging
     timeout: 110
     run: |
+      # TEMPORARY: the stand-up only (suite: false) until the guests' kernel has CONFIG_NFT_BRIDGE_REJECT
       # as the guest requester R2 (the runner associated it with the pusher's session; kcp refuses root): no creds here
       id r2
       install -d -o r2 /work/runs
@@ -33,4 +34,4 @@ steps:
       jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
       cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs CI=1 \
-        target/release/swc-test-host compositions/staging --account r2 --on-fail cleanup
+        target/release/swc-test-host compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false}'
