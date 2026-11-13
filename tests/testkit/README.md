@@ -95,33 +95,28 @@ headless Chrome and its WebRTC session.
 - Cleanups release VMs, delete records and check tombstones even when the test failed.
 - One file per runbook in `tests/system/tests/acc_NNNN_*.rs`; each test names the runbook section it implements.
 
-## Next: tests as atlibs compositions
+## Tests as atlibs compositions
 
 Owner-approved (2026-11-12): each runbook becomes a composition on atlibs' step loop (events `start`, `result`,
-`message`/`closed`, `timer`; outputs `calls`, `send`, `cancel`, `timers`, `state`, `done`; `Out`/`Fan`/`On` in the abi
-crate). A runbook's Rust test here stays until its composition passes on staging and prod.
+`message`/`closed`, `timer`; outputs `calls`, `send`, `cancel`, `timers`, `state`, `done`). A runbook's Rust test here
+stays until its composition passes on staging and prod. Done: 0004.
 
-Host handlers, Rust, on atlibs-host's transport seam (`com.fedfork.exec.<name>.*`; the module never holds a credential:
-kubeconfigs, keys and creds files are host config, named by ref):
+```sh
+cd tests/modules && cargo wasm && cd ..                                     # the modules (wasm32)
+cd compositions/0004 && deno run -A --no-lock compose.ts > composition.json && cd ../..
+SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/0004 --dry-run
+SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/0004 --account alice
+SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/0004 --instance assert --entry tombstoned --input '{"dids":["did:plc:lpfuqerea3deuoyrn7ojser4"]}'
+```
 
-| NSID | call / event source | repo |
+| piece | where | what |
 | --- | --- | --- |
-| `com.fedfork.exec.kube.{get,list,apply,patch,delete}` | calls; results as `result` | atlibs-kube (new; kube-rs, transports via atlibs-iroh / atlibs-webrtc / direct / overlay) |
-| `com.fedfork.exec.kube.watch` | `subscribe`: each watch event a `message`; `closed` at its end | atlibs-kube |
-| `com.fedfork.exec.ssh.{exec,session}` | exec a call; session a `subscribe` (output lines as `message`, `send` = stdin, `cancel` = disconnect); the ssh gateway (`-F /dev/null -p 22`) and guests | atlibs-ssh (new; the system ssh, as atlibs-iroh does) |
-| `computer.socialweb.test.requester.{start,stop,restart}` | `subscribe`: its phases and ready file as `message`s (release, sha or local build; sign-in by app password or QR) | this repo, `tests/host` |
-| `com.fedfork.exec.identlink.walk` | a call: identlink natively (its async walk does not fit a step loop in wasm) | atlibs-host |
-| firehose, Jetstream | `subscribe: true` XRPC / JSON-text streams | atlibs-host (exists) |
-| PDS, PLC | XRPC with the run's session; `http.fetch` for PLC `log/last` | atlibs-host (exists) |
+| `com.fedfork.exec.kube.{get,list,apply,patch,delete}`, `kube.watch` (subscription) | atlibs-kube (knotless) | any kcp or cluster the host names; writes only to what the run created, or what the host's guard allows; `cleanup()` deletes them and restores patched specs |
+| `com.fedfork.exec.ssh.{exec,session}` | atlibs-ssh (knotless) | the system ssh to destinations the host names (`-F /dev/null`, `SetEnv`) |
+| `computer.socialweb.test.{requester,request,account,atirc}.*` | `tests/host` (`swc-test-host`) | the requester under test as the account: `run requester` (its kcp becomes cluster `requester:<name>`), `run request` (its log events a subscription), the owner's mesh node; released and stopped after the run |
+| `com.fedfork.exec.identlink.{walk,plc}` | `tests/host` (to move into atlibs-host) | identlink's verified walk, PLC log/last and documents of the target's PLC |
+| `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain |
+| `acc-0004` | `tests/modules/acc-0004`, `tests/compositions/0004` | the runbook as a state machine |
 
-Cleanup: atlibs-host's `managed_records` ledger (0.5.1: deleted past the calls budget) grows to every resource a run
-created: kube objects it applied, requester invocations it started (released), throwaway DIDs (tombstoned). Writes and
-deletes outside the ledger are refused, so fault injection on prod reaches only the test's own VMs and contracts.
-
-Modules (Rust -> wasm): `assert` (record present / RecordNotFound x3, PLC tombstone, walk roots, timing bounds,
-distinct-node placement); one state machine per runbook (act, wait on `On` sources, assert, timeout, cleanup), its
-composition built by `compose.ts` into a committed `composition.json` (`atlibs compose check`), run from local module
-dirs while iterating, published pinned for CI. Budgets: each composition declares its calls and wall time.
-
-Order: atlibs-kube + atlibs-ssh + `tests/host`, the `assert` module, 0004, then one runbook at a time; the staging
-stand-up is itself a composition (knotless runs it).
+The host passes the guard: a test deletes only VMs of its own receipts, patches a bidder root only to have it restored.
+Budgets: calls, events and wall time unlimited per run (each module bounds itself with a deadline timer).

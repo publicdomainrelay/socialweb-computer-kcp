@@ -1,0 +1,21 @@
+# The test compositions' modules (wasm32-unknown-unknown): `cargo build --release --target wasm32-unknown-unknown`.
+# Each member is one module: its module.json beside its Cargo.toml.
+[workspace]
+resolver = "3"
+members = ["assert", "acc-0004"]
+
+[workspace.package]
+edition = "2024"
+license = "Unlicense"
+publish = false
+
+[workspace.dependencies]
+abi = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "6e113df320bc705ec93da7b299ef14093f5fdb6d" }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

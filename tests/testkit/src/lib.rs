@@ -237,7 +237,7 @@ fn dry_run() -> bool {
 
 /// Hold the per-account lock (one driver per account): a file lock under ~/.tmp/swc-system-tests/locks,
 /// released when the process ends.
-async fn lock_account(handle: &str) -> Result<std::fs::File> {
+pub async fn lock_account(handle: &str) -> Result<std::fs::File> {
     let dir = home_tmp("locks");
     std::fs::create_dir_all(&dir)?;
     let f = std::fs::OpenOptions::new()

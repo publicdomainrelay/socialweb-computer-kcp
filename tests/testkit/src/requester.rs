@@ -154,7 +154,7 @@ impl SignIn {
     }
 }
 
-fn identity_args(t: &Target, a: &Account, mode: SignIn) -> Vec<String> {
+pub fn identity_args(t: &Target, a: &Account, mode: SignIn) -> Vec<String> {
     match mode {
         SignIn::AppPassword => vec![
             "--atproto-identity-mode".into(),

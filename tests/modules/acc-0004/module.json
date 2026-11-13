@@ -1,0 +1,33 @@
+{
+	"name": "acc-0004",
+	"description": "Acceptance 0004: an atirc agent in a market VM, its ident.link chain, the owner's mesh node, a fast release.",
+	"actions": [{ "entry": "run", "label": "Run 0004", "description": "The runbook end to end; the result says pass, the phase and the readings." }],
+	"config": [
+		{ "key": "name", "label": "name", "type": "string", "description": "the run request invocation's name" },
+		{ "key": "handle", "label": "handle", "type": "string", "description": "the renter's handle (the owner node's)" }
+	],
+	"calls": [
+		"computer.socialweb.test.requester.start",
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.agent",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"computer.socialweb.test.account.envFile",
+		"computer.socialweb.test.atirc.meshSub",
+		"computer.socialweb.test.atirc.meshPub",
+		"com.fedfork.exec.kube.apply",
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.assert.tombstoned",
+		"computer.socialweb.test.assert.agentChain"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "records RecordNotFound after the release" },
+		{ "nsid": "computer.socialweb.test.assert.tombstoned", "reason": "R2 and the agent tombstoned" },
+		{ "nsid": "computer.socialweb.test.assert.agentChain", "reason": "the renter -> R2 -> agent chain" },
+		{ "nsid": "computer.socialweb.test.requester.start", "required": true, "entries": ["run"], "reason": "the orchestrator requester (owner node host)" },
+		{ "nsid": "computer.socialweb.test.request.start", "required": true, "entries": ["run"], "reason": "run request --hold --agent" },
+		{ "nsid": "com.fedfork.exec.kube.apply", "required": true, "entries": ["run"], "reason": "the owner's AtircNode in the orchestrator's kcp" }
+	]
+}

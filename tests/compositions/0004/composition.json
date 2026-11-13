@@ -1,0 +1,36 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0004",
+	"description": "An atirc agent in a market VM: chain, owner mesh node, answer, fast release (docs/acceptance/0004-vm-atirc-agent.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0004"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "records RecordNotFound after the release"
+		},
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.tombstoned",
+			"to": "assert",
+			"reason": "R2 and the agent tombstoned"
+		},
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.agentChain",
+			"to": "assert",
+			"reason": "the renter -> R2 -> agent chain"
+		}
+	]
+}
+

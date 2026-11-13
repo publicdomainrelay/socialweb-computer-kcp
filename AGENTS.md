@@ -625,8 +625,9 @@ again; user_data installs `atirc-agent.service`
 - The runbooks (`docs/acceptance`) are the spec. Each test in `tests/system/tests/acc_NNNN_*.rs` names the runbook
   section it implements; a runbook change and its test change land together.
 - New behavior gets a test in `tests/system`.
-- Tests become atlibs compositions (step-loop modules, host handlers in Rust; `tests/testkit/README.md`); a runbook's
-  Rust test stays until its composition passes on staging and prod.
+- Tests are atlibs compositions: step-loop modules (`tests/modules`, `tests/compositions/<runbook>`), host handlers
+  in Rust (atlibs-kube, atlibs-ssh, `tests/host`); `tests/testkit/README.md`. A runbook's Rust test stays until its
+  composition passes on staging and prod.
 - A change is done when the system tests covering it pass on staging.
 - No Go tests, except the policy engine specification tests (owner, 2026-10-30): `internal/policyengine/spec`, the
   policy decision tests in `internal/market/bidder` and `internal/market/requester`, their harness

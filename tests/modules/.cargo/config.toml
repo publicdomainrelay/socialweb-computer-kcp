@@ -1,0 +1,6 @@
+# as atlibs' own: modules have no randomness of their own; `cargo wasm` builds them (release: the runner takes <= 4 MB)
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"unsupported\""]
+
+[alias]
+wasm = "build --release --target wasm32-unknown-unknown"

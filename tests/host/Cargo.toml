@@ -1,0 +1,25 @@
+# swc-test-host: runs a test composition (tests/compositions/<runbook>) on atlibs-host with the transports a test
+# needs: atlibs-kube, atlibs-ssh, atlibs-iroh, identlink, and this repo's requester handler.
+[package]
+name = "swc-test-host"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "swc-test-host"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+anyhow.workspace = true
+atlibs-host.workspace = true
+atlibs-iroh.workspace = true
+atlibs-kube.workspace = true
+atlibs-ssh.workspace = true
+identlink.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+testkit.workspace = true
+tokio.workspace = true
