@@ -2115,15 +2115,15 @@
         "sourceDateEpoch": 1790380800,
         "outputs": {
           "vmlinux": {
-            "sha256": "e9679e81fdf230ea57d6c64ce41cc9b770899f6ed0cd27726ff1f6339673ad1d",
-            "bytes": 44679120
+            "sha256": "70aa702091b95e8221f53eeb49085e7cadb393b900db58460645f2bd6e59faa8",
+            "bytes": 44682360
           },
           "rootfs.ext4": {
             "sha256": "f2096748f2f7de32f56dd90c2ba85a5e0688a5918ca86fa6ea9c1040c7922584",
             "bytes": 1543503872
           },
           "image.json": {
-            "sha256": "ddb8e127048f1e808a6869ba654d6f0d0b2761e49a32b9c16634c974d410dac6",
+            "sha256": "1398c83ff608a64604175d544dc2c3cecfecb9c7f8a20c2b44fd09b0c272503d",
             "bytes": 5822
           }
         }
