@@ -8,9 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/iroh"
 	"strings"
 	"time"
+
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/ingress/iroh"
 
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -149,7 +150,7 @@ func (s *Service) setup(ctx context.Context) (*role.Requester, error) {
 	address := func() string { return inputs.Address(role.PDSExposure) }
 	crawl := participant.Crawl{Relays: s.cfg.Relays(), Address: address, Period: participant.CrawlPeriod, Log: s.log}
 	if len(crawl.Relays) == 0 {
-		crawl.PublicRelays = []string{v1alpha1.DefaultMarketRelayURL}
+		crawl.PublicRelays = s.spec.Comms.FirehoseRelays(s.spec.Network)
 		crawl.PublicAddress = func(ctx context.Context) string { return s.publicPDS(ctx, address(), core.DID()) }
 	}
 	s.wg.Go(func() { crawl.Run(ctx) })

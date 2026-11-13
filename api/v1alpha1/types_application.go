@@ -82,6 +82,9 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 	var extra []string
 	if n != nil {
 		extra = n.DiscoveryRelays
+		if len(extra) == 0 && n.Comms != nil && n.Comms.RelayURLs != nil {
+			extra = *n.Comms.RelayURLs
+		}
 	}
 	if len(extra) == 0 && len(out) == 0 {
 		extra = []string{DefaultDiscoveryRelayURL, DefaultMarketRelayURL}
