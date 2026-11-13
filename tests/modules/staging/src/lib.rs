@@ -30,7 +30,7 @@ fn prefix(spec: &str) -> Result<String, String> {
 fn install(prefix: &str) -> String {
     let b = format!("{BUCKET}/{prefix}/binaries");
     format!(
-        "set -e; id stg >/dev/null 2>&1 || useradd -m -s /bin/bash -G kvm stg; sed -i /^stg:/d /etc/subuid /etc/subgid; \
+        "set -e; getent group kvm >/dev/null || groupadd -r kvm; id stg >/dev/null 2>&1 || useradd -m -s /bin/bash -G kvm stg; sed -i /^stg:/d /etc/subuid /etc/subgid; \
          usermod --add-subuids 1000000-2048575 --add-subgids 1000000-2048575 stg; \
          command -v newuidmap >/dev/null || {{ apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q uidmap >/dev/null; }}; \
          loginctl enable-linger stg; install -d -o stg -g stg /home/stg/stg /home/stg/stg/s; cd /home/stg/stg; \
