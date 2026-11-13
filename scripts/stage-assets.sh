@@ -27,7 +27,12 @@ usage() {
   echo "  the sha256 of its versions.json entry, this script, assetpack and the zstd version and flags (a hit" >&2
   echo "  skips its download or build, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
   echo "  and checked against its pin every time, and only its zstd step is reused, keyed by the sha256 of" >&2
-  echo "  its tar stream. --jobs stages up to N assets at once (default 6)." >&2
+  echo "  its tar stream, or, when its tracked source inputs hash as before (kind go: the in-repo packages it builds from," >&2
+  echo "  go.mod and go.sum; kind script: the script, the paths its '# stage-assets inputs:' line names (go:<module>:<pkg>" >&2
+  echo "  for a package) and versions.json), by those. ASSET_CACHE_URL (the bucket's asset-cache/): a blob the" >&2
+  echo "  --blob-cache misses is fetched from <url>/<asset>/<goos>_<goarch>/<key>.tar.zst and its tree checked against" >&2
+  echo "  its pin; each blob put in the --blob-cache is listed in <blob-cache>/.new for scripts/asset-cache-upload.sh." >&2
+  echo "  --jobs stages up to N assets at once (default 6)." >&2
   exit 2
 }
 
@@ -376,7 +381,23 @@ place() {
 }
 
 cache_get() {
-  local f="$blob_cache/$1.tar.zst" rec="$blob_cache/$1.sha256"
+  local f="$blob_cache/$1.tar.zst" rec="$blob_cache/$1.sha256" u t
+  if { [ ! -f "$f" ] || [ ! -f "$rec" ]; } && [ -n "${ASSET_CACHE_URL:-}" ] && [ -n "${3:-}" ]; then
+    u="$ASSET_CACHE_URL/$asset/${plat/\//_}/$1"
+    if curl -sfL --retry 2 --max-time 900 -o "$f.$BASHPID" "$u.tar.zst" && curl -sfL --max-time 60 -o "$rec.$BASHPID" "$u.sha256" &&
+      [ "$(sha_of "$f.$BASHPID")" = "$(cat "$rec.$BASHPID")" ]; then
+      t="$work/remote-$1"
+      mkdir -p "$t" && zstd -dcq "$f.$BASHPID" | tar -x -C "$t"
+      if [ "$("$work/assetpack" digest "$t")" = "$3" ]; then
+        mv -f "$f.$BASHPID" "$f" && mv -f "$rec.$BASHPID" "$rec"
+        say "$plat $asset: $1 from the asset cache, tree $3"
+      else
+        say "warn: $u does not unpack to the pinned tree $3; staging it"
+      fi
+      chmod -R u+w "$t" && rm -rf "$t"
+    fi
+    rm -f "$f.$BASHPID" "$rec.$BASHPID"
+  fi
   [ -f "$f" ] && [ -f "$rec" ] || return 1
   if [ "$(sha_of "$f")" != "$(cat "$rec")" ]; then
     say "warn: cached blob $f does not hash to its record; staging again"
@@ -392,6 +413,36 @@ cache_put() {
   sha_of "$tmp.tar.zst" >"$tmp.sha256"
   mv -f "$tmp.tar.zst" "$blob_cache/$1.tar.zst"
   mv -f "$tmp.sha256" "$blob_cache/$1.sha256"
+  echo "$asset/${plat/\//_}/$1" >>"$blob_cache/.new"
+}
+
+src_files() {
+  local w m p d
+  for w in "$@"; do
+    case "$w" in
+      go:*)
+        m="${w#go:}" && p="${m#*:}" && m="${m%%:*}"
+        printf '%s\n' "$m/go.mod" "$m/go.sum"
+        (cd "$root/$m" && go list -deps -f '{{if not .Standard}}{{.Dir}}{{end}}' "$p") | while read -r d; do
+          case "$d" in "$root"/*) d="${d#"$root"/}" && git -C "$root" ls-files -- "$d" | awk -F/ -v n="$(echo "$d" | awk -F/ '{print NF}')" 'NF == n + 1' ;; esac
+        done
+        ;;
+      *) git -C "$root" ls-files -- "$w" ;;
+    esac
+  done
+}
+
+src_key() {
+  local spec="$1" kind inputs files
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  kind="$(echo "$spec" | jq -r .kind)"
+  case "$kind" in
+    go) inputs="go:$(echo "$spec" | jq -r '.module // "."'):$(echo "$spec" | jq -r .package)" ;;
+    script) inputs="$(echo "$spec" | jq -r .script) $(sed -n 's/^# stage-assets inputs: //p' "$root/$(echo "$spec" | jq -r .script)")" ;;
+  esac
+  files="$(cd "$root" && src_files $inputs | sort -u | xargs -r sha256sum | sha256sum | cut -d' ' -f1)" || return 0
+  printf '%s\n' "$plat" "$asset" "$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")" "$script_sha" "$pack_id" "$(go version)" \
+    "$([ "$kind" = script ] && sha_of "$versions")" "$files" | sha256sum | cut -d' ' -f1 | sed 's/^/src-/'
 }
 
 stage_one() {
@@ -411,9 +462,17 @@ stage_one() {
     case "$kind" in
       file|oci|debs|gosrc|cargosrc)
         in_key="in-$(printf '%s\n' "$plat" "$asset" "$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")" "$script_sha" "$pack_id" | sha256sum | cut -d' ' -f1)"
-        if cache_get "$in_key" "$pdir/$asset.tar.zst"; then
+        if cache_get "$in_key" "$pdir/$asset.tar.zst" "$pin"; then
           chmod -R u+w "$x" && rm -rf "$x"
           say "ok $plat $asset tree $pin cached by its pinned inputs ($((SECONDS - started))s)"
+          return 0
+        fi
+        ;;
+      go|script)
+        in_key="$(src_key "$spec")"
+        if [ -n "$in_key" ] && cache_get "$in_key" "$pdir/$asset.tar.zst" "$pin"; then
+          chmod -R u+w "$x" && rm -rf "$x"
+          say "ok $plat $asset tree $pin cached by its source inputs ($((SECONDS - started))s)"
           return 0
         fi
         ;;

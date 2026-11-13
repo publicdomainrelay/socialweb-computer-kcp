@@ -5,11 +5,28 @@ on:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
 runners: [aliceoa.bsky.social]
 executor: kcp-small
+# stage-assets takes what it has staged before from the bucket's asset-cache/ (by pinned or source inputs, each tree
+# checked against its pin) and stages only the rest; a push to main or a v* tag uploads what it staged (the sealed
+# bucket key). A v* tag stages every asset cold.
+secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
+env:
+  SPACES_BUCKET: socialweb-computer-kcp
+  SPACES_REGION: sfo3
 steps:
   - name: toolchain
-    run: bash scripts/knotless-ci-toolchain.sh
+    run: bash scripts/knotless-ci-toolchain.sh --deno
   - name: pins
     timeout: 60
     run: |
       . /opt/ci/env
-      make check-pins BUILD_ROOT=/root/pins-build
+      case "$KNOTLESS_RUN_REF" in refs/tags/v*) ;; *) export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache ;; esac
+      rc=0
+      make check-pins BUILD_ROOT=/root/pins-build || rc=$?
+      echo "asset-cache: $(sort -u /root/pins-build/cache/blobs/.new 2>/dev/null | grep -c '/\(in\|src\)-' || true) new entries"
+      exit $rc
+  - name: asset cache
+    on: {refs: [refs/heads/main, refs/tags/v*]}
+    timeout: 30
+    run: |
+      . /opt/ci/env
+      scripts/asset-cache-upload.sh /root/pins-build/cache/blobs

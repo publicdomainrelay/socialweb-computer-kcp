@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# stage-assets inputs: rust go:.:./cmd/socialweb-node
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

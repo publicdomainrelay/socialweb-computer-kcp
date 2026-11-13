@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# stage-assets inputs: deploy/swc-userns-stage
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

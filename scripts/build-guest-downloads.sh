@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# stage-assets inputs: scripts/build-cargosrc.sh go:.:./cmd/socialweb-guest-agent
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -25,6 +25,7 @@ steps:
       (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
       trap "kill $! 2>/dev/null" EXIT
       root=/root/release-build
+      case "$KNOTLESS_RUN_REF" in refs/tags/v*) ;; *) export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache ;; esac
       bash scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" --build-root "$root"
       rel="$root/release/$KNOTLESS_RUN_SHA"
       ls -la "$rel"
@@ -72,6 +73,12 @@ steps:
         echo "$TARGET/$f sha256 $got (pinned $want)"
         test "$got" = "$want"
       done
+  - name: asset cache
+    on: {refs: [refs/heads/main, refs/tags/v*]}
+    timeout: 30
+    run: |
+      . /opt/ci/env
+      scripts/asset-cache-upload.sh /root/release-build/cache/blobs
   - name: publish
     on: {refs: [refs/heads/main, refs/tags/v*]}
     timeout: 90
