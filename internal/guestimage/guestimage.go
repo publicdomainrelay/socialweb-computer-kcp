@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestrootfs"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/progress"
@@ -180,7 +182,54 @@ func (s Store) open(ctx context.Context, source, name string) (io.ReadCloser, er
 	}
 }
 
+const FetchTimeout = 30 * time.Minute
+
+type flight struct {
+	done chan struct{}
+
+	res Result
+
+	err error
+}
+
+var (
+	flightMu sync.Mutex
+
+	flights = map[string]*flight{}
+)
+
 func (s Store) Ensure(ctx context.Context, pin Pin, source string) (Result, error) {
+	if err := pin.Valid(); err != nil {
+		return Result{}, err
+	}
+	dir := s.Dir(pin)
+	flightMu.Lock()
+	f, running := flights[dir]
+	if !running {
+		f = &flight{done: make(chan struct{})}
+		flights[dir] = f
+	}
+	flightMu.Unlock()
+	if !running {
+		go func() {
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), FetchTimeout)
+			defer cancel()
+			f.res, f.err = s.ensure(fctx, pin, source)
+			flightMu.Lock()
+			delete(flights, dir)
+			flightMu.Unlock()
+			close(f.done)
+		}()
+	}
+	select {
+	case <-f.done:
+		return f.res, f.err
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
+}
+
+func (s Store) ensure(ctx context.Context, pin Pin, source string) (Result, error) {
 	if err := pin.Valid(); err != nil {
 		return Result{}, err
 	}
