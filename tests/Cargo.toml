@@ -1,8 +1,9 @@
 # System integration tests: the acceptance runbooks (docs/acceptance) run against a target (staging or prod).
-# No unit tests. Members: testkit (the harness), system (one test file per runbook).
+# No unit tests. Members: testkit (the harness), system (one test file per runbook), vmm (the VMM wrapper on a KVM host).
 [workspace]
 resolver = "3"
-members = ["testkit", "system"]
+members = ["testkit", "system", "vmm"]
+default-members = ["testkit", "system"]
 
 [workspace.package]
 edition = "2024"

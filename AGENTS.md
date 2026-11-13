@@ -44,7 +44,7 @@ Go:
 | `deploy/` | manifests, sets, the generated schemas and exports, `check.sh` |
 | `docs/` | `ARCHITECTURE.md`, `plans/`, inventories, research notes |
 | `rust/` | socialweb-meshd |
-| `tests/` | the Rust system integration tests: `testkit` (harness), `system` (runbook ports), `targets/` |
+| `tests/` | the Rust system integration tests: `testkit` (harness), `system` (runbook ports), `targets/`; `vmm` (the VMM wrapper on a KVM host, `-p swc-vmm-tests`) |
 
 TypeScript:
 
@@ -640,6 +640,7 @@ SWC_TARGET=$PWD/targets/prod.json SWC_DRY_RUN=1 cargo test                   # p
 SWC_TARGET=<staging target.json> cargo test                                  # the full suite on staging
 SWC_TARGET=$PWD/targets/prod.json cargo test --test acc_0004_vm_atirc_agent  # prod: only in a lead-given window
 cargo run -p testkit --bin last-pass -- readings/*.json                       # passing runs onto docs/acceptance/README.md
+cargo test -p swc-vmm-tests -- --nocapture                                   # VMM wrapper, KVM host: tests/vmm/README.md
 ```
 
 Pipeline, in order; cut the rc only when both suites are green:
