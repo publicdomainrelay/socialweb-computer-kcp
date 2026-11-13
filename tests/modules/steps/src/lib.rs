@@ -1,6 +1,6 @@
 //! The bookkeeping of a runbook's state machine: `S` holds the state (phase, marks, readings, flags), the clock of
 //! this event, and ends the run as pass or fail; calls to the test host and to kube by name; the market's rkeys.
-use abi::{Call, Handle};
+use abi::{Call, Event, Handle};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -145,6 +145,28 @@ impl S {
     pub fn keep(&self, h: Handle) -> Handle {
         h.state(self.st.clone())
     }
+}
+
+/// A `requester_market_event` message: the requester's line for a market event of a contract this run made, which the
+/// host forwards like Held. An OOM kill (guest.oomKill, vm.oomKilled, vm.terminated reason oom) fails the run naming
+/// the VM; memory pressure (guest.memoryPressure, vm.memoryPressure) is a warning in readings.memory. Call it first.
+pub fn market_event(s: &mut S, event: &Event) -> Option<Handle> {
+    let Event::Message { id, data, .. } = event else {
+        return None;
+    };
+    let e = data["event"].as_str().unwrap_or_default();
+    let kill = data["kill"] == true;
+    if data["msg"] != "requester_market_event" || (!kill && !e.ends_with("memoryPressure")) {
+        return None;
+    }
+    // the invocation's instance names the VM's run (a contract is "contract" in its own workspace)
+    let vm = [&data["instance"], &data["contract"]].iter().find_map(|v| v.as_str()).unwrap_or(id).to_string();
+    let entry = json!({ "event": e, "vm": vm, "kill": kill, "payload": data["payload"] });
+    match s.st["readings"]["memory"].as_array_mut() {
+        Some(a) => a.push(entry),
+        None => s.st["readings"]["memory"] = json!([entry]),
+    }
+    kill.then(|| s.fail(format!("OOM: {e} on VM {vm}: {}", data["payload"])))
 }
 
 /// A call's output, or the run's failure naming the call.

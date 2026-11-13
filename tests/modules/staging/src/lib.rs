@@ -69,6 +69,9 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let name = format!("{}-vm", args["name"].as_str().ok_or("name is required")?);
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let mut h = Handle::new();
     let ssh = |id: &str, exec: String| host(id, "request.ssh", json!({ "name": name, "exec": exec }));
     // dev down before the result, however it ended (the host then releases the VM)
@@ -256,6 +259,9 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
     let tag: String = base.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
     let tag = tag[tag.len().saturating_sub(6)..].to_string();
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let mut h = Handle::new();
     // provision infra: one EphemeralInfra of the run requester `stg` holds the four contracts (else one run request each)
     let infra = args["provision"] == "infra";

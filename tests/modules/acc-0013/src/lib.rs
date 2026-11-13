@@ -17,6 +17,9 @@ fn mixed_prod(text: &str, key: &str) -> String {
 fn a_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let did = args["did"].as_str().ok_or("did")?.to_string();
     let rq = "requester:mp";
     let cc = |c: &str| format!("einfra-mixedprod-{c}");
@@ -294,6 +297,9 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
 fn c_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let did = args["did"].as_str().ok_or("did")?.to_string();
     let t = "tenant:c1";
     let mut h = Handle::new();
@@ -392,6 +398,9 @@ fn c_handler(run: Run<Value>) -> Result<Handle, String> {
 fn b_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     if args["target"] == "prod" {
         return Ok(s.skip("needs staging (root on a staging VM)"));
     }

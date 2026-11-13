@@ -8,6 +8,9 @@ use steps::{S, host, out};
 fn gates(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let Some(base) = args["atirc"].as_str().map(|b| b.trim_end_matches('/').to_string()) else { return Ok(s.skip("the target names no atirc")) };
     let mut h = Handle::new();
     match run.event {
@@ -49,6 +52,9 @@ fn gates(run: Run<Value>) -> Result<Handle, String> {
 fn token_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let nick = format!("sttok{}", args["name"].as_str().unwrap_or_default().chars().rev().take(5).collect::<String>());
     let text = format!("st-0011 {nick}");
     let mut h = Handle::new();

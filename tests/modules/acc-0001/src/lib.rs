@@ -43,6 +43,9 @@ fn ns() -> Value {
 fn run_0001(run: Run<Value>) -> Result<Handle, String> {
     let a = &run.args;
     let mut s = S::new(run.state, a["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let gw = a["gateway"]["url"].as_str().ok_or("gateway.url")?.trim_end_matches('/').to_string();
     let cl = a["name"].as_str().ok_or("name")?.to_string();
     let tenant = format!("tenant:{cl}");

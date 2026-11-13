@@ -15,6 +15,9 @@ fn bidder_patch(id: &str, cluster: &str, suspend: bool) -> abi::Call {
 fn run_0003(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let base = args["name"].as_str().ok_or("name")?.to_string();
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
     let per_host = args["perHost"] == true && !bidders.is_empty() && bidders.iter().all(|b| b["cluster"].is_string());

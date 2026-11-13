@@ -12,6 +12,9 @@ const KEY: &str = "ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop";
 fn run_0012(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let did = args["did"].as_str().ok_or("did")?.to_string();
     let rq = "requester:qs";
     let key = s.st["key"].as_str().unwrap_or_default().to_string();

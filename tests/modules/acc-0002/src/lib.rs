@@ -11,6 +11,9 @@ use steps::{MIN, S, host, out};
 fn run_0002(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let ssh = args["gateway"]["ssh"].as_str().ok_or("gateway.ssh")?.to_string();
     let n = args["name"].as_str().unwrap_or_default().rsplit('-').next().unwrap_or("0").chars().rev().take(5).collect::<String>();
     let obs = format!("stobs{n}");

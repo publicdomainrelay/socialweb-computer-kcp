@@ -43,11 +43,16 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
         .as_str()
         .ok_or("did is required")?
         .to_string();
-    let mut st = if run.state.is_null() {
+    let st = if run.state.is_null() {
         json!({ "phase": "start", "t0": now, "readings": {}, "f": {} })
     } else {
         run.state
     };
+    let mut s = steps::S { st, now };
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
+    let mut st = s.st;
     let t = |st: &Value| ((now - st["t0"].as_f64().unwrap_or(now)) * 10.0).round() / 10.0;
     let set = |st: &mut Value, phase: &str| st["phase"] = json!(phase);
     let phase = st["phase"].as_str().unwrap_or_default().to_string();

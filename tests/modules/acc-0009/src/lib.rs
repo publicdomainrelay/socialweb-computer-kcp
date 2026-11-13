@@ -8,6 +8,9 @@ use steps::{MIN, S, host, out};
 fn run_0009(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
     let i = s.st["i"].as_u64().unwrap_or(0) as usize;
     let round = |i: usize| host("round", "page.round", json!({ "bidder": bidders[i]["did"] }));

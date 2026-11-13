@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The release gate: every composition, in order, one at a time, against a target, as one account.
 # Usage (from tests/): ./gate.sh <target.json> [--account <name>] [<runbook>[:<entry>] ...]
-# One "RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>" line each, then a summary table; exit 1 on a FAIL.
+# One "RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note> [MEMORY <events>]" line each, then a summary table (with
+# each run's VM memory events from its readings.memory: the test modules fail a run on an OOM kill and list pressure);
+# exit 1 on a FAIL.
 # A failed run freezes (attach: the FROZEN line of its log) until GATE_FREEZE_TTL (900 s), then the gate goes on.
 # SWC_COMPAT_REQUESTER (the previous rc's CLI, e.g. release:v0.0.0-rc165) runs 0006:compat; unset, it is skipped.
 # GATE_SKIP="<runbook>:<entry>=<reason>;..." skips more (no ";" in a reason), with the reason in its RESULT line.
@@ -52,10 +54,11 @@ for id in $ids; do
     fi
   fi
   s=$(( $(date +%s) - t0 ))
-  echo "RESULT $r:$e $res $s $note"
-  printf '%s\t%s\t%s\t%s\n' "$r:$e" "$res" "$s" "$note" >> "$out/results.tsv"
+  mem=$(jq -r '[.readings.memory // [] | .[] | "\(.event) \(.vm)"] | unique | join(", ")' "$out/$r-$e.json" 2>/dev/null)
+  echo "RESULT $r:$e $res $s $note${mem:+ MEMORY $mem}"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$r:$e" "$res" "$s" "$note" "$mem" >> "$out/results.tsv"
 done
-printf '\n| composition | result | seconds | note |\n| --- | --- | --- | --- |\n'
-awk -F'\t' '{printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4}' "$out/results.tsv"
+printf '\n| composition | result | seconds | note | memory |\n| --- | --- | --- | --- | --- |\n'
+awk -F'\t' '{printf "| %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5}' "$out/results.tsv"
 echo "logs and readings: $out"
 exit $failed

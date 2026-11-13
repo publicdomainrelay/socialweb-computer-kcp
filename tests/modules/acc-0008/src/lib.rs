@@ -9,6 +9,9 @@ use steps::{MIN, S, VM_TERMINATED, get_record, host, kube, out, termination_rkey
 fn run_0008(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
     let vms = |id: &str, c: &str| kube(id, "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" }));

@@ -174,6 +174,9 @@ fn run_entry(entry: &'static str, run: Run<Value>) -> Result<Handle, String> {
         args["name"].as_str().ok_or("name is required")?
     );
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let (bindings, steps) = plan(entry, &repo);
     let mut h = Handle::new();
     let step = |s: &mut S, h: Handle, i: usize| -> Handle {

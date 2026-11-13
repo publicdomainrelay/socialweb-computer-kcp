@@ -8,6 +8,9 @@ use steps::{MIN, S, VM_TERMINATED, get_record, host, kube, out, sw, termination_
 fn run_0007(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
     let cluster = s.st["cluster"].as_str().unwrap_or_default().to_string();

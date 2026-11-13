@@ -11,6 +11,9 @@ use steps::{MIN, S, host, kube, out, sw};
 fn bidders(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let bs: Vec<Value> = args["bidders"].as_array().into_iter().flatten().filter(|b| b["cluster"].is_string()).cloned().collect();
     let mut h = Handle::new();
     match run.event {
@@ -98,6 +101,9 @@ fn bidders(run: Run<Value>) -> Result<Handle, String> {
 fn compat_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let mut h = Handle::new();
     match run.event {

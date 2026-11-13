@@ -23,6 +23,9 @@ fn uri_of(c: &Value) -> &Value {
 fn run_a(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state.clone(), args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let renter = args["did"].as_str().ok_or("did")?.to_string();
     let mut h = Handle::new();
@@ -187,6 +190,9 @@ fn settle(s: &mut S, name: &str) -> Option<Call> {
 fn run_b(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let renter = args["did"].as_str().ok_or("did")?.to_string();
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
@@ -378,6 +384,9 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
 fn run_r2fail(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let mut h = Handle::new();
     match run.event {
