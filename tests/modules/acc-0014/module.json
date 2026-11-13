@@ -1,0 +1,35 @@
+{
+	"name": "acc-0014",
+	"description": "Acceptance 0014: a refused accept (409 CapacityExceeded) falls back to the next bid; concurrent rentals never overcommit a bidder.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0014",
+			"description": "Three rentals on three one-VM bidders: refusals, the fallback, all Held, all released."
+		},
+		{
+			"entry": "concurrent",
+			"label": "Run 0014 concurrent",
+			"description": "Four rentals on two two-VM bidders: all Held, no overcommit, all released."
+		},
+		{
+			"entry": "exhausted",
+			"label": "Run 0014 exhausted",
+			"description": "Three rentals on two one-VM bidders: two Held, the third refused by both, its new RFP fails at once."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"com.atproto.repo.getRecord",
+		"com.fedfork.exec.kube.list",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "the refused accepts, then every contract record, RecordNotFound"
+		}
+	]
+}
