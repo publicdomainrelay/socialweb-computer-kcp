@@ -729,7 +729,9 @@ list it (`$KNOTLESS_APPVIEW/xrpc/dev.knotless.listRepos?runner=$KNOTLESS_IDENTIF
 pushing.
 
 Release pipeline. kcp CI is the knotless workflows only (`.knotless/workflows/`, the fork's runner; GitHub CI is gone, its
-`SPACES_*` secrets unused). The knotless `release` workflow publishes `main/<sha>/` and `main/latest/` (a v* tag:
+`SPACES_*` secrets unused; hat-8's GitHub self-hosted runner, account socialweb-ci from `scripts/gh-runner-install.sh`, is
+stopped and disabled with its files kept: `sudo systemctl --user -M socialweb-ci@ status
+gh-actions-runner-socialweb-computer-kcp.service`, `--remove` deletes it). The knotless `release` workflow publishes `main/<sha>/` and `main/latest/` (a v* tag:
 `releases/<tag>/`), `downloads/` and `guest-images/` as GitHub CI did. Until it has passed on main, builds are hat-8
 release builds (never `--dev`), published by hand to `local/<sha>/binaries/` (testkit's `local:<sha>`), and the test host
 and module wasm to `tests/<tree>/` (`tests/publish-test-host.sh`):

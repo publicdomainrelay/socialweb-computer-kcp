@@ -66,7 +66,7 @@ steps:
       # the market's relays and Jetstreams over the run, for https://watch.socialweb.computer/ (runs/watch.ndjson)
       command -v git >/dev/null && dpkg -s libatomic1 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git libatomic1 >/dev/null; }
       git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
-      git -C /opt/swc-watch checkout -q c74ff0a4b6456856676e25d121f94fd542427477
+      git -C /opt/swc-watch checkout -q 83541a1bd622a8679d90226fa72cab2af87dcde3
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
       # the newest published release build at or below this commit: knotless release's main/<sha>, else a hat-8 release
       # build by hand at local/<sha> (AGENTS.md: Release pipeline)
