@@ -3,7 +3,7 @@
 # run's dump is an artifact (runs/), kept on failure.
 # TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
 # then `after: [build]` and its artifacts again (build.yml).
-# A run rents a 16 vCPU / 32 GB nested-virt staging VM (only the temp bidder offers one): pushes to knotless-ci only,
+# A run rents a 4 vCPU / 8 GB nested-virt staging VM (only the temp bidder offers one): pushes to knotless-ci only,
 # and when asked at main (`knotless run rerun knotless://<owner>/socialweb-computer-kcp --ref refs/heads/main --workflow test`).
 on:
   push:

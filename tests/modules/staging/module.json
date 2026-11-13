@@ -25,13 +25,13 @@
 			"key": "cpus",
 			"label": "cpus",
 			"type": "integer",
-			"description": "the VM's vCPUs (default 16)"
+			"description": "the VM's vCPUs (default 4)"
 		},
 		{
 			"key": "mem",
 			"label": "mem",
 			"type": "string",
-			"description": "the VM's memory (default 32G)"
+			"description": "the VM's memory (default 8G)"
 		},
 		{
 			"key": "suite",
@@ -49,7 +49,7 @@
 			"key": "bidders",
 			"label": "bidders",
 			"type": "integer",
-			"description": "dev up's bidders on the VM (default 3)"
+			"description": "dev up's bidders on the VM (default 1)"
 		},
 		{
 			"key": "fault",

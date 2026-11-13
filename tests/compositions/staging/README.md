@@ -4,17 +4,17 @@ A self-contained socialweb.computer on one rented VM, for one run of the suite, 
 the staging plan (CI VM, associated requester R2 renting staging VMs, `dev up --parent` onto them, one meshd overlay).
 
 The VM runs `socialweb-computer dev up --profile market-network`: its own PLC, relay, PDSes (`alice.test`,
-`bob.test`), 3 bidders (nested VMs), the gateway, vouches between them, a per-network CA in `network.caBundle`.
+`bob.test`), 1 bidder (a nested VM; input `bidders`), the gateway, vouches between them, a per-network CA in `network.caBundle`.
 Every service is on the VM's loopback, so anything that uses it runs on the VM (`run requester --network stg`).
 
 ## Run
 
-1. `run request --hold --nested-virt --cpus 16 --mem 32G --expires-in 2h` as the target's account (input `cpus`, `mem`).
+1. `run request --hold --nested-virt --cpus 4 --mem 8G --expires-in 2h` as the target's account (input `cpus`, `mem`).
 2. As root on the VM: the account `stg` (group `kvm`, one subordinate id range above the image's, `uidmap`, linger), and
    the binary under test in `/home/stg/stg`: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
    checked against `SHA256SUMS`. `dev` refuses root.
 3. As `stg`, detached from the ssh session and polled (`/home/stg/up.rc`): `dev up --instance stg --state-dir /home/stg/stg/s
-   --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc` (input `bidders`).
+   --profile market-network --bidders 1 --with-gateway --compute-kinds vm,deno --host-backend proc` (input `bidders`, default 1).
 4. `dev status --instance stg --state-dir /home/stg/stg/s`.
 5. Always: `dev down` (detached, polled; `--keep-state` when the run failed); the host copies a failed run's logs into
    the dump's `logs/` (redacted), then releases the VM.

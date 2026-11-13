@@ -1,7 +1,7 @@
 // tests/compositions/staging/README.md as a state machine: rent one nested-virt VM, install the socialweb-computer
 // under test on it, `dev up --profile market-network` there (own PLC, relay, PDSes, bidders, gateway), read `dev
 // status`, `dev down`. Input {name (the run), requester (the target's binary spec: release:<tag> | sha:<commit>),
-// cpus?, mem? (default 16, 32G), bidders? (dev up's, default 3), fault? ("status": that step fails)}.
+// cpus?, mem? (default 4, 8G), bidders? (dev up's, default 1), fault? ("status": that step fails)}.
 // Result {pass, error?, phase, readings}. The host releases the VM however it ends.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
@@ -89,9 +89,9 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             };
             s.st["prefix"] = json!(p);
             s.set("held");
-            // the CI VM's size (owner: 16 vCPU / 32 GB; a bidder refuses more than its host has)
-            let cpus = args["cpus"].as_u64().unwrap_or(16).to_string();
-            let mem = args["mem"].as_str().unwrap_or("32G");
+            // small until builds run on it (owner: 4 vCPU / 8 GB, one bidder; a bidder refuses more than its host has free)
+            let cpus = args["cpus"].as_u64().unwrap_or(4).to_string();
+            let mem = args["mem"].as_str().unwrap_or("8G");
             let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", "4h", "--exec", "true"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", args["deadlineMin"].as_u64().unwrap_or(180) * MIN);
         }
@@ -104,7 +104,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("vm"),
                 "contract" if data["phase"] == "Failed" => {
-                    let asked = format!("{} vCPU, {}, nestedVirt", args["cpus"].as_u64().unwrap_or(16), args["mem"].as_str().unwrap_or("32G"));
+                    let asked = format!("{} vCPU, {}, nestedVirt", args["cpus"].as_u64().unwrap_or(4), args["mem"].as_str().unwrap_or("8G"));
                     return Ok(s.fail(format!("the VM contract failed ({asked}): {}", data["message"].as_str().unwrap_or_default())));
                 }
                 "exited" if !s.has("vm") => return Ok(s.fail(format!("run request exited before the VM was Held: {data}"))),
@@ -129,7 +129,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
                     s.mark("installed");
                     s.set("up");
-                    h = h.call(ssh("up", bg("up", swc(&format!("dev up {INST} {}", dev_up(args["bidders"].as_u64().unwrap_or(3)))))));
+                    h = h.call(ssh("up", bg("up", swc(&format!("dev up {INST} {}", dev_up(args["bidders"].as_u64().unwrap_or(1)))))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
                 "up" | "down" if o["ok"] == true => h = h.timer(&format!("poll-{id}"), 10_000),
