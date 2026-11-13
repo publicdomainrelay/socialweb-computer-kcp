@@ -131,7 +131,7 @@ pub fn market_lines(msg: &str) -> bool {
 }
 
 impl Swc {
-    fn requester_state(&self, name: &str) -> PathBuf {
+    pub(crate) fn requester_state(&self, name: &str) -> PathBuf {
         self.dir.join(format!("requester-{name}"))
     }
 

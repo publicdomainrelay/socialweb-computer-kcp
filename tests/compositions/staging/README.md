@@ -60,6 +60,12 @@ Four small VMs on one meshd overlay (10.44.0.1-4), joined by the atproto VM's ne
    the joined bidders run `--bidder-policy open`), each on a nested bidder.
 6. `dev down` on atproto; the host releases the four VMs.
 
+`"provision": "infra"` rents the four through one `EphemeralInfra` `stg-<run>` of a run requester (`requester.start`
+`stg`), contracts `atproto`, `bidder-1`, `bidder-2`, `gateway` (vmName `stg-<layer>`, per-VM size and nested virt,
+`ttlSeconds` the deadline, its record `computer.socialweb.ephemeralInfra/stg-<run>`); the module's ssh and put go
+through `run requester ssh --contract einfra-stg-<run>-<layer>`, and the teardown deletes the EphemeralInfra (its
+finalizer releases every contract).
+
 ```sh
 SWC_MESHD=<static socialweb-meshd x86_64> SWC_TARGET=~/.tmp/target-staging.json \
   cargo run -p swc-test-host -- compositions/staging --input '{"layout": "multi"}'

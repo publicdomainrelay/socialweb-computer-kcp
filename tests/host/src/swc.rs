@@ -264,10 +264,19 @@ impl Swc {
             other => return Err(format!("what {other:?}: testHost, suite or meshd")),
         };
         let exec = format!("cat > '{remote}.part' && mv '{remote}.part' '{remote}'");
+        // contract: a Held contract of the run requester `name` (an Infra's), else `name` is a run request invocation
+        let args: Vec<String> = match input["contract"].as_str() {
+            Some(c) => ["run", "requester", "ssh", name, "--state-dir"]
+                .map(String::from)
+                .into_iter()
+                .chain([self.requester_state(name).display().to_string(), "--contract".into(), c.into(), "--exec".into(), exec])
+                .collect(),
+            None => self.sub_args("ssh", name, &["--exec", &exec]),
+        };
         let mut child = self
             .bin
             .cmd()
-            .args(self.sub_args("ssh", name, &["--exec", &exec]))
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

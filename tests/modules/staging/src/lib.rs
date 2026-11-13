@@ -5,7 +5,7 @@
 // Result {pass, error?, phase, readings}. The host releases the VM however it ends.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
-use steps::{MIN, S, host};
+use steps::{MIN, S, host, kube, sw};
 
 const BUCKET: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com";
 const BIN: &str = "socialweb-computer-linux-amd64";
@@ -257,19 +257,29 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
     let tag = tag[tag.len().saturating_sub(6)..].to_string();
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
     let mut h = Handle::new();
-    let ssh = |v: &str, id: &str, exec: String| host(id, "request.ssh", json!({ "name": format!("{base}-{v}"), "exec": exec }));
+    // provision infra: one EphemeralInfra of the run requester `stg` holds the four contracts (else one run request each)
+    let infra = args["provision"] == "infra";
+    let ei = format!("stg-{tag}");
+    let cc = |v: &str| format!("einfra-{ei}-{v}");
+    let ssh = |v: &str, id: &str, exec: String| match infra {
+        true => host(id, "requester.ssh", json!({ "name": RQ, "contract": cc(v), "exec": exec })),
+        false => host(id, "request.ssh", json!({ "name": format!("{base}-{v}"), "exec": exec })),
+    };
+    let put = |v: &str| match infra {
+        true => host(&format!("{v}:put"), "request.put", json!({ "name": RQ, "contract": cc(v), "what": "meshd", "remote": MESHD })),
+        false => host(&format!("{v}:put"), "request.put", json!({ "name": format!("{base}-{v}"), "what": "meshd", "remote": MESHD })),
+    };
     let handle_of = |v: &str| format!("{}-{tag}.bob.test", v.replace("bidder-", "b"));
     let down = |s: &mut S, h: Handle, result: Value| {
         if s.is("down") {
             return s.keep(h);
         }
         s.st["result"] = result;
-        if !s.has("installed:atproto") {
-            let r = s.st["result"].clone();
-            return if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) };
-        }
         s.set("down");
-        s.keep(h.call(host("down", "request.ssh", json!({ "name": format!("{base}-atproto"), "exec": bg("down", swc(&format!("dev down {INST}"))) }))))
+        if !s.has("installed:atproto") {
+            return finish_multi(s, h, infra, &ei);
+        }
+        s.keep(h.call(ssh("atproto", "down", bg("down", swc(&format!("dev down {INST}"))))))
     };
     match run.event {
         Event::Start => {
@@ -280,6 +290,10 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
             s.st["prefix"] = json!(p);
             s.set("held");
             let expires = format!("{}m", args["deadlineMin"].as_u64().unwrap_or(120) + 30);
+            h = h.timer("deadline", args["deadlineMin"].as_u64().unwrap_or(120) * MIN);
+            if infra {
+                return Ok(s.keep(h.call(host("infra:start", "requester.start", json!({ "name": RQ })))));
+            }
             for (v, cpus, mem, nested) in VMS {
                 let mut a = vec![json!("--hold")];
                 if nested {
@@ -289,8 +303,8 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 // vmName: the RFP's compute.vm role (what the watch page shows), the layer
                 h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a, "vmName": format!("stg-{v}") })));
             }
-            h = h.timer("deadline", args["deadlineMin"].as_u64().unwrap_or(120) * MIN);
         }
+        Event::Timer { id } if id == "poll-infra:get" => h = h.call(kube("infra:get", "get", &format!("requester:{RQ}"), sw("EphemeralInfra", &ei))),
         Event::Timer { id } if id == "deadline" => {
             let e = format!("not done by the deadline (phase {})", s.phase());
             return Ok(down(&mut s, h, json!({ "pass": false, "error": e })));
@@ -330,6 +344,10 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     s.st["readings"]["downError"] = json!(text);
                 }
                 s.mark("down");
+                return Ok(finish_multi(&mut s, h, infra, &ei));
+            }
+            if id == "infra:delete" {
+                s.st["readings"]["infraDeleted"] = json!(result.output().is_ok());
                 let r = s.st["result"].clone();
                 return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
             }
@@ -339,10 +357,45 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 return Ok(s.keep(h));
             }
             match step.as_str() {
+                "start" if v == "infra" && result.output().is_ok() => {
+                    let key = o["sshKey"].as_str().unwrap_or_default();
+                    let ttl = args["deadlineMin"].as_u64().unwrap_or(120) * 60;
+                    let contracts: Vec<Value> = VMS.iter().map(|(n, cpus, mem, nested)| json!({ "name": n, "state": "Requested", "vmName": format!("stg-{n}"),
+                        "cpus": cpus, "mem": mem, "nestedVirt": nested, "sshAuthorizedKeys": [key] })).collect();
+                    let mut spec = json!({ "description": format!("staging {base}: atproto, bidder-1, bidder-2, gateway on one meshd overlay"),
+                        "ttlSeconds": ttl, "endWhen": "Complete", "contracts": contracts });
+                    if let Some(d) = o["did"].as_str() {
+                        spec["record"] = json!({ "repoRef": { "kind": "AtprotoRepo", "name": repo_name(d) } });
+                    }
+                    let doc = json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "EphemeralInfra", "metadata": { "name": ei }, "spec": spec });
+                    s.mark("apply");
+                    h = h.call(kube("infra:apply", "apply", &format!("requester:{RQ}"), json!({ "yaml": doc.to_string() })));
+                }
+                "apply" if v == "infra" && result.output().is_ok() => {
+                    s.flag("infra");
+                    h = h.timer("poll-infra:get", 5_000);
+                }
+                "get" if v == "infra" => {
+                    let st = &o["status"];
+                    s.st["readings"]["infraPhase"] = st["phase"].clone();
+                    let failed: Vec<String> = st["contracts"].as_array().into_iter().flatten().filter(|c| c["phase"] == "Failed").map(|c| format!("{}: {}", c["name"], c["message"])).collect();
+                    if !failed.is_empty() {
+                        return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("EphemeralInfra {ei}: {}", failed.join("; ")) })));
+                    }
+                    if st["phase"] != "Deployed" {
+                        return Ok(s.keep(h.timer("poll-infra:get", 10_000)));
+                    }
+                    s.st["readings"]["infraRecord"] = st["record"]["uri"].clone();
+                    for (n, ..) in VMS {
+                        s.flag(&format!("install:{n}"));
+                        s.st["readings"]["heldS"][n] = json!(s.since("apply"));
+                        h = h.call(ssh(n, &format!("{n}:install"), install(s.st["prefix"].as_str().unwrap_or_default())));
+                    }
+                }
                 "install" if ok => {
                     s.flag(&format!("installed:{v}"));
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
-                    h = h.call(host(&format!("{v}:put"), "request.put", json!({ "name": format!("{base}-{v}"), "what": "meshd", "remote": MESHD })));
+                    h = h.call(put(&v));
                 }
                 "put" if ok => {
                     let cmd = format!(
@@ -457,6 +510,31 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
         _ => {}
     }
     Ok(s.keep(h))
+}
+
+/// The run requester of the infra provisioning.
+const RQ: &str = "stg";
+
+/// atprotorepo.RepoName: "repo-" + the DID, lowercased, every other character a dash (no two in a row).
+fn repo_name(did: &str) -> String {
+    let mut out = String::new();
+    for c in format!("repo-{did}").to_lowercase().chars() {
+        let c = if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' { c } else { '-' };
+        if !(c == '-' && out.ends_with('-')) {
+            out.push(c);
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+/// After dev down (or before anything was installed): the EphemeralInfra deleted (its finalizer releases every
+/// contract), then the kept result.
+fn finish_multi(s: &mut S, h: Handle, infra: bool, ei: &str) -> Handle {
+    if infra && s.has("infra") {
+        return s.keep(h.call(kube("infra:delete", "delete", &format!("requester:{RQ}"), sw("EphemeralInfra", ei))));
+    }
+    let r = s.st["result"].clone();
+    if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) }
 }
 
 entries! { run => run_staging }

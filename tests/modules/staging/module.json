@@ -22,6 +22,12 @@
 			"description": "single (default): one nested-virt VM; multi: atproto 2/4, bidder-1 and bidder-2 4/8 nested, gateway 4/8 on one meshd overlay, joined by the atproto VM's network value"
 		},
 		{
+			"key": "provision",
+			"label": "provision",
+			"type": "string",
+			"description": "layout multi: request (default; one held run request per VM) or infra (one EphemeralInfra stg-<run> of the run requester stg, its contracts stg-atproto, stg-bidder-1, stg-bidder-2, stg-gateway; deleting it releases them)"
+		},
+		{
 			"key": "cpus",
 			"label": "cpus",
 			"type": "integer",
