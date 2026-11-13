@@ -74,11 +74,7 @@ func (q *Requester) atircServiceAuth(market ServiceAuthSource) (ServiceAuthSourc
 	open, did := q.deps.ServiceAuth, q.did
 	switch pdsRef := q.cfg.Spec.PdsRef; {
 	case q.cfg.LocalSigner && pdsRef != nil && pdsRef.Name != "":
-		plcURL := ""
-		if network := q.cfg.Spec.Network; network != nil {
-			plcURL = network.PLCDirectoryURL
-		}
-		if ok, reason := LocalPdsSignsAtirc(plcURL, q.pdsURL); !ok {
+		if ok, reason := LocalPdsSignsAtirc(q.pdsURL); !ok {
 			return nil, "none", reason
 		}
 		target := commonv1.ObjectRef{Group: cmp.Or(pdsRef.Group, v1alpha1.GroupName), Kind: cmp.Or(pdsRef.Kind, "Pds"), Name: pdsRef.Name,

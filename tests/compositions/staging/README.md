@@ -81,7 +81,8 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/sta
 5. meshd DNS: A/AAAA per peer only; handles need `_atproto` TXT, did:key ingress a wildcard.
 6. Nested KVM: no request field asks for it; a bidder VM can land on a host without it.
 7. Vouches: each staging bidder and requester account vouches the others (`bidder-tangled-vouch`), or `open` policy.
-8. atirc agents refuse DIDs not on plc.directory (`internal/market/requester/agent.go:23`).
+8. atirc resolves DIDs on its `--plc-directory-url` / `ATIRC_PLC_DIRECTORY_URL` (default plc.directory): a staging atirc
+   runs with the staging PLC; the requester still needs an https, public Pds for `local-pds` signing.
 9. PDS on port 80 (the relay refuses ports in hostnames); the orchestrator must `requestCrawl` the PDS as
    `http://pds.<zone>` before the first account. The current PLC image is not public: pinned to the last public build.
 
