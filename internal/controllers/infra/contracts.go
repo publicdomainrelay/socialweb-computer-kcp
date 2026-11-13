@@ -120,6 +120,9 @@ func contractStatus(name string, cc *v1alpha1.ComputeContract, phase v1alpha1.In
 	out.Message = cc.Status.Message
 	if state := cc.Status.Contract; state != nil {
 		out.ReceiptURI = state.ReceiptURI
+		if out.ReceiptURI == "" && state.Receipt != nil {
+			out.ReceiptURI = state.Receipt.URI
+		}
 		if state.Winner != nil {
 			out.Winner = state.Winner.DID
 		}
