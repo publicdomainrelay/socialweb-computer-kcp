@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.oomKilled",
+  "description": "The bidder reports that the kernel OOM-killed processes in the VM's host cgroup (memory.events oom_kill increased); sent as the payload of a market.event, one per new kill count, capped per contract.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kills", "total", "limit", "observedAt", "createdAt"],
+        "properties": {
+          "kills": { "type": "integer", "description": "New OOM kills since the last report." },
+          "total": { "type": "integer", "description": "OOM kills in the cgroup's lifetime." },
+          "limit": { "type": "integer", "description": "memory.max in bytes." },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}
