@@ -19,23 +19,37 @@ fn run_0002(run: Run<Value>) -> Result<Handle, String> {
             h = h.call(host("signin", "page.signin", json!({ "url": format!("https://ssh.{ssh}/"), "startApi": true }))).timer("deadline", 40 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 40 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "reprompt" => {
+            let form = if s.is("held") { "held" } else { "transient" };
+            if s.since("prompt1") > 300.0 {
+                return Ok(s.fail(format!("{form}: no answer 5 min after the first prompt")));
+            }
+            let n = s.st["readings"][form]["prompts"].as_u64().unwrap_or(1) + 1;
+            s.st["readings"][form]["prompts"] = json!(n);
+            s.mark("prompt");
+            h = h.call(host("prompt", "atirc.observerPub", json!({ "nick": obs, "text": format!("{}: uname -m; id -un", agent(s.is("held"))) }))).timer("reprompt", 30_000);
+        }
         Event::Message { id, data, .. } if id == "obs" => {
             let held = s.is("held");
             let a = agent(held);
             let from = data["nick"] == a.as_str() || data["identity"].as_str().is_some_and(|i| i.starts_with(&format!("{a}.")));
             let text = data["text"].as_str().unwrap_or_default();
             let form = if held { "held" } else { "transient" };
-            // the agent JOINs ~18 s before it reads: prompt only after its "online - monitoring atirc" line
-            if (s.is("transient") || s.is("held")) && from && text.contains("online") && !s.has(&format!("{form}-joined")) {
+            // the agent JOINs some 18 s before it reads, and its "online" line is the model's choice (rc165: "Standing
+            // by" on stdout only): prompt at the JOIN or that line, again every 30 s until it answers
+            if (s.is("transient") || s.is("held")) && from && (text.contains("online") || data["event"] == "join") && !s.has(&format!("{form}-joined")) {
                 s.flag(&format!("{form}-joined"));
                 let t = s.since("session");
                 s.st["readings"][form]["join_s"] = json!(t);
                 s.mark("prompt");
-                h = h.call(host("prompt", "atirc.observerPub", json!({ "nick": obs, "text": format!("{a}: uname -m; id -un") })));
+                s.mark("prompt1");
+                s.st["readings"][form]["prompts"] = json!(1);
+                h = h.call(host("prompt", "atirc.observerPub", json!({ "nick": obs, "text": format!("{a}: uname -m; id -un") }))).timer("reprompt", 30_000);
             } else if from && text.contains("x86_64") && text.contains(a.as_str()) && s.has(&format!("{form}-joined")) {
                 let t = s.since("prompt");
                 s.st["readings"][form]["answer_s"] = json!(t);
-                h = h.cancel(format!("agent-{form}"));
+                s.st["readings"][form]["answer_after_first_prompt_s"] = json!(s.since("prompt1"));
+                h = h.cancel(format!("agent-{form}")).cancel("reprompt");
                 if held {
                     return Ok(s.pass());
                 }
