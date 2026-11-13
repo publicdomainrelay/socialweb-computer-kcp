@@ -22,6 +22,10 @@ fn run_0008(run: Run<Value>) -> Result<Handle, String> {
         Event::Timer { id } if id == "contract" => {
             let w = json!(s.st["receipt"].as_str().unwrap_or_default().trim_start_matches("at://").split('/').next().unwrap_or_default());
             s.st["winner"] = w.clone();
+            s.reading("winner", w.clone());
+            if !bidders.iter().any(|b| b["did"] == w) {
+                return Ok(s.fail(format!("unknown bidder {w}: the winner is not in the target")));
+            }
             match bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) {
                 Some(c) => {
                     s.st["cluster"] = json!(c);
