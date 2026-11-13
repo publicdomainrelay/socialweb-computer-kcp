@@ -271,6 +271,7 @@ type InfraContract struct {
 	Cpus               int64                      `json:"cpus,omitempty"`
 	DenyBidderDids     []string                   `json:"denyBidderDids,omitempty"`
 	GuestTools         []string                   `json:"guestTools,omitempty"`
+	Image              *InfraImage                `json:"image,omitempty"`
 	Mem                string                     `json:"mem,omitempty"`
 	Name               string                     `json:"name"`
 	NestedVirt         bool                       `json:"nestedVirt,omitempty"`
@@ -329,6 +330,31 @@ func (v *InfraContractStatus) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = InfraContractStatus(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type InfraImage struct {
+	Sha256 string                     `json:"sha256"`
+	URL    string                     `json:"url"`
+	Extra  map[string]json.RawMessage `json:"-"`
+	absent map[string]json.RawMessage
+}
+
+func (v InfraImage) MarshalJSON() ([]byte, error) {
+	type plain InfraImage
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *InfraImage) UnmarshalJSON(b []byte) error {
+	type plain InfraImage
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = InfraImage(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil

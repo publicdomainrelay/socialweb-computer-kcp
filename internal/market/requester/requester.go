@@ -996,5 +996,5 @@ func CheckVMSize(t v1alpha1.ComputeContractTemplate) error {
 	if mib, err := memsize.ParseMiB(t.Mem); err != nil || (mib == 0 && strings.TrimSpace(t.Mem) != "") {
 		return fmt.Errorf("mem %q is not a memory size such as 8G", t.Mem)
 	}
-	return nil
+	return checkImage(t)
 }

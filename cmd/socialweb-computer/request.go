@@ -56,7 +56,7 @@ const (
 	sshConnectionFailed       = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "cpus", "mem", "nested-virt", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "cpus", "mem", "nested-virt", "image", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated", "identity-only")
@@ -348,6 +348,13 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 		return nil, fmt.Errorf("guest-tools: %w", err)
 	}
 	r.contract.Cpus, r.contract.Mem, r.contract.NestedVirt = int32(vals.Int("cpus")), strings.TrimSpace(vals.String("mem")), vals.Bool("nested-virt")
+	if image := strings.TrimSpace(vals.String("image")); image != "" {
+		at := strings.LastIndex(image, "@")
+		if at < 0 {
+			return nil, fmt.Errorf("image %q: want <https base url>@<image.json sha256>", image)
+		}
+		r.contract.Image = &v1alpha1.ComputeContractImage{URL: image[:at], Sha256: image[at+1:]}
+	}
 	if err := requester.CheckVMSize(r.contract.ComputeContractTemplate); err != nil {
 		return nil, err
 	}

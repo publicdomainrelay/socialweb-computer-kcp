@@ -19,6 +19,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/identity"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/serviceauth"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/xrpc"
@@ -51,6 +52,18 @@ type Bidder struct {
 	Audience string
 
 	NestedVirt bool
+
+	Images bool
+}
+
+func (b Bidder) Lacks(spec v1alpha1.ComputeContractTemplate) string {
+	switch {
+	case spec.NestedVirt && !b.NestedVirt:
+		return dropNoNestedVirt
+	case spec.Image != nil && !b.Images:
+		return dropNoImages
+	}
+	return ""
 }
 
 type BidRecord struct {
@@ -114,6 +127,7 @@ const (
 	dropOfferingsRead  = "offerings read failed: "
 	dropEndpoint       = "offering endpoint refused: "
 	dropNoNestedVirt   = "the offering does not set nestedVirt"
+	dropNoImages       = "the offering does not set images"
 
 	maxDropsInMessage = 5
 )
@@ -161,15 +175,15 @@ func (d Discovery) Without(deny []string) Discovery {
 	return out
 }
 
-func (d Discovery) NestedVirtOnly() Discovery {
+func (d Discovery) Capable(spec v1alpha1.ComputeContractTemplate) Discovery {
 	out := d.clone()
 	out.Bidders = out.Bidders[:0]
 	for _, bidder := range d.Bidders {
-		if bidder.NestedVirt {
-			out.Bidders = append(out.Bidders, bidder)
+		if lacks := bidder.Lacks(spec); lacks != "" {
+			out.Dropped = append(out.Dropped, BidderDrop{DID: bidder.DID, Reason: lacks})
 			continue
 		}
-		out.Dropped = append(out.Dropped, BidderDrop{DID: bidder.DID, Reason: dropNoNestedVirt})
+		out.Bidders = append(out.Bidders, bidder)
 	}
 	return out
 }
@@ -412,7 +426,7 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	if !ok {
 		return nil, dropNoEndpoint
 	}
-	bidder.NestedVirt = offering.NestedVirt
+	bidder.NestedVirt, bidder.Images = offering.NestedVirt, offering.Images
 	return []Bidder{bidder}, dropNoOffering
 }
 
