@@ -563,8 +563,16 @@ again; user_data installs `atirc-agent.service`
   The bidder checks image.json before it bids (`imageRefused`); the FirecrackerVM fetches the files into the image
   store (`Store.EnsureRequested`, content-addressed) and a refusal fails it as lostReason ImageRefused (vm.terminated
   `image_refused`). The guest agent posts one guest.image {marker} from `/etc/swc-image`; the requester logs
-  `requester_guest_image` {marker, expected, ok} and releases the contract as Failed on a mismatch or no marker within
-  the on-network deadline (no re-placement after a receipt). Fetch guard and its limits: docs/FEATURES.md Known limits.
+  `requester_guest_image` {marker, expected, ok}. A refusal is re-placed (`MaxAcceptReplacements`, the refusing bidder
+  denied): a bidder declines an accept whose image it refuses at provision (`imageRefused`, before its reservation), and a
+  wrong or missing marker or a vm.terminated `image_refused` releases the VM and re-places (`replaceWrongImage`; after a
+  requester restart `resumeReceipt` only fails the contract). An image contract waits `RequestedFetchTimeout` more than
+  `DefaultVMReadyTimeout` for the guest (the first fetch of a 4.8 GB rootfs). Verified image.json fetches are cached per
+  (url, sha256); `Store.Verify` trusts the `.verified` stamp (sha, size, mtime per file) of an image dir, so a reused rootfs is
+  not hashed again. Fetch guard and its limits: docs/FEATURES.md Known limits. The CI toolchain image
+  (`deploy/vm-images/ci-toolchain.json`, `scripts/build-ci-image.sh`: the pinned base kernel and rootfs with
+  `knotless-ci-toolchain.sh --bake` run in it, published content-addressed under `vm-images/ci-toolchain/<image.json sha256>/`)
+  is the image of the knotless build binding; composition 0016 (`run`, `badsha`) is its testcase.
 - Signaling is sealed. Each side publishes a `guest.publicKey` (kind `age-x25519`) per tag; an offer
   is age ciphertext sealed to the guest's latest key, with plaintext `{sdp, replyTo}`; the answer is
   sealed to `replyTo`. A signal names no recipient: a reader trial-opens every signal for its tag.
