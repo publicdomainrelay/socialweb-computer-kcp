@@ -1,6 +1,6 @@
 {
 	"name": "staging",
-	"description": "The staging stand-up (tests/compositions/staging): one nested-virt VM running dev up --profile market-network.",
+	"description": "The staging stand-up (tests/compositions/staging): one nested-virt VM running dev up --profile market-network, or (layout multi) four small VMs joined by one network value.",
 	"actions": [
 		{
 			"entry": "run",
@@ -14,6 +14,12 @@
 			"label": "name",
 			"type": "string",
 			"description": "the run; the VM's invocation is <name>-vm"
+		},
+		{
+			"key": "layout",
+			"label": "layout",
+			"type": "string",
+			"description": "single (default): one nested-virt VM; multi: atproto 2/4, bidder-1 and bidder-2 4/8 nested, gateway 4/8 on one meshd overlay, joined by the atproto VM's network value"
 		},
 		{
 			"key": "cpus",

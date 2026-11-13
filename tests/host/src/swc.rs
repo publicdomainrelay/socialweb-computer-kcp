@@ -256,7 +256,12 @@ impl Swc {
                 }
                 out.stdout
             }
-            other => return Err(format!("what {other:?}: testHost or suite")),
+            "meshd" => {
+                let p = std::env::var("SWC_MESHD")
+                    .map_err(|_| "SWC_MESHD is not set (a static socialweb-meshd, rust/build.sh)")?;
+                std::fs::read(&p).map_err(|e| format!("{p}: {e}"))?
+            }
+            other => return Err(format!("what {other:?}: testHost, suite or meshd")),
         };
         let exec = format!("cat > '{remote}.part' && mv '{remote}.part' '{remote}'");
         let mut child = self

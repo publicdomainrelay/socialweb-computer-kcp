@@ -60,6 +60,9 @@ fn poll(step: &str) -> String {
 }
 
 fn run_staging(run: Run<Value>) -> Result<Handle, String> {
+    if run.args["layout"] == "multi" {
+        return run_multi(run);
+    }
     let args = &run.args;
     let name = format!("{}-vm", args["name"].as_str().ok_or("name is required")?);
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
@@ -196,6 +199,247 @@ fn finish(s: &mut S) -> Handle {
     s.mark("down");
     let r = s.st["result"].clone();
     if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) }
+}
+
+/// The multi-VM layout: (name, vCPUs, memory, nested virt). Overlay address 10.44.0.<index + 1>.
+const VMS: [(&str, u32, &str, bool); 4] = [("atproto", 2, "4G", false), ("bidder-1", 4, "8G", true), ("bidder-2", 4, "8G", true), ("gateway", 4, "8G", false)];
+const MESHD: &str = "/home/stg/stg/socialweb-meshd";
+const MESH_SECRET: &str = "/var/lib/socialweb/meshd/secret";
+const PLC_PROBE: &str = "/home/stg/stg/plc";
+
+fn overlay(i: usize) -> String {
+    format!("10.44.0.{}", i + 1)
+}
+
+/// The first JSON object in a command's output that has `key` (JSON log lines may come before it).
+fn json_with(text: &str, key: &str) -> Option<Value> {
+    text.match_indices('{').find_map(|(i, _)| {
+        let v = serde_json::Deserializer::from_str(&text[i..]).into_iter::<Value>().next()?.ok()?;
+        v.get(key).is_some().then_some(v)
+    })
+}
+
+/// A file on the VM from text without a single quote (JSON, PEM in JSON).
+fn write_file(path: &str, text: &str) -> Result<String, String> {
+    if text.contains('\'') {
+        return Err(format!("{path}: the content carries a single quote"));
+    }
+    Ok(format!("printf %s '{text}' > {path}.part && mv {path}.part {path} && chown stg:stg {path}"))
+}
+
+/// The joined bidder on a bidder VM: its kcp's MarketBidder `app` (curl on the admin token; no kubectl on the VM).
+fn bidder_poll(handle: &str) -> String {
+    let k = format!("/home/stg/.local/state/socialweb-computer/dev/b-{}/kcp/admin.kubeconfig", handle.replace('.', "-"));
+    format!(
+        "K={k}; [ -f $K ] || {{ echo none; exit 0; }}; T=$(awk '/ token:/{{print $2; exit}}' $K); S=$(awk '/ server:/{{print $2; exit}}' $K); \
+         U=$S/clusters/root/apis/socialweb.computer/v1alpha1/marketbidders/app; \
+         curl -fsSk -X PATCH -H \"Authorization: Bearer $T\" -H 'Content-Type: application/merge-patch+json' $U -d '{{\"spec\":{{\"identity\":{{\"association\":\"Skip\"}}}}}}' >/dev/null || true; \
+         curl -fsSk -H \"Authorization: Bearer $T\" $U | python3 -c 'import json,sys; s=json.load(sys.stdin).get(\"status\",{{}}); print(s.get(\"phase\",\"-\"), s.get(\"did\",\"-\"), s.get(\"message\",\"\"))'"
+    )
+}
+
+/// tests/compositions/staging/README.md "Multi-VM": four small VMs on one meshd overlay, joined by one network value.
+fn run_multi(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let base = args["name"].as_str().ok_or("name is required")?.to_string();
+    let tag: String = base.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+    let tag = tag[tag.len().saturating_sub(6)..].to_string();
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    let mut h = Handle::new();
+    let ssh = |v: &str, id: &str, exec: String| host(id, "request.ssh", json!({ "name": format!("{base}-{v}"), "exec": exec }));
+    let handle_of = |v: &str| format!("{}-{tag}.bob.test", v.replace("bidder-", "b"));
+    let down = |s: &mut S, h: Handle, result: Value| {
+        if s.is("down") {
+            return s.keep(h);
+        }
+        s.st["result"] = result;
+        if !s.has("installed:atproto") {
+            let r = s.st["result"].clone();
+            return if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) };
+        }
+        s.set("down");
+        s.keep(h.call(host("down", "request.ssh", json!({ "name": format!("{base}-atproto"), "exec": bg("down", swc(&format!("dev down {INST}"))) }))))
+    };
+    match run.event {
+        Event::Start => {
+            let p = match prefix(args["requester"].as_str().unwrap_or_default()) {
+                Ok(p) => p,
+                Err(e) => return Ok(s.fail(e)),
+            };
+            s.st["prefix"] = json!(p);
+            s.set("held");
+            for (v, cpus, mem, nested) in VMS {
+                let mut a = vec![json!("--hold")];
+                if nested {
+                    a.push(json!("--nested-virt"));
+                }
+                a.extend([json!("--cpus"), json!(cpus.to_string()), json!("--mem"), json!(mem), json!("--expires-in"), json!("4h"), json!("--exec"), json!("true")]);
+                h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a })));
+            }
+            h = h.timer("deadline", args["deadlineMin"].as_u64().unwrap_or(120) * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => {
+            let e = format!("not done by the deadline (phase {})", s.phase());
+            return Ok(down(&mut s, h, json!({ "pass": false, "error": e })));
+        }
+        Event::Timer { id } if id.starts_with("poll-") => {
+            let (v, step) = id[5..].split_once(':').unwrap_or(("atproto", &id[5..]));
+            let exec = if step == "bidder" { bidder_poll(&handle_of(v)) } else { poll(step) };
+            h = h.call(ssh(v, &format!("{v}:{step}-poll"), exec));
+        }
+        Event::Message { id, data, .. } if id.starts_with("req-") => {
+            let v = id[4..].to_string();
+            match data["msg"].as_str().unwrap_or_default() {
+                "contract" if data["phase"] == "Held" => s.flag(&format!("vm:{v}")),
+                "contract" if data["phase"] == "Failed" => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{v}: the VM contract failed: {data}") }))),
+                "exited" if !s.has(&format!("vm:{v}")) => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{v}: run request exited before the VM was Held: {data}") }))),
+                "exited" => s.flag(&format!("exited:{v}")),
+                _ => {}
+            }
+            if s.has(&format!("vm:{v}")) && s.has(&format!("exited:{v}")) && !s.has(&format!("install:{v}")) {
+                s.flag(&format!("install:{v}"));
+                s.mark(&format!("held:{v}"));
+                s.st["readings"]["heldS"][&v] = json!(s.t());
+                h = h.cancel(&id).call(ssh(&v, &format!("{v}:install"), install(s.st["prefix"].as_str().unwrap_or_default())));
+            }
+        }
+        Event::Result { id, result, .. } => {
+            let o = result.output().cloned().unwrap_or_else(|e| json!({ "ok": false, "output": e.to_string() }));
+            let ok = o["ok"] == true && result.output().is_ok();
+            let text = o["output"].as_str().unwrap_or_default().to_string();
+            if id == "down" || id == "atproto:down-poll" {
+                let rc = text.split_once('\n').map(|(rc, _)| rc.trim()).unwrap_or(text.trim());
+                if id == "down" && ok || id == "atproto:down-poll" && (!ok || rc.is_empty()) {
+                    return Ok(s.keep(h.timer("poll-atproto:down", 10_000)));
+                }
+                if id == "down" || rc != "0" {
+                    s.st["readings"]["downError"] = json!(text);
+                }
+                s.mark("down");
+                let r = s.st["result"].clone();
+                return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
+            }
+            let (v, step) = id.split_once(':').unwrap_or(("", id.as_str()));
+            let (v, step) = (v.to_string(), step.to_string());
+            if s.is("down") {
+                return Ok(s.keep(h));
+            }
+            match step.as_str() {
+                "install" if ok => {
+                    s.flag(&format!("installed:{v}"));
+                    s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
+                    h = h.call(host(&format!("{v}:put"), "request.put", json!({ "name": format!("{base}-{v}"), "what": "meshd", "remote": MESHD })));
+                }
+                "put" if ok => {
+                    let cmd = format!(
+                        "set -e; chmod 0755 {MESHD}; install -d -m 0700 /var/lib/socialweb/meshd; \
+                         [ -s {MESH_SECRET} ] || (umask 077; od -An -tx1 -N32 /dev/urandom | tr -d ' \\n' > {MESH_SECRET}); {MESHD} identity --secret-file {MESH_SECRET}"
+                    );
+                    h = h.call(ssh(&v, &format!("{v}:id"), cmd));
+                }
+                "id" if ok => {
+                    let endpoint = json_with(&text, "endpoint").and_then(|j| j["endpoint"].as_str().map(String::from));
+                    let Some(endpoint) = endpoint else { return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{v}: meshd identity: {text}") }))) };
+                    s.st["mesh"][&v] = json!(endpoint);
+                    if VMS.iter().all(|(n, ..)| s.st["mesh"][*n].is_string()) {
+                        let peers: Vec<Value> = VMS.iter().enumerate().map(|(i, (n, ..))| json!({ "name": n, "endpoint": s.st["mesh"][*n], "cidrs": [format!("{}/32", overlay(i))] })).collect();
+                        let roster = json!({ "peers": peers }).to_string();
+                        s.set("mesh");
+                        for (i, (n, ..)) in VMS.iter().enumerate() {
+                            let wait = if i == 0 { format!("ip -br addr | grep -q ' {}/32'", overlay(0)) } else { format!("ping -c1 -W2 {} >/dev/null", overlay(0)) };
+                            let cmd = format!(
+                                "set -e; {}; (setsid nohup {MESHD} run --secret-file {MESH_SECRET} --roster /home/stg/stg/roster.json > /home/stg/meshd.log 2>&1 < /dev/null &); \
+                                 for i in $(seq 90); do {wait} && break; sleep 2; done; {wait} || {{ tail -c 2000 /home/stg/meshd.log; exit 1; }}; ip -br addr show swmesh0",
+                                write_file("/home/stg/stg/roster.json", &roster)?
+                            );
+                            h = h.call(ssh(n, &format!("{n}:mesh"), cmd));
+                        }
+                    }
+                }
+                "mesh" if ok => {
+                    s.flag(&format!("mesh:{v}"));
+                    if s.has("mesh:atproto") && !s.has("up") {
+                        s.flag("up");
+                        s.mark("up");
+                        h = h.call(ssh("atproto", "atproto:up", bg("up", swc(&format!("dev up {INST} --profile market-network --bidders 0 --network-bind {} --host-backend proc --ready-timeout 90s --network-timeout 20m", overlay(0))))));
+                    }
+                    if VMS.iter().all(|(n, ..)| s.has(&format!("mesh:{n}"))) {
+                        s.st["readings"]["meshS"] = json!(s.t());
+                    }
+                }
+                "up" | "bidder" | "request" if ok => h = h.timer(&format!("poll-{v}:{step}"), 10_000),
+                "up-poll" | "request-poll" => {
+                    let step = &step[..step.len() - 5];
+                    let (rc, log) = text.split_once('\n').unwrap_or((text.as_str(), ""));
+                    match rc.trim() {
+                        _ if !ok => h = h.timer(&format!("poll-{v}:{step}"), 10_000),
+                        "" => h = h.timer(&format!("poll-{v}:{step}"), 10_000),
+                        "0" if step == "up" => {
+                            s.st["readings"]["upS"] = json!(s.since("up"));
+                            h = h.call(ssh("atproto", "atproto:status", swc(&format!("dev status {INST}"))));
+                        }
+                        "0" => {
+                            s.st["readings"]["requestS"] = json!(s.since("request"));
+                            s.st["readings"]["request"] = json!(log.lines().filter(|l| l.starts_with("RENTED")).collect::<Vec<_>>());
+                            return Ok(down(&mut s, h, json!({ "pass": true })));
+                        }
+                        rc => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{step} exit {rc}: {log}") }))),
+                    }
+                }
+                "status" if ok => {
+                    let Some(st) = json_with(&text, "network") else { return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("dev status: {text}") }))) };
+                    let net = st["network"]["status"].clone();
+                    if net["phase"] != "Ready" {
+                        return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("the network is not Ready: {}", net["message"]) })));
+                    }
+                    s.st["readings"]["network"] = json!({ "plc": net["network"]["plcDirectoryUrl"], "bidderPds": net["bidderPdsUrl"] });
+                    let file = match write_file("/home/stg/stg/net.json", &net.to_string()) {
+                        Ok(f) => f,
+                        Err(e) => return Ok(down(&mut s, h, json!({ "pass": false, "error": e }))),
+                    };
+                    s.set("bidders");
+                    s.mark("bidders");
+                    for v in ["bidder-1", "bidder-2"] {
+                        let cmd = format!(
+                            "set -e; {file}; {}",
+                            bg("bidder", swc(&format!("run bidder --market-network-file /home/stg/stg/net.json --handle {} --host-backend proc --fg --vmm qemu --compute-kinds vm --bidder-policy open", handle_of(v))))
+                        );
+                        h = h.call(ssh(v, &format!("{v}:bidder"), cmd));
+                    }
+                    let probe = format!("set -e; curl -fsS -o /dev/null -w '%{{http_code}}' {}/did:plc:nobody > {PLC_PROBE} || true; cat {PLC_PROBE}", net["network"]["plcDirectoryUrl"].as_str().unwrap_or_default());
+                    h = h.call(ssh("gateway", "gateway:probe", probe));
+                }
+                "probe" => s.st["readings"]["gatewayPlcProbe"] = json!(text.trim()),
+                "bidder-poll" => {
+                    let mut words = text.split_whitespace();
+                    let (phase, did) = (words.next().unwrap_or_default(), words.next().unwrap_or_default());
+                    s.st["readings"]["bidders"][&v] = json!(text.trim());
+                    if phase == "Ready" && did.starts_with("did:") {
+                        s.flag(&format!("ready:{v}"));
+                        s.st["readings"]["bidderReadyS"][&v] = json!(s.since("bidders"));
+                    } else {
+                        h = h.timer(&format!("poll-{v}:bidder"), 15_000);
+                    }
+                    if s.has("ready:bidder-1") && s.has("ready:bidder-2") && !s.has("request") {
+                        s.flag("request");
+                        s.mark("request");
+                        s.set("request");
+                        let one = |n: &str| swc(&format!("run request --network stg --state-dir /home/stg/stg/s --name {n} --exec hostname -- --policy open"));
+                        let both = format!(
+                            "(sh -c \"{} > /home/stg/p1.out\" & {} > /home/stg/p2.out; rc=$?; wait $! || rc=1; grep -h -o winnerDid.* /home/stg/p1.out /home/stg/p2.out | sed s/^/RENTED/; exit $rc)",
+                            one("p1"), one("p2")
+                        );
+                        let cmd = bg("request", both);
+                        h = h.call(ssh("atproto", "atproto:request", cmd));
+                    }
+                }
+                _ if !ok => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{id}: {text}") }))),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(s.keep(h))
 }
 
 entries! { run => run_staging }
