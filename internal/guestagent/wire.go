@@ -31,6 +31,8 @@ const (
 
 	OOMKillNSID = nsidPrefix + "events.guest.oomKill"
 
+	ImageNSID = nsidPrefix + "events.guest.image"
+
 	secretsViaGetSecrets = "getSecrets"
 
 	secretsViaSealed = "sealed"
