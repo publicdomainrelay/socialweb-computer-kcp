@@ -22,8 +22,13 @@ pub fn secs(iso: &str) -> f64 {
 
 /// termination-payload-<first 32 hex of sha256("terminated:<receipt uri>")>: the receipt's vm.terminated rkey.
 pub fn termination_rkey(receipt: &str) -> String {
-    let h = Sha256::digest(format!("terminated:{receipt}"));
-    format!("termination-payload-{}", h[..16].iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!("termination-payload-{}", key_hash(&format!("terminated:{receipt}")))
+}
+
+/// The first 32 hex of sha256(key): a bidder event record's rkey ends `-payload-<this>` of its StateSync key
+/// (market.EventRKeys); a report's key is `<nsid>:<tag>:<receipt uri>`.
+pub fn key_hash(key: &str) -> String {
+    Sha256::digest(key)[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A call to the test host: computer.socialweb.test.<what>.
