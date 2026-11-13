@@ -28,6 +28,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.requester.start",
     "computer.socialweb.test.request.start",
     "computer.socialweb.test.request.ssh",
+    "computer.socialweb.test.request.put",
     "computer.socialweb.test.request.agent",
     "computer.socialweb.test.request.summary",
     "computer.socialweb.test.request.release",
@@ -188,6 +189,56 @@ impl Swc {
             .run(&args.iter().map(String::as_str).collect::<Vec<_>>())
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Copies one of this host's files to the guest of invocation `name` (stdin of `run request ssh --exec 'cat >
+    /// <remote>'`). `what` names the file, never a path: testHost ($SWC_TEST_HOST_STATIC, a static swc-test-host) or
+    /// suite (a tar.gz of tests/compositions, tests/targets and the module wasm and module.json files).
+    async fn request_put(&self, input: &Value) -> Result<Value, String> {
+        let name = str_of(input, "name")?;
+        let remote = str_of(input, "remote")?;
+        if !remote.starts_with('/') || remote.contains('\'') {
+            return Err(format!("remote {remote:?}: an absolute path without quotes"));
+        }
+        let bytes = match str_of(input, "what")? {
+            "testHost" => {
+                let p = std::env::var("SWC_TEST_HOST_STATIC").map_err(|_| "SWC_TEST_HOST_STATIC is not set (tests/build-static-host.sh)")?;
+                std::fs::read(&p).map_err(|e| format!("{p}: {e}"))?
+            }
+            "suite" => {
+                let tests = std::env::current_dir().map_err(|e| e.to_string())?;
+                let out = tokio::process::Command::new("sh")
+                    .args(["-c", "tar -czf - compositions targets modules/*/module.json modules/target/wasm32-unknown-unknown/release/*.wasm"])
+                    .current_dir(&tests)
+                    .output()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if !out.status.success() {
+                    return Err(format!("tar of the suite in {}: {}", tests.display(), String::from_utf8_lossy(&out.stderr)));
+                }
+                out.stdout
+            }
+            other => return Err(format!("what {other:?}: testHost or suite")),
+        };
+        let exec = format!("cat > '{remote}.part' && mv '{remote}.part' '{remote}'");
+        let mut child = self
+            .bin
+            .cmd()
+            .args(self.sub_args("ssh", name, &["--exec", &exec]))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        let mut sin = child.stdin.take().unwrap();
+        use tokio::io::AsyncWriteExt;
+        sin.write_all(&bytes).await.map_err(|e| e.to_string())?;
+        drop(sin);
+        let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!("put {remote}: {}", tail(&String::from_utf8_lossy(&out.stderr))));
+        }
+        Ok(json!({ "remote": remote, "bytes": bytes.len() }))
     }
 
     fn sub_args(&self, verb: &str, name: &str, extra: &[&str]) -> Vec<String> {
@@ -527,6 +578,7 @@ impl Swc {
         let what = nsid.strip_prefix(P).unwrap_or(nsid);
         match what {
             "requester.start" => self.requester_start(&input).await,
+            "request.put" => self.request_put(&input).await,
             "request.ssh" => {
                 let name = str_of(&input, "name")?;
                 let exec = input["exec"].as_str().ok_or("exec is required")?;
