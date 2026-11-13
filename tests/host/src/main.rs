@@ -724,7 +724,14 @@ async fn main_() -> Result<bool> {
     let result = match &ran {
         // the root run's result says pass, whoever runs it (a guest requester has no sign-in)
         Ok(v) if flag(&args, "--instance").is_none() => {
-            v.get("result").cloned().unwrap_or_else(|| v.clone())
+            let r = v.get("result").unwrap_or(v);
+            if r.get("pass").is_some() {
+                r.clone()
+            } else {
+                // a trapped or crashed module leaves no result: its error (else the whole run doc) is the failure
+                let error = v.get("error").filter(|e| !e.is_null()).cloned();
+                json!({ "pass": false, "error": error.unwrap_or_else(|| json!(format!("the module returned no result: {v}"))), "result": v })
+            }
         }
         Ok(v) => {
             json!({ "pass": v.get("error").is_none_or(Value::is_null), "error": v.get("error"), "result": v })
