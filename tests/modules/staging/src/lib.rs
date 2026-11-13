@@ -93,7 +93,9 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             // small until builds run on it (owner: 4 vCPU / 8 GB, one bidder; a bidder refuses more than its host has free)
             let cpus = args["cpus"].as_u64().unwrap_or(4).to_string();
             let mem = args["mem"].as_str().unwrap_or("8G");
-            let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", "4h", "--exec", "true"]);
+            // the bidder ends the VM 30 min past the run's deadline, whatever becomes of the run (a cancelled CI run)
+            let expires = format!("{}m", args["deadlineMin"].as_u64().unwrap_or(180) + 30);
+            let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", expires, "--exec", "true"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", args["deadlineMin"].as_u64().unwrap_or(180) * MIN);
         }
         Event::Timer { id } if id.starts_with("poll-") => h = h.call(ssh(&format!("{}-poll", &id[5..]), poll(&id[5..]))),
@@ -277,12 +279,13 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
             };
             s.st["prefix"] = json!(p);
             s.set("held");
+            let expires = format!("{}m", args["deadlineMin"].as_u64().unwrap_or(120) + 30);
             for (v, cpus, mem, nested) in VMS {
                 let mut a = vec![json!("--hold")];
                 if nested {
                     a.push(json!("--nested-virt"));
                 }
-                a.extend([json!("--cpus"), json!(cpus.to_string()), json!("--mem"), json!(mem), json!("--expires-in"), json!("4h"), json!("--exec"), json!("true")]);
+                a.extend([json!("--cpus"), json!(cpus.to_string()), json!("--mem"), json!(mem), json!("--expires-in"), json!(expires), json!("--exec"), json!("true")]);
                 // vmName: the RFP's compute.vm role (what the watch page shows), the layer
                 h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a, "vmName": format!("stg-{v}") })));
             }

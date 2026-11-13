@@ -17,6 +17,9 @@ artifacts: [runs]
 # a failed run freezes (--on-fail freeze): `knotless run attach` gives the owner's or a collaborator's key this, as
 # root on the CI VM, only while the run goes (AGENTS.md: Debug a failed CI run)
 attach: runuser -u r2 -- /usr/local/bin/swc-test-host attach /work/runs
+# after the steps, whatever they came to (a cancel or a timeout cuts the staging step short): swc-test-host aborts and
+# releases what R2 rented before the runner gives the CI VM back
+stop: pkill -TERM -f "[s]wc-test-host compositions/" || exit 0; while pgrep -f "[s]wc-test-host compositions/" >/dev/null; do sleep 5; done
 env:
   SWC_RUNS: /work/runs
 steps:

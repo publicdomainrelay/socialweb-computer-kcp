@@ -501,6 +501,22 @@ async fn main_() -> Result<bool> {
         });
     }
     let (cleaned, clean_now) = (Arc::new(tokio::sync::Notify::new()), signal.clone());
+    // SIGTERM or SIGINT (a CI run cancelled or out of time: its workflow's `stop`): abort the run, no freeze, and
+    // the cleanup releases everything it started before the process exits
+    {
+        let (f, sig, c) = (freezer.clone(), signal.clone(), cleaned.clone());
+        tokio::spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+            let (Ok(mut term), Ok(mut int)) = (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) else {
+                return;
+            };
+            tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
+            eprintln!("swc-test-host: stopping: the run is aborted and everything it started released");
+            sig.abort("stopped (SIGTERM)");
+            f.thaw();
+            c.notify_waiters();
+        });
+    }
     let host_tools = {
         let (s, k, c1, cf, comp2, w2, cl, sig) = (
             swc.clone(),
