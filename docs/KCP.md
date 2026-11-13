@@ -153,6 +153,63 @@ flowchart TD
   SVC --> EXPO["Exposure: status.address"]
 ```
 
+### One process: kcp, core, root, network
+
+- `run bidder` / `run requester` / `run request` / `run gateway` / `run gateway ssh` = one process: its kcp + its core (`internal/devcore`)
+- the core = controller manager (app controllers) + component controller (`componentcore.Supervise`) + the bus (handler registry)
+- the bus is created by `devcore.Run` (`cfg.Handlers`) and shared by everything in the core; only its creator stops it
+- the root = the object the command applies (MarketBidder, MarketRequester, Gateway, SshGateway); its `spec.network` (`MarketNetworkValue`) names the network: PLC directory, relays, CA bundle, comms, atirc URL
+- the component controller is built from the network value; nothing falls back to prod defaults when a network is set
+- a core under a MarketNetwork (`dev up --profile market-network`) takes the network from its `status.network`, read once
+- any other core follows its root: first `spec.network` of its MarketBidder / MarketRequester / SshGateway / Gateway roots
+- a change restarts only the component controller, in process; the kcp, app controllers and bus keep running
+- the core applies its root itself after it starts (`devcore.Config.Application`, in `internal/stack/{bidder,request,gatewaykcp}`), so every start does one restart (no network → the root's)
+
+```mermaid
+flowchart LR
+  subgraph proc["one process: socialweb-computer run bidder / requester / gateway"]
+    kcp["kcp<br/>(slots, front, kine)"]
+    subgraph core["core (internal/devcore)"]
+      bus["bus<br/>handler registry<br/>(created + stopped by devcore.Run)"]
+      apps["app controllers<br/>MarketBidder, MarketRequester, ..."]
+      cc["component controller<br/>componentcore.Supervise<br/>(Pds, Bidder, Relay, OpenBao, ...)"]
+      follow["network follower<br/>marketnetwork.FollowRootNetwork"]
+    end
+  end
+  root["root object<br/>spec.network: PLC, relays,<br/>caBundle, comms, atircUrl"]
+  kcp --- root
+  apps <--> bus
+  cc <--> bus
+  follow -- "watch roots" --> kcp
+  follow -- "changed: restart" --> cc
+  cc -- "PLC / relays / CA" --> net["network<br/>(prod or staging)"]
+```
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant cmd as run bidder (stack/bidder)
+  participant core as devcore.Run
+  participant bus as bus
+  participant f as network follower
+  participant cc as component controller
+  participant k as kcp
+
+  cmd->>core: start core
+  core->>bus: create (cfg.Handlers)
+  core->>cc: Supervise(network = none)
+  core->>f: FollowRootNetwork
+  core->>k: apply root (Config.Application, spec.network)
+  k-->>f: root changed
+  f->>f: network differs
+  f->>cc: cancel
+  cc-->>f: stopped (bus untouched: not its own)
+  f->>cc: Supervise(network = root's)
+  cc->>bus: register handlers again
+```
+
+- rule: a component runtime stops a bus only if it created it (`cfg.Handlers == nil`); stopping a shared bus leaves the core up but dead (`bus: the handler registry is stopped`, roots never Ready); 2017c797 did that, e2916a9b fixed it
+
 ## Controllers Pattern
 
 - one reconciler per kind: `internal/controllers/<kind>` on `internal/controllers/runtime` (the only home of the dynamic client and unstructured)
