@@ -1013,6 +1013,29 @@ pub async fn cleanup_from_disk(
             Err(e) => errors.push(format!("release {n}: {e}")),
         }
     }
+    let clusters: HashMap<String, Cluster> =
+        serde_json::from_value(r["clusters"].clone()).unwrap_or_default();
+    let kube = atlibs_kube::Kube::new(clusters, None);
+    if let Err(e) = kube.load_ledger(&r["kube"]) {
+        errors.push(format!("kube ledger: {e}"));
+    }
+    errors.extend(kube.cleanup().await);
+    // a deleted Infra's finalizer (it releases the contracts) runs in its requester: wait for it before the stop
+    for k in r["kube"]["created"].as_array().into_iter().flatten() {
+        let input = json!({ "cluster": k["cluster"], "apiVersion": k["apiVersion"], "kind": k["kind"], "name": k["name"] });
+        for _ in 0..60 {
+            let got = atlibs_host::run::Call::call(
+                &*kube,
+                atlibs_kube::GET.into(),
+                atlibs_host::run::Request { input: Some(input.clone()), ..Default::default() },
+            )
+            .await;
+            if !matches!(&got, Ok(Some(v)) if v.get("metadata").is_some()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    }
     for q in r["requesters"].as_array().into_iter().flatten() {
         if let Some(pid) = q["pid"].as_u64()
             && std::path::Path::new(&format!("/proc/{pid}")).exists()
@@ -1022,13 +1045,6 @@ pub async fn cleanup_from_disk(
                 .status();
         }
     }
-    let clusters: HashMap<String, Cluster> =
-        serde_json::from_value(r["clusters"].clone()).unwrap_or_default();
-    let kube = atlibs_kube::Kube::new(clusters, None);
-    if let Err(e) = kube.load_ledger(&r["kube"]) {
-        errors.push(format!("kube ledger: {e}"));
-    }
-    errors.extend(kube.cleanup().await);
     let Ok(acct) = target.account(account) else {
         return errors;
     };

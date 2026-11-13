@@ -240,6 +240,8 @@ const (
 
 	InfraContractLabel = "infra.socialweb.computer/contract"
 
+	ContractExpiresAtLabel = "socialweb.computer/vm-expires-at"
+
 	InfraCollectionLabel = "infra.socialweb.computer/collection"
 
 	InfraClusterLabel = "infra.socialweb.computer/cluster"

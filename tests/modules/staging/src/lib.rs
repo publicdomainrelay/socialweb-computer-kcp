@@ -304,6 +304,7 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a, "vmName": format!("stg-{v}") })));
             }
         }
+        Event::Timer { id } if id == "poll-infra:gone" => h = h.call(kube("infra:gone", "get", &format!("requester:{RQ}"), sw("EphemeralInfra", &ei))),
         Event::Timer { id } if id == "poll-infra:get" => h = h.call(kube("infra:get", "get", &format!("requester:{RQ}"), sw("EphemeralInfra", &ei))),
         Event::Timer { id } if id == "deadline" => {
             let e = format!("not done by the deadline (phase {})", s.phase());
@@ -346,8 +347,16 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 s.mark("down");
                 return Ok(finish_multi(&mut s, h, infra, &ei));
             }
-            if id == "infra:delete" {
-                s.st["readings"]["infraDeleted"] = json!(result.output().is_ok());
+            // the finalizer runs in the requester (the host stops it after the run): wait until the EphemeralInfra is gone
+            if id == "infra:delete" || id == "infra:gone" {
+                let gone = id == "infra:gone" && (result.output().is_err() || o.is_null() || o.get("metadata").is_none());
+                if !gone && s.since("deleted") < 600.0 {
+                    if id == "infra:delete" {
+                        s.mark("deleted");
+                    }
+                    return Ok(s.keep(h.timer("poll-infra:gone", 10_000)));
+                }
+                s.st["readings"]["infraGoneS"] = json!(s.since("deleted"));
                 let r = s.st["result"].clone();
                 return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
             }

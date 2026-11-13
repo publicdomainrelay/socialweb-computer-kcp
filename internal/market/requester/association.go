@@ -28,7 +28,7 @@ const (
 
 	// ContractExpiresAtLabel on a ComputeContract is the unix time (seconds) its
 	// compute.vm asks the bidder to end the VM at (compute.vm expiresAt).
-	ContractExpiresAtLabel = "socialweb.computer/vm-expires-at"
+	ContractExpiresAtLabel = v1alpha1.ContractExpiresAtLabel
 
 	associationRetryFirst = 2 * time.Second
 

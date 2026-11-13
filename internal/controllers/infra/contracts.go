@@ -3,6 +3,8 @@ package infra
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -128,7 +130,12 @@ func contractStatus(name string, cc *v1alpha1.ComputeContract, phase v1alpha1.In
 func (r *reconciler[T]) create(ctx context.Context, req ctlruntime.Request, v view, c v1alpha1.InfraContract,
 	secrets *commonv1.SecretRef, node *v1alpha1.InfraContractNode) (*v1alpha1.ComputeContract, error) {
 	name := infra.ChildName(v.kind, v.object.GetName(), c.Name)
-	cc := &v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: childLabels(v, v1alpha1.InfraContractLabel, c.Name),
+	labels := childLabels(v, v1alpha1.InfraContractLabel, c.Name)
+	if v.kind == infra.KindEphemeralInfra && v.declaration.TTLSeconds > 0 {
+		end := v.object.GetCreationTimestamp().Add(time.Duration(v.declaration.TTLSeconds) * time.Second)
+		labels[v1alpha1.ContractExpiresAtLabel] = strconv.FormatInt(end.Unix(), 10)
+	}
+	cc := &v1alpha1.ComputeContract{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels,
 		OwnerReferences: []metav1.OwnerReference{ownerRef(v)}}, Spec: infra.ContractSpec(c, secrets, node)}
 	if err := req.Apply(ctx, cc); err != nil {
 		return nil, fmt.Errorf("infra: applying the ComputeContract %s: %w", name, err)

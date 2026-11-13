@@ -244,6 +244,12 @@ Deleting a deployment releases every contract first (finalizer
 `infra.socialweb.computer/release`), then deletes the ComputeContracts and the
 record, then the object goes.
 
+The finalizer and the TTL run in the requester. When the requester is gone (a killed host, a destroyed CI VM) the
+bidder still ends each VM: an EphemeralInfra labels its ComputeContracts `socialweb.computer/vm-expires-at`
+(creation + `ttlSeconds`), the RFP's compute.vm `expiresAt`, and the bidder releases the VM 10 min after it
+(`AssociationExpiryGrace`); a guest requester's (R2's) contract is also bounded by its association's `expiresAt`, and
+any other VM by accept + 24 h.
+
 A requester app for deployments that stays up (no held guest, no CLI) is one
 `spec.apps[]` entry of the network:
 
