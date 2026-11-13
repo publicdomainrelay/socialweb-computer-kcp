@@ -109,6 +109,9 @@ func (b *Bidder) awaitImage(ctx context.Context) bool {
 			b.log.Info("bidder_guest_image_ready")
 			return true
 		}
+		if ctx.Err() != nil {
+			return false
+		}
 		msg := err.Error()
 		b.imageErr.Store(&msg)
 		b.log.Error("bidder_guest_image_unready: the pinned guest image does not verify; the offering is withdrawn and no RFP is bid until it does", "err", msg)
