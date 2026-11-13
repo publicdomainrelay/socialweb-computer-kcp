@@ -1503,6 +1503,10 @@ func (a *app) restartLoaded(ctx context.Context, r *requestRun, verb string) (*r
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
 	r.resuming = verb == "resume"
 	if err := r.start(ctx, false); err != nil {
+		if verb == "release" && r.inv.GuestRequester && r.kcp != nil {
+			r.log("the guest requester never got Ready; it retires its local accounts before its guest goes", "err", err.Error())
+			r.retire(context.WithoutCancel(ctx))
+		}
 		r.stop(context.WithoutCancel(ctx), false)
 		return nil, a.fail(exitFailed, "run request %s: %v", verb, err)
 	}
