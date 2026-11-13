@@ -2076,16 +2076,16 @@
         "sourceDateEpoch": 1790380800,
         "outputs": {
           "vmlinux": {
-            "sha256": "70aa702091b95e8221f53eeb49085e7cadb393b900db58460645f2bd6e59faa8",
-            "bytes": 44682360
+            "sha256": "3331ce820fa0c861c5149b11c8daed0c8e6f0ebb41fb971a1260c37ebc2ee72d",
+            "bytes": 44766072
           },
           "rootfs.ext4": {
-            "sha256": "f2096748f2f7de32f56dd90c2ba85a5e0688a5918ca86fa6ea9c1040c7922584",
+            "sha256": "b8dede8482bf9b870c6340833dd5ed52ec16edd7d2615ce52caea274076124ff",
             "bytes": 1543503872
           },
           "image.json": {
-            "sha256": "1398c83ff608a64604175d544dc2c3cecfecb9c7f8a20c2b44fd09b0c272503d",
-            "bytes": 5822
+            "sha256": "3edacb6a2537704a13f66f91880ce916eb0be299d514be523beb5e907e5de947",
+            "bytes": 6063
           }
         }
       },
@@ -2111,16 +2111,16 @@
         "sourceDateEpoch": 1790380800,
         "outputs": {
           "vmlinux": {
-            "sha256": "70fb64c9b54af357f8db915c80ad25f547d87f877139d979cdfce366c29d18bd",
-            "bytes": 17420800
+            "sha256": "1eb6af72eb91a0e1be266b504984ef4e04f4c627b561b7aae00245e2fb0cddd3",
+            "bytes": 18283008
           },
           "rootfs.ext4": {
-            "sha256": "2094d5f25dc6735824f0a6c078f499f360347251f7d46e62afb73533e2e69420",
+            "sha256": "c1d524c4e86879e56fac3475683d9b67ea76c443d44b08c51ef5b3b151e9392d",
             "bytes": 1610612736
           },
           "image.json": {
-            "sha256": "54996591408083f3d5e782ae67061fafc7cda3251bac537c15de73edc266af9f",
-            "bytes": 5850
+            "sha256": "b5648c78b8964fe7eb582fb158ae8d7b24e900dc6af4fe176accccc468529e93",
+            "bytes": 6091
           }
         }
       }

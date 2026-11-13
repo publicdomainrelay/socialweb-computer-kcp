@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+[ -e /sys/block/zram0 ] || exit 0
+cat >"$1/socialweb-zram-swap.service" <<UNIT
+[Unit]
+Description=socialweb zram swap: zstd, half the guest's RAM
+DefaultDependencies=no
+Before=swap.target
+ConditionPathExists=/sys/block/zram0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/socialweb-zram-swap
+UNIT
+mkdir -p "$1/swap.target.wants"
+ln -sf ../socialweb-zram-swap.service "$1/swap.target.wants/socialweb-zram-swap.service"

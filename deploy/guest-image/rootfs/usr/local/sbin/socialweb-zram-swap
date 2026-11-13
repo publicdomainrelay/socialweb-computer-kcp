@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+z=/sys/block/zram0
+[ "$(cat "$z/disksize")" = 0 ] || exit 0
+kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+echo zstd >"$z/comp_algorithm"
+echo $((kib * 512)) >"$z/disksize"
+mkswap /dev/zram0 >/dev/null
+swapon -p 100 /dev/zram0
