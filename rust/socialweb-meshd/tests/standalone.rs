@@ -215,7 +215,8 @@ fn roster(vms: &[&Vm]) -> serde_json::Value {
                 "endpoint": vm.endpoint,
                 "cidrs": [format!("{}/32", vm.overlay())],
                 "addrs": [format!("{}:{MESH_PORT}", vm.public())],
-                "names": [format!("svc-{}", vm.name)],
+                "names": [format!("svc-{}", vm.name), format!("*.svc-{}", vm.name)],
+                "txt": [{ "name": format!("_atproto.{}", vm.name), "value": format!("did=did:plc:{}", vm.name) }],
             })
         })
         .collect();
@@ -257,6 +258,10 @@ fn start(bin: &str, vm: &mut Vm) {
 }
 
 fn dig(ns: &str, server: &str, name: &str) -> String {
+    dig_type(ns, server, name, "A")
+}
+
+fn dig_type(ns: &str, server: &str, name: &str, rtype: &str) -> String {
     exec_ok(
         ns,
         &[
@@ -265,6 +270,8 @@ fn dig(ns: &str, server: &str, name: &str) -> String {
             "+time=2",
             "+tries=2",
             &format!("@{server}"),
+            "-t",
+            rtype,
             name,
         ],
     )
@@ -442,7 +449,11 @@ fn three_standalone_meshd_behind_three_nats_share_one_roster_and_one_zone() {
     for from in &rig.vms {
         for server in &rig.vms {
             for to in &rig.vms {
-                for name in [to.name.to_string(), format!("svc-{}", to.name)] {
+                for name in [
+                    to.name.to_string(),
+                    format!("svc-{}", to.name),
+                    format!("abc.svc-{}", to.name),
+                ] {
                     assert_eq!(
                         dig(&from.ns, &server.overlay(), &format!("{name}.{ZONE}")),
                         to.overlay(),
@@ -451,6 +462,19 @@ fn three_standalone_meshd_behind_three_nats_share_one_roster_and_one_zone() {
                         server.name
                     );
                 }
+                assert_eq!(
+                    dig_type(
+                        &from.ns,
+                        &server.overlay(),
+                        &format!("_atproto.{}.{ZONE}", to.name),
+                        "TXT"
+                    ),
+                    format!("\"did=did:plc:{}\"", to.name),
+                    "vm {} asks vm {}'s DNS for _atproto.{}'s TXT",
+                    from.name,
+                    server.name,
+                    to.name
+                );
             }
         }
         assert_eq!(
