@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 )
+
+const imageRefusedReason = "image_refused"
 
 var errGuestImage = errors.New("requester: the guest did not boot the requested image")
 
@@ -37,6 +40,13 @@ func checkImage(t v1alpha1.ComputeContractTemplate) error {
 	return req.Valid()
 }
 
+func (r *contractRunner) vmReadyTimeout() time.Duration {
+	if r.snapshot().Spec.Image == nil {
+		return DefaultVMReadyTimeout
+	}
+	return DefaultVMReadyTimeout + guestimage.RequestedFetchTimeout
+}
+
 func (r *contractRunner) expectedImageMarker(ctx context.Context) (string, error) {
 	req := contractImage(r.snapshot().Spec.ComputeContractTemplate)
 	if req == nil {
@@ -63,10 +73,23 @@ func (r *contractRunner) guestImage(state *v1alpha1.NodeClaimContract, parsed *G
 }
 
 func (r *contractRunner) releaseWrongImage(ctx context.Context, state *v1alpha1.NodeClaimContract, bidderDID string, cause error) error {
-	r.log().Warn("requester_guest_image_release", "err", cause.Error())
+	r.log().Warn("requester_guest_image_release", "bidder", bidderDID, "err", cause.Error())
 	if err := r.releaseContract(ctx, state, bidderDID); err != nil {
 		return err
 	}
-	r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "released: "+cause.Error(), state, r.currentBids(), r.currentChosen(), "imageMismatch", 1)
-	return nil
+	return cause
+}
+
+func (r *contractRunner) replaceWrongImage(ctx context.Context, cause error) {
+	state := r.stateCopy()
+	did := winnerDID(state)
+	r.log().Warn("requester_image_replace", "bidder", did, "err", cause.Error())
+	r.mu.Lock()
+	if did != "" {
+		r.declined = append(r.declined, did)
+	}
+	r.chosen = nil
+	r.release = nil
+	r.state = nil
+	r.mu.Unlock()
 }
