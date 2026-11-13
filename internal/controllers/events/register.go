@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,8 @@ type Options struct {
 
 	HTTPClient *http.Client
 
+	TLS *tls.Config
+
 	StateDir string
 
 	Cursors contract.CursorStore
@@ -70,7 +73,7 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts Options) (func(co
 		log = slog.New(slog.DiscardHandler)
 	}
 	opts.Log = log
-	backend := eventsource.BackendOptions{Bus: opts.Bus, Log: log}
+	backend := eventsource.BackendOptions{Bus: opts.Bus, TLS: opts.TLS, Log: log}
 	if _, err := eventsource.Register(m, eventsource.Options{Bus: opts.Bus, Log: log}); err != nil {
 		return nil, err
 	}

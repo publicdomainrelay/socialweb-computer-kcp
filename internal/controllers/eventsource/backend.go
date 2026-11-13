@@ -2,6 +2,7 @@ package eventsource
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -102,6 +103,8 @@ type backendEntry[T ctlruntime.Object] struct {
 
 type BackendOptions struct {
 	Bus *bus.Bus
+
+	TLS *tls.Config
 
 	Log *slog.Logger
 

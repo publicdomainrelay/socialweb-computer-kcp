@@ -3,6 +3,7 @@ package jetstream
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,6 +78,8 @@ type Config struct {
 type Deps struct {
 	Dial wsconn.DialFunc
 
+	TLS *tls.Config
+
 	Log *slog.Logger
 }
 
@@ -86,6 +89,8 @@ type Source struct {
 	v2 bool
 
 	dial wsconn.DialFunc
+
+	tls *tls.Config
 
 	log *slog.Logger
 }
@@ -111,7 +116,7 @@ func New(cfg Config, deps Deps) (*Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jetstream: %w", err)
 	}
-	return &Source{url: endpoint, v2: IsV2(parsed.Path), dial: deps.Dial, log: log}, nil
+	return &Source{url: endpoint, v2: IsV2(parsed.Path), dial: deps.Dial, tls: deps.TLS, log: log}, nil
 }
 
 func (s *Source) Address() string {
@@ -165,7 +170,7 @@ func (s *Source) Subscribe(ctx context.Context, filter events.Filter) (events.St
 	parsed.RawQuery = query.Encode()
 	s.log.Info("jetstream_subscribe_dial", "url", endpoint.String(), "v2", s.v2, collectionsParam, collections,
 		didsParam+"Count", len(dids), didsParam, events.LogDIDs(dids), "cursor", cursor)
-	conn, err := wsconn.Dial(ctx, parsed.String(), s.dial)
+	conn, err := wsconn.DialConfig(ctx, parsed.String(), wsconn.Config{Dial: s.dial, TLSConfig: s.tls})
 	if err != nil {
 		return nil, fmt.Errorf("jetstream: %w", err)
 	}

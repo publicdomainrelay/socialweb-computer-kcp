@@ -28,7 +28,7 @@ func Register(ctx context.Context, m *ctlruntime.Manager, opts eventsource.Backe
 			if err != nil {
 				return eventsource.Upstream{}, err
 			}
-			source, err := relay.New(relay.Config{Base: base}, relay.Deps{Dial: dial, Log: opts.Log})
+			source, err := relay.New(relay.Config{Base: base}, relay.Deps{Dial: dial, TLS: opts.TLS, Log: opts.Log})
 			if err != nil {
 				return eventsource.Upstream{}, err
 			}
