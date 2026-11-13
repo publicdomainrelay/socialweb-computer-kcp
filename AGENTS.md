@@ -769,11 +769,15 @@ Pipeline, in order; cut the rc only when both suites are green:
 7. Full suite against prod (from rc166 the release gate; no hand runs), on hat-8, as bob, in one command:
 
 ```sh
-cd tests && SWC_COMPAT_REQUESTER=release:<previous rc tag> ./gate.sh $PWD/targets/prod.json --account bob
+cd tests && SWC_COMPAT_REQUESTER=release:<previous rc tag> ./gate.sh $PWD/targets/prod.json --account bob,alice
 ```
 
-It runs every composition in order, one at a time (`--on-fail freeze`, `GATE_FREEZE_TTL` 900 s), prints one
-`RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>` line each and a summary table, and exits 1 on a FAIL. A SKIP
+It runs the compositions as many at once as there are accounts (one driver per account: the test host's account lock;
+each slot its own iroh key, `SWC_IROH_KEY`), each holding its entry's VM weight of `GATE_VMS` (4) so the bidders are
+not oversubscribed; an exclusive entry (0001: k8s nodes one per host) runs alone
+(`GATE_EXCLUSIVE`); `GATE_JOBS=1` is the serial gate. `--on-fail freeze`, `GATE_FREEZE_TTL` 900 s; one
+`RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>` line each as it ends, a summary table in gate order with the
+wall time, exit 1 on a FAIL. A SKIP
 names its reason (0010 iOS paused; staging-only entries; `GATE_SKIP="<runbook>:<entry>=<reason>;..."`). Logs, the
 readings and each run's dump path: `~/.tmp/swc-system-tests/gate/<time>/`.
 
