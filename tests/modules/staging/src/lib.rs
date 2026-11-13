@@ -99,6 +99,9 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                 "contract" if data["phase"] == "Failed" => return Ok(s.fail(format!("the VM contract failed: {data}"))),
                 "exited" if !s.has("vm") => return Ok(s.fail(format!("run request exited before the VM was Held: {data}"))),
                 "exited" => s.flag("exited"),
+                // a guest requester's held `run request` keeps its kcp and PDS up (for request.ssh and the release):
+                // its ssh returning 0 is where an account's run request would exit
+                "ssh returned" if args["guestRequester"] == true && data["exit"] == 0 => s.flag("exited"),
                 _ => {}
             }
             if s.is("held") && s.has("vm") && s.has("exited") {

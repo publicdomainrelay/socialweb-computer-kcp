@@ -82,6 +82,57 @@ fn loader(modules: PathBuf) -> ModuleLoader {
     })
 }
 
+/// One line of what a tick saw and did: the event (its id; a request's message and phase), the calls and timers it
+/// made (ids and NSIDs), and its end. Never a call's params or a result's output.
+fn progress(event: &Value, out: &Value) {
+    let at = atlibs_host::iso_now();
+    let data = &event["data"];
+    let said = [
+        data["msg"].as_str(),
+        data["phase"].as_str(),
+        data["contractPhase"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
+    let woke = format!(
+        "{} {}",
+        event["type"].as_str().unwrap_or("?"),
+        event["id"].as_str().unwrap_or_default()
+    );
+    let calls: Vec<String> = (out["calls"].as_array().into_iter().flatten())
+        .map(|c| {
+            format!(
+                "{}={}",
+                c["id"].as_str().unwrap_or("?"),
+                c["nsid"]
+                    .as_str()
+                    .unwrap_or("?")
+                    .trim_start_matches("computer.socialweb.test.")
+            )
+        })
+        .collect();
+    let timers: Vec<&str> = (out["timers"].as_array().into_iter().flatten())
+        .filter_map(|t| t["id"].as_str())
+        .collect();
+    let mut line = format!("{at} {}", woke.trim());
+    if !said.is_empty() {
+        line += &format!(" ({said})");
+    }
+    if !calls.is_empty() {
+        line += &format!(" -> {}", calls.join(" "));
+    }
+    if !timers.is_empty() {
+        line += &format!(" timers {}", timers.join(" "));
+    }
+    if out["done"] == true {
+        line += &format!(" done pass={}", out["result"]["pass"]);
+    }
+    println!("{line}");
+}
+
 fn flag(args: &[String], f: &str) -> Option<String> {
     args.iter()
         .position(|a| a == f)
@@ -499,7 +550,14 @@ async fn main_() -> Result<bool> {
         provides: Some(provides),
         gate: Some(freezer.gate()),
         tick_for: Some(ticks.tick_for()),
-        on_event: Some(freezer.on_event()),
+        on_event: {
+            // and a progress line per tick on stdout, as the run goes (a CI step's log): names only, never params
+            let frozen = freezer.on_event();
+            Some(Arc::new(move |event: &Value, out: &Value| {
+                frozen(event, out);
+                progress(event, out);
+            }))
+        },
         http: {
             // com.fedfork.exec.http.fetch: the target's own origins only
             let mut allow = serde_json::Map::new();
@@ -532,7 +590,7 @@ async fn main_() -> Result<bool> {
     let mut input: serde_json::Map<String, Value> = json!({
         "did": acc.did, "handle": acc.handle, "name": name, "target": target.name, "bidders": bidders,
         "gateway": { "url": target.gateway.url, "aud": target.gateway.aud, "ssh": target.gateway.ssh, "requesterDid": target.gateway.requester_did, "cluster": target.gateway.kcp.as_ref().map(|_| "gateway") },
-        "atirc": target.atirc, "plc": target.plc, "pds": target.pds, "requester": target.requester, "restartSshMaxS": target.restart_ssh_max_s, "perHost": args.iter().any(|a| a == "--per-host"),
+        "atirc": target.atirc, "plc": target.plc, "pds": target.pds, "requester": target.requester, "restartSshMaxS": target.restart_ssh_max_s, "perHost": args.iter().any(|a| a == "--per-host"), "guestRequester": acc.guest_requester,
     })
     .as_object()
     .unwrap()
