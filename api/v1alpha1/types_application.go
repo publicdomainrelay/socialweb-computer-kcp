@@ -46,6 +46,8 @@ const (
 
 	GuestTLSHost = "relay.localhost"
 
+	PublicPLCDirectoryURL = "https://plc.directory"
+
 	DefaultDiscoveryRelayURL = "https://relay1.us-east.bsky.network"
 
 	DefaultMarketRelayURL = "https://relay.mini-cloud-0002.chadig.com"
@@ -90,7 +92,7 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 			extra = *n.Comms.RelayURLs
 		}
 	}
-	if len(extra) == 0 && len(out) == 0 {
+	if len(extra) == 0 && len(out) == 0 && n.publicPLC() {
 		extra = []string{DefaultDiscoveryRelayURL, DefaultMarketRelayURL}
 	}
 	for _, raw := range extra {
@@ -99,6 +101,14 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 		}
 	}
 	return out
+}
+
+func (n *MarketNetworkValue) publicPLC() bool {
+	if n == nil {
+		return true
+	}
+	plc := strings.TrimRight(strings.TrimSpace(n.PLCDirectoryURL), "/")
+	return plc == "" || plc == PublicPLCDirectoryURL
 }
 
 func (n *MarketNetworkValue) GuestTLSURL() string {
