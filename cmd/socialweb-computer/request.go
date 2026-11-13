@@ -30,6 +30,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/bootstrap"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/clicfg"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/httpclient"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/logx"
@@ -360,6 +361,9 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)
+	}
+	if r.contract.Image != nil {
+		r.contractTimeout += guestimage.RequestedFetchTimeout
 	}
 	if in := strings.TrimSpace(vals.String("expires-in")); in != "" {
 		d, err := time.ParseDuration(in)

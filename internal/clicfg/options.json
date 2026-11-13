@@ -675,7 +675,7 @@
     },
     "image": {
       "type": "string",
-      "description": "run request: <https base url>@<image.json sha256>, a full VM image the bidder boots instead of its own (spec.image, the RFP's compute.vm image): image.json in the guestimage manifest shape (kernel vmlinux, rootfs rootfs.ext4, bootArgs, target, hypervisor, arch, vcpu, memMiB, marker) next to the files it names; only a bidder whose offering sets images is asked or accepted; kernel plus rootfs fit the disk (50G); after the receipt the requester fetches image.json and releases the contract (Failed) when the guest's guest.image marker differs or does not arrive within the on-network deadline"
+      "description": "run request: <https base url>@<image.json sha256>, a full VM image the bidder boots instead of its own (spec.image, the RFP's compute.vm image): image.json in the guestimage manifest shape (kernel vmlinux, rootfs rootfs.ext4, bootArgs, target, hypervisor, arch, vcpu, memMiB, marker) next to the files it names; only a bidder whose offering sets images is asked or accepted; kernel plus rootfs fit the disk (50G); after the receipt the requester fetches image.json and, when the guest's guest.image marker differs or does not arrive within the on-network deadline, releases the VM and places the RFP again on another bidder (a bidder that refuses the image is not asked again); the contract-timeout grows by the 30 min a first fetch of the image may take"
     },
     "guest-tools": {
       "type": "string",
