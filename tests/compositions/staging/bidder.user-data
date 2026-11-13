@@ -10,13 +10,14 @@ write_files:
   permissions: '0700'
   content: |
     #!/bin/sh
-    # install bidder (as infra/bidder/deploy.sh), QEMU, against the staging PLC/PDS/relay. install bidder takes no
-    # PLC/PDS/relay/comms/identity options and its unit passes none after --, so a drop-in on the unit template
-    # passes them (run bidder ... -- <hono-bidder options>), in place before the first start.
+    # install bidder (as infra/bidder/deploy.sh), QEMU, against the staging PLC/PDS/relay/Jetstream: the spec file
+    # (--bidder-spec-file, written to config.json) gives the network value, the identity and the comms; a drop-in on
+    # the unit template gives only ATPROTO_PASSWORD.
     set -eu
     A=swc-bidder
     ST=/var/lib/socialweb-computer/$A
     BIN=/var/lib/socialweb-computer/incoming-{{binarySha256}}
+    SPEC=/var/lib/socialweb-computer/bidder-spec-$A.yaml
     D=$ST/.config/systemd/user/socialweb-computer-bidder@.service.d
     RELAY=$(printf %s '{{relayUrl}}' | sed -E 's#^[a-z]+://##; s#/.*##')
     # meshd answers REFUSED outside the zone when it has no --dns-upstream; glibc then asks the next server
@@ -34,14 +35,24 @@ write_files:
     install -d -m 0700 -o $A -g $A $ST
     install -d -m 0755 -o $A -g $A $ST/.config $ST/.config/systemd $ST/.config/systemd/user $D
     install -m 0600 -o $A -g $A /etc/socialweb-staging/atproto.env $ST/staging.env
-    cat > $D/10-staging.conf <<EOF
-    [Service]
-    EnvironmentFile=$ST/staging.env
-    ExecStart=
-    ExecStart=$ST/bin/current/socialweb-computer run bidder --handle %i --fg -- --atproto-identity-mode pdsAccount --atproto-pds-url {{pdsUrl}} --plc-directory-url {{plcUrl}} --ingress-proxy-host gateway.{{zone}}:8790 --network-hosts relay.default.relay.svc.kcp.local=$RELAY --comms-mode Firehose
-    EOF
+    printf '[Service]\nEnvironmentFile=%s/staging.env\n' $ST > $D/10-staging.conf
     chown $A:$A $D/10-staging.conf
+    cat > "$SPEC" <<EOF
+    network:
+      plcDirectoryUrl: "{{plcUrl}}"
+      ingressProxyHost: "gateway.{{zone}}:8790"
+      hosts:
+      - name: relay.default.relay.svc.kcp.local
+        address: "$RELAY"
+      comms:
+        mode: Firehose
+        jetstreamUrls: ["{{jetstreamUrl}}"]
+    identity:
+      mode: pdsAccount
+      pdsUrl: "{{pdsUrl}}"
+    EOF
+    chmod 0644 "$SPEC"
     "$BIN" install bidder --handle '{{handle}}' --account $A --state-dir $ST --adopt-account --host-backend systemd-user \
-      --vmm qemu --ready-timeout 5m --network-timeout 15m
+      --vmm qemu --ready-timeout 5m --network-timeout 15m --bidder-spec-file "$SPEC"
 runcmd:
 - [sh, -c, "/usr/local/sbin/swc-staging-bidder > /var/log/swc-staging-bidder.log 2>&1"]
