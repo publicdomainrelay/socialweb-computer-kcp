@@ -70,6 +70,9 @@ func (b *Bidder) payloadRefused(ctx context.Context, rfpURI string, rfp *market.
 	if at, err := market.ParseTime(record.ExpiresAt); err == nil && !at.After(b.now()) {
 		return fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt), nil
 	}
+	if msg := b.imageErr.Load(); msg != nil && record.Kind != string(v1alpha1.ComputeKindDeno) {
+		return "bidder: the bidder's pinned guest image does not verify: " + *msg, nil
+	}
 	return b.reserve(rfpURI, record, 0), nil
 }
 
