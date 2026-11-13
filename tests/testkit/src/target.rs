@@ -129,7 +129,12 @@ pub struct Account {
     pub handle: String,
     pub did: String,
     /// shell file exporting <PREFIX>ATPROTO_HANDLE and <PREFIX>ATPROTO_PASSWORD; read here only, never printed
+    #[serde(default)]
     pub creds: String,
+    /// the guest requester R2 of the VM this runs on (knotless CI): `run request --guest-requester`, as the
+    /// renter's contract-scoped agent (its association-ref in /run/socialweb-r2); no creds, no session
+    #[serde(default)]
+    pub guest_requester: bool,
     /// the oauth-signin.ts --account prefix (ALICE, BOB); none: app password only
     #[serde(default)]
     pub oauth_account: Option<String>,

@@ -278,14 +278,21 @@ async fn main_() -> Result<bool> {
     // a required hook outside com.fedfork.exec.* needs an edge at run time (host transports serve only that prefix)
     for (name, m) in &comp.modules {
         for hk in &m.hooks {
-            let routed = comp.manifest["edges"].as_array().into_iter().flatten().any(|e| e["from"] == name.as_str() && e["nsid"] == hk.nsid.as_str());
+            let routed = comp.manifest["edges"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|e| e["from"] == name.as_str() && e["nsid"] == hk.nsid.as_str());
             if hk.required && !hk.nsid.starts_with("com.fedfork.exec.") && !routed {
-                anyhow::bail!("instance {name}: required hook {} has no edge (a host call is a call, not a hook)", hk.nsid);
+                anyhow::bail!(
+                    "instance {name}: required hook {} has no edge (a host call is a call, not a hook)",
+                    hk.nsid
+                );
             }
         }
     }
-    // a dry run touches no account: its creds are read only to run
-    if !dry {
+    // a dry run touches no account, and the guest requester has no creds: they are read only to run as one
+    if !dry && !acc.guest_requester {
         acc.password()?;
     }
     if dry {
@@ -299,7 +306,7 @@ async fn main_() -> Result<bool> {
 
     let instance = flag(&args, "--instance").unwrap_or_else(|| "test".into());
     let entry = flag(&args, "--entry").unwrap_or_else(|| "run".into());
-    let signed_in = flag(&args, "--instance").is_none();
+    let signed_in = flag(&args, "--instance").is_none() && !acc.guest_requester;
     let root_key = manifest["instances"]
         .as_array()
         .into_iter()

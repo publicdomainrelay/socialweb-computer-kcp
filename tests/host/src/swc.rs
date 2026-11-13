@@ -108,7 +108,11 @@ fn input_of(r: &Request) -> Value {
         return i.clone();
     }
     let params = r.params.clone().unwrap_or_default();
-    match params.get("json").and_then(Value::as_str).and_then(|j| serde_json::from_str::<Value>(j).ok()) {
+    match params
+        .get("json")
+        .and_then(Value::as_str)
+        .and_then(|j| serde_json::from_str::<Value>(j).ok())
+    {
         Some(v) => v,
         None => Value::Object(params),
     }
@@ -259,6 +263,12 @@ impl Swc {
     }
 
     async fn requester_start(&self, input: &Value) -> Result<Value, String> {
+        if self.acct()?.guest_requester {
+            return Err(
+                "the guest requester runs `run request` only, not a long-lived `run requester`"
+                    .into(),
+            );
+        }
         let name = str_of(input, "name")?.to_string();
         let state = self.dir.join(format!("requester-{name}"));
         std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;
@@ -380,19 +390,24 @@ impl Swc {
             (true, Ok(spec)) => Binary::resolve(&spec).await.map_err(|e| e.to_string())?,
             _ => self.bin.clone(),
         };
-        let mut child = bin
-            .cmd()
-            .args(["run", "request", "--state-dir"])
+        let mut cmd = bin.cmd();
+        cmd.args(["run", "request", "--state-dir"])
             .arg(&state)
             .args(["--name", &name])
-            .args(&args)
-            .arg("--")
-            .args(identity_args(
-                &self.target,
-                self.acct()?,
-                SignIn::AppPassword,
-            ))
-            .env("ATPROTO_PASSWORD", self.password()?)
+            .args(&args);
+        // R2 rents as the renter's agent: its identity is the association, no password
+        if self.acct()?.guest_requester {
+            cmd.arg("--guest-requester");
+        } else {
+            cmd.arg("--")
+                .args(identity_args(
+                    &self.target,
+                    self.acct()?,
+                    SignIn::AppPassword,
+                ))
+                .env("ATPROTO_PASSWORD", self.password()?);
+        }
+        let mut child = cmd
             .stdout(f.try_clone().map_err(|e| e.to_string())?)
             .stderr(f)
             .spawn()
