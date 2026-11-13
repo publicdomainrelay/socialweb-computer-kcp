@@ -357,7 +357,12 @@ func (c *Core) Run(ctx context.Context) error {
 	}
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), component.DefaultStopTimeout)
 	defer cancel()
-	return errors.Join(err, c.runtime.Stop(stopCtx))
+	err = errors.Join(err, c.runtime.Stop(stopCtx))
+	// a caller's bus (cfg.Handlers) outlives this core: a restarted core and the app controllers keep using it
+	if c.cfg.Handlers == nil {
+		err = errors.Join(err, c.handlers.Stop(stopCtx))
+	}
+	return err
 }
 
 func (c *Core) Registry() *component.Registry {

@@ -245,11 +245,6 @@ func (r *Runtime) Stop(ctx context.Context) error {
 		r.forget(inst)
 		inst.opMu.Unlock()
 	}
-	if r.bus != nil {
-		if err := r.bus.Stop(stopCtx); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	return errors.Join(errs...)
 }
 
