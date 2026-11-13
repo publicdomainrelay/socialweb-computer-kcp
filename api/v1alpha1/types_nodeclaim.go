@@ -132,6 +132,8 @@ type NodeClaimContract struct {
 
 	Sandbox *ContractSandbox `json:"sandbox,omitempty"`
 
+	GuestImageMarker string `json:"guestImageMarker,omitempty"`
+
 	SecretsRequested *ContractSecretsRequested `json:"secretsRequested,omitempty"`
 
 	SecretsApplied *ContractSecretsApplied `json:"secretsApplied,omitempty"`

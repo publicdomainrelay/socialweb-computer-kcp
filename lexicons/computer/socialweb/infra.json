@@ -51,6 +51,7 @@
         "cpus": { "type": "integer", "minimum": 0, "description": "vCPUs of the VM (unset: the requester's default, 2)." },
         "mem": { "type": "string", "description": "Memory of the VM, such as 8G (unset: the requester's default, 4G)." },
         "nestedVirt": { "type": "boolean", "description": "The VM must run VMs of its own; only a bidder whose offering sets nestedVirt is asked." },
+        "image": { "type": "ref", "ref": "#image" },
         "tunnels": {
           "type": "array",
           "items": { "type": "ref", "ref": "#tunnel" },
@@ -63,6 +64,14 @@
           "items": { "type": "string", "knownValues": ["socialweb-computer"] },
           "description": "Tools the bidder installs on the guest from its own downloads. socialweb-computer is the bidder's own running binary, linux/amd64 bidders only, installed as /usr/local/bin/socialweb-computer."
         }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["url", "sha256"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "An https base URL of a directory holding image.json, the kernel and the rootfs it names." },
+        "sha256": { "type": "string", "minLength": 64, "maxLength": 64, "description": "The hex sha256 of that image.json." }
       }
     },
     "tunnel": {

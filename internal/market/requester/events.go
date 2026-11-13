@@ -45,6 +45,8 @@ type GuestEvent struct {
 
 	HostKeys []v1alpha1.ComputeVMHostKey
 
+	ImageMarker string
+
 	Termination *v1alpha1.ContractTermination
 
 	Sandbox *v1alpha1.ContractSandbox
@@ -68,7 +70,7 @@ func isGuestEventNSID(nsid string) bool {
 	switch nsid {
 	case market.ComputeEventsVMOnNetworkNSID, market.ComputeEventsVMHostKeysNSID, market.ComputeEventsVMTerminatedNSID,
 		market.ComputeEventsVMSandboxNSID, market.ComputeEventsGuestSecretsRequestedNSID, market.ComputeEventsGuestSecretsAppliedNSID,
-		market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsGuestR2ReleasedNSID:
+		market.ComputeEventsGuestRequesterDIDNSID, market.ComputeEventsGuestR2ReleasedNSID, market.ComputeEventsGuestImageNSID:
 		return true
 	}
 	return isContractEventNSID(nsid) || market.IsMemoryEventNSID(nsid)
@@ -244,6 +246,9 @@ func (q *Requester) parseGuestEvent(ctx context.Context, event MarketEvent, rece
 		out.ObservedAt = sandbox.ObservedAt
 	case market.ComputeEventsGuestMemoryPressureNSID, market.ComputeEventsGuestOOMKillNSID, market.ComputeEventsVMMemoryPressureNSID, market.ComputeEventsVMOOMKilledNSID:
 		out.ObservedAt = stringOf(event.Payload.Value["observedAt"])
+	case market.ComputeEventsGuestImageNSID:
+		out.ImageMarker = stringOf(event.Payload.Value["marker"])
+		out.ObservedAt = stringOf(event.Payload.Value["createdAt"])
 	case market.ComputeEventsVMTerminatedNSID:
 		termination, err := reportedTermination(event)
 		if err != nil {
@@ -429,6 +434,8 @@ func guestEventApplied(state *v1alpha1.NodeClaimContract, parsed *GuestEvent) bo
 		return state.SecretsApplied != nil && guestEventRecorded(state.SecretsApplied.Event, state.SecretsApplied.Payload, parsed)
 	case market.ComputeEventsGuestRequesterDIDNSID:
 		return state.GuestRequester != nil && guestEventRecorded(state.GuestRequester.Event, state.GuestRequester.Payload, parsed)
+	case market.ComputeEventsGuestImageNSID:
+		return state.GuestImageMarker != ""
 	}
 	return false
 }

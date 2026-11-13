@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-36.computecontracts.socialweb.computer
+  name: v1alpha1-37.computecontracts.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -67,6 +67,17 @@ spec:
                 pattern: ^[0-9]+[KMGTkmgt]?i?[Bb]?$
               nestedVirt:
                 type: boolean
+              image:
+                type: object
+                properties:
+                  url:
+                    type: string
+                  sha256:
+                    type: string
+                    pattern: ^[0-9a-f]{64}$
+                required:
+                  - url
+                  - sha256
               tunnels:
                 type: array
                 items:
@@ -516,6 +527,8 @@ spec:
                         type: string
                     required:
                       - exitCode
+                  guestImageMarker:
+                    type: string
                   secretsRequested:
                     type: object
                     properties:

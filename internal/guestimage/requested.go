@@ -1,7 +1,6 @@
 package guestimage
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -110,12 +109,15 @@ func FetchManifest(ctx context.Context, client *http.Client, req Requested) (Man
 	if got := hex.EncodeToString(sum[:]); got != req.SHA256 {
 		return Manifest{}, 0, fmt.Errorf("%w: %s hashes to %s, not the requested %s", ErrRequestedRefused, get.URL, got, req.SHA256)
 	}
-	var m Manifest
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	if err := dec.Decode(&m); err != nil {
+	var m struct {
+		Manifest
+		Bake   json.RawMessage `json:"bake"`
+		Inputs json.RawMessage `json:"inputs"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
 		return Manifest{}, 0, fmt.Errorf("%w: %s: %w", ErrRequestedRefused, get.URL, err)
 	}
-	return m, int64(len(raw)), nil
+	return m.Manifest, int64(len(raw)), nil
 }
 
 func (m Manifest) CheckFor(pin Pin, capBytes int64) error {

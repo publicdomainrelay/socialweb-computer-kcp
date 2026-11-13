@@ -557,6 +557,14 @@ again; user_data installs `atirc-agent.service`
   `requester_market_event` line; swc-test-host forwards it to the composition like Held, and the test modules
   decide (`steps::market_event`, first in every module: an OOM kill fails the run naming the VM, pressure goes to
   readings.memory, which gate.sh lists). No memory policy in the host.
+- Requester images. `run request --image <https base>@<image.json sha256>` (ComputeContract `spec.image {url, sha256}`,
+  compute.vm `image`) rents a VM booted from the requester's full image (guestimage.Manifest shape plus `marker`; kernel,
+  rootfs and bootArgs its own, on the bidder's VMM). Only offerings with `images` are asked or accepted (`Bidder.Lacks`).
+  The bidder checks image.json before it bids (`imageRefused`); the FirecrackerVM fetches the files into the image
+  store (`Store.EnsureRequested`, content-addressed) and a refusal fails it as lostReason ImageRefused (vm.terminated
+  `image_refused`). The guest agent posts one guest.image {marker} from `/etc/swc-image`; the requester logs
+  `requester_guest_image` {marker, expected, ok} and releases the contract as Failed on a mismatch or no marker within
+  the on-network deadline (no re-placement after a receipt). Fetch guard and its limits: docs/FEATURES.md Known limits.
 - Signaling is sealed. Each side publishes a `guest.publicKey` (kind `age-x25519`) per tag; an offer
   is age ciphertext sealed to the guest's latest key, with plaintext `{sdp, replyTo}`; the answer is
   sealed to `replyTo`. A signal names no recipient: a reader trial-opens every signal for its tag.

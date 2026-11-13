@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-18.nodeclaims.socialweb.computer
+  name: v1alpha1-19.nodeclaims.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -359,6 +359,8 @@ spec:
                         type: string
                     required:
                       - exitCode
+                  guestImageMarker:
+                    type: string
                   secretsRequested:
                     type: object
                     properties:

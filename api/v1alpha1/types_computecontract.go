@@ -48,6 +48,8 @@ type ComputeContractTemplate struct {
 
 	NestedVirt bool `json:"nestedVirt,omitempty"`
 
+	Image *ComputeContractImage `json:"image,omitempty"`
+
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	Agent *ComputeContractAgent `json:"agent,omitempty"`
@@ -131,6 +133,12 @@ type ComputeContractNodeJoin struct {
 	Meshd *ComputeContractMeshd `json:"meshd,omitempty"`
 
 	NodeAgent *ComputeContractNodeAgent `json:"nodeAgent,omitempty"`
+}
+
+type ComputeContractImage struct {
+	URL string `json:"url" apigen:"userEndpoint"`
+
+	Sha256 string `json:"sha256" apigen:"pattern=^[0-9a-f]{64}$"`
 }
 
 type ComputeContractTunnel struct {
