@@ -1583,6 +1583,8 @@ type Offering struct {
 	CreatedAt   string                     `json:"createdAt"`
 	Endpoints   []Endpoint                 `json:"endpoints,omitempty"`
 	Ingress     []StrongRef                `json:"ingress,omitempty"`
+	MaxCpus     int64                      `json:"maxCpus,omitempty"`
+	MaxMem      string                     `json:"maxMem,omitempty"`
 	RefreshedAt string                     `json:"refreshedAt,omitempty"`
 	WithdrawnAt string                     `json:"withdrawnAt,omitempty"`
 	Extra       map[string]json.RawMessage `json:"-"`

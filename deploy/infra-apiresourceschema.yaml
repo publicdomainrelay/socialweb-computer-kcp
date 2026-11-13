@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-14.infras.socialweb.computer
+  name: v1alpha1-15.infras.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -79,6 +79,13 @@ spec:
                       type: string
                     vmReadyTimeoutSec:
                       type: integer
+                    cpus:
+                      type: integer
+                      format: int32
+                      minimum: 0
+                    mem:
+                      type: string
+                      pattern: ^[0-9]+[KMGTkmgt]?i?[Bb]?$
                     tunnels:
                       type: array
                       items:

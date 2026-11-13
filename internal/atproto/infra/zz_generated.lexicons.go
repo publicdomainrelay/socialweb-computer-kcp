@@ -268,8 +268,10 @@ type InfraContract struct {
 	Association        *InfraAssociation          `json:"association,omitempty"`
 	BidderDids         []string                   `json:"bidderDids,omitempty"`
 	ComputeKind        string                     `json:"computeKind,omitempty"`
+	Cpus               int64                      `json:"cpus,omitempty"`
 	DenyBidderDids     []string                   `json:"denyBidderDids,omitempty"`
 	GuestTools         []string                   `json:"guestTools,omitempty"`
+	Mem                string                     `json:"mem,omitempty"`
 	Name               string                     `json:"name"`
 	Net                bool                       `json:"net,omitempty"`
 	Policy             string                     `json:"policy,omitempty"`

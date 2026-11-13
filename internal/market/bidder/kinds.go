@@ -70,7 +70,7 @@ func (b *Bidder) payloadRefused(ctx context.Context, rfp *market.RFP) (string, e
 	if at, err := market.ParseTime(record.ExpiresAt); err == nil && !at.After(b.now()) {
 		return fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt), nil
 	}
-	return "", nil
+	return b.sizeRefused(record), nil
 }
 
 func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string, error) {

@@ -165,10 +165,12 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 		return err
 	}
 	endpoints := b.offeredEndpoints(b.ensureListen(ctx))
+	limits := b.vmLimits()
 	createdAt := now
 	if prior != nil {
 		createdAt = prior.CreatedAt
-		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, endpoints) && sameStrings(prior.AppliesTo, appliesTo) {
+		if !touch && prior.WithdrawnAt == "" && sameEndpoints(prior.Endpoints, endpoints) && sameStrings(prior.AppliesTo, appliesTo) &&
+			prior.MaxCpus == limits.cpus && prior.MaxMem == limits.mem() {
 			if b.legacyStale {
 				b.mirrorLegacy(ctx, *prior)
 			}
@@ -180,6 +182,7 @@ func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
 	if err != nil {
 		return err
 	}
+	record.MaxCpus, record.MaxMem = limits.cpus, limits.mem()
 	uri, err := b.putOffering(ctx, record)
 	if err != nil {
 		return err

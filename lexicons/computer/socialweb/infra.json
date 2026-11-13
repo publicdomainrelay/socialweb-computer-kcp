@@ -48,6 +48,8 @@
         "policy": { "type": "string" },
         "policyArgs": { "type": "string" },
         "vmReadyTimeoutSec": { "type": "integer", "minimum": 0 },
+        "cpus": { "type": "integer", "minimum": 0, "description": "vCPUs of the VM (unset: the requester's default, 2)." },
+        "mem": { "type": "string", "description": "Memory of the VM, such as 8G (unset: the requester's default, 4G)." },
         "tunnels": {
           "type": "array",
           "items": { "type": "ref", "ref": "#tunnel" },

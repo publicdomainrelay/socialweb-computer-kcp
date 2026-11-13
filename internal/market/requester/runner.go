@@ -239,6 +239,11 @@ func (r *contractRunner) Run(ctx context.Context) {
 		return
 	}
 	state := r.stateCopy()
+	if err := CheckVMSize(contract.Spec.ComputeContractTemplate); err != nil && (state == nil || state.RFPURI == "") && !r.released() {
+		r.log().Warn("requester_contract_refused", "err", err.Error())
+		r.writeStatus(ctx, v1alpha1.ComputeContractFailed, "refused: "+err.Error(), state, nil, nil, "refused", 1)
+		return
+	}
 	tokenPathConflict := CheckTokenPaths(contract, nil)
 	if tokenPathConflict != nil {
 		if (state == nil || state.RFPURI == "") && !r.released() {
@@ -409,7 +414,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
-			Cpus: DefaultComputeCPUs, Mem: DefaultComputeMem, Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
+			Cpus: int64(cmp.Or(contract.Spec.Cpus, DefaultComputeCPUs)), Mem: cmp.Or(strings.TrimSpace(contract.Spec.Mem), DefaultComputeMem), Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
 			ExpiresAt: contractExpiresAt(contract.Labels[ContractExpiresAtLabel])})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)

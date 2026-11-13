@@ -28,6 +28,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/policy"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/tunnel"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/vault"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/memsize"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/runs"
@@ -986,4 +987,14 @@ func (q *Requester) guestKeyDir() string {
 func (q *Requester) bundleLock(contract string) *sync.Mutex {
 	lock, _ := q.bundleLocks.LoadOrStore(contract, &sync.Mutex{})
 	return lock.(*sync.Mutex)
+}
+
+func CheckVMSize(t v1alpha1.ComputeContractTemplate) error {
+	if t.Cpus < 0 {
+		return fmt.Errorf("cpus %d is not a vCPU count", t.Cpus)
+	}
+	if mib, err := memsize.ParseMiB(t.Mem); err != nil || (mib == 0 && strings.TrimSpace(t.Mem) != "") {
+		return fmt.Errorf("mem %q is not a memory size such as 8G", t.Mem)
+	}
+	return nil
 }

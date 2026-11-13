@@ -17,7 +17,9 @@
             "description": "The payload collections the bidder bids on.",
             "items": { "type": "string", "format": "nsid" }
           },
-          "createdAt": { "type": "string", "format": "datetime" },
+          "maxCpus": { "type": "integer", "minimum": 1, "description": "The most vCPUs one compute.vm may ask for; the bidder refuses an RFP that asks for more. Absent: no limit advertised." },
+        "maxMem": { "type": "string", "description": "The most memory one compute.vm may ask for, such as 16G; the bidder refuses an RFP that asks for more. Absent: no limit advertised." },
+        "createdAt": { "type": "string", "format": "datetime" },
           "refreshedAt": { "type": "string", "format": "datetime" },
           "withdrawnAt": { "type": "string", "format": "datetime", "description": "Set when the bidder stopped taking RFPs; appliesTo is empty then." }
         }

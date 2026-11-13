@@ -54,7 +54,7 @@ const (
 	sshConnectionFailed       = 255
 )
 
-var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
+var requestOptions = []string{"network", "name", "secrets", "tunnel", "agent", "agent-config", "guest-tools", "cpus", "mem", "association-ref", "hold", "expires-in", "exec", "skip-ssh", "contract-timeout", "state-dir",
 	"ready-timeout", "network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "transport", "tag", "log-level"}
 
 var requestCreateOptions = append(append([]string{}, requestOptions...), "identity", "associate", "guest-requester", "colocated", "identity-only")
@@ -344,6 +344,10 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 	r.contract.Agent = agentOf(vals.String("agent"))
 	if r.contract.GuestTools, err = guestToolsOf(vals.String("guest-tools")); err != nil {
 		return nil, fmt.Errorf("guest-tools: %w", err)
+	}
+	r.contract.Cpus, r.contract.Mem = int32(vals.Int("cpus")), strings.TrimSpace(vals.String("mem"))
+	if err := requester.CheckVMSize(r.contract.ComputeContractTemplate); err != nil {
+		return nil, err
 	}
 	if r.contractTimeout, err = time.ParseDuration(vals.String("contract-timeout")); err != nil {
 		return nil, fmt.Errorf("contract-timeout: %w", err)

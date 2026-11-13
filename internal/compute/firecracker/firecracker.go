@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/memsize"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -67,7 +67,6 @@ type Deps struct {
 }
 
 var (
-	sizeRE    = regexp.MustCompile(`(?i)^\s*(\d+)\s*([KMGT])?i?B?\s*$`)
 	vmmExitRE = regexp.MustCompile(`Firecracker exiting[^\n]*exit_code=(\d+)`)
 )
 
@@ -140,29 +139,6 @@ func hostPorts(ports []int32) []int {
 		out = append(out, int(p))
 	}
 	return out
-}
-
-func ParseMiB(s string) (int, error) {
-	if strings.TrimSpace(s) == "" {
-		return 0, nil
-	}
-	m := sizeRE.FindStringSubmatch(s)
-	if m == nil {
-		return 0, fmt.Errorf("firecracker: size %q is not <number>[K|M|G|T][i][B]", s)
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0, err
-	}
-	switch strings.ToUpper(m[2]) {
-	case "K":
-		return max(1, (n+512)/1024), nil
-	case "G":
-		return n * 1024, nil
-	case "T":
-		return n * 1024 * 1024, nil
-	}
-	return n, nil
 }
 
 func loggedExit(code string) v1alpha1.ComputeVMLostReason {
@@ -358,11 +334,11 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 			}
 			return st, errors.New("firecracker: " + st.Message)
 		}
-		mem, err := ParseMiB(vm.Spec.Mem)
+		mem, err := memsize.ParseMiB(vm.Spec.Mem)
 		if err != nil {
 			log.Info("spec.mem does not parse; the guest gets the image's own memory", "mem", vm.Spec.Mem)
 		}
-		disk, err := ParseMiB(vm.Spec.Disk)
+		disk, err := memsize.ParseMiB(vm.Spec.Disk)
 		if err != nil {
 			log.Info("spec.disk does not parse; the guest keeps the image's own disk size", "disk", vm.Spec.Disk)
 		}

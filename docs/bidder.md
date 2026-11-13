@@ -33,6 +33,7 @@ sudo scripts/host-nested-kvm.sh --apply
   `--apply` reloads the KVM module only when nested is off and no VM runs; otherwise it persists the setting for the
   next boot
 - `check-host -role bidder` runs at the end of an install and before a foreground start
+- VM size: the offering advertises `maxCpus` / `maxMem` (the host's CPUs and memory); an RFP asking for more is refused
 
 ## Identity
 

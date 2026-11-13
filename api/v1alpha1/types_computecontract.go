@@ -42,6 +42,10 @@ type ComputeContractTemplate struct {
 
 	VMReadyTimeoutSec int `json:"vmReadyTimeoutSec,omitempty"`
 
+	Cpus int32 `json:"cpus,omitempty" apigen:"minimum=0"`
+
+	Mem string `json:"mem,omitempty" apigen:"pattern=^[0-9]+[KMGTkmgt]?i?[Bb]?$"`
+
 	Tunnels []ComputeContractTunnel `json:"tunnels,omitempty" apigen:"listType=map,listMapKey=tag"`
 
 	Agent *ComputeContractAgent `json:"agent,omitempty"`
