@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hickory_server::Server;
-use hickory_server::proto::rr::rdata::{A, AAAA, SOA};
+use hickory_server::proto::rr::rdata::{A, AAAA, SOA, TXT};
 use hickory_server::proto::rr::{LowerName, Name, RData, Record};
 use hickory_server::resolver::config::NameServerConfig;
 use hickory_server::store::forwarder::{ForwardConfig, ForwardZoneHandler};
@@ -39,9 +39,21 @@ fn zone_records(origin: &Name, roster: &Roster, serial: u32) -> InMemoryZoneHand
             .filter_map(|cidr| cidr.trim().parse::<IpNet>().ok())
             .map(|cidr| cidr.network())
             .collect();
-        for label in std::iter::once(&peer.name).chain(&peer.names) {
-            let Ok(name) = Name::from_ascii(label).and_then(|n| n.append_domain(origin)) else {
+        let under = |label: &str| {
+            let name = Name::from_ascii(label).and_then(|n| n.append_domain(origin));
+            if name.is_err() {
                 tracing::warn!(event = "dns_name_invalid", name = %label);
+            }
+            name.ok()
+        };
+        for txt in &peer.txt {
+            if let Some(name) = under(&txt.name) {
+                let rdata = RData::TXT(TXT::new(vec![txt.value.clone()]));
+                zone.upsert_mut(Record::from_rdata(name, TTL, rdata), serial);
+            }
+        }
+        for label in std::iter::once(&peer.name).chain(&peer.names) {
+            let Some(name) = under(label) else {
                 continue;
             };
             for addr in &addrs {

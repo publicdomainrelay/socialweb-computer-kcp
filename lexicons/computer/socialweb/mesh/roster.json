@@ -76,7 +76,34 @@
             "type": "string",
             "maxLength": 63
           },
-          "description": "More names under the zone for the same address: the services it runs."
+          "description": "More names under the zone for the same address: the services it runs. *.<name> is a wildcard (did:key ingress https://<did-label>.<host>)."
+        },
+        "txt": {
+          "type": "array",
+          "maxLength": 32,
+          "items": {
+            "type": "ref",
+            "ref": "#txt"
+          },
+          "description": "TXT records under the zone, e.g. _atproto.<handle> = did=<did> so a handle under the zone resolves."
+        }
+      }
+    },
+    "txt": {
+      "type": "object",
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 190,
+          "description": "Relative to the zone; <name>.<zone> answers the TXT."
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 255
         }
       }
     }

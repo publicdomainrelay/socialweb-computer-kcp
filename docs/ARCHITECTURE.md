@@ -2439,7 +2439,9 @@ by `RouteTable::compute` from a Node list and unit-tested on Node lists:
 
 **DNS on the overlay.** `--dns-zone Z --dns-listen ip:port[,...] [--dns-upstream ip:port[,...]]`:
 hickory-server, authoritative for `Z` from the roster (`<name>.Z` and each `<names>.Z` answer each cidr's
-network address, TTL 5 s), everything else forwarded to the upstreams (none: REFUSED). UDP and TCP;
+network address, TTL 5 s; a `names` entry `*.<name>` is a wildcard, for did:key ingress
+`https://<did-label>.<host>`; each `txt` `{name, value}` answers TXT at `<name>.Z`, e.g.
+`_atproto.<handle>` = `did=<did>` so a handle under `Z` resolves), everything else forwarded to the upstreams (none: REFUSED). UDP and TCP;
 bound once the address exists, so it listens on the node's own overlay address. Every member serves the
 same zone. A plain VM: `nameserver <own overlay IP>` in resolv.conf. Pods: add to the
 `socialweb-node-dns` Corefile (re-add after a bootstrap reapplies the baseline):
@@ -2453,7 +2455,7 @@ staging.internal:53 {
 
 Proofs (hat-8, `cargo test` with sudo; meshd keeps its integration tests in `rust/socialweb-meshd/tests/`): `tests/standalone.rs` (`SOCIALWEB_MESHD_NETNS=1`): three VMs
 behind three NATs (UDP port forward), one on an http getRecord-shaped roster, ping and TCP all six ways,
-every name from every member's DNS, forwarding to a dnsmasq upstream, resolv.conf, leave and rejoin.
+every name from every member's DNS (a wildcard and an `_atproto` TXT included), forwarding to a dnsmasq upstream, resolv.conf, leave and rejoin.
 `tests/kube_k3s.rs` (`SOCIALWEB_MESHD_K3S=1`): a kube-mode node following its annotation and a plain VM
 on one overlay, pod and node to VM and back, each side's DNS answering the other's names.
 

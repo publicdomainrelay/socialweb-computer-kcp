@@ -23,6 +23,14 @@ pub struct Peer {
     pub addrs: Vec<String>,
     #[serde(default)]
     pub names: Vec<String>,
+    #[serde(default)]
+    pub txt: Vec<Txt>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct Txt {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
