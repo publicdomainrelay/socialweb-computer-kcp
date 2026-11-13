@@ -231,11 +231,12 @@ fn qemu_guest_hosts_a_market_network_bidder() {
         b"",
         Duration::from_secs(600),
     );
-    let as_stg = |cmd: &str| format!("cd /home/stg && sudo runuser -u stg -- env HOME=/home/stg XDG_RUNTIME_DIR=/run/user/$(id -u stg) {cmd} 2>&1");
+    // stg's own cwd (dev stats it); cmd has no single quotes
+    let as_stg = |cmd: &str| format!("sudo runuser -u stg -- sh -c 'cd /home/stg && HOME=/home/stg XDG_RUNTIME_DIR=/run/user/$(id -u stg) {cmd}' 2>&1");
     let st = "--instance g --state-dir /home/stg/s";
     let up = guest.sh_in(&as_stg(&format!("/home/stg/swc dev up {st} --profile market-network --bidders 1 --host-backend proc --network-timeout 15m")), b"", Duration::from_secs(1200));
     eprintln!("dev up: {}", &up[up.len().saturating_sub(300)..]);
-    let req = guest.sh_in(&as_stg(&format!("/home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec 'uname -r'")), b"", Duration::from_secs(900));
+    let req = guest.sh_in(&as_stg(&format!("/home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec \"uname -r\"")), b"", Duration::from_secs(900));
     let _ = guest.try_sh(&as_stg(&format!("/home/stg/swc dev down {st}")), b"", Duration::from_secs(300));
     let _ = vm.stop();
     let _ = fs::remove_dir_all(&dir);
