@@ -713,7 +713,16 @@ Pipeline, in order; cut the rc only when both suites are green:
 4. Full suite against staging.
 5. Tear staging down.
 6. Redeploy prod.
-7. Full suite against prod.
+7. Full suite against prod (from rc166 the release gate; no hand runs), on hat-8, as bob, in one command:
+
+```sh
+cd tests && SWC_COMPAT_REQUESTER=release:<previous rc tag> ./gate.sh $PWD/targets/prod.json --account bob
+```
+
+It runs every composition in order, one at a time (`--on-fail freeze`, `GATE_FREEZE_TTL` 900 s), prints one
+`RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>` line each and a summary table, and exits 1 on a FAIL. A SKIP
+names its reason (0010 iOS paused; staging-only entries; `GATE_SKIP="<runbook>:<entry>=<reason>;..."`). Logs, the
+readings and each run's dump path: `~/.tmp/swc-system-tests/gate/<time>/`.
 
 ## Prod deployments
 

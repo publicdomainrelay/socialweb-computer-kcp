@@ -112,17 +112,17 @@ stays until its composition passes on staging and prod.
 A module whose XRPC needs a scope (0001's gateway calls) names it in its module.json `scope`, the scope of the
 client a published module would have; without one the host refuses those calls.
 
-| composition | entries (`--entry`) | live |
+| composition | entries (`--entry`) | live (prod rc165, bob, `gate.sh` 2026-11-13) |
 | --- | --- | --- |
-| 0001 | `run` (sections 3-6), `s2` (staging: a temporary oauthQr bidder) | not yet |
-| 0002 | `run` | not yet |
-| 0003 (0001 section 9) | `run` (`--per-host`: each host in turn) | not yet |
-| 0004 | `run` | not yet |
-| 0005 | `run` (A), `b`, `r2fail` (a failed R2 leaves no live DID at PLC: known gap, fails until rc166) | not yet |
-| 0006 | `run` (bidders), `compat` (`SWC_COMPAT_REQUESTER`) | not yet |
-| 0007, 0008, 0009, 0012 | `run` | not yet |
-| 0011 | `run` (gates), `token` | gates: pass 2026-11-13 (signed out) |
-| 0013 | `run` (A), `c`, `b` (staging) | not yet |
+| 0001 | `run` (sections 3-6), `s2` (staging: a temporary oauthQr bidder) | `run`: module pass; cleanup fails until atlibs-kube `delete-drops-ledger` is in the pin set |
+| 0002 | `run` | pass |
+| 0003 (0001 section 9) | `run` (`--per-host`: each host in turn) | pass (discovery) |
+| 0004 | `run` | pass |
+| 0005 | `run` (A), `b`, `r2fail` (a failed R2 leaves no live DID at PLC: known gap, fails until rc166) | `run`, `b`: pass |
+| 0006 | `run` (bidders), `compat` (`SWC_COMPAT_REQUESTER`) | pass (compat: rc164 CLI) |
+| 0007, 0008, 0009, 0012 | `run` | pass |
+| 0011 | `run` (gates), `token` | pass |
+| 0013 | `run` (A), `c`, `b` (staging) | `run`, `c`: pass |
 
 0010 (iOS) is paused. Follow-ups: the CI freeze on the knotless orchestrator VM (a frozen run's check names its attach
 route); `freeze::attach` ends when stdin closes (with the next atlibs-host change).
