@@ -736,7 +736,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		}
 	}
 	if _, _, err := c.VaultRefs(ctx, ws, SshGatewayVaultServer, SshGatewayVaultClient); err != nil {
-		return p.retry("its vault", err)
+		return p.wait("its vault: " + err.Error())
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, links); !ok {
 		return p.wait(msg)

@@ -242,7 +242,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return ctlruntime.Result{}, err
 	}
 	if _, _, err := c.VaultRefs(ctx, ws, RequesterVaultServer, RequesterVaultClient); err != nil {
-		return p.retry("its vault", err)
+		return p.wait("its vault: " + err.Error())
 	}
 	if ok, msg := c.LinksAccepted(ctx, r, p.links); !ok {
 		return p.wait(msg)
