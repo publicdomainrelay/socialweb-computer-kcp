@@ -442,6 +442,16 @@ impl Swc {
                 ))
                 .env("ATPROTO_PASSWORD", self.password()?);
         }
+        // the RFP's compute.vm role (e.g. the staging layer the watch page shows)
+        if let Some(v) = input["vmName"].as_str() {
+            if v.is_empty() || !v.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                return Err(format!("vmName {v:?}: lowercase letters, digits and dashes"));
+            }
+            if self.acct()?.guest_requester {
+                cmd.arg("--");
+            }
+            cmd.args(["--vm-name", v]);
+        }
         let mut child = cmd
             .stdout(f.try_clone().map_err(|e| e.to_string())?)
             .stderr(f)

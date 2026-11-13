@@ -285,7 +285,8 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     a.push(json!("--nested-virt"));
                 }
                 a.extend([json!("--cpus"), json!(cpus.to_string()), json!("--mem"), json!(mem), json!("--expires-in"), json!("4h"), json!("--exec"), json!("true")]);
-                h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a })));
+                // vmName: the RFP's compute.vm role (what the watch page shows), the layer
+                h = h.call(steps::host_sub(&format!("req-{v}"), "request.start", json!({ "name": format!("{base}-{v}"), "args": a, "vmName": format!("stg-{v}") })));
             }
             h = h.timer("deadline", args["deadlineMin"].as_u64().unwrap_or(120) * MIN);
         }
