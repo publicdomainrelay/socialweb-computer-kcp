@@ -688,7 +688,10 @@ async fn main_() -> Result<bool> {
     )
     .await;
     let result = match &ran {
-        Ok(v) if signed_in => v.get("result").cloned().unwrap_or_else(|| v.clone()),
+        // the root run's result says pass, whoever runs it (a guest requester has no sign-in)
+        Ok(v) if flag(&args, "--instance").is_none() => {
+            v.get("result").cloned().unwrap_or_else(|| v.clone())
+        }
         Ok(v) => {
             json!({ "pass": v.get("error").is_none_or(Value::is_null), "error": v.get("error"), "result": v })
         }
