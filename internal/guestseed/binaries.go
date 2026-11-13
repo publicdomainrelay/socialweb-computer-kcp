@@ -393,6 +393,7 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *W
 		"ExecStart=" + GuestAgentBinary,
 		"Restart=always",
 		"RestartSec=2",
+		"OOMScoreAdjust=-900",
 		"StandardOutput=journal+console",
 		"StandardError=journal+console",
 		"",
