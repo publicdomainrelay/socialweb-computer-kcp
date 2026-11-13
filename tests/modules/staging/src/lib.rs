@@ -66,6 +66,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("vm"),
                 "contract" if data["phase"] == "Failed" => return Ok(s.fail(format!("the VM contract failed: {data}"))),
+                "exited" if !s.has("vm") => return Ok(s.fail(format!("run request exited before the VM was Held: {data}"))),
                 "exited" => s.flag("exited"),
                 _ => {}
             }
