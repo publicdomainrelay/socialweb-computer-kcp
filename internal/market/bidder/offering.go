@@ -15,6 +15,7 @@ import (
 func (b *Bidder) Run(ctx context.Context) {
 	defer b.wg.Wait()
 	b.wg.Go(func() { b.bindBadgeBlueKey(ctx) })
+	b.wg.Go(func() { b.watchMemory(ctx) })
 	if b.cfg.Suspend {
 		b.withdraw(ctx)
 		return

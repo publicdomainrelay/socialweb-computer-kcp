@@ -50,6 +50,8 @@
 | `compute/events/vm/sandbox.json` | [compute.events.vm.sandbox](#computeeventsvmsandbox) | x |
 | `compute/events/vm/started.json` | [compute.events.vm.started](#computeeventsvmstarted) | x |
 | `compute/events/vm/terminated.json` | [compute.events.vm.terminated](#computeeventsvmterminated) | x |
+| `compute/events/vm/memoryPressure.json` | [compute.events.vm.memoryPressure](#computeeventsvmmemorypressure) | x |
+| `compute/events/vm/oomKilled.json` | [compute.events.vm.oomKilled](#computeeventsvmoomkilled) | x |
 | `compute/events/guest/publicKey.json` | [compute.events.guest.publicKey](#computeeventsguestpublickey) | x |
 | `compute/events/guest/signalWebRTC.json` | [compute.events.guest.signalWebRTC](#computeeventsguestsignalwebrtc) | x |
 | `compute/events/guest/secrets.json` | [compute.events.guest.secrets](#computeeventsguestsecrets) | x |
@@ -437,6 +439,30 @@
 | rkey | none: defined, not written |
 | written by | no Go writer (`ComputeEventsVMStartedNSID` constant only) |
 | read by | none |
+| step | [S7](README.md#step-s7) |
+
+## compute.events.vm.memoryPressure
+
+| item | value |
+|---|---|
+| file | `compute/events/vm/memoryPressure.json` |
+| type | record, key any |
+| key fields | `kind`* (`high` or `max`), `threshold`* (bytes), `observed`* (memory.current bytes), `observedAt`*, `createdAt`* |
+| rkey | from the report StateSync key `<nsid>:<kind>-<n>:<receipt>` |
+| written by | bidder: `internal/market/bidder/memory.go` (edge-triggered from the VM cgroup's memory.events: one per crossing, re-armed after 5 min below 90% of the threshold, at most 1 per kind per 10 min and 10 memory events per contract) |
+| read by | none in Go (renters and the watch page) |
+| step | [S7](README.md#step-s7) |
+
+## compute.events.vm.oomKilled
+
+| item | value |
+|---|---|
+| file | `compute/events/vm/oomKilled.json` |
+| type | record, key any |
+| key fields | `kills`* (new kills), `total`*, `limit`* (memory.max bytes), `observedAt`*, `createdAt`* |
+| rkey | from the report StateSync key `<nsid>:oom-<n>:<receipt>` |
+| written by | bidder: `internal/market/bidder/memory.go` (one per new oom_kill count, inside the same 10-per-contract cap) |
+| read by | none in Go |
 | step | [S7](README.md#step-s7) |
 
 ## compute.events.vm.terminated
