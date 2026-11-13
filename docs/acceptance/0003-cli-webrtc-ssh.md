@@ -7,7 +7,15 @@ invocation kcp and after that kcp restarts from its state dir.
 - Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
   [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
 - One run per host: only `$HOST` bids: `-- --allow-bidder-dids <$HOST bidder DID>` (or the other two bidders suspended)
-- Last run: 2026-11-12 23:57Z-2026-11-13 00:17Z, bidders + CLI on kcp e190a3b1 (release 66f3bd4d, rollout 19) on hat-8,
+- Last pass: 2026-11-13 01:25-01:35Z, bidders + CLI on rollout 20 (release/rc165 038bd32e, `v0.0.0-rc165-pre1`, binary
+  24a8b5307d19) on hat-8, alice by QR (consent page: client qr.fedfork.com for @aliceoa.bsky.social), no bidders list (the
+  other two MarketBidders suspended, resumed and Ready 6/6 after each host). local / hat-9 / hat-7: Held, winner = the
+  unpaused host (Running ComputeVM), ssh over WebRTC fresh 4.0 / 2.6 / 9.5 s, restarted invocation 6.7 / 5.2 / 5.5 s (was
+  ~65 s on rollout 19), `uid=0` from both invocations, exit 0, plaintext 0 / 0, `run request release` -> `released`, hosts 0
+  ComputeVM / 0 firecracker, the 10 alice URIs each run logged RecordNotFound x3. core.log per run (3 core starts) waits /
+  timeouts / "serves discovery": 5/0/5, 8/0/8, 6/0/6. Each release left 0 `market.event` / `compute.events.vm.delete` /
+  rfp / accept in alice's repo (createdAt since the run start)
+- Previous run (FAIL): 2026-11-12 23:57Z-2026-11-13 00:17Z, bidders + CLI on kcp e190a3b1 (release 66f3bd4d, rollout 19) on hat-8,
   alice by QR (consent page: client qr.fedfork.com for @aliceoa.bsky.social), no bidders list (the other two
   MarketBidders suspended, resumed after each host): **FAIL** on the restarted-kcp ssh only. local / hat-9 / hat-7:
   identity Ready -> guest on network 49 / 37 / 32 s, Held, ssh over WebRTC fresh 3.9 / 3.3 / 3.1 s, restarted invocation

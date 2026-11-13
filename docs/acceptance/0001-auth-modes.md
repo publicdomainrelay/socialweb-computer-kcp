@@ -71,6 +71,17 @@ sudo "$BIN" install bidder --account $A --adopt-account --handle $H --compute-ki
   (`AUD` below) is unchanged.
 - Every market read is one getRecord at a computable key; no step lists records.
 
+Section 9 last pass: 2026-11-13 01:16-01:25Z, every bidder and the gateway on rollout 20 (release/rc165
+038bd32e = e190a3b1 + the startup-wait fix 5b75ac08 + the release-records fix, `v0.0.0-rc165-pre1`, binary
+24a8b5307d19), CLI 24a8b5307d19 on hat-8, alice by QR (consent qr.fedfork.com for @aliceoa.bsky.social), no
+bidders list, the other two MarketBidders suspended per host and resumed (Ready 6/6) after. Run on the three
+prod bidders; the oauthQr host was not re-run (`swc-qr0001` was removed after the rollout 19 pass). Fresh /
+restarted ssh over WebRTC: local 2.7 / 5.7 s, hat-9 2.6 / 7.1 s, hat-7 2.5 / 2.0 s (rollout 19: ~64 s
+restarted). Held, winner = `$HOST`, `uid=0` both times, plaintext 0 / 0, `released`, hosts 0 ComputeVM / 0
+firecracker, 10 logged alice URIs RecordNotFound x3. core.log waits / timeouts / "serves discovery" per run (3
+core starts): 7/0/7, 6/0/6, 5/0/5. Each release left 0 `market.event` / `compute.events.vm.delete` (the 0006
+release-records bug is fixed in the CLI). Sections 1-8 stand on the rollout 19 reading below.
+
 Last pass: 2026-11-12 22:25-23:35Z, every bidder and the gateway on kcp e190a3b1 (release 66f3bd4d,
 rollout 19), CLI 66f3bd4d on hat-8, alice requester, bob oauthQr bidder `swc-qr0001` on hat-8 (installed for
 the pass, removed after), no bidders list anywhere. **Section 9 FAIL** (restart time); every other section

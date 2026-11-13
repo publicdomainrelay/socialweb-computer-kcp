@@ -13,7 +13,25 @@ Run after every rollout; it is the gate before "tests may resume".
   (`config.json.bak-rollout10-*`): version, readyz ok, MarketBidder Ready, offering `["iroh","webrtc"]`, 0 ERROR from
   start, three `ingress.offer` stream dials, mesh UDP listener, hosts empty. Rollback: `bin/previous` = d1f19736 (rollout 9).
   Proof round: [0007](0007-bidder-termination.md) last expiry pass
-- Last pass: 2026-11-12 21:35-21:56Z, rollout 19 (kcp e190a3b1, release sha256 66f3bd4dc927) on every component (rolled
+- Last pass: 2026-11-13 01:05-01:36Z, rollout 20 (release/rc165 038bd32e = e190a3b1 + the startup-wait fix 5b75ac08 + the
+  release-records fix; `v0.0.0-rc165-pre1`, `bin/current` sha256 24a8b5307d19, `bin/previous` 66f3bd4d) on every
+  component. Bidders hat-7 (unit start 00:55:55Z), hat-9 (00:56:09Z), hat-8 `swc-bidder` (00:56:25Z): version, `bidder.json`
+  ready=true, MarketIdentity Ready (hat-7 SignedIn=True; hat-8, hat-9 localRepo, Associated=True), no `pendingAction`,
+  `bidder-tangled-vouch`, MarketBidder `app` Ready 6/6, offering `self` `["iroh","webrtc"]` with no `endpointUrl`, NRestarts
+  0, 0 ERROR / 0 unsupported from start, 0 `starts before its virtual workspace serves discovery` (the rollout 19 start
+  logged 11 per bidder; same grep), `ingress.offer` lines hat-8 5, hat-9 3, hat-7 3, hosts 0 ComputeVM / FirecrackerVM /
+  firecracker / `vms/`. Gateway (unit start 01:04:31Z) and `swc-ssh-gateway.service` (01:04:57Z), `bin/current`
+  24a8b5307d19, NRestarts 0 after 21 min, 0 ERROR and 0 startup-wait timeouts from start on both (the
+  `testaccount-alice-atirc-operator` retries no longer show), no failed system units: Gateway Ready ("every component is
+  ready"), SshGateway `app` Ready, SshServer Ready, `owner-3b4d61ac074e291a` and `owner-748258c72ce18fe0` Ready
+  SignedIn=True, HostProcesses `bao-ssh-gateway`, `iroh-dial`, `bootstrap-*` Running; k8s, root, ssh /healthz, atlibs,
+  shell 200, kcp 403. Compat smoke, alice, no bidders list: CLI of rollout 19 (e190a3b1, binary 66f3bd4dc927, hat-8) `run
+  request --hold --exec id -- --atproto-oauth-qr` 01:12:21Z: consent page qr.fedfork.com for @aliceoa.bsky.social, 3 bids,
+  winner hat-8, Held, `uid=0(root)`, release exit 0 01:16:13Z, phase `released`, rfp / accept gone; the old CLI's release
+  still left its release `market.event` and `compute.events.vm.delete` (the fix is in the requester, so an old client keeps
+  the bug; both deleted by hand, RecordNotFound x3). The new CLI's six releases in 0001 section 9 and 0003 (same day) left
+  0. Page compat: 0009
+- Previous pass: 2026-11-12 21:35-21:56Z, rollout 19 (kcp e190a3b1, release sha256 66f3bd4dc927) on every component (rolled
   21:10-21:20Z by the lead). Bidders hat-7 (unit start 21:10:30Z), hat-9 (21:10:44Z), hat-8 `swc-bidder` (21:10:57Z):
   version `v0.0.0-rc99.0.20261112201800-e190a3b1c7ee`, `bin/current` sha256 66f3bd4dc927, `bidder.json` ready=true,
   MarketIdentity Ready (hat-7 SignedIn=True; hat-8, hat-9 localRepo), no `pendingAction`, `bidder-tangled-vouch`,
