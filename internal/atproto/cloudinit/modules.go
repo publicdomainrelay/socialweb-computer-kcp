@@ -287,6 +287,13 @@ for _ in $(seq 1 150); do
   sleep 1
 done
 
+for _ in $(seq 1 180); do
+  if timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/` + strconv.Itoa(targetPort) + `; head -c 4 <&3' 2>/dev/null | grep -q '^SSH-'; then
+    break
+  fi
+  sleep 1
+done
+
 if [ -n "${TICKET}" ]; then
   printf 'iroh://%s\n' "${TICKET}" > "${TICKET_FILE}"
   chmod 0600 "${TICKET_FILE}"
