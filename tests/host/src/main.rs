@@ -74,6 +74,8 @@ fn loader(modules: PathBuf) -> ModuleLoader {
                 .map_err(|e| format!("{}: {e} (cargo wasm in tests/modules)", wasm.display()))?;
             let mut m = Module::from_manifest(bytes, &manifest)?;
             m.id = Some(dir.display().to_string());
+            // a local module has no published session record: module.json `scope` stands in for its client scope
+            m.scope = manifest["scope"].as_str().map(|s| (key.clone(), s.to_string()));
             m.key = Some(key);
             Ok(m)
         })

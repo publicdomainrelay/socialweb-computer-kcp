@@ -1,6 +1,7 @@
 {
 	"name": "acc-0001",
 	"description": "Acceptance 0001 sections 3-6: tenant cluster, readyz, no-expiry kubeconfig and revoke (xrpc and page), one replica per node 1-2-3-2-1-0, per-step orphan and vm.terminated checks.",
+	"scope": "atproto rpc:com.publicdomainrelay.temp.cluster.createCluster?aud=* rpc:com.publicdomainrelay.temp.cluster.listClusters?aud=* rpc:com.publicdomainrelay.temp.cluster.listKubeconfigs?aud=* rpc:com.publicdomainrelay.temp.cluster.revokeKubeconfig?aud=* rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=* repo:com.publicdomainrelay.temp.market.offering?action=delete repo:com.publicdomainrelay.temp.market.heartbeat?action=delete repo:computer.socialweb.ingress.listen?action=delete",
 	"actions": [
 		{
 			"entry": "run",
