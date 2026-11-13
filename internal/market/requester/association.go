@@ -244,15 +244,21 @@ func (r *contractRunner) finishAssociation(ctx context.Context, contract v1alpha
 	if current == nil {
 		return "", nil
 	}
-	if state != nil && state.Accept != nil {
-		if err := r.ensureGuestRequesterToken(ctx, contract, state, current.ref, current.expiresAt); err != nil {
-			return "mint the guest requester's atirc token", err
-		}
-	}
-	if contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
-		(state != nil && state.SecretsApplied != nil)) {
+	notify := contract.Spec.SecretsRef != nil && (fromGuest(contract) || r.secretsFetched() != "" || contract.Status.SecretsFetchedAt != "" ||
+		(state != nil && state.SecretsApplied != nil))
+	if notify {
 		if err := r.notifySecretsUpdated(ctx, contract, current.ref); err != nil {
 			return "notify the guest", err
+		}
+	}
+	if state != nil && state.Accept != nil {
+		if err := r.ensureGuestRequesterToken(ctx, contract, state, current.ref, current.expiresAt); err != nil {
+			return "mint the guest requester's atirc token (the association ref is already out)", err
+		}
+		if notify && fromGuest(contract) && contract.Spec.Agent == nil {
+			if err := r.notifySecretsUpdated(ctx, contract, current.ref); err != nil {
+				return "notify the guest of its atirc token", err
+			}
 		}
 	}
 	r.mu.Lock()
