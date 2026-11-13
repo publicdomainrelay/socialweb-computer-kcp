@@ -60,6 +60,22 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 h = h.call(host("records", "requester.records", json!({ "name": "mp" })));
             }
         }
+        // the agent's "online" line is the model's choice: prompt 60 s after the owner node subscribed without it, and
+        // again every 30 s until it answers (5 min)
+        Event::Timer { id } if (id == "first" && s.is("online")) || (id == "reprompt" && (s.is("answer") || s.is("answer2"))) => {
+            if id == "first" {
+                s.reading("online_after_agent_start_s", "not seen: prompted 60 s after the owner node subscribed");
+                s.set("answer");
+                s.mark("prompt1");
+            } else if s.since("prompt1") > 300.0 {
+                return Ok(s.fail(format!("no answer 5 min after the first prompt (phase {})", s.phase())));
+            }
+            let n = s.st["readings"]["prompts"].as_u64().unwrap_or(0) + 1;
+            s.reading("prompts", n);
+            s.mark("prompt");
+            let nick = s.st["identity"].as_str().unwrap_or_default().split('.').next().unwrap_or_default().to_string();
+            h = h.call(host("prompt", "atirc.meshPub", json!({ "cluster": rq, "node": "st-owner", "text": format!("{nick}: uname -m") }))).timer("reprompt", 30_000);
+        }
         Event::Message { id, data, .. } if id == "mesh" => {
             let from = data["identity"] == s.st["identity"];
             let text = data["text"].as_str().unwrap_or_default();
@@ -70,8 +86,11 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 s.reading("online_after_agent_start_s", t);
                 s.set("answer");
                 s.mark("prompt");
-                h = h.call(prompt("prompt"));
+                s.mark("prompt1");
+                s.reading("prompts", 1);
+                h = h.cancel("first").call(prompt("prompt")).timer("reprompt", 30_000);
             } else if (s.is("answer") || s.is("answer2")) && from && (text.contains("x86_64") || text.contains("aarch64")) {
+                h = h.cancel("reprompt");
                 let t = s.since("prompt");
                 if s.is("answer") {
                     s.reading("answer_s", t);
@@ -88,7 +107,8 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
         Event::Result { id, result, .. } => {
             let o = match out(&s, &id, result.output()) {
                 Ok(o) => o,
-                Err(f) if id == "eigone" => {
+                // a missing vouch is a value (the fan below counts the ones found): an operator need not vouch itself
+                Err(f) if id == "eigone" || id.starts_with("vouch-") => {
                     let _ = f;
                     Value::Null
                 }
@@ -168,6 +188,8 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                     } else {
                         s.set("answer2");
                         s.mark("prompt");
+                        s.mark("prompt1");
+                        h = h.timer("reprompt", 30_000);
                         let nick = s.st["identity"].as_str().unwrap_or_default().split('.').next().unwrap_or_default().to_string();
                         h = h.call(host("prompt2", "atirc.meshPub", json!({ "cluster": rq, "node": "st-owner", "text": format!("{nick}: uname -m") })));
                     }
@@ -186,7 +208,7 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 }
                 "node" => {
                     s.set("online");
-                    h = h.call(steps::host_sub("mesh", "atirc.meshSub", json!({ "cluster": rq, "node": "st-owner" })));
+                    h = h.call(steps::host_sub("mesh", "atirc.meshSub", json!({ "cluster": rq, "node": "st-owner" }))).timer("first", 60_000);
                 }
                 "restart" => {
                     if o["did"] != did.as_str() {
