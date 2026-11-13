@@ -56,11 +56,15 @@ steps:
       url="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/guest-images/$TARGET/$pin"
       img=/root/ci-guest-image && rm -rf "$img" "$img.published"
       published=true
+      # never downloads the image: the publish stores each object's sha256 (x-amz-meta-sha256) beside its bytes
       for f in image.json vmlinux rootfs.ext4; do
         want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].sha256' internal/versions/versions.json)"
-        got="$(curl -sSfL --retry 3 --max-time 1800 "$url/$f" | sha256sum | cut -d' ' -f1)" || got=
-        echo "$TARGET/$f sha256 ${got:-absent} (pinned $want) at $url/$f"
-        [ "$got" = "$want" ] || published=false
+        bytes="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].bytes' internal/versions/versions.json)"
+        head="$(curl -sSfI --retry 3 --max-time 60 "$url/$f" | tr -d '\r')" || head=
+        got="$(printf '%s\n' "$head" | awk 'tolower($1)=="x-amz-meta-sha256:" {print $2}')"
+        size="$(printf '%s\n' "$head" | awk 'tolower($1)=="content-length:" {print $2}')"
+        echo "$TARGET/$f sha256 ${got:-absent} ${size:-?} bytes (pinned $want, $bytes bytes) at $url/$f"
+        [ "$got" = "$want" ] && [ "$size" = "$bytes" ] || published=false
       done
       if [ "$published" = true ]; then
         echo "guest-image: not building $TARGET: every output is published at $url and matches its pin"
