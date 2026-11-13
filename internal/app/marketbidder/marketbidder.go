@@ -329,7 +329,6 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 				p.st.AppliedSet = &v1alpha1.AppliedSet{Generation: o.Generation, Digest: digest}
 			}
 		}
-		p.log().Warn("no ComputeVM PolicyTrigger action handler is registered; ComputeVM triggers stay fail-closed")
 	}
 	if _, _, err := c.VaultRefs(ctx, ws, BidderVaultServer, BidderVaultClient); err != nil {
 		return p.wait("its vault: " + err.Error())
