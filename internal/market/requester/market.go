@@ -227,6 +227,8 @@ type MarketClient interface {
 	FindReceipt(ctx context.Context, bidderDID, acceptURI, acceptCID string) (*market.ResolvedRecord, error)
 
 	FindTermination(ctx context.Context, bidderDID, receiptURI string) (*MarketEvent, error)
+
+	ReleaseBidder(ctx context.Context, did string) (Bidder, bool)
 }
 
 type HTTPMarket struct {
@@ -410,6 +412,14 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	}
 	bidder.NestedVirt = offering.NestedVirt
 	return []Bidder{bidder}, dropNoOffering
+}
+
+func (m *HTTPMarket) ReleaseBidder(ctx context.Context, did string) (Bidder, bool) {
+	offering, _, err := market.ReadOffering(ctx, m.Reader, did)
+	if err != nil {
+		return Bidder{}, false
+	}
+	return BidderFor(did, offering.Endpoints, m.EndpointKinds)
 }
 
 func BidderFor(did string, endpoints []market.Endpoint, kinds []string) (Bidder, bool) {

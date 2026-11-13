@@ -755,12 +755,13 @@ func BuildOffering(endpoints []Endpoint, appliesTo []string, ingress []RecordRef
 	return Offering{Endpoints: endpoints, AppliesTo: appliesTo, Ingress: records, CreatedAt: isoOrNow(createdAt), RefreshedAt: refreshedAt}, nil
 }
 
-func BuildWithdrawnOffering(createdAt, withdrawnAt string) (Offering, error) {
+func BuildWithdrawnOffering(createdAt, withdrawnAt string, endpoints []Endpoint) (Offering, error) {
 	withdrawnAt = isoOrNow(withdrawnAt)
 	if err := validateOptionalDatetime(withdrawnAt, "withdrawnAt"); err != nil {
 		return Offering{}, err
 	}
 	return Offering{
+		Endpoints:   endpoints,
 		AppliesTo:   []string{},
 		CreatedAt:   isoOrNow(createdAt),
 		RefreshedAt: withdrawnAt,

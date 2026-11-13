@@ -100,14 +100,15 @@ func (b *Bidder) withdraw(ctx context.Context) {
 	if readErr != nil {
 		b.log.Warn("reading the market offering to withdraw failed; it is withdrawn anyway", "err", readErr)
 	}
-	if prior != nil && market.OfferingWithdrawn(*prior) {
+	endpoints := b.offeredEndpoints(b.ensureListen(ctx))
+	if prior != nil && market.OfferingWithdrawn(*prior) && sameEndpoints(prior.Endpoints, endpoints) {
 		return
 	}
 	createdAt := ""
 	if prior != nil {
 		createdAt = prior.CreatedAt
 	}
-	record, err := market.BuildWithdrawnOffering(createdAt, b.now().UTC().Format(time.RFC3339))
+	record, err := market.BuildWithdrawnOffering(createdAt, b.now().UTC().Format(time.RFC3339), endpoints)
 	if err != nil {
 		b.log.Warn("building the withdrawn market offering failed", "err", err)
 		return

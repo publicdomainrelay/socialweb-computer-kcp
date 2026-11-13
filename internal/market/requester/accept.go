@@ -253,7 +253,7 @@ func (q *Requester) bidderForDID(ctx context.Context, did string) (Bidder, bool)
 			return bidder, true
 		}
 	}
-	return Bidder{}, false
+	return q.market.ReleaseBidder(ctx, did)
 }
 
 func (q *Requester) classifyBid(ctx context.Context, bid *BidRecord) error {
