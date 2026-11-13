@@ -71,6 +71,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
         Event::Result { id, result, .. } => {
             let out = match result.output() {
                 Ok(o) => o.clone(),
+                Err(_) if id == "summary" => return Ok(h.state(st)),
                 Err(e) => return Ok(fail(&st, format!("{id}: {e}"))),
             };
             match id.as_str() {
@@ -136,8 +137,6 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 "summary" => {
                     st["receipt"] = out["contract"]["receiptUri"].clone();
                     st["readings"]["winner"] = out["contract"]["winnerDid"].clone();
-                    st["t_rel"] = json!(now);
-                    h = h.call(call("release", "request.release", json!({ "name": name })));
                 }
                 "release" => {
                     let s = out["seconds"].as_f64().unwrap_or(f64::MAX);
@@ -149,6 +148,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                         ));
                     }
                     set(&mut st, "released");
+                    h = h.call(call("summary", "request.summary", json!({ "name": name })));
                 }
                 "records" => {
                     let mut uris = out["uris"].as_array().cloned().unwrap_or_default();
@@ -268,11 +268,9 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
             {
                 st["readings"]["answer_s"] = json!(now - st["t_prompt"].as_f64().unwrap_or(now));
                 set(&mut st, "release");
-                h = h.cancel("mesh").call(call(
-                    "summary",
-                    "request.summary",
-                    json!({ "name": name }),
-                ));
+                // the summary is written when the --hold process ends: release first, read it after
+                st["t_rel"] = json!(now);
+                h = h.cancel("mesh").call(call("release", "request.release", json!({ "name": name })));
             }
         }
         Event::Closed { id, error } if id == "req" || (id == "mesh" && phase != "release") => {
