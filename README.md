@@ -7,13 +7,13 @@ Rent and sell VMs on the atproto compute market. One binary: `socialweb-computer
 Linux amd64 and arm64 (no macOS build is published).
 
 ```sh
-V=v0.0.0-rc164
+V=v0.0.0-rc165
 ARCH=linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 cd "$(mktemp -d)"
 curl -fLO https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/releases/$V/binaries/socialweb-computer-$ARCH
 cat > SHA256SUMS <<'EOF'
-0722fb6551163e8c5f800aef6a66fe9fcad33d6567594f564a9388ae5ec5030c  socialweb-computer-linux-amd64
-83ab88477f3968eb067bf7eec0b39dd64093695ff440e4c3d54e1b35f2c905d5  socialweb-computer-linux-arm64
+eb91c035530bd965a7d59d1c7b0e88e1ab4e4ea5452b5e6cea5efe82248d26dd  socialweb-computer-linux-amd64
+7d9d5651b29876c60242b48d336df7416c813ef459055a0a5d1b3e71b582cbf3  socialweb-computer-linux-arm64
 EOF
 sha256sum -c --ignore-missing SHA256SUMS
 install -D -m 0755 socialweb-computer-$ARCH ~/.local/bin/socialweb-computer
