@@ -794,7 +794,9 @@ not oversubscribed; an exclusive entry (0001: k8s nodes one per host; 0007:resta
 (`GATE_EXCLUSIVE`); `GATE_JOBS=1` is the serial gate. `--on-fail freeze`, `GATE_FREEZE_TTL` 900 s; one
 `RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>` line each as it ends, a summary table in gate order with the
 wall time, exit 1 on a FAIL. A SKIP
-names its reason (0010 iOS paused; staging-only entries; `GATE_SKIP="<runbook>:<entry>=<reason>;..."`). Logs, the
+names its reason (0010 iOS paused; staging-only entries; `GATE_SKIP="<runbook>:<entry>=<reason>;..."`). The serial
+gate2 of 2026-11-13 (entries summing to 3528 s) scheduled this way takes about 2200 s with bob and alice, about 1970 s
+with a third account; 0001 (803 s) runs alone, which is the floor. Logs, the
 readings and each run's dump path: `~/.tmp/swc-system-tests/gate/<time>/`.
 
 ## Prod deployments

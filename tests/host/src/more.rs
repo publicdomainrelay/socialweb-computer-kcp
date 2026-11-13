@@ -615,7 +615,7 @@ impl Swc {
             // how many lines of a bidder's log hold each text (a text: a string, or a list of strings a line must all
             // hold), counted now (a module diffs two counts): a network bidder's core.log under the network's dev
             // state, an installed one's journal (swc-bidder, read-only, over ssh); the texts never reach a shell
-            "bidder.logCount" => {
+            "bidder.logCount" | "bidder.logLines" => {
                 let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
                 let Some(b) = self.target.bidders.iter().find(|b| b.name == name) else { return Some(Err(format!("no bidder {name} in the target"))) };
                 let texts: Vec<Vec<String>> = input["texts"].as_array().into_iter().flatten().map(|t| match t {
@@ -625,14 +625,24 @@ impl Swc {
                 if texts.is_empty() || texts.iter().any(|t| t.is_empty() || t.iter().any(|x| x.is_empty() || x.chars().any(char::is_control))) {
                     return Some(Err("texts: strings or lists of strings, none empty".into()));
                 }
+                let lines = what == "bidder.logLines";
                 let count = |log: &str| json!(texts.iter().map(|t| (t.join(" & "), json!(log.lines().filter(|l| t.iter().all(|x| l.contains(x.as_str()))).count()))).collect::<serde_json::Map<_, _>>());
+                // bidder.logLines: the JSON lines holding every text of the first entry of `texts`, as {time, msg, fields} of the
+                // keys named in `keys` (at most 50)
+                let pick = |log: &str| {
+                    let keys: Vec<String> = input["keys"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(String::from)).collect();
+                    let rows: Vec<Value> = log.lines().filter(|l| texts[0].iter().all(|x| l.contains(x.as_str()))).filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                        .map(|v| { let mut o = json!({ "time": v["time"], "msg": v["msg"] }); for k in &keys { o[k] = v[k].clone(); } o }).take(50).collect();
+                    json!({ "lines": rows })
+                };
+                let out = |log: &str, from: &str| if lines { let mut v = pick(log); v["log"] = json!(from); v } else { json!({ "counts": count(log), "log": from }) };
                 if let Some(n) = &self.target.network {
                     let i = &n.instance;
                     let p = testkit::target::expand(&n.state_dir).join(format!("dev/{i}/apps/dev/{i}-{name}/logs/core.log"));
-                    return Some(std::fs::read_to_string(&p).map(|l| json!({ "counts": count(&l), "log": p.display().to_string() })).map_err(|e| format!("{}: {e}", p.display())));
+                    return Some(std::fs::read_to_string(&p).map(|l| out(&l, &p.display().to_string())).map_err(|e| format!("{}: {e}", p.display())));
                 }
                 let Some(testkit::target::Via::Ssh { host }) = b.kcp.as_ref().map(|k| &k.via) else { return Some(Err(format!("{name}: the host reaches its bidder log by ssh or in the network only"))) };
-                on_host(Some(host), BIDDER_LOG).await.map(|l| json!({ "counts": count(&l), "log": "journal" }))
+                on_host(Some(host), BIDDER_LOG).await.map(|l| out(&l, "journal"))
             }
             // a bidder host's health without sudo (0006, 0008): its `run bidder` unit's ERROR lines since the process
             // started (and in its first 10 min), automatic restarts since the last stop, VM processes, when it verified

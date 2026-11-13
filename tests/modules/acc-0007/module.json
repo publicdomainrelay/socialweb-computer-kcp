@@ -6,6 +6,11 @@
 			"entry": "run",
 			"label": "Run 0007",
 			"description": "Fault injection on the winner, scoped to the receipt."
+		},
+		{
+			"entry": "restart",
+			"label": "Run 0007 restart",
+			"description": "Staging: the winner's core restarted in place under this run's VM; the VM lives on, adopted."
 		}
 	],
 	"calls": [
@@ -15,7 +20,13 @@
 		"com.atproto.repo.getRecord",
 		"com.fedfork.exec.kube.list",
 		"com.fedfork.exec.kube.delete",
-		"computer.socialweb.test.assert.recordsGone"
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.release",
+		"com.fedfork.exec.kube.get",
+		"computer.socialweb.test.bidder.logCount",
+		"computer.socialweb.test.bidder.restart",
+		"computer.socialweb.test.bidder.logLines"
 	],
 	"hooks": [
 		{
