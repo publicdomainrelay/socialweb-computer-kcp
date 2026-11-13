@@ -30,6 +30,9 @@ pub struct Target {
     /// hosts a test may administer as root (staging VMs only: `install requester`, a temporary bidder); ssh destinations
     #[serde(default)]
     pub root_hosts: Vec<String>,
+    /// 0003: a restarted invocation's ssh within this many seconds (prod 10)
+    #[serde(default = "default_restart_ssh_max_s")]
+    pub restart_ssh_max_s: f64,
     /// staging inside one VM: the `dev up --profile market-network` instance every `run request` joins (`--network`)
     #[serde(default)]
     pub network: Option<NetworkRef>,
@@ -58,6 +61,10 @@ pub struct Knotless {
 
 fn default_source_plc() -> String {
     "https://plc.directory".into()
+}
+
+fn default_restart_ssh_max_s() -> f64 {
+    10.0
 }
 
 fn default_requester() -> String {
