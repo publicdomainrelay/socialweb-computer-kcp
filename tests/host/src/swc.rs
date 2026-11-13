@@ -207,11 +207,23 @@ impl Swc {
 
     fn request_logs(&self, name: &str) -> Vec<PathBuf> {
         let base = self.request_state().join("requests").join(name);
-        vec![
+        let mut logs = vec![
             self.request_state().join(format!("{name}-request.log")),
             base.join("dev").join(name).join("logs/core.log"),
             base.join("logs/core.log"),
-        ]
+        ];
+        // `run request --network`: the invocation's requester is a child core of the network, its log there
+        if let Some(n) = &self.target.network {
+            logs.push(
+                expand(&n.state_dir)
+                    .join("dev")
+                    .join(&n.instance)
+                    .join("apps/dev")
+                    .join(format!("{}-{name}", n.instance))
+                    .join("logs/core.log"),
+            );
+        }
+        logs
     }
 
     async fn cli(&self, args: &[String]) -> Result<(bool, String), String> {
