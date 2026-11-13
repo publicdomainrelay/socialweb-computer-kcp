@@ -85,7 +85,7 @@ func IsGuestOriginatedEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
 		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID, ComputeEventsGuestR2ReleasedNSID,
-		ComputeEventsGuestMemoryPressureNSID, ComputeEventsGuestOOMKillNSID:
+		ComputeEventsGuestMemoryPressureNSID, ComputeEventsGuestOOMKillNSID, ComputeEventsGuestImageNSID:
 		return true
 	}
 	return false

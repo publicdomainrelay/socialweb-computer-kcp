@@ -565,6 +565,48 @@ func (v *ComputeEventsGuestAgentStart) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsGuestImage struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Marker     string                     `json:"marker"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsGuestImage) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.guest.image"
+}
+
+func ParseComputeEventsGuestImage(value map[string]any) (*ComputeEventsGuestImage, error) {
+	var out ComputeEventsGuestImage
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.guest.image", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsGuestImage) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsGuestImage
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.guest.image"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsGuestImage) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsGuestImage
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsGuestImage(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsGuestMemoryPressure struct {
 	Type         string                     `json:"$type"`
 	CreatedAt    string                     `json:"createdAt"`
@@ -1417,6 +1459,7 @@ type ComputeVM struct {
 	CreatedAt  string                     `json:"createdAt,omitempty"`
 	Disk       string                     `json:"disk,omitempty"`
 	ExpiresAt  string                     `json:"expiresAt,omitempty"`
+	Image      *ComputeVMImage            `json:"image,omitempty"`
 	Kind       string                     `json:"kind,omitempty"`
 	Location   *ComputeVMLocation         `json:"location,omitempty"`
 	Mem        string                     `json:"mem,omitempty"`
@@ -1457,6 +1500,31 @@ func (v *ComputeVM) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ComputeVM(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type ComputeVMImage struct {
+	Sha256 string                     `json:"sha256"`
+	URL    string                     `json:"url"`
+	Extra  map[string]json.RawMessage `json:"-"`
+	absent map[string]json.RawMessage
+}
+
+func (v ComputeVMImage) MarshalJSON() ([]byte, error) {
+	type plain ComputeVMImage
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeVMImage) UnmarshalJSON(b []byte) error {
+	type plain ComputeVMImage
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeVMImage(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil
@@ -1675,6 +1743,7 @@ type Offering struct {
 	AppliesTo   []string                   `json:"appliesTo,omitempty"`
 	CreatedAt   string                     `json:"createdAt"`
 	Endpoints   []Endpoint                 `json:"endpoints,omitempty"`
+	Images      bool                       `json:"images,omitempty"`
 	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	MaxCpus     int64                      `json:"maxCpus,omitempty"`
 	MaxMem      string                     `json:"maxMem,omitempty"`

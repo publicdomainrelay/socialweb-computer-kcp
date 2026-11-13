@@ -61,6 +61,7 @@ const (
 	ComputeEventsGuestR2ReleasedNSID       = GuestEventNSIDPrefix + "r2Released"
 	ComputeEventsGuestMemoryPressureNSID   = GuestEventNSIDPrefix + "memoryPressure"
 	ComputeEventsGuestOOMKillNSID          = GuestEventNSIDPrefix + "oomKill"
+	ComputeEventsGuestImageNSID            = GuestEventNSIDPrefix + "image"
 	ComputeGuestSubscribeEventsNSID        = "com.publicdomainrelay.temp.compute.guest.subscribeEvents"
 
 	IngressWebRTCNSID = "com.publicdomainrelay.temp.ingress.webRTC"
@@ -104,6 +105,7 @@ var VMTerminatedReasons = []string{
 	"identity_mismatch",
 	"deleted_on_request",
 	"expired",
+	"image_refused",
 }
 
 var VMHostKeyTypes = []string{
