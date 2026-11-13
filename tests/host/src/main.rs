@@ -230,7 +230,7 @@ async fn main_() -> Result<bool> {
     let started = atlibs_host::iso_now();
     let name = format!("st-{runbook}-{}", atlibs_host::now_ms() / 1000);
     let input: serde_json::Map<String, Value> =
-        json!({ "did": acc.did, "handle": acc.handle, "name": name })
+        json!({ "did": acc.did, "handle": acc.handle, "name": name, "pds": target.pds })
             .as_object()
             .unwrap()
             .clone();
@@ -252,8 +252,9 @@ async fn main_() -> Result<bool> {
     )
     .await;
 
-    let mut cleanup = swc.cleanup().await;
-    cleanup.extend(kube.cleanup().await);
+    // the run's kube objects first (a tenant cluster's pods, so its nodes scale down), then Infras and requesters
+    let mut cleanup = kube.cleanup().await;
+    cleanup.extend(swc.cleanup().await);
     let result = match &ran {
         Ok(v) => v.get("result").cloned().unwrap_or_else(|| v.clone()),
         Err(e) => json!({ "pass": false, "error": e }),

@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "staging",
+	"description": "A full socialweb.computer on rented VMs for one suite run, torn down after (tests/compositions/staging/README.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "staging"
+		}
+	]
+}
+

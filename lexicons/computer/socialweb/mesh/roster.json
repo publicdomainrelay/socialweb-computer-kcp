@@ -1,0 +1,84 @@
+{
+  "lexicon": 1,
+  "id": "computer.socialweb.mesh.roster",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "description": "One overlay's socialweb-meshd roster, written by its one orchestrator. Record key: the run (a staging stand-up's name). meshd reads it with one getRecord(DID, computer.socialweb.mesh.roster, run) as --roster or a Node's socialweb.computer/mesh-roster; never listed. Deleted at teardown.",
+      "record": {
+        "type": "object",
+        "required": [
+          "peers",
+          "createdAt"
+        ],
+        "properties": {
+          "zone": {
+            "type": "string",
+            "maxLength": 253,
+            "description": "The DNS zone every member serves (--dns-zone), e.g. <run>.staging.internal."
+          },
+          "peers": {
+            "type": "array",
+            "maxLength": 256,
+            "items": {
+              "type": "ref",
+              "ref": "#peer"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    },
+    "peer": {
+      "type": "object",
+      "required": [
+        "name",
+        "endpoint"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "The member's name; <name>.<zone> answers its first cidr's address."
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "description": "Its iroh endpoint id, 64 lowercase hex (socialweb-meshd identity)."
+        },
+        "cidrs": {
+          "type": "array",
+          "maxLength": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 43
+          },
+          "description": "The networks routed to it: a VM's overlay /32, a k3s node's podCIDR."
+        },
+        "addrs": {
+          "type": "array",
+          "maxLength": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "description": "Dialing hints, ip:port."
+        },
+        "names": {
+          "type": "array",
+          "maxLength": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 63
+          },
+          "description": "More names under the zone for the same address: the services it runs."
+        }
+      }
+    }
+  }
+}
