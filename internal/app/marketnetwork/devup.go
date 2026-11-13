@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	apisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
@@ -216,16 +218,47 @@ func ReadNetwork(ctx context.Context, kubeconfig string) (v1alpha1.MarketNetwork
 	return *o, nil
 }
 
-func ReadJoinedNetwork(ctx context.Context, kubeconfig string) (*v1alpha1.MarketNetworkValue, error) {
+func ReadRootNetwork(ctx context.Context, kubeconfig string) *v1alpha1.MarketNetworkValue {
 	dc, err := rootClient(kubeconfig)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	o, err := kube.Get[v1alpha1.MarketBidder](ctx, dc.Resource(compose.MarketBidderGVR), compose.ChildRootName)
+	return cmp.Or(
+		rootNetwork(ctx, dc, compose.MarketBidderGVR, func(o *v1alpha1.MarketBidder) *v1alpha1.MarketNetworkValue { return o.Spec.Network }),
+		rootNetwork(ctx, dc, compose.MarketRequesterGVR, func(o *v1alpha1.MarketRequester) *v1alpha1.MarketNetworkValue { return o.Spec.Network }),
+		rootNetwork(ctx, dc, compose.SshGatewayGVR, func(o *v1alpha1.SshGateway) *v1alpha1.MarketNetworkValue { return o.Spec.Network }),
+		rootNetwork(ctx, dc, compose.GatewayGVR, func(o *v1alpha1.Gateway) *v1alpha1.MarketNetworkValue { return o.Spec.Network }))
+}
+
+func rootNetwork[T any](ctx context.Context, dc *kube.Client, gvr schema.GroupVersionResource, network func(*T) *v1alpha1.MarketNetworkValue) *v1alpha1.MarketNetworkValue {
+	items, err := kube.List[T](ctx, dc.Resource(gvr), metav1.ListOptions{})
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	return o.Spec.Network, nil
+	for i := range items {
+		if n := network(&items[i]); n != nil {
+			return n
+		}
+	}
+	return nil
+}
+
+func FollowRootNetwork(ctx context.Context, kubeconfig string, changed func()) error {
+	dc, err := rootClient(kubeconfig)
+	if err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	wg.Go(func() { followRoot[v1alpha1.MarketBidder](ctx, dc, compose.MarketBidderGVR, changed) })
+	wg.Go(func() { followRoot[v1alpha1.MarketRequester](ctx, dc, compose.MarketRequesterGVR, changed) })
+	wg.Go(func() { followRoot[v1alpha1.SshGateway](ctx, dc, compose.SshGatewayGVR, changed) })
+	wg.Go(func() { followRoot[v1alpha1.Gateway](ctx, dc, compose.GatewayGVR, changed) })
+	wg.Wait()
+	return nil
+}
+
+func followRoot[T any](ctx context.Context, dc *kube.Client, gvr schema.GroupVersionResource, changed func()) {
+	kube.FollowResource[T](ctx, dc.Resource(gvr), metav1.ListOptions{}, func(*T, bool) { changed() })
 }
 
 const FailedComponentGrace = time.Minute

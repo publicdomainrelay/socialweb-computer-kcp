@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -210,7 +211,7 @@ func Run(ctx context.Context, cfg Config, m hostsvc.Manager) error {
 		}
 		coreCfg.Apps = &app.Config{Compose: ac, WebApp: cfg.WebApp, SignInGuard: cfg.SignInGuard}
 		g.Go("componentcore", func(ctx context.Context) error {
-			componentcore.Supervise(ctx, coreCfg)
+			superviseCore(ctx, coreCfg, rec.AdminKubeconfig, log)
 			return nil
 		})
 		hpCfg := HostProcessConfig(bcfg, rec, m, log)
@@ -410,6 +411,53 @@ func rollDrifted(ctx context.Context, m hostsvc.Manager, bcfg bootstrap.Config, 
 	return ensure(ctx, m, bcfg, l, rec, core, log)
 }
 
+func withNetwork(c componentcore.Config, n *v1alpha1.MarketNetworkValue) componentcore.Config {
+	c.PLCBaseURL, c.Relays, c.Network = "", nil, nil
+	if n != nil {
+		network := *n
+		c.PLCBaseURL, c.Relays, c.Network = n.PLCDirectoryURL, n.Relays(), &network
+	}
+	return c
+}
+
+func superviseCore(ctx context.Context, cfg componentcore.Config, kubeconfig string, log *slog.Logger) {
+	if n, err := marketnetwork.ReadNetwork(ctx, kubeconfig); kubeconfig == "" || (err == nil && n.Status.Network != nil) {
+		componentcore.Supervise(ctx, cfg)
+		return
+	}
+	changed := make(chan struct{}, 1)
+	go func() {
+		if err := marketnetwork.FollowRootNetwork(ctx, kubeconfig, func() {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}); err != nil {
+			log.Warn("the core does not follow its application's network value", "err", err.Error())
+		}
+	}()
+	for ctx.Err() == nil {
+		cctx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			componentcore.Supervise(cctx, cfg)
+			close(done)
+		}()
+		for restart := false; !restart && ctx.Err() == nil; {
+			select {
+			case <-ctx.Done():
+			case <-changed:
+				if n := marketnetwork.ReadRootNetwork(ctx, kubeconfig); !reflect.DeepEqual(n, cfg.Network) {
+					cfg, restart = withNetwork(cfg, n), true
+					log.Info("the application's network value changed; the component controller starts again with it", "plc", cfg.PLCBaseURL)
+				}
+			}
+		}
+		cancel()
+		<-done
+	}
+}
+
 func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record, log *slog.Logger) componentcore.Config {
 	out := componentcore.Config{
 		Kubeconfig:              rec.AdminKubeconfig,
@@ -432,14 +480,9 @@ func ComponentCoreConfig(ctx context.Context, cfg Config, rec devinstance.Record
 	}
 	if rec.AdminKubeconfig != "" {
 		if n, err := marketnetwork.ReadNetwork(ctx, rec.AdminKubeconfig); err == nil && n.Status.Network != nil {
-			out.PLCBaseURL = n.Status.Network.PLCDirectoryURL
-			out.Relays = n.Status.Network.Relays()
-			network := *n.Status.Network
-			out.Network = &network
-		} else if joined, err := marketnetwork.ReadJoinedNetwork(ctx, rec.AdminKubeconfig); err == nil && joined != nil {
-			out.PLCBaseURL = joined.PLCDirectoryURL
-			out.Relays = joined.Relays()
-			out.Network = joined
+			out = withNetwork(out, n.Status.Network)
+		} else {
+			out = withNetwork(out, marketnetwork.ReadRootNetwork(ctx, rec.AdminKubeconfig))
 		}
 	}
 	switch {
