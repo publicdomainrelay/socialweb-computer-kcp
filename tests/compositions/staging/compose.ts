@@ -9,7 +9,7 @@ const binding = async (key: string) => {
 
 const c = composition({
   name: "staging",
-  description: "A full socialweb.computer on rented VMs for one suite run, torn down after (tests/compositions/staging/README.md).",
+  description: "A self-contained socialweb.computer (dev up --profile market-network) on one rented VM for one suite run, torn down after (tests/compositions/staging/README.md).",
 });
 c.instance("test", await binding("staging"));
 
