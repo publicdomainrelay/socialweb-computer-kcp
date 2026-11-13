@@ -7,6 +7,7 @@
   "atirc": "https://irc.fedfork.com",
   "requester": "release",
   "agentConfig": "~/.config/atirc/config.toml",
+  "pageRepo": "~/.tmp/swc-system-tests/atlibs-socialweb-computer-requester",
   "gateway": {
     "url": "https://k8s.socialweb.computer",
     "aud": "did:web:k8s.socialweb.computer",

@@ -23,8 +23,11 @@ cargo run -p testkit --bin last-pass -- readings/0004-*.json          # passing 
 
 `targets/prod.json` is prod. Fields: `plc`, `pds` (where app-password sessions sign in), `relay`, `jetstream`, `atirc`,
 `gateway` (`url`, `aud`, `ssh`, optional `kcp`), `bidders[]` (`name`, `did`, `operator`, optional `kcp`), `accounts`
-(`handle`, `did`, `creds`, `oauthAccount`, `throwaway`), `agentConfig`, `requester`.
+(`handle`, `did`, `creds`, `oauthAccount`, `throwaway`), `agentConfig`, `pageRepo`, `requester`.
 
+- `pageRepo` (0009): a checkout of the requester page repo,
+  `git clone https://knotless.dev/johnandersen777.bsky.social/atlibs-socialweb-computer-requester ~/.tmp/swc-system-tests/atlibs-socialweb-computer-requester`;
+  unset, 0009 is skipped.
 - `requester`: the orchestrator binary: `release` (newest `v*` tag), `release:<tag>`, `sha:<commit>` (CI's `main/<sha>`),
   `path:<file>` (a local build). Downloads are checked against `SHA256SUMS`, cached in `~/.tmp/swc-system-tests/bin`.
 - `accounts[].creds`: a shell file exporting `*ATPROTO_HANDLE` and `*ATPROTO_PASSWORD`, mode 0600 (refused otherwise).
@@ -100,6 +103,8 @@ headless Chrome and its WebRTC session.
 Owner-approved (2026-11-12): each runbook becomes a composition on atlibs' step loop (events `start`, `result`,
 `message`/`closed`, `timer`; outputs `calls`, `send`, `cancel`, `timers`, `state`, `done`). A runbook's Rust test here
 stays until its composition passes on staging and prod.
+A module whose XRPC needs a scope (0001's gateway calls) names it in its module.json `scope`, the scope of the
+client a published module would have; without one the host refuses those calls.
 
 | composition | entries (`--entry`) | live |
 | --- | --- | --- |
