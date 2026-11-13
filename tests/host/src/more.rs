@@ -592,6 +592,37 @@ impl Swc {
                 }
                 None => Err("url is required".into()),
             },
+            // a bidder host's health without sudo (0006, 0008): its `run bidder` unit's ERROR lines since the process
+            // started (and in its first 10 min), automatic restarts since the last stop, VM processes
+            "bidder.health" => {
+                let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
+                let Some(b) = self.target.bidders.iter().find(|b| b.name == name) else { return Some(Err(format!("no bidder {name} in the target"))) };
+                let via = match b.kcp.as_ref().map(|k| &k.via) {
+                    Some(testkit::target::Via::Ssh { host }) => Some(host.clone()),
+                    Some(testkit::target::Via::Direct) => None,
+                    _ => return Some(Err(format!("{name}: the host reaches its bidder by ssh or locally only"))),
+                };
+                on_host(via.as_deref(), BIDDER_HEALTH).await.and_then(|o| serde_json::from_str(o.trim()).map_err(|e| format!("{name}: {e}: {}", tail(&o))))
+            }
+            // the ssh gateway's core log lines of a DID since an ISO time (0002: revoke before release), read over ssh
+            "gateway.log" => {
+                let (Ok(did), Ok(since)) = (str_of(input, "did"), str_of(input, "since")) else { return Some(Err("did and since are required".into())) };
+                let Some(l) = self.target.gateway.log.clone() else { return Some(Err("the target names no gateway.log".into())) };
+                if !did.starts_with("did:") || did.contains(['\'', ' ']) {
+                    return Some(Err("did is a DID".into()));
+                }
+                let msgs: Vec<String> = input["msgs"].as_array().into_iter().flatten().filter_map(|m| m.as_str().map(String::from)).collect();
+                on_host(Some(&l.host), &format!("grep -F '\"did\":\"{did}\"' '{}' || true", l.path.replace('\'', ""))).await.map(|o| {
+                    let lines: Vec<Value> = o
+                        .lines()
+                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                        .filter(|v| v["time"].as_str().is_some_and(|t| t >= since))
+                        .filter(|v| msgs.is_empty() || v["msg"].as_str().is_some_and(|m| msgs.iter().any(|x| x == m)))
+                        .map(|v| json!({ "time": v["time"], "msg": v["msg"], "subhandle": v["subhandle"], "contract": v["contract"], "receipt": v["receipt"], "deleted": v["deleted"], "of": v["of"], "reason": v["reason"] }))
+                        .collect();
+                    json!({ "lines": lines })
+                })
+            }
             "page.fetch" => match input["url"].as_str() {
                 Some(url) => {
                     self.page_fetch(
@@ -1061,4 +1092,45 @@ pub async fn cleanup_from_disk(
         let _ = std::fs::remove_file(p);
     }
     errors
+}
+
+/// bidder.health on a bidder host: read-only, no sudo (journal of the account swc-bidder, /proc), one JSON line.
+const BIDDER_HEALTH: &str = r#"pid=$(pgrep -u swc-bidder -f "socialweb-computer run bidder" | head -1)
+[ -n "$pid" ] || { echo '{"error":"no run bidder process of the account swc-bidder"}'; exit 0; }
+unit=$(grep -o '[^/]*\.service' /proc/$pid/cgroup | tail -1)
+start=$(date -d "$(ps -o lstart= -p $pid)" +%s)
+U=$(id -u swc-bidder)
+log() { journalctl _UID=$U --since "@$start" "$@" -o cat --no-pager 2>/dev/null; }
+errors=$(log | grep -c '"level":"ERROR"')
+startup=$(log --until "@$((start + 600))" | grep -c '"level":"ERROR"\|unsupported type: source.TypedFunc')
+sample=$(log | grep '"level":"ERROR"' | tail -3 | jq -c '{time, msg, err: ((.err // .error // "") | tostring | .[0:160])}' | jq -sc .)
+restarts=$(journalctl _UID=$U USER_UNIT=$unit --since -14d -o cat --no-pager 2>/dev/null | awk '/Stopping /{n=0} /Scheduled restart job/{n++} END{print n+0}')
+procs=$(( $(pgrep -c -u swc-bidder -x firecracker) + $(pgrep -c -u swc-bidder -f qemu-system) ))
+jq -nc --arg unit "$unit" --arg started "$(date -u -d @$start +%FT%TZ)" \
+  --argjson errors "$errors" --argjson startup "$startup" --argjson restarts "$restarts" --argjson procs "$procs" --argjson sample "${sample:-[]}" \
+  '{unit: $unit, started: $started, errors: $errors, startupErrors: $startup, restarts: $restarts, vmProcesses: $procs, errorSample: $sample}'
+"#;
+
+/// A script on this host (`bash -s`) or on an ssh alias (`ssh -o BatchMode=yes <host> bash -s`), its stdout.
+async fn on_host(host: Option<&str>, script: &str) -> Result<String, String> {
+    use tokio::io::AsyncWriteExt;
+    let mut cmd = match host {
+        Some(h) => {
+            let mut c = tokio::process::Command::new("ssh");
+            c.args(["-o", "BatchMode=yes", "-o", "LogLevel=ERROR", h, "bash", "-s"]);
+            c
+        }
+        None => {
+            let mut c = tokio::process::Command::new("bash");
+            c.arg("-s");
+            c
+        }
+    };
+    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).spawn().map_err(|e| e.to_string())?;
+    child.stdin.take().ok_or("no stdin")?.write_all(script.as_bytes()).await.map_err(|e| e.to_string())?;
+    let out = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output()).await.map_err(|_| "the host script did not end in 120 s".to_string())?.map_err(|e| e.to_string())?;
+    if !out.status.success() && out.stdout.is_empty() {
+        return Err(format!("{}: {}", host.unwrap_or("this host"), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

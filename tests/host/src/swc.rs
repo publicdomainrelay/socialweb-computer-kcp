@@ -64,6 +64,8 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.checkLogs",
     "computer.socialweb.test.knotless.seed",
     "computer.socialweb.test.knotless.sh",
+    "computer.socialweb.test.bidder.health",
+    "computer.socialweb.test.gateway.log",
     "com.fedfork.exec.identlink.walk",
     "com.fedfork.exec.identlink.plc",
 ];
@@ -415,6 +417,8 @@ impl Swc {
             .map_err(|e| e.to_string())?;
         self.requests.lock().unwrap().insert(name.clone(), state);
         let (tx, messages) = mpsc::unbounded_channel();
+        // which binary runs the invocation (0006 compat: the unchanged CLI's)
+        let _ = tx.send(Ok(json!({ "msg": "requester_binary", "version": bin.version, "compat": input["compat"] == true })));
         let (commands, mut cmds) = mpsc::unbounded_channel::<SubCmd>();
         let receipts = self.receipts.clone();
         tokio::spawn(async move {

@@ -12,7 +12,8 @@
     "url": "https://k8s.socialweb.computer",
     "aud": "did:web:k8s.socialweb.computer",
     "ssh": "socialweb.computer",
-    "requesterDid": "did:plc:jjcsg5fg3ujd22ywuxg4lr72"
+    "requesterDid": "did:plc:jjcsg5fg3ujd22ywuxg4lr72",
+    "log": { "host": "socialweb.computer", "path": "/var/lib/socialweb-computer/socialweb/sg/dev/sg/logs/core.log" }
   },
   "bidders": [
     {

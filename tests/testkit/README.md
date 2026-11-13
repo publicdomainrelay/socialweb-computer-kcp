@@ -22,7 +22,7 @@ cargo run -p testkit --bin last-pass -- readings/0004-*.json          # passing 
 ## target.json
 
 `targets/prod.json` is prod. Fields: `plc`, `pds` (where app-password sessions sign in), `relay`, `jetstream`, `atirc`,
-`gateway` (`url`, `aud`, `ssh`, optional `kcp`), `bidders[]` (`name`, `did`, `operator`, optional `kcp`), `accounts`
+`gateway` (`url`, `aud`, `ssh`, optional `kcp`, optional `log` {`host`, `path`}: the ssh gateway's core log over an ssh alias, 0002), `bidders[]` (`name`, `did`, `operator`, optional `kcp`), `accounts`
 (`handle`, `did`, `creds`, `oauthAccount`, `throwaway`), `agentConfig`, `pageRepo`, `requester`.
 
 - `pageRepo` (0009): a built checkout of the requester page repo (its README's Build: `cargo wasm` there and in the
@@ -140,8 +140,9 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/000
 | `com.fedfork.exec.kube.{get,list,apply,patch,delete}`, `kube.watch` (subscription) | atlibs-kube (knotless) | any kcp or cluster the host names; writes only to what the run created, or what the host's guard allows; `cleanup()` deletes them and restores patched specs |
 | `com.fedfork.exec.ssh.{exec,session}` | atlibs-ssh (knotless) | the system ssh to destinations the host names (`-F /dev/null`, `SetEnv`) |
 | `computer.socialweb.test.{requester,request,account,atirc}.*` | `tests/host` (`swc-test-host`) | the requester under test as the account: `run requester` (its kcp becomes cluster `requester:<name>`), `run request` (its log events a subscription), the owner's mesh node; released and stopped after the run |
+| `computer.socialweb.test.bidder.health`, `computer.socialweb.test.gateway.log` | `tests/host` | a bidder host's health without sudo (its `run bidder` journal: ERROR lines since start and in the first 10 min, automatic restarts, VM processes), over the bidder's ssh alias or here; the ssh gateway log lines of a DID (target `gateway.log`) |
 | `com.fedfork.exec.identlink.{walk,plc}` | `tests/host` (to move into atlibs-host) | identlink's verified walk, PLC log/last and documents of the target's PLC |
-| `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain; each asks again every 10 s for up to `within` s (180) |
+| `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain, no market or compute record created since a time (`none_since`, every listRecords page); each asks again every 10 s for up to `within` s (180) |
 | `acc-0004` | `tests/modules/acc-0004`, `tests/compositions/0004` | the runbook as a state machine |
 
 ### Freeze, inspect, replay

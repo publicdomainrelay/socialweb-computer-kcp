@@ -268,4 +268,75 @@ fn agent_chain_handler(run: Run<Value>) -> Result<Handle, String> {
     })
 }
 
-entries! { records_gone => records_gone_handler, tombstoned => tombstoned_handler, agent_chain => agent_chain_handler }
+const MARKET: [&str; 2] = ["com.publicdomainrelay.temp.market.", "com.publicdomainrelay.temp.compute."];
+
+/// A listRecords page's records created at or after `since` into `left`, those with no createdAt into `undated`.
+fn tally(st: &mut Value, page: &Value, since: f64) {
+    for r in page["records"].as_array().into_iter().flatten() {
+        match r["value"]["createdAt"].as_str() {
+            Some(t) if steps::secs(t) >= since => st["left"].as_array_mut().unwrap().push(r["uri"].clone()),
+            Some(_) => {}
+            None => st["undated"].as_array_mut().unwrap().push(r["uri"].clone()),
+        }
+    }
+}
+
+/// none_since {did, since, prefixes?}: no record of a collection under `prefixes` (default the market's and compute's)
+/// in the repo of `did` was created at or after `since` (its createdAt): {left, undated, errors} (the hand runs' full
+/// listRecords scan; it sees records whose URIs no log of the run names, e.g. a separate release process's).
+fn none_since_handler(run: Run<Value>) -> Result<Handle, String> {
+    let did = run.args["did"].as_str().ok_or("did is required")?.to_string();
+    let since = steps::secs(run.args["since"].as_str().ok_or("since is required")?);
+    let prefixes: Vec<String> = match run.args["prefixes"].as_array() {
+        Some(p) => p.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        None => MARKET.iter().map(|p| p.to_string()).collect(),
+    };
+    let fresh = json!({ "pending": 0, "left": [], "undated": [], "errors": [] });
+    let (c, mut st) = clock(&run, &fresh);
+    Ok(match run.event {
+        Event::Start | Event::Timer { .. } => Handle::new()
+            .call(Call::new("d", "com.atproto.repo.describeRepo").params(json!({ "repo": did })).service(did.clone()))
+            .state(st),
+        Event::Result { id, result, .. } if id == "d" => {
+            let o = result.output()?.clone();
+            let cols: Vec<String> = o["collections"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).filter(|x| prefixes.iter().any(|p| x.starts_with(p.as_str()))).map(String::from).collect();
+            if cols.is_empty() {
+                return Ok(Handle::new().result(json!({ "left": [], "undated": [], "errors": [], "seconds": took(c, &st) })).done());
+            }
+            let mut h = Handle::new();
+            for (i, col) in cols.iter().enumerate() {
+                h = h.call(Call::new(format!("l-{i}"), "com.atproto.repo.listRecords").params(json!({ "repo": did, "collection": col, "limit": 100 })).service(did.clone()));
+            }
+            st["pending"] = json!(cols.len());
+            h.state(st)
+        }
+        Event::Result { id, result, .. } => {
+            match result.output() {
+                Ok(o) => {
+                    // rkeys are not all TIDs (hash rkeys sort anywhere): every page, up to 50 per collection (the page stays pending)
+                    let (i, page) = id.trim_start_matches("l-").split_once('-').map_or((id.trim_start_matches("l-").to_string(), 0), |(a, b)| (a.to_string(), b.parse().unwrap_or(0)));
+                    if let Some(cursor) = o["cursor"].as_str().filter(|_| o["records"].as_array().is_some_and(|r| r.len() == 100) && page < 50) {
+                        let col = o["records"][0]["uri"].as_str().unwrap_or_default().split('/').nth(3).unwrap_or_default().to_string();
+                        let call = Call::new(format!("l-{i}-{}", page + 1), "com.atproto.repo.listRecords").params(json!({ "repo": did, "collection": col, "limit": 100, "cursor": cursor })).service(did.clone());
+                        tally(&mut st, o, since);
+                        return Ok(Handle::new().call(call).state(st));
+                    }
+                    tally(&mut st, o, since);
+                }
+                Err(e) => st["errors"].as_array_mut().unwrap().push(json!(e)),
+            }
+            st["pending"] = json!(st["pending"].as_u64().unwrap_or(1) - 1);
+            if st["pending"] != 0 {
+                return Ok(Handle::new().state(st));
+            }
+            let clean = st["left"].as_array().is_some_and(|l| l.is_empty()) && st["errors"].as_array().is_some_and(|e| e.is_empty());
+            if !clean && let Some(h) = again(c, &st, fresh) {
+                return Ok(h);
+            }
+            Handle::new().result(json!({ "left": st["left"], "undated": st["undated"], "errors": st["errors"], "seconds": took(c, &st) })).done()
+        }
+        _ => Handle::new().state(st),
+    })
+}
+
+entries! { records_gone => records_gone_handler, tombstoned => tombstoned_handler, agent_chain => agent_chain_handler, none_since => none_since_handler }

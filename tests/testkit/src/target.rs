@@ -88,6 +88,16 @@ pub struct Gateway {
     /// the gateway's own kcp (fault injection, NodeClaim winners); absent on prod unless the lead grants it
     #[serde(default)]
     pub kcp: Option<KcpEndpoint>,
+    /// the ssh gateway's core log, read over ssh (0002: revoke before release); absent: 0002 does not read it
+    #[serde(default)]
+    pub log: Option<GatewayLog>,
+}
+
+/// A log file on a host this runner reaches by an ssh alias.
+#[derive(Debug, Deserialize, Clone)]
+pub struct GatewayLog {
+    pub host: String,
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -4,13 +4,15 @@
 	"actions": [
 		{ "entry": "records_gone", "label": "Records gone", "description": "Reads each record 3 times: left, errors.", "readOnly": true },
 		{ "entry": "tombstoned", "label": "Tombstoned", "description": "PLC log/last plc_tombstone and no document: alive.", "readOnly": true },
-		{ "entry": "agent_chain", "label": "Agent chain", "description": "The renter -> R2 -> agent pair + grant chain and walk.", "readOnly": true }
+		{ "entry": "agent_chain", "label": "Agent chain", "description": "The renter -> R2 -> agent pair + grant chain and walk.", "readOnly": true },
+		{ "entry": "none_since", "label": "None since", "description": "No market or compute record of the DID created since a time: left, undated, errors.", "readOnly": true }
 	],
-	"calls": ["com.atproto.repo.getRecord", "com.fedfork.exec.identlink.plc", "com.fedfork.exec.identlink.walk"],
+	"calls": ["com.atproto.repo.getRecord", "com.atproto.repo.describeRepo", "com.atproto.repo.listRecords", "com.fedfork.exec.identlink.plc", "com.fedfork.exec.identlink.walk"],
 	"implements": [
 		{ "nsid": "computer.socialweb.test.assert.recordsGone", "entry": "records_gone" },
 		{ "nsid": "computer.socialweb.test.assert.tombstoned", "entry": "tombstoned" },
-		{ "nsid": "computer.socialweb.test.assert.agentChain", "entry": "agent_chain" }
+		{ "nsid": "computer.socialweb.test.assert.agentChain", "entry": "agent_chain" },
+		{ "nsid": "computer.socialweb.test.assert.noneSince", "entry": "none_since" }
 	],
 	"hooks": [
 		{ "nsid": "com.fedfork.exec.identlink.plc", "required": true, "entries": ["tombstoned", "agent_chain"], "reason": "PLC log/last and documents from the host (its PLC)" },
