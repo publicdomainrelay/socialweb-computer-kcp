@@ -47,13 +47,14 @@ case "$(uname -m)" in
 esac
 zig_dir="${MESHD_ZIG_CACHE:-$HOME/.cache/socialweb-meshd-zig}/$zig_sha256"
 if [ ! -x "$zig_dir/zig" ]; then
-  rm -rf "$zig_dir.tmp"
-  mkdir -p "$zig_dir.tmp"
-  curl -fsSL --max-time 300 -o "$zig_dir.tmp/zig.tar.xz" "https://ziglang.org/download/$zig_version/zig-$(uname -m)-linux-$zig_version.tar.xz"
-  echo "$zig_sha256  $zig_dir.tmp/zig.tar.xz" | sha256sum -c --quiet -
-  tar -xJf "$zig_dir.tmp/zig.tar.xz" -C "$zig_dir.tmp" --strip-components=1
-  rm "$zig_dir.tmp/zig.tar.xz"
-  mv -T "$zig_dir.tmp" "$zig_dir"
+  mkdir -p "${zig_dir%/*}"
+  zig_tmp="$(mktemp -d "$zig_dir.tmp.XXXXXX")"
+  curl -fsSL --max-time 300 -o "$zig_tmp/zig.tar.xz" "https://ziglang.org/download/$zig_version/zig-$(uname -m)-linux-$zig_version.tar.xz"
+  echo "$zig_sha256  $zig_tmp/zig.tar.xz" | sha256sum -c --quiet -
+  tar -xJf "$zig_tmp/zig.tar.xz" -C "$zig_tmp" --strip-components=1
+  rm "$zig_tmp/zig.tar.xz"
+  mv -T "$zig_tmp" "$zig_dir" 2>/dev/null || rm -rf "$zig_tmp"
+  [ -x "$zig_dir/zig" ]
 fi
 command -v unshare >/dev/null || { echo "build.sh: unshare not found" >&2; exit 1; }
 sysroot="$(rustc --print sysroot)"
