@@ -3,7 +3,8 @@
 # run's dump is an artifact (runs/), kept on failure.
 # TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
 # then `after: [build]` and its artifacts again (build.yml).
-# A run rents a 4 vCPU / 8 GB nested-virt staging VM (only the temp bidder offers one): pushes to knotless-ci only,
+# A run rents, as R2, the multi-VM staging layout: atproto 2/4, gateway 4/8, two 4/8 nested bidders (nestedVirt: the
+# temp bidder until every hat offers it) on one meshd overlay: pushes to knotless-ci only,
 # and when asked at main (`knotless run rerun knotless://<owner>/socialweb-computer-kcp --ref refs/heads/main --workflow test`).
 on:
   push:
@@ -41,6 +42,18 @@ steps:
         (cd tests && cargo build --release -p swc-test-host)
       fi
       install -m 0755 tests/target/release/swc-test-host /usr/local/bin/swc-test-host
+      # the static socialweb-meshd the multi-VM layout puts on each VM (SWC_MESHD), of this rust/ tree
+      m=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/meshd/$(git rev-parse HEAD:rust)
+      if curl -sfo "$d/meshd.SHA256SUMS" "$m/SHA256SUMS" && curl -sfo "$d/socialweb-meshd-x86_64" "$m/socialweb-meshd-x86_64"; then
+        echo "meshd: $m"
+        (cd "$d" && sha256sum -c --quiet meshd.SHA256SUMS)
+      else
+        echo "fallback: building meshd ($m: none)"
+        [ -e /opt/ci/env ] || bash scripts/knotless-ci-toolchain.sh
+        . /opt/ci/env
+        MESHD_DIST="$d" bash rust/build.sh x86_64
+      fi
+      install -m 0755 "$d/socialweb-meshd-x86_64" /usr/local/bin/socialweb-meshd
   - name: staging
     timeout: 110
     run: |
@@ -60,8 +73,10 @@ steps:
       jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
       rc=0
-      (cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" CI=1 \
-        target/release/swc-test-host compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false}') || rc=$?
+      # the multi-VM layout (tests/compositions/staging): atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay
+      (cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" \
+        SWC_MESHD=/usr/local/bin/socialweb-meshd CI=1 target/release/swc-test-host compositions/staging --account r2 --on-fail freeze \
+        --freeze-ttl 3600 --input '{"suite": false, "layout": "multi"}') || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc
