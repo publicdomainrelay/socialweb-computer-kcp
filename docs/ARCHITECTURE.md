@@ -792,9 +792,9 @@ virtio-mmio disks and once hit a divide error at timer init; acpi=off boots like
 elevateprivileges, spawn and resourcecontrol denied, and QMP at the API socket path; `query-name` (= the VMM id)
 and `query-status` answer what Firecracker's `GET /` does. The unit's TasksMax gets 64 more for QEMU's I/O
 threads. Each VM keeps the VMM it booted under: the runtime record's `hypervisor`, else the VMM named in its
-`params.json`, so a host that changes `vmm` still inspects and stops its older VMs. The `qemu` asset is
-QEMU 11.1.2 of the aqua registry's takumin/qemu-bin (upstream built with zig cc in public CI, attested) with its
-library closure (glibc 2.27 floor, so it also runs inside a guest), relocated with `LD_LIBRARY_PATH=<root>/usr/lib/sys` and `-L <root>/usr/share/qemu`, both derived from
+`params.json`, so a host that changes `vmm` still inspects and stops its older VMs. The `qemu` asset is the
+Ubuntu noble `qemu-system-x86` 8.2.2 with its library closure (glibc 2.38 floor, so it also runs inside a noble
+guest), relocated with `LD_LIBRARY_PATH=<root>/usr/lib/sys` and `-L <root>/usr/share/qemu`, both derived from
 the executable path. Proof: `tests/vmm` (Rust, on a KVM host) boots each VMM through `internal vm`, checks
 user-data, size, disk, network out, ssh over a reverse tunnel, ssh over an iroh (dumbpipe) tunnel, the webrtc
 UDP forward, a guest filling its memory, a nested QEMU guest kernel under KVM (QEMU), graceful stop and that no

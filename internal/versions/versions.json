@@ -597,56 +597,436 @@
       }
     },
     "qemu": {
-      "version": "11.1.2 (takumin/qemu-bin v2026.10.22)",
-      "source": "the aqua registry's takumin/qemu-bin (pkgs/takumin/qemu-bin): upstream QEMU 11.1.2 and its libraries built with zig cc in that repo's public GitHub Actions, the release tarball and its SHA256SUMS; this tree takes qemu-system-x86_64, the four ROMs a microvm guest loads (<root>/usr/share/qemu) and the binary's shared-library closure from the tarball's lib/ (<root>/usr/lib/sys)",
-      "verify": "sha256 pinned here, also listed in the release's SHA256SUMS; at pin time the tarball's GitHub artifact attestation (signer workflow takumin/qemu-bin/.github/workflows/wc-sign.yml) verified with gh attestation verify",
+      "version": "1:8.2.2+ds-0ubuntu1.18",
+      "source": "the qemu-system-x86 and qemu-system-data debs of Ubuntu 24.04 noble-updates plus their Ubuntu 24.04 shared-library closure (ldd of qemu-system-x86_64 minus libc6), extracted without root into <root>/usr/bin/qemu-system-x86_64, <root>/usr/share/qemu (the four ROMs a microvm guest loads) and <root>/usr/lib/sys; each deb from Launchpad's +files (every file Ubuntu published) by its file name. The aqua registry's takumin/qemu-bin (QEMU 11.1.2, zig cc, attested) does not fit: with it a bidder inside a QEMU guest never brought its own guest on network (tests/vmm qemu_guest_hosts_a_market_network_bidder), with these debs it does",
+      "verify": "each deb's sha256 pinned here (pinned from the signed noble InRelease, Packages.xz and stanza chain); no index is read at build time",
       "executables": {
         "qemu-system-x86_64": "usr/bin/qemu-system-x86_64"
       },
       "libraryPath": "usr/lib/sys",
-      "glibcFloor": "2.27",
-      "invariant": "Relocatable ONLY with LD_LIBRARY_PATH=<root>/usr/lib/sys on the qemu exec alone and -L <root>/usr/share/qemu; vmruntime derives both from the executable's path. glibc 2.27 floor, so the same tree runs on a bidder inside a guest (nested).",
+      "glibcFloor": "2.38",
+      "invariant": "Relocatable ONLY with LD_LIBRARY_PATH=<root>/usr/lib/sys on the qemu exec alone and -L <root>/usr/share/qemu; vmruntime derives both from the executable's path. noble (glibc 2.39), not a newer suite, so the same tree runs on a bidder inside a noble guest (nested). Any Ubuntu noble security update changes the closure pins.",
+      "repos": {
+        "ubuntu": {
+          "files": "https://launchpad.net/ubuntu/+archive/primary/+files/{file}"
+        }
+      },
+      "debs": [
+        {
+          "package": "qemu-system-x86",
+          "version": "1:8.2.2+ds-0ubuntu1.18",
+          "repo": "ubuntu",
+          "pool": "pool/main/q/qemu/",
+          "sha256": {
+            "linux/amd64": "14602e262627adac030329d2cecfee5f6c0938b34566ff2ea2d4c9a9eb02430d"
+          }
+        },
+        {
+          "package": "qemu-system-data",
+          "version": "1:8.2.2+ds-0ubuntu1.18",
+          "repo": "ubuntu",
+          "pool": "pool/main/q/qemu/",
+          "sha256": {
+            "linux/amd64": "a14b88d864859bd61c8a3274971da4ecb7da6cec15be6c265d0d411f783d5f2e"
+          }
+        },
+        {
+          "package": "libaio1t64",
+          "version": "0.3.113-6build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/liba/libaio/",
+          "sha256": {
+            "linux/amd64": "433212b33e26d424605c01cec1de33b63f2cc12870987b4cb7b3625baba66a19"
+          }
+        },
+        {
+          "package": "libblkid1",
+          "version": "2.39.3-9ubuntu6.6",
+          "repo": "ubuntu",
+          "pool": "pool/main/u/util-linux/",
+          "sha256": {
+            "linux/amd64": "3bcf169cd65e2539059b2287924090fc629f9bf90f595fc25465a7efe950ee82"
+          }
+        },
+        {
+          "package": "libbpf1",
+          "version": "1:1.3.0-2build2",
+          "repo": "ubuntu",
+          "pool": "pool/main/libb/libbpf/",
+          "sha256": {
+            "linux/amd64": "5654cbb145c2b299472cd208dd06c7dc09bf06cad4c4663fc42a865a51a0d96f"
+          }
+        },
+        {
+          "package": "libcap2",
+          "version": "1:2.66-5ubuntu2.4",
+          "repo": "ubuntu",
+          "pool": "pool/main/libc/libcap2/",
+          "sha256": {
+            "linux/amd64": "23c627c77c66552a658e62852f244f4946dc543898e0ec5428d5dc6bffde2d6a"
+          }
+        },
+        {
+          "package": "libdaxctl1",
+          "version": "77-2ubuntu2",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/ndctl/",
+          "sha256": {
+            "linux/amd64": "c6629b49c79343fb11ae404aeaa3156f051168da6c6d3d9d8d516acd94705061"
+          }
+        },
+        {
+          "package": "libelf1t64",
+          "version": "0.190-1.1ubuntu0.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/e/elfutils/",
+          "sha256": {
+            "linux/amd64": "b4aee123a37472d213647594b4f7d4a0d13615b0ca2a6fd33926b768d6b232c2"
+          }
+        },
+        {
+          "package": "libfdt1",
+          "version": "1.7.0-2build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/d/device-tree-compiler/",
+          "sha256": {
+            "linux/amd64": "274d20dfab9d6b216b5de85446a93f6ce5b2cd82c847b8dfdc508577f76eb96a"
+          }
+        },
+        {
+          "package": "libffi8",
+          "version": "3.4.6-1build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libf/libffi/",
+          "sha256": {
+            "linux/amd64": "637e6a7744de08cd331a41f4efd0d24e6ea9064843dea9d1c6ca87bdb5f038a2"
+          }
+        },
+        {
+          "package": "libglib2.0-0t64",
+          "version": "2.80.0-6ubuntu3.10",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/glib2.0/",
+          "sha256": {
+            "linux/amd64": "ff1b650f655b36dfe202fdbae6bb02b363c7257b6dd23e4f95ab61f716190df3"
+          }
+        },
+        {
+          "package": "libgmp10",
+          "version": "2:6.3.0+dfsg-2ubuntu6.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gmp/",
+          "sha256": {
+            "linux/amd64": "285f8a505dfa8e1b33f357a9d8d3477ad35bf18c0b34771a6df4c25923f3ae0d"
+          }
+        },
+        {
+          "package": "libgnutls30t64",
+          "version": "3.8.3-1.1ubuntu3.6",
+          "repo": "ubuntu",
+          "pool": "pool/main/g/gnutls28/",
+          "sha256": {
+            "linux/amd64": "b8944756260c5ea6b7fac019745f931f905aa7a4df0763676b1b25c911b692e2"
+          }
+        },
+        {
+          "package": "libhogweed6t64",
+          "version": "3.9.1-2.2build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/nettle/",
+          "sha256": {
+            "linux/amd64": "a9b5f7e9d49ba9060e1c933567046fbc6feab6096799cbf550b7214dc9b0f49b"
+          }
+        },
+        {
+          "package": "libibverbs1",
+          "version": "50.0-2ubuntu0.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/r/rdma-core/",
+          "sha256": {
+            "linux/amd64": "8489558105ee1d1c65ae6e0f1bac0e9b15f314a68f106ee9a63c89821242bd8e"
+          }
+        },
+        {
+          "package": "libidn2-0",
+          "version": "2.3.7-2build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libi/libidn2/",
+          "sha256": {
+            "linux/amd64": "46bfd10df095a23b65f58115de47a547c9a2d14627749bd0423ae78c14be77d3"
+          }
+        },
+        {
+          "package": "libjpeg-turbo8",
+          "version": "2.1.5-2ubuntu2",
+          "repo": "ubuntu",
+          "pool": "pool/main/libj/libjpeg-turbo/",
+          "sha256": {
+            "linux/amd64": "f68b5b23bc8a1688fb787d2aed7e2cdf895a73022f6a5025e183162dac4500b2"
+          }
+        },
+        {
+          "package": "libkmod2",
+          "version": "31+20240202-2ubuntu7.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/k/kmod/",
+          "sha256": {
+            "linux/amd64": "a9cbdc424bc0a5c8af3d6445488a48de76df5ff4d76b7dab8aaf88f712358bbc"
+          }
+        },
+        {
+          "package": "liblzma5",
+          "version": "5.6.1+really5.4.5-1ubuntu0.4",
+          "repo": "ubuntu",
+          "pool": "pool/main/x/xz-utils/",
+          "sha256": {
+            "linux/amd64": "5bcf5da2339331e21d3f42a831e82c61c54c6b2f29804010e8d59abd0ae52167"
+          }
+        },
+        {
+          "package": "libmount1",
+          "version": "2.39.3-9ubuntu6.6",
+          "repo": "ubuntu",
+          "pool": "pool/main/u/util-linux/",
+          "sha256": {
+            "linux/amd64": "8f2c25589f187dacfdc5bb6be2af0aee6c2ba7b4d2edd1ca4b26753469f07aae"
+          }
+        },
+        {
+          "package": "libndctl6",
+          "version": "77-2ubuntu2",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/ndctl/",
+          "sha256": {
+            "linux/amd64": "4eab53588a8fa9e3192635e118c2d91bc069cde46a4a3785c77a0bb1ae001d02"
+          }
+        },
+        {
+          "package": "libnettle8t64",
+          "version": "3.9.1-2.2build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/nettle/",
+          "sha256": {
+            "linux/amd64": "6d97fbc1972633083f08f51ccab433606c97bbceb897c631c66495117ca3406f"
+          }
+        },
+        {
+          "package": "libnl-3-200",
+          "version": "3.7.0-0.3build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libn/libnl3/",
+          "sha256": {
+            "linux/amd64": "15b3f61db753dc3db6f62f4259f8b822299343e500886776486612a13a2ed247"
+          }
+        },
+        {
+          "package": "libnl-route-3-200",
+          "version": "3.7.0-0.3build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libn/libnl3/",
+          "sha256": {
+            "linux/amd64": "c9dbd29cb7fdcf1a0587726cbc5432a7d3e81242108dfcfa2dd6716c44c74d4d"
+          }
+        },
+        {
+          "package": "libnuma1",
+          "version": "2.0.18-1ubuntu0.24.04.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/n/numactl/",
+          "sha256": {
+            "linux/amd64": "f333b8edf6f0b705c19f2a67008194df66f7aab0fa2350dc98510569a033ff29"
+          }
+        },
+        {
+          "package": "libp11-kit0",
+          "version": "0.25.3-4ubuntu2.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/p11-kit/",
+          "sha256": {
+            "linux/amd64": "e7c58aeac19d89f5f1492dfaa52b8623bcd56edc40983f5243ad56d94f477bf2"
+          }
+        },
+        {
+          "package": "libpcre2-8-0",
+          "version": "10.42-4ubuntu2.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/pcre2/",
+          "sha256": {
+            "linux/amd64": "f41da7cb7e979d6b037ea92650c72ec8ec532ec3c93aa8d5b997207de56695ea"
+          }
+        },
+        {
+          "package": "libpixman-1-0",
+          "version": "0.42.2-1build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/pixman/",
+          "sha256": {
+            "linux/amd64": "d9c2931c4c424615eeab9dd5ae08bfc608b84e803c1d3ccddf319270db213421"
+          }
+        },
+        {
+          "package": "libpmem1",
+          "version": "1.13.1-1.1ubuntu2",
+          "repo": "ubuntu",
+          "pool": "pool/main/p/pmdk/",
+          "sha256": {
+            "linux/amd64": "8f1be1cc834a98f0cf5c0950153f7f939a0c2c92095e98cd7bb40c752c545c1b"
+          }
+        },
+        {
+          "package": "libpng16-16t64",
+          "version": "1.6.43-5ubuntu0.7",
+          "repo": "ubuntu",
+          "pool": "pool/main/libp/libpng1.6/",
+          "sha256": {
+            "linux/amd64": "863d6abb089b2820ceba98e6b18f06eaacc55f9b05827001e7b4021a9a7b246c"
+          }
+        },
+        {
+          "package": "librdmacm1t64",
+          "version": "50.0-2ubuntu0.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/r/rdma-core/",
+          "sha256": {
+            "linux/amd64": "7b7cc2fa16564bf301751b43d05d16f0846288b080d9a25a92a691d0df33fc68"
+          }
+        },
+        {
+          "package": "libsasl2-2",
+          "version": "2.1.28+dfsg1-5ubuntu3.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/c/cyrus-sasl2/",
+          "sha256": {
+            "linux/amd64": "eda097f98dcb3a08b9ce157d6191d140e4885c1cba47b683c94b8ca45e88f458"
+          }
+        },
+        {
+          "package": "libseccomp2",
+          "version": "2.5.5-1ubuntu3.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libs/libseccomp/",
+          "sha256": {
+            "linux/amd64": "33fc96f1e008d27c042a3db9bcd16f7f4d49e866f7a3141b758a799328dbdc3f"
+          }
+        },
+        {
+          "package": "libselinux1",
+          "version": "3.5-2ubuntu2.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libs/libselinux/",
+          "sha256": {
+            "linux/amd64": "6abaa6c26f46ef17764c4a753e0e84de1cdadde5634fd2987621fdc617988d19"
+          }
+        },
+        {
+          "package": "libslirp0",
+          "version": "4.7.0-1ubuntu3.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libs/libslirp/",
+          "sha256": {
+            "linux/amd64": "4efa2d1c509de4d10fe965e86a3d864bf542996caf476d9111fd882c73857164"
+          }
+        },
+        {
+          "package": "libssl3t64",
+          "version": "3.0.13-0ubuntu3.16",
+          "repo": "ubuntu",
+          "pool": "pool/main/o/openssl/",
+          "sha256": {
+            "linux/amd64": "219f43b1cd836a4da550938db5fda93160d269d39a4edcf1f1ce698a470db797"
+          }
+        },
+        {
+          "package": "libtasn1-6",
+          "version": "4.19.0-3ubuntu0.24.04.2",
+          "repo": "ubuntu",
+          "pool": "pool/main/libt/libtasn1-6/",
+          "sha256": {
+            "linux/amd64": "f82c9ad142f952ea523bda5bfca7bb0802af3a50b8c0f0dd9ec18cdfa104bde7"
+          }
+        },
+        {
+          "package": "libudev1",
+          "version": "255.4-1ubuntu8.18",
+          "repo": "ubuntu",
+          "pool": "pool/main/s/systemd/",
+          "sha256": {
+            "linux/amd64": "6de7321adcc37068f8702fe6826473662df73c36377e00f07f7acfeca2e40d4a"
+          }
+        },
+        {
+          "package": "libunistring5",
+          "version": "1.1-2build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libu/libunistring/",
+          "sha256": {
+            "linux/amd64": "203d7657b5f54633fba1a9c9b784d556ef83c9f6787b3185ba55a88e07b865a3"
+          }
+        },
+        {
+          "package": "liburing2",
+          "version": "2.5-1build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libu/liburing/",
+          "sha256": {
+            "linux/amd64": "c2aef62accee92a06263c3ad4ef46132c13e409b54296c44792a20491830a7b0"
+          }
+        },
+        {
+          "package": "libuuid1",
+          "version": "2.39.3-9ubuntu6.6",
+          "repo": "ubuntu",
+          "pool": "pool/main/u/util-linux/",
+          "sha256": {
+            "linux/amd64": "7e2992d3a79fc05514dc5966558ee9c66a7214a47edf2a36017b9e2777528665"
+          }
+        },
+        {
+          "package": "libzstd1",
+          "version": "1.5.5+dfsg2-2build1.1",
+          "repo": "ubuntu",
+          "pool": "pool/main/libz/libzstd/",
+          "sha256": {
+            "linux/amd64": "dfcf25061e07aad7efd3f4f880ba5ad4d4d09ebe7fc8cc77ab6b8a161d6d4727"
+          }
+        },
+        {
+          "package": "zlib1g",
+          "version": "1:1.3.dfsg-3.1ubuntu2.3",
+          "repo": "ubuntu",
+          "pool": "pool/main/z/zlib/",
+          "sha256": {
+            "linux/amd64": "376249c8de139568221dbb242318cc8cb8f02299e3a62b7432948e1754fbddf9"
+          }
+        },
+        {
+          "package": "libfuse3-3",
+          "version": "3.14.0-5build1",
+          "repo": "ubuntu",
+          "pool": "pool/main/f/fuse3/",
+          "sha256": {
+            "linux/amd64": "3042159c6d7d4dcb3df9d49cd21e49ecb57f4ba8c4153a72102f512a4fc534a2"
+          }
+        }
+      ],
       "fetch": {
         "linux/amd64": {
-          "kind": "file",
-          "url": "https://github.com/takumin/qemu-bin/releases/download/v2026.10.22/qemu-x86_64-linux-gnu.tar.gz",
-          "sha256": "57524261a242b4816f3790e5118a312bae9ccf7d23eee8a53c1b8a9a3001ddd7",
-          "archive": "tar.gz",
-          "checksums": {
-            "url": "https://github.com/takumin/qemu-bin/releases/download/v2026.10.22/SHA256SUMS",
-            "name": "qemu-x86_64-linux-gnu.tar.gz"
-          },
+          "kind": "debs",
+          "layout": "lib-tree",
           "members": {
-            "bin/qemu-system-x86_64": "usr/bin/qemu-system-x86_64",
-            "share/qemu/qboot.rom": "usr/share/qemu/qboot.rom",
-            "share/qemu/pvh.bin": "usr/share/qemu/pvh.bin",
-            "share/qemu/linuxboot_dma.bin": "usr/share/qemu/linuxboot_dma.bin",
-            "share/qemu/kvmvapic.bin": "usr/share/qemu/kvmvapic.bin",
-            "lib/libpixman-1.so.0": "usr/lib/sys/libpixman-1.so.0",
-            "lib/libz.so.1": "usr/lib/sys/libz.so.1",
-            "lib/libgio-2.0.so.0": "usr/lib/sys/libgio-2.0.so.0",
-            "lib/libgobject-2.0.so.0": "usr/lib/sys/libgobject-2.0.so.0",
-            "lib/libglib-2.0.so.0": "usr/lib/sys/libglib-2.0.so.0",
-            "lib/libzstd.so.1": "usr/lib/sys/libzstd.so.1",
-            "lib/libslirp.so.0": "usr/lib/sys/libslirp.so.0",
-            "lib/libseccomp.so.2": "usr/lib/sys/libseccomp.so.2",
-            "lib/libfdt.so.1": "usr/lib/sys/libfdt.so.1",
-            "lib/libncursesw.so.6": "usr/lib/sys/libncursesw.so.6",
-            "lib/libgmodule-2.0.so.0": "usr/lib/sys/libgmodule-2.0.so.0",
-            "lib/libnettle.so.8": "usr/lib/sys/libnettle.so.8",
-            "lib/libfuse3.so.4": "usr/lib/sys/libfuse3.so.4",
-            "lib/libaio.so.1": "usr/lib/sys/libaio.so.1",
-            "lib/liburing.so.2": "usr/lib/sys/liburing.so.2",
-            "lib/libffi.so.8": "usr/lib/sys/libffi.so.8",
-            "lib/libpcre2-8.so.0": "usr/lib/sys/libpcre2-8.so.0"
+            "usr/bin/qemu-system-x86_64": "usr/bin/qemu-system-x86_64",
+            "usr/share/qemu/qboot.rom": "usr/share/qemu/qboot.rom",
+            "usr/share/qemu/pvh.bin": "usr/share/qemu/pvh.bin",
+            "usr/share/qemu/linuxboot_dma.bin": "usr/share/qemu/linuxboot_dma.bin",
+            "usr/share/qemu/kvmvapic.bin": "usr/share/qemu/kvmvapic.bin"
           }
         }
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "2381fdec3f2efd781899f4198341284925c55997dfbf2ccf699383a527ed694d",
-          "rawBytes": 39037816,
-          "zstdBytes": 7024496
+          "treeSha256": "bea668c6cf2a4751afa2e7467af3203f71f76d9db97400c94b4def40ff0db457",
+          "rawBytes": 50302128,
+          "zstdBytes": 12234659
         }
       }
     },

@@ -342,6 +342,19 @@ stage_debs() {
         case "$(readlink "$l")" in /*) die "absolute symlink $l -> $(readlink "$l") in the postgres tree" ;; esac
       done
       ;;
+    lib-tree)
+      local triplet
+      case "$arch" in amd64) triplet=x86_64-linux-gnu ;; arm64) triplet=aarch64-linux-gnu ;; esac
+      copy_members "$x/root" "$tree" "$(echo "$spec" | jq -c .members)"
+      mkdir -p "$tree/usr/lib/sys"
+      for d in "$x/root/lib/$triplet" "$x/root/usr/lib/$triplet"; do
+        [ -d "$d" ] || continue
+        find "$d" -maxdepth 1 -name '*.so*' \( -type f -o -type l \) -exec cp -a {} "$tree/usr/lib/sys/" \;
+      done
+      find "$tree" -type l | while read -r l; do
+        case "$(readlink "$l")" in /*) die "absolute symlink $l -> $(readlink "$l") in the $asset tree" ;; esac
+      done
+      ;;
     *) die "unknown deb layout" ;;
   esac
 }
