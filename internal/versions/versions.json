@@ -1640,7 +1640,7 @@
           "sha256": "2305c6dfa1866e2a8a6c38d0ca6f4b43adea4d4a99539b67e275a6a89278e9d5"
         }
       },
-      "reason": "the guest kernel is a pinned build, never a host's /boot kernel: every bidder boots the same kernel whatever its distro, so a guest behaves the same on every host and a host upgrade changes nothing inside a guest. Upstream longterm 6.1 with firecracker's own guest config: virtio-mmio, virtio-blk/net, ext4 and (x86_64) i8042 + atkbd so SendCtrlAltDel reaches the guest; socialweb.config adds vfat for the cidata seed, nf_tables/xtables/ip_set/ip_vs, bridge, vxlan, veth, overlay and tun for k3s and the guest's own iptables, and /proc/config.gz. Everything is built in (no modules), so the image needs no module tree and no initramfs, and the guest init socialweb-nodeinit (which only loaded virtio_mmio from an initramfs) is not baked."
+      "reason": "the guest kernel is a pinned build, never a host's /boot kernel: every bidder boots the same kernel whatever its distro, so a guest behaves the same on every host and a host upgrade changes nothing inside a guest. Upstream longterm 6.1 with firecracker's own guest config: virtio-mmio, virtio-blk/net, ext4 and (x86_64) i8042 + atkbd so SendCtrlAltDel reaches the guest; socialweb.config adds vfat for the cidata seed, nf_tables/xtables/ip_set/ip_vs, bridge, vxlan, veth, overlay and tun for k3s and the guest's own iptables, /proc/config.gz, and KVM (kvm_intel, kvm_amd) so a guest under QEMU -cpu host on a host with nested virtualization has /dev/kvm. Everything is built in (no modules), so the image needs no module tree and no initramfs, and the guest init socialweb-nodeinit (which only loaded virtio_mmio from an initramfs) is not baked."
     },
     "targets": {
       "firecracker-x86_64": {
@@ -1670,15 +1670,15 @@
         "sourceDateEpoch": 1790380800,
         "outputs": {
           "vmlinux": {
-            "sha256": "a7ba816b712c4dc4f52c943f8b51460bc0bd799fe50762dd44f605afd82eace8",
-            "bytes": 43742872
+            "sha256": "e9679e81fdf230ea57d6c64ce41cc9b770899f6ed0cd27726ff1f6339673ad1d",
+            "bytes": 44679120
           },
           "rootfs.ext4": {
             "sha256": "f2096748f2f7de32f56dd90c2ba85a5e0688a5918ca86fa6ea9c1040c7922584",
             "bytes": 1543503872
           },
           "image.json": {
-            "sha256": "bddc484c610e956fb7e198281cf4a19dc8c95fc441c0575f49d2a33de0c74021",
+            "sha256": "ddb8e127048f1e808a6869ba654d6f0d0b2761e49a32b9c16634c974d410dac6",
             "bytes": 5822
           }
         }
