@@ -263,8 +263,8 @@ fn qemu_guest_hosts_a_market_network_bidder() {
     let keep = "( while :; do for f in $(find /home/stg/s -name console.log 2>/dev/null); do cp $f /tmp/con-$(basename $(dirname $f)).log; done; sleep 2; done ) >/dev/null 2>&1 &";
     let req = guest.sh_in(&as_stg(&format!("{keep} /home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec \"uname -r\"")), b"", Duration::from_secs(900));
     let held = !req.contains("fencing the guest") && req.contains("Held");
-    if !held {
-        // the failure's evidence before dev down removes it: the inner bidder's and requester's milestones with times,
+    if !held || std::env::var("SWC_VMM_DUMP").is_ok() {
+        // (SWC_VMM_DUMP=1 dumps a passing run too) the failure's evidence before dev down removes it: the inner bidder's and requester's milestones with times,
         // the inner guest's serial console, the outer guest's load
         let dump = guest.try_sh(&as_stg("sh -s"), INNER_DUMP.as_bytes(), Duration::from_secs(120));
         eprintln!("=== inner dump ===\n{}\n{}\n=== end inner dump ===", dump.stdout, dump.stderr);
