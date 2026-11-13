@@ -174,7 +174,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                         let d = "/home/stg/stg";
                         let cmd = format!(
                             "set -e; chmod 0755 {d}/swc-test-host; rm -rf {d}/suite; mkdir -p {d}/suite; tar -xzf {d}/suite.tgz -C {d}/suite; chown -R stg:stg {d}/suite; {}",
-                            bg("suite", as_stg(&format!("{d}/suite/compositions/staging/suite.sh {run_name} {}", list.join(" "))))
+                            bg("suite", as_stg(&format!("{d}/suite/tests/compositions/staging/suite.sh {run_name} {}", list.join(" "))))
                         );
                         h = h.call(ssh("suite", cmd));
                     }

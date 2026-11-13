@@ -196,7 +196,8 @@ impl Swc {
 
     /// Copies one of this host's files to the guest of invocation `name` (stdin of `run request ssh --exec 'cat >
     /// <remote>'`). `what` names the file, never a path: testHost ($SWC_TEST_HOST_STATIC, a static swc-test-host) or
-    /// suite (a tar.gz of tests/compositions, tests/targets and the module wasm and module.json files).
+    /// suite (a tar.gz of the repo's examples, scripts, tests/compositions, tests/targets and the module wasm and
+    /// module.json files; SWC_REPO on the guest).
     async fn request_put(&self, input: &Value) -> Result<Value, String> {
         let name = str_of(input, "name")?;
         let remote = input["remote"].as_str().unwrap_or_default();
@@ -211,8 +212,8 @@ impl Swc {
             "suite" => {
                 let tests = std::env::current_dir().map_err(|e| e.to_string())?;
                 let out = tokio::process::Command::new("sh")
-                    .args(["-c", "tar -czf - compositions targets modules/*/module.json modules/target/wasm32-unknown-unknown/release/*.wasm"])
-                    .current_dir(&tests)
+                    .args(["-c", "tar -czf - tests/compositions tests/targets tests/modules/*/module.json tests/modules/target/wasm32-unknown-unknown/release/*.wasm examples scripts"])
+                    .current_dir(tests.join(".."))
                     .output()
                     .await
                     .map_err(|e| e.to_string())?;

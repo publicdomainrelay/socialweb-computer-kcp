@@ -5,7 +5,8 @@ set -uo pipefail
 run=$1; shift
 D=${SWC_DIR:-/home/stg/stg}
 export SWC_READINGS=$D/readings
-cd $D/suite
+export SWC_REPO=$D/suite
+cd $D/suite/tests
 compositions/staging/target.sh "$run" > $D/target-staging.json || exit 3
 failed=0
 for r in "$@"; do

@@ -29,8 +29,12 @@ pub use tenant::Tenant;
 
 type Cleanup = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
-/// The kcp repository root (the runbooks, examples/, scripts/).
+/// The kcp repository root (the runbooks, examples/, scripts/): $SWC_REPO (a staging VM's suite tree), else this
+/// build's checkout.
 pub fn repo() -> PathBuf {
+    if let Ok(r) = std::env::var("SWC_REPO") {
+        return PathBuf::from(r);
+    }
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
