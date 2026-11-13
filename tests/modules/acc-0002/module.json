@@ -14,7 +14,9 @@
 		"computer.socialweb.test.atirc.observer",
 		"computer.socialweb.test.atirc.observerPub",
 		"com.fedfork.exec.ssh.exec",
-		"com.fedfork.exec.ssh.session"
+		"com.fedfork.exec.ssh.session",
+		"computer.socialweb.test.gateway.log",
+		"computer.socialweb.test.assert.noneSince"
 	],
 	"hooks": [
 		{
@@ -24,6 +26,10 @@
 				"run"
 			],
 			"reason": "ssh to the gateway (atlibs-ssh)"
+		},
+		{
+			"nsid": "computer.socialweb.test.assert.noneSince",
+			"reason": "no market or compute record of the account created during the run is left (the hand runs' listRecords scan)"
 		}
 	]
 }
