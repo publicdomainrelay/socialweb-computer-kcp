@@ -6,6 +6,8 @@
 //             `knotless run artifacts --out` downloads it
 //   executor  two workflows on two bindings (executor: small | big): each VM has its binding's vCPUs
 //   pull      a sealed secret: the push to main sees it, a pull's run gets none
+//   terminated a step powers off its own VM: its bidder's vm.terminated reaches the cicd workload as a market event
+//             and the step fails at once with the reason (not after the read retries)
 // Result {pass, error?, phase (the step), readings (seconds per step)}. The host deletes the repo and the seeded
 // records however it ends; the runner releases each VM.
 use abi::{Event, Handle, Run, entries};
@@ -22,6 +24,7 @@ const BUILD: &str = "on:\n  push:\n    refs: [refs/heads/main]\nartifacts: [out/
 const TEST: &str = "on:\n  push:\n    refs: [refs/heads/main]\nafter: [build]\nsteps:\n  - name: fetch\n    run: |\n      curl -sSfo got.txt -H \"Authorization: Bearer $KNOTLESS_ARTIFACTS_TOKEN\" \"$KNOTLESS_ARTIFACTS_URL?workflow=build&name=out/hello.txt\" \n      test \"$(cat got.txt)\" = \"hello $KNOTLESS_RUN_SHA\"\n";
 const SMALL: &str = "on:\n  push:\n    refs: [refs/heads/main]\nexecutor: small\nsteps:\n  - name: size\n    run: nproc && test \"$(nproc)\" = 1\n";
 const BIG: &str = "on:\n  push:\n    refs: [refs/heads/main]\nexecutor: big\nsteps:\n  - name: size\n    run: nproc && test \"$(nproc)\" = 2\n";
+const POWEROFF: &str = "on:\n  push:\n    refs: [refs/heads/main]\nsteps:\n  - name: poweroff\n    run: |\n      nohup sh -c 'sleep 20; echo 1 > /proc/sys/kernel/sysrq; echo o > /proc/sysrq-trigger' > /dev/null 2>&1 &\n      sleep 1200\n";
 const SECRET: &str = "on:\n  push:\n    refs: [refs/heads/main]\n  pull:\n    base: [refs/heads/main]\nsecrets: [STAGING_SECRET]\nsteps:\n  - name: secret\n    run: if [ -n \"${KNOTLESS_RUN_PULL:-}\" ]; then test -z \"${STAGING_SECRET:-}\" && echo pull-has-no-secret; else test \"$STAGING_SECRET\" = staging-secret-value && echo push-has-the-secret; fi\n";
 
 /// Repo `r`, then the wait until the runner watches it: a runner acts on no ref, pull or rerun it found already there.
@@ -105,6 +108,25 @@ fn plan(entry: &str, r: &str) -> (Value, Vec<Step>) {
                 Step {
                     id: "checks",
                     script: checks(r, "push", &["small", "big"]),
+                },
+            ],
+        ),
+        "terminated" => (
+            json!({ "self": one }),
+            vec![
+                Step {
+                    id: "create",
+                    script: create(r),
+                },
+                Step {
+                    id: "push",
+                    script: push_script(r, &[("terminated", POWEROFF)]),
+                },
+                Step {
+                    id: "check",
+                    script: format!(
+                        "U=knotless://$KNOTLESS_IDENTIFIER/{r}\nC=\"$(cat {r}.sha)\"\nknotless run list \"$U\" --commit \"$C\" --wait 1500 > {r}.checks\ncat {r}.checks\nknotless run list \"$U\" --commit \"$C\" --log > {r}.log\ngrep -q \"^failure\tterminated\t\" {r}.checks || {{ cat {r}.log; exit 1; }}\ngrep 'the VM was terminated by its bidder: ' {r}.log || {{ cat {r}.log; exit 1; }}\nms=$(knotless run list \"$U\" --commit \"$C\" --json | jq '[.[] | select(.workflow == \"terminated\")][0].steps[0].durationMs')\necho \"step $ms ms\"\ntest \"$ms\" -lt 300000\n"
+                    ),
                 },
             ],
         ),
@@ -269,4 +291,8 @@ fn pull_entry(r: Run<Value>) -> Result<Handle, String> {
     run_entry("pull", r)
 }
 
-entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry }
+fn terminated_entry(r: Run<Value>) -> Result<Handle, String> {
+    run_entry("terminated", r)
+}
+
+entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry, terminated => terminated_entry }

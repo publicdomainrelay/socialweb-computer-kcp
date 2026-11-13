@@ -11,6 +11,7 @@ published `socialweb-computer-cicd` composition (`knotless.source`) once, its mo
 | `after` | `build` keeps an artifact; `test` (`after: [build]`) reads it in its VM with `$KNOTLESS_ARTIFACTS_URL` and `$KNOTLESS_ARTIFACTS_TOKEN`; `knotless run artifacts --out` downloads it |
 | `executor` | two workflows on two bindings (`executor: small`, `executor: big`): each VM has its binding's vCPUs |
 | `pull` | a sealed secret: the push to main sees it, a pull's run gets none |
+| `terminated` | a step powers off its own VM (sysrq o, 20 s in): the bidder's `vm.terminated` reaches the cicd workload (`com.fedfork.market.watch` on the requester that rented it) and the step fails in under 5 min with `the VM was terminated by its bidder: <reason>` |
 
 ## Run
 

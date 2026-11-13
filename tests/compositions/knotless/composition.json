@@ -1,7 +1,7 @@
 {
 	"$type": "com.fedfork.exec.composition",
 	"name": "knotless",
-	"description": "A staging network's knotless (dev up --with-knotless): push, after: [build] artifacts, per-workflow executor bindings, a pull gets no secrets (tests/compositions/knotless/README.md).",
+	"description": "A staging network's knotless (dev up --with-knotless): push, after: [build] artifacts, per-workflow executor bindings, a pull gets no secrets, a VM its bidder terminated fails its step at once (tests/compositions/knotless/README.md).",
 	"instances": [
 		{
 			"name": "test",
