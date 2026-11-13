@@ -1,0 +1,30 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0013",
+	"description": "Mixed prod: run requester + mixed-prod.yaml by discovery (A), the gateway in the requester kcp (C), install requester (B, staging) (docs/acceptance/0013-mixed-prod.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0013"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "records RecordNotFound after the delete"
+		},
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.tombstoned",
+			"to": "assert",
+			"reason": "agent1's R2 and agent tombstoned"
+		}
+	]
+}
+

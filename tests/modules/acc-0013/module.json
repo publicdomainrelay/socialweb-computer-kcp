@@ -1,0 +1,38 @@
+{
+	"name": "acc-0013",
+	"description": "Acceptance 0013 mixed prod: a (run requester, mixed-prod.yaml by discovery, restart, delete), c (the gateway in the requester kcp), b (install requester, staging).",
+	"actions": [
+		{ "entry": "run", "label": "Run 0013 A", "description": "Path A end to end." },
+		{ "entry": "c", "label": "Run 0013 C", "description": "Path C end to end." },
+		{ "entry": "b", "label": "Run 0013 B", "description": "Path B (root on a staging VM; skipped on prod)." }
+	],
+	"calls": [
+		"computer.socialweb.test.requester.start",
+		"computer.socialweb.test.requester.events",
+		"computer.socialweb.test.requester.ssh",
+		"computer.socialweb.test.requester.restart",
+		"computer.socialweb.test.requester.cluster",
+		"computer.socialweb.test.requester.bundle",
+		"computer.socialweb.test.requester.records",
+		"computer.socialweb.test.example",
+		"computer.socialweb.test.account.envFile",
+		"computer.socialweb.test.atirc.meshSub",
+		"computer.socialweb.test.atirc.meshPub",
+		"computer.socialweb.test.root.exec",
+		"computer.socialweb.test.root.putBinary",
+		"com.atproto.repo.getRecord",
+		"com.fedfork.exec.kube.get",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.apply",
+		"com.fedfork.exec.kube.delete",
+		"com.fedfork.exec.kube.raw",
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.assert.tombstoned"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "records RecordNotFound after the delete" },
+		{ "nsid": "computer.socialweb.test.assert.tombstoned", "reason": "agent1's R2 and agent tombstoned" },
+		{ "nsid": "computer.socialweb.test.requester.start", "required": true, "entries": ["run", "c"], "reason": "the long-lived requester" },
+		{ "nsid": "com.fedfork.exec.kube.apply", "required": true, "entries": ["run", "c"], "reason": "kubectl apply, in-process" }
+	]
+}
