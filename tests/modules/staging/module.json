@@ -28,6 +28,18 @@
 			"description": "the VM's memory (default 32G)"
 		},
 		{
+			"key": "suite",
+			"label": "suite",
+			"type": "array",
+			"description": "runbook compositions run inside the VM (default 0003 0005 0006 0007 0008 0012 0013); false: the stand-up only"
+		},
+		{
+			"key": "deadlineMin",
+			"label": "deadline",
+			"type": "integer",
+			"description": "minutes for the whole run (default 180)"
+		},
+		{
 			"key": "requester",
 			"label": "requester",
 			"type": "string",
@@ -36,7 +48,8 @@
 	],
 	"calls": [
 		"computer.socialweb.test.request.start",
-		"computer.socialweb.test.request.ssh"
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.put"
 	],
 	"hooks": []
 }
