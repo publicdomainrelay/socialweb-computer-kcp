@@ -74,6 +74,7 @@ const (
 	RPCClusterDelete     = "rpc:com.publicdomainrelay.temp.cluster.deleteCluster?aud=*"
 	RPCAtircMint         = "rpc:chat.atirc.mint?aud=did:web:irc.fedfork.com%23atirc"
 	RPCAtircRevoke       = "rpc:chat.atirc.revoke?aud=did:web:irc.fedfork.com%23atirc"
+	atircAudPublic       = "did:web:irc.fedfork.com#atirc"
 )
 
 var (
@@ -344,4 +345,12 @@ func dedupeScopes(sets ...[]string) []string {
 		}
 	}
 	return out
+}
+
+// RPCAtircRevokeFor is RPCAtircRevoke for the atirc service audience aud (a network's atircUrl).
+func RPCAtircRevokeFor(aud string) string {
+	if aud == "" || aud == atircAudPublic {
+		return RPCAtircRevoke
+	}
+	return "rpc:chat.atirc.revoke?aud=" + strings.ReplaceAll(aud, "#", "%23")
 }

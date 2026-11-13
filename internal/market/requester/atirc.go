@@ -1048,7 +1048,7 @@ func (r *contractRunner) revokeAccount(ctx context.Context) atircRevokeAccount {
 			return handle, granted
 		}
 		read = true
-		ok, err := q.oauthGranted(ctx, atprotooauth.RPCAtircRevoke)
+		ok, err := q.oauthGranted(ctx, atprotooauth.RPCAtircRevokeFor(q.atircAudience()))
 		switch {
 		case err != nil:
 			r.log().Warn("requester_atirc_revoke_account_unavailable", "err", err.Error())
