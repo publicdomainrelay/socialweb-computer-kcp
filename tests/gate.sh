@@ -12,7 +12,8 @@ target=$(realpath "${1:?usage: gate.sh <target.json> [--account <name>] [<runboo
 account=bob
 if [ "${1:-}" = --account ]; then account=$2; shift 2; fi
 all="0001:run 0001:s2 0002:run 0003:run 0004:run 0005:run 0005:b 0005:r2fail 0006:run 0006:compat 0007:run 0008:run
-  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b"
+  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b
+  0014:run 0014:concurrent 0014:exhausted 0015:run"
 ids=${*:-$all}
 cd "$(dirname "$0")"
 unset ATPROTO_HANDLE ATPROTO_PASSWORD ATP_USERNAME ATP_PASSWORD ATPROTO_PDS
@@ -21,6 +22,10 @@ mkdir -p "$out" && chmod 700 "$out"
 (cd modules && cargo wasm -q) && cargo build -q -p swc-test-host || exit 2
 host=$PWD/target/debug/swc-test-host
 export SWC_TARGET=$target SWC_READINGS=$out
+# a module's public reads (getRecord, listRecords of another DID) resolve DIDs at the target's PLC: a staging network's
+# is on loopback (http)
+plc=$(jq -r '.plc // ""' "$target")
+case $plc in ""|https://plc.directory*) ;; *) export ATLIBS_PLC_URL=$plc ATLIBS_ALLOW_PRIVATE=1 ;; esac
 skip_of() {
   case $1 in
     0010:*) echo "iOS paused (owner)"; return ;;

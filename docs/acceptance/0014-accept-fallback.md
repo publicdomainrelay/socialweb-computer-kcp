@@ -1,0 +1,122 @@
+# Acceptance 0014: accept fallback and committed capacity
+
+Proves a bidder never takes more VMs than it has room for, and that a requester whose accept is refused for capacity
+gets its VM elsewhere on the same RFP: the bidder answers the accept's `submitAccept` with HTTP 409
+`CapacityExceeded` (no receipt), the requester deletes that accept, denies the bidder for the contract and takes the
+next bid; with no bid left it deletes the RFP and issues a new one without the refusers.
+
+- Code: `internal/market/bidder/vmsize.go` (bid-time check, accept-time reservation keyed by RFP URI, 10 min hold,
+  dropped once the ComputeVM exists), `internal/market/requester/runner.go` (`replaceDeclined`, `reRFPAfterRefusals`,
+  up to 3 replacements)
+- Test: `tests/compositions/0014` (module `tests/modules/acc-0014`), entries `run`, `concurrent` and `exhausted`, through the kcp
+  CLI requester (`run request`); staging only. The same fallback in the atlibs requester module (the cicd
+  composition's) is `tests/compositions/knotless` entry `fallback` (concurrent workflows, one accept refused 409, the
+  checks still succeed, the refused accept gone)
+- Last pass: see Evidence
+
+```mermaid
+sequenceDiagram
+  participant R1 as rental 1
+  participant R2 as rental 2
+  participant X as bidder X (room for 1)
+  participant Y as bidder Y
+  R1->>X: RFP 1; X bids (room)
+  R2->>X: RFP 2; X bids (room)
+  R2->>Y: RFP 2; Y bids
+  R1->>X: accept 1 -> reserved, receipt
+  R2->>X: accept 2 -> 409 CapacityExceeded, no receipt
+  R2->>R2: requester_submit_accept_declined, requester_accept_declined_replace, delete accept 2, deny X
+  R2->>Y: accept (Y's bid on RFP 2) -> receipt, Held
+```
+
+## Why the rentals are concurrent
+
+A bidder checks capacity twice: when it bids (its live guests plus reservations of other RFPs) and when it gets the
+accept (the same, then it reserves). A bidder that is already full when an RFP arrives does not bid at all, so filler
+VMs rented first make the requester skip that bidder, never a 409. A 409 needs room taken between a bidder's bid and
+the accept: rentals whose RFPs land together, each first picking the bid that arrived first. The test sizes every VM
+from the bidders' offerings (`maxCpus`) less the guests already on their kcp, so each bidder has room for exactly
+`fit` of them.
+
+| entry | bidders | rentals | VM vCPUs | refusal |
+| --- | --- | --- | --- | --- |
+| `run` | first 3 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required; up to 3 rounds (a round where every first pick had room has none) |
+| `concurrent` | first 2 of the target | 4 | `min(free)/2` (two per bidder) | a reading |
+| `exhausted` | first 2 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required: one rental is refused by both, its bids run out, its new RFP (the refusers excluded, as specified) has no bidder: Failed at once |
+
+Every rental is pinned to the entry's bidders (`--allow-bidder-dids`); mem 1G (input `mem`).
+
+Big bidders (more than 8 free vCPUs, e.g. a dev network's bidders, which offer the whole host) first get one filler
+VM each, pinned to that bidder (`--allow-bidder-dids <it>`), sized to leave room for exactly `fit` guests of 2 vCPUs
+(input `cpus`); the rentals are then 2-vCPU guests. Without fillers a 16-CPU host gets four 8-vCPU guests booting at
+once, and on a loaded host they miss the requester's 2 min on-network window. The fillers are released with the
+rentals and their records checked too.
+
+## Preconditions
+
+- A market network the run owns: staging (`tests/compositions/staging`, `bidders` >= 3 for `run`) or a dev market
+  network (`dev up --profile market-network --bidders 3`), its target file from `tests/compositions/staging/target.sh`
+- Nothing else renting on those bidders during the run (the sizing reads their live guests once, at the start)
+- On the prod target both entries SKIP: they fill bidders to capacity, and prod bidders are shared
+
+## Steps
+
+```sh
+cd tests/modules && cargo wasm && cd ..
+cd compositions/0014 && deno run -A --no-lock compose.ts > composition.json && cd ../..
+SWC_TARGET=<staging target.json> cargo run -p swc-test-host -- compositions/0014 --account alice --entry run
+SWC_TARGET=<staging target.json> cargo run -p swc-test-host -- compositions/0014 --account alice --entry concurrent
+SWC_TARGET=<staging target.json> cargo run -p swc-test-host -- compositions/0014 --account alice --entry exhausted
+```
+
+A dev market network on a host (hat-8: `--asset-cache` under /var/tmp, the default cache is not traversable by the
+VM user):
+
+```sh
+B=<socialweb-computer>; N="--instance capt --state-dir /var/tmp/capt/net"
+$B dev up $N --profile market-network --bidders 3 --network-timeout 15m --asset-cache /var/tmp/capt/assets
+SWC=$B SWC_STATE=/var/tmp/capt/net SWC_INSTANCE=capt SWC_CREDS=/var/tmp/capt/creds \
+  tests/compositions/staging/target.sh capt0001 > /var/tmp/capt/target.json
+$B dev down $N
+```
+
+## Expected observations
+
+- Each bidder's offering record `com.publicdomainrelay.temp.market.offering/self` carries `maxCpus` (the host's CPUs)
+- The refused rental's request log, in order: `requester_submit_accept_declined` (`status` 409, `body.error`
+  `CapacityExceeded`, `body.message` "... running and reserved guests hold N of its M"), `requester_accept_declined_replace`
+  (`bidder`), then `contract` Held with a receipt from another bidder; with no bid left, `requester_bids_exhausted_new_rfp`
+  (`declined`) and a new RFP
+- The refusing bidder's log: `bidder_accept_refused_capacity` (the async provision path, from the accept record on the
+  firehose, and the `submitAccept` path)
+
+## Pass criteria
+
+- Every rental Held (`exhausted`: all but one), each on one of the entry's bidders and never on a bidder that refused it
+- `exhausted`: the one rental left without a VM was refused (409) by every bidder of the entry, logged
+  `requester_bids_exhausted_new_rfp`, and failed with `requester_no_bidders` ("denied by the contract" for each)
+- No bidder over its vCPUs: this run's VMs on a bidder fit its free vCPUs; its kcp's live ComputeVMs' `spec.vm.cpus`
+  sum to at most its `maxCpus`
+- Every refusal is a 409 `CapacityExceeded`; every refused accept record RecordNotFound (x3)
+- `run`: at least one refusal (readings: `rounds[].refusals`, `maxRefusalsOneRental`: 2 is a rental refused by its first
+  two picks and Held on the third)
+- After the release: every record of every rental RecordNotFound, no ComputeVM of the run's receipts on any bidder kcp
+  within 3 min
+
+## Cleanup
+
+The run releases every rental (`run request release`) and checks; `--on-fail freeze` keeps them for `attach`, then
+`cleanup` releases them.
+
+## Known pitfalls
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `run` fails "no accept refused in 3 rounds" | every round's first picks were distinct (a race); run again. A requester picks the first free bid that arrives |
+| "the bidders have room for N VMs" | guests of another run on the bidders; wait for them to go or use another network |
+| a rental fails `requester_no_bidders` after `requester_bids_exhausted_new_rfp` in `run` or `concurrent` | every bidder refused it: a bidder had less room than its live guests show. Before 91103758 a reservation whose ComputeVM was released before the bidder's next capacity check counted for its whole 10 min hold (phantom "hold 16 of its 16" with one VM); run the entries back to back only on bidders with that fix |
+| `the guest did not come on network within 2m0s` | a loaded host booting several large guests at once (hat-8, four 8-vCPU guests, 2m10s); rerun when the host is quieter |
+
+## Evidence
+
+(filled by the passing runs)
