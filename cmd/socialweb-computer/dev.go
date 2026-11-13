@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -455,6 +456,12 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 			ComputeKinds: computeKinds, Policy: strings.TrimSpace(vals.String("bidder-policy"))}
 		if networkSpec, err = marketnetwork.NetworkSpec(l.ID, vals.Int("bidders"), vals.Bool("with-gateway"), networkOverlay, vm); err != nil {
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
+		}
+		if bind := strings.TrimSpace(vals.String("network-bind")); bind != "" {
+			if net.ParseIP(bind) == nil {
+				return upReport{}, a.fail(exitRefused, "dev up: network-bind %q is not an IP address", bind)
+			}
+			networkSpec.BindAddress = bind
 		}
 		knotless, err := knotlessDir(vals.String("with-knotless"), vals.Bool("with-gateway"))
 		if err != nil {

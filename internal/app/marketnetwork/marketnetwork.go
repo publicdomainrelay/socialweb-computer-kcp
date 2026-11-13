@@ -21,6 +21,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime/manifests"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/conds"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/jsonx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tcpforward"
 )
 
 const (
@@ -88,6 +89,8 @@ type Controller struct {
 	unplaced map[string]string
 
 	roots sync.Map
+
+	forwards tcpforward.Set
 }
 
 func Register(m *ctlruntime.Manager, c *compose.Composer) error {
@@ -166,6 +169,7 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: v1alpha1.MarketNetworkStatus{ObservedGeneration: o.Generation, AppliedSet: o.Status.AppliedSet, Network: o.Status.Network,
 		BidderPdsURL: o.Status.BidderPdsURL, Apps: o.Status.Apps, Conditions: append([]metav1.Condition(nil), o.Status.Conditions...)}}
 	if r.Deleting {
+		ctl.forwards.Close()
 		return p.delete(ctx)
 	}
 	res, err := p.reconcile(ctx)
@@ -281,7 +285,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		return p.retry(v1alpha1.ApplicationPhaseProvisioning, "the network CA bundle", err)
 	}
 	c.PublishTrust(r.Ref(), []byte(bundle))
-	value := networkValueFromLeases(leases, bundle)
+	value := boundValue(networkValueFromLeases(leases, bundle), leases, o.Spec.BindAddress)
 	if ctl.value != nil && ctl.valueUID == string(r.UID) {
 		value = *ctl.value
 	}
@@ -384,8 +388,12 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 		}
 	}
 	published.Ingress = netIngress
-	p.st.Network = &published
-	if o.Status.Network == nil || !jsonx.Equal(*o.Status.Network, published) {
+	if err := ctl.bindForwards(snap, leases, o.Spec.BindAddress); err != nil {
+		return p.write(v1alpha1.ApplicationPhaseProvisioning, err.Error())
+	}
+	bound := boundValue(published, leases, o.Spec.BindAddress)
+	p.st.Network = &bound
+	if o.Status.Network == nil || !jsonx.Equal(*o.Status.Network, bound) {
 		p.st.Phase, p.st.Message = v1alpha1.ApplicationPhaseProvisioning, "publishing the network endpoints before the child applications start"
 		if err := c.WriteStatus(ctx, r, compose.MarketNetworkGVR, p.st); err != nil {
 			return ctlruntime.Result{}, err
@@ -401,6 +409,9 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	}
 	if pdsURL == "" || aliceURL == "" {
 		return p.write(v1alpha1.ApplicationPhaseProvisioning, "waiting for the network's PDS Exposure URLs")
+	}
+	if o.Spec.BindAddress != "" {
+		pdsURL = networkValueHostURL(bound, NetworkBobPdsHost)
 	}
 	p.st.BidderPdsURL = pdsURL
 	var keep []string

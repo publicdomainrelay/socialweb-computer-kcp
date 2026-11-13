@@ -192,7 +192,7 @@ func (s *Service) Start(ctx context.Context) error {
 	handlers := s.deps.Bus
 	var plcClient *http.Client
 	if plcURL != "" {
-		if handlers != nil && strings.HasPrefix(strings.ToLower(plcURL), "http://") && !isLoopbackURL(plcURL) {
+		if handlers != nil && strings.HasPrefix(strings.ToLower(plcURL), "http://") && !isDirectURL(plcURL) {
 			plcClient = handlers.HTTPClient()
 		} else {
 			plcClient = s.deps.Egress.Client(directoryTimeout)
@@ -389,7 +389,7 @@ func buildDirectory(plcURL string, client *http.Client, handlers *bus.Bus, egres
 	if plcURL == "" {
 		return identity.DefaultDirectory()
 	}
-	if handlers != nil && strings.HasPrefix(strings.ToLower(plcURL), "http://") && !isLoopbackURL(plcURL) {
+	if handlers != nil && strings.HasPrefix(strings.ToLower(plcURL), "http://") && !isDirectURL(plcURL) {
 		httpClient := handlers.HTTPClient()
 		return &identity.BaseDirectory{
 			PLCURL:     plcURL,
@@ -411,17 +411,13 @@ func buildDirectory(plcURL string, client *http.Client, handlers *bus.Bus, egres
 	}
 }
 
-func isLoopbackURL(raw string) bool {
+func isDirectURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return false
 	}
 	host := u.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host) != nil
 }
 
 func logicalHost(key component.Key) string {

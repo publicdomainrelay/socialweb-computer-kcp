@@ -525,6 +525,15 @@ A bidder hands each guest those hosts: `/etc/hosts` at `192.0.2.1`, their ports 
 whatever `/etc/hosts` says). It also adds the network CA bundle to every guest's `ca_certs`, so a guest of a
 requester that did not (the knotless runner's composition) still trusts the guest TLS front.
 
+### Join from another host
+
+`dev up --profile market-network --network-bind <ip>` (spec.bindAddress; the host's overlay address) puts the PLC, relay,
+PDSes, ingress and TLS front on `<ip>` (and the ingress and TLS front on `127.0.0.1` too), and `status.network` names
+`<ip>`. A bidder on another host runs `run bidder --market-network-file` with that status; it forwards its
+`127.0.0.1:<port>` to each network host that is not its own, so its guests' `*.localhost` path reaches the network.
+The network vouches only for its own children: in staging the joined bidder runs `--bidder-policy open` and a request
+asks for `-- --policy open`.
+
 ### Point an installed bidder account at the network
 
 An installed bidder account (`install bidder`, host-backend systemd-user) is not

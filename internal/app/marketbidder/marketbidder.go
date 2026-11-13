@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 
@@ -21,6 +22,7 @@ import (
 	ctlruntime "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/runtime"
 	vaultctl "github.com/johnandersen777/socialweb-computer-kcp/internal/controllers/vault"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/tcpforward"
 )
 
 const (
@@ -67,6 +69,8 @@ type Controller struct {
 	mu sync.Mutex
 
 	rotated map[string]int64
+
+	forwards tcpforward.Set
 }
 
 func Register(m *ctlruntime.Manager, c *compose.Composer, guard SignInGuard) error {
@@ -157,6 +161,32 @@ func (p *pass) snapshot(ctx context.Context) (compose.Snapshot, error) {
 	return snap, nil
 }
 
+func (ctl *Controller) remoteNetwork(n *v1alpha1.MarketNetworkValue) error {
+	if n == nil {
+		return nil
+	}
+	own, _ := net.InterfaceAddrs()
+	local := func(ip net.IP) bool {
+		for _, a := range own {
+			if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
+				return true
+			}
+		}
+		return ip.IsLoopback()
+	}
+	for _, h := range n.Hosts {
+		host, port, err := net.SplitHostPort(h.Address)
+		if ip := net.ParseIP(host); err != nil || ip == nil || local(ip) {
+			continue
+		}
+		// ponytail: one bidder per host joins a remote network; a second one's loopback ports collide, share one host-level forward if that is needed
+		if err := ctl.forwards.Ensure(net.JoinHostPort("127.0.0.1", port), h.Address); err != nil {
+			return fmt.Errorf("the loopback path to the network's %s at %s: %w", h.Name, h.Address, err)
+		}
+	}
+	return nil
+}
+
 func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o *v1alpha1.MarketBidder) (ctlruntime.Result, error) {
 	c := ctl.c
 	if !c.Mine(req) {
@@ -166,7 +196,11 @@ func (ctl *Controller) Reconcile(ctx context.Context, req ctlruntime.Request, o 
 	c.Observe(r)
 	p := &pass{ctx: ctx, ctl: ctl, c: c, r: r, o: o, st: compose.NewStatus(o.Generation, o.Spec.Profile, o.Status)}
 	if r.Deleting {
+		ctl.forwards.Close()
 		return p.delete(ctx)
+	}
+	if err := ctl.remoteNetwork(o.Spec.Network); err != nil {
+		return p.wait(err.Error())
 	}
 	if c.Parked(r) {
 		return ctlruntime.Result{}, nil

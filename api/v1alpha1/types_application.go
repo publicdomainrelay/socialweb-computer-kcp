@@ -901,6 +901,8 @@ type MarketNetworkSpec struct {
 
 	GuestLabel string `json:"guestLabel,omitempty"`
 
+	BindAddress string `json:"bindAddress,omitempty" apigen:"userEndpoint"`
+
 	Comms *MarketComms `json:"comms,omitempty"`
 
 	Ingress *IngressConfig `json:"ingress,omitempty"`

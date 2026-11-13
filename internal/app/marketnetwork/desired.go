@@ -77,6 +77,51 @@ func networkValueFromLeases(leases map[string]component.PortLease, caBundle stri
 	}
 }
 
+func boundValue(value v1alpha1.MarketNetworkValue, leases map[string]component.PortLease, bind string) v1alpha1.MarketNetworkValue {
+	if bind == "" {
+		return value
+	}
+	at := func(name string) string { return net.JoinHostPort(bind, strconv.Itoa(int(leasePort(leases[name])))) }
+	value.PLCDirectoryURL = "http://" + at(NetworkPortPlc)
+	value.Hosts = []v1alpha1.NetworkHost{
+		{Name: NetworkPlcHost, Address: at(NetworkPortPlc)},
+		{Name: NetworkRelayHost, Address: at(NetworkPortRelay)},
+		{Name: NetworkIngressHost, Address: at(NetworkPortIngress)},
+		{Name: NetworkDispatcherHost, Address: at(NetworkPortDispatcher)},
+		{Name: NetworkAlicePdsHost, Address: at(NetworkPortAlicePds)},
+		{Name: NetworkBobPdsHost, Address: at(NetworkPortBobPds)},
+	}
+	return value
+}
+
+func (ctl *Controller) bindForwards(snap compose.Snapshot, leases map[string]component.PortLease, bind string) error {
+	if bind == "" {
+		return nil
+	}
+	at := func(lease string) string { return net.JoinHostPort(bind, strconv.Itoa(int(leasePort(leases[lease])))) }
+	for lease, exposure := range map[string]string{
+		NetworkPortPlc:      localExposureName(compose.ComponentKindPlc, compose.NetworkPLCName),
+		NetworkPortRelay:    localExposureName(compose.ComponentKindRelay, compose.NetworkRelayName),
+		NetworkPortAlicePds: localExposureName(compose.ComponentKindPds, NetworkAlicePdsName),
+		NetworkPortBobPds:   localExposureName(compose.ComponentKindPds, NetworkBobPdsName),
+	} {
+		target, err := exposureHost(snap, exposure)
+		if err != nil {
+			return err
+		}
+		if err := ctl.forwards.Ensure(at(lease), target); err != nil {
+			return fmt.Errorf("the network's %s on %s: %w", exposure, at(lease), err)
+		}
+	}
+	for _, lease := range []string{NetworkPortIngress, NetworkPortDispatcher} {
+		local := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(leasePort(leases[lease]))))
+		if err := ctl.forwards.Ensure(local, at(lease)); err != nil {
+			return fmt.Errorf("the network's %s on %s: %w", lease, local, err)
+		}
+	}
+	return nil
+}
+
 func endpointAddress(e v1alpha1.Endpoint) string {
 	if e.Address != "" {
 		return e.Address
@@ -247,7 +292,7 @@ func networkDesired(o *v1alpha1.MarketNetwork, ws, stateRoot string, leases map[
 		Identity:      &v1alpha1.ComponentIdentity{Handle: GuestTLSHost},
 		RelayRef:      compose.ComponentRefFor(compose.ComponentKindRelay, compose.NetworkRelayName),
 		Hostnames:     []string{GuestTLSHost},
-		Serve:         compose.ComponentServe("", leasePort(leases[NetworkPortIngress])),
+		Serve:         compose.ComponentServe(o.Spec.BindAddress, leasePort(leases[NetworkPortIngress])),
 	}
 	if cfg := ingressCfg; cfg != nil {
 		ingressSpec.PublicHost = strings.TrimSpace(cfg.PublicHost)
@@ -288,7 +333,7 @@ func networkDesired(o *v1alpha1.MarketNetwork, ws, stateRoot string, leases map[
 		UpstreamRef:   compose.ComponentRefFor(compose.ComponentKindIngressProxy, compose.NetworkIngressName),
 		Hostnames:     []string{GuestTLSHost, "*." + GuestTLSHost},
 		Storage:       &v1alpha1.ComponentStorage{CertsDir: guestDir},
-		Serve:         compose.ComponentServe("", leasePort(leases[NetworkPortDispatcher])),
+		Serve:         compose.ComponentServe(o.Spec.BindAddress, leasePort(leases[NetworkPortDispatcher])),
 	}}
 	vault := compose.ComponentRefFor(compose.KindOpenBaoServer, NetworkVaultServer)
 	alice := networkPds(stateRoot, value, leases[NetworkPortAlicePds], NetworkAlicePdsName, "alice.test", NetworkAlicePdsHost, vault, alicePublicURL)

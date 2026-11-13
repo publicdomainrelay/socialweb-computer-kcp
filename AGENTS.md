@@ -712,7 +712,8 @@ Pipeline, in order; cut the rc only when both suites are green:
 1. Build the release of the commit (`scripts/build-socialweb-computer.sh`), `deploy/check.sh --fast`.
 2. VMM wrapper tests (QEMU default, Firecracker).
 3. Stand up staging on VMs rented from the market: own PLC, PDS with throwaway accounts, relay, Jetstream, gateway, ssh
-   gateway, bidders; it writes the staging target.json.
+   gateway, bidders; it writes the staging target.json. `tests/compositions/staging`: one VM, or `--input '{"layout":
+   "multi"}'` (four small VMs on one meshd overlay, the bidders joined by `--market-network-file`; README there).
 4. Full suite against staging.
 5. Tear staging down.
 6. Redeploy prod.

@@ -74,6 +74,11 @@
       "description": "dev up --profile market-network: a YAML file merged over the built-in market-network defaults (keys bidder and gateway: the NetworkApp fields every bidder or the gateway gets, e.g. bidder.firecracker)",
       "env": "SOCIALWEB_DEV_APP_VALUES"
     },
+    "network-bind": {
+      "type": "string",
+      "description": "dev up --profile market-network: the IP its PLC, relay, PDSes, ingress and TLS front listen on (this host's overlay address); the published network value names it, so bidders and requesters on other hosts join with --market-network-file",
+      "env": "SOCIALWEB_DEV_NETWORK_BIND"
+    },
     "network-timeout": {
       "type": "string",
       "description": "How long dev up waits for the MarketNetwork and every child application to report Ready, and how long install bidder gives the guest image download; a third of it, at least 30s, is the budget install bidder gives the search of the release base for that image, and install bidder refuses a value under 30s (Go duration)",
