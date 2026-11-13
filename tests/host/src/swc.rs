@@ -328,12 +328,18 @@ impl Swc {
         if input["withGateway"] == true {
             args.push("--with-gateway".into());
         }
-        args.push("--".into());
-        args.extend(identity_args(
-            &self.target,
-            self.acct()?,
-            SignIn::AppPassword,
-        ));
+        // R2 (a guest requester): its identity is the renter's association, through the guest's /run/socialweb-r2 files
+        let guest = self.acct()?.guest_requester;
+        if guest {
+            args.push("--guest-requester".into());
+        } else {
+            args.push("--".into());
+            args.extend(identity_args(
+                &self.target,
+                self.acct()?,
+                SignIn::AppPassword,
+            ));
+        }
         self.extra
             .argv
             .lock()
@@ -345,7 +351,7 @@ impl Swc {
             .bin
             .cmd()
             .args(&args)
-            .env("ATPROTO_PASSWORD", self.password()?)
+            .env("ATPROTO_PASSWORD", if guest { String::new() } else { self.password()? })
             .stdout(log.try_clone().map_err(|e| e.to_string())?)
             .stderr(log)
             .spawn()

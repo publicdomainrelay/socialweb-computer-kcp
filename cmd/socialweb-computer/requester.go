@@ -35,7 +35,7 @@ const (
 	requesterRootApply = 3 * time.Minute
 )
 
-var requesterOptions = []string{backendOpt, "network", "name", "identity", "state-dir", "ready-file", "fg", "ready-timeout", "network-timeout",
+var requesterOptions = []string{backendOpt, "network", "name", "identity", "state-dir", "ready-file", "fg", "ready-timeout", "network-timeout", "guest-requester", "association-ref",
 	"kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache", "log-level", "unit-prefix", "with-gateway", "node-download-base"}
 
 var requesterPasswordOptions = []string{"name", "state-dir", "network-timeout"}
@@ -337,6 +337,15 @@ func runRequester(ctx context.Context, a *app, vals clicfg.Values, rest []string
 			return a.fail(exitRefused, "run requester: %v", err)
 		}
 		r.gatewayOn = true
+	}
+	if vals.Bool("guest-requester") {
+		if network != "" {
+			return a.fail(exitRefused, "run requester: --guest-requester is for a standalone requester")
+		}
+		rr.guestRequester, rr.inv.GuestRequester = true, true
+	}
+	if err := rr.associationRef(network != ""); err != nil {
+		return a.fail(exitRefused, "run requester: --association-ref: %v", err)
 	}
 	if err := r.openIdentity(name); err != nil {
 		return a.fail(exitRefused, "run requester: %v", err)

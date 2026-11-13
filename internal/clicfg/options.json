@@ -729,7 +729,7 @@
     },
     "guest-requester": {
       "type": "boolean",
-      "description": "run request, as the agent user inside a guest of a spec.association.fromGuest contract: run this requester as the guest requester in one command. It implies --association-ref (the shared /run/socialweb-r2 files the guest agent mirrors), --skip-ssh and its parent atirc token from /run/socialweb-r2/r2-atirc.env, (its token is only the parent for minting its own agents' tokens; it does not join the atirc channel itself); standalone only"
+      "description": "run requester (standalone): the guest requester R2 as a long-lived requester, its Infra/EphemeralInfra contracts all under its one association (the same /run/socialweb-r2 handshake). run request, as the agent user inside a guest of a spec.association.fromGuest contract: run this requester as the guest requester in one command. It implies --association-ref (the shared /run/socialweb-r2 files the guest agent mirrors), --skip-ssh and its parent atirc token from /run/socialweb-r2/r2-atirc.env, (its token is only the parent for minting its own agents' tokens; it does not join the atirc channel itself); standalone only"
     },
     "colocated": {
       "type": "string",
