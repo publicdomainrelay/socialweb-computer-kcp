@@ -445,8 +445,13 @@ func New(cfg Config, deps Deps) (*Bidder, error) {
 		return nil, err
 	}
 	b.outbox = outbox
+	if cfg.ImageReady != nil && b.servesKind(string(v1alpha1.ComputeKindVM)) {
+		b.imageErr.Store(&imageUnverified)
+	}
 	return b, nil
 }
+
+var imageUnverified = "the bidder's pinned guest image is not verified yet"
 
 func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Duration, error) {
 	switch change.Kind {
