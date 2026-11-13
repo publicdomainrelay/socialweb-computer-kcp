@@ -661,7 +661,7 @@ Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.js
 
 ```sh
 # 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to
-#    the owner and collaborators, kept 14 days); from knotless docs, the list form (no --out) not yet run against one
+#    the owner and collaborators, kept 14 days); a knotless CLI built from the fork (runner-atlibs-composition)
 export KNOTLESS_APPVIEW=https://knotless.socialweb.computer
 knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha>                    # list
 knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha> --out ./artifacts  # or --pull <pull at-uri>
