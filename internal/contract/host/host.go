@@ -49,6 +49,8 @@ type Output struct {
 
 type Limits struct {
 	MemoryMax       uint64
+	MemoryHigh      uint64
+	MemorySwapMax   uint64
 	CPUWeight       uint64
 	CPUQuotaPercent int
 	TasksMax        uint64
@@ -163,4 +165,17 @@ type Processes interface {
 type Clock interface {
 	Now() time.Time
 	After(d time.Duration) <-chan time.Time
+}
+
+func VMOverheadMiB(memMiB int) int {
+	return max(512, memMiB/10)
+}
+
+func VMCommitMiB(memMiB int) int {
+	return memMiB + VMOverheadMiB(memMiB)
+}
+
+func VMLimits(memMiB int) (memoryMax, memoryHigh, swapMax uint64) {
+	overhead := VMOverheadMiB(memMiB)
+	return uint64(memMiB+overhead) << 20, uint64(memMiB+overhead/2) << 20, uint64(max(512, memMiB/8)) << 20
 }

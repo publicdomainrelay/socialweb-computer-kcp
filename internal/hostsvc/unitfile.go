@@ -128,7 +128,10 @@ func RenderInstalled(spec UnitSpec, o InstallOptions) (InstalledFile, error) {
 	}
 	if spec.Limits.MemoryMax > 0 {
 		service = append(service, systemdunit.KV("MemoryMax", strconv.FormatUint(spec.Limits.MemoryMax, 10)),
-			systemdunit.KV("MemorySwapMax", "0"))
+			systemdunit.KV("MemorySwapMax", strconv.FormatUint(spec.Limits.MemorySwapMax, 10)))
+		if spec.Limits.MemoryHigh > 0 {
+			service = append(service, systemdunit.KV("MemoryHigh", strconv.FormatUint(spec.Limits.MemoryHigh, 10)))
+		}
 	}
 	if spec.Delegate {
 		service = append(service, systemdunit.KV("Delegate", "yes"))

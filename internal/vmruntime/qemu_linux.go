@@ -68,7 +68,7 @@ func qemuArgv(exe, vmmID string, c fcapi.Config, socket string) ([]string, error
 		"-kernel", c.BootSource.KernelImagePath, "-append", c.BootSource.BootArgs,
 		"-qmp", "unix:" + socket + ",server=on,wait=off"}
 	for _, d := range c.Drives {
-		drive := "id=" + d.DriveID + ",file=" + d.PathOnHost + ",format=raw,if=none"
+		drive := "id=" + d.DriveID + ",file=" + d.PathOnHost + ",format=raw,if=none,cache=none,aio=native"
 		if d.IsReadOnly {
 			drive += ",readonly=on"
 		}

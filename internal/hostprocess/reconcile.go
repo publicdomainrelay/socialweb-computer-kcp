@@ -107,12 +107,19 @@ func UnitSpec(o v1alpha1.HostProcess, exec string) (hostsvc.UnitSpec, error) {
 	if s.Limits != nil {
 		spec.Limits = hostsvc.Limits{MemoryMax: DefaultMemoryMax, CPUWeight: uint64(s.Limits.CpuWeight), CPUQuotaPercent: int(s.Limits.CpuQuotaPercent),
 			TasksMax: uint64(s.Limits.TasksMax)}
-		if s.Limits.MemoryMax != "" {
-			n, err := strconv.ParseUint(s.Limits.MemoryMax, 10, 64)
-			if err != nil {
-				return hostsvc.UnitSpec{}, fmt.Errorf("hostprocess %s: limits.memoryMax %q is not a byte count", o.Name, s.Limits.MemoryMax)
+		for _, f := range []struct {
+			name, value string
+			to          *uint64
+		}{{"memoryMax", s.Limits.MemoryMax, &spec.Limits.MemoryMax}, {"memoryHigh", s.Limits.MemoryHigh, &spec.Limits.MemoryHigh},
+			{"memorySwapMax", s.Limits.MemorySwapMax, &spec.Limits.MemorySwapMax}} {
+			if f.value == "" {
+				continue
 			}
-			spec.Limits.MemoryMax = n
+			n, err := strconv.ParseUint(f.value, 10, 64)
+			if err != nil {
+				return hostsvc.UnitSpec{}, fmt.Errorf("hostprocess %s: limits.%s %q is not a byte count", o.Name, f.name, f.value)
+			}
+			*f.to = n
 		}
 	}
 	return spec, hostsvc.ValidateSpec(spec)

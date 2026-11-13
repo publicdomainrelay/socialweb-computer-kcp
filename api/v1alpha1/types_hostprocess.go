@@ -102,6 +102,10 @@ type HostProcessOutput struct {
 type HostProcessLimits struct {
 	MemoryMax string `json:"memoryMax,omitempty"`
 
+	MemoryHigh string `json:"memoryHigh,omitempty"`
+
+	MemorySwapMax string `json:"memorySwapMax,omitempty"`
+
 	CpuWeight int64 `json:"cpuWeight,omitempty"`
 
 	CpuQuotaPercent int32 `json:"cpuQuotaPercent,omitempty"`

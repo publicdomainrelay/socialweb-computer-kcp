@@ -369,7 +369,10 @@ func unitProperties(spec UnitSpec) []sd.Property {
 		props = append(props, u64("TimeoutStopUSec", uint64(spec.StopTimeout/time.Microsecond)))
 	}
 	if spec.Limits.MemoryMax > 0 {
-		props = append(props, u64("MemoryMax", spec.Limits.MemoryMax), u64("MemorySwapMax", 0))
+		props = append(props, u64("MemoryMax", spec.Limits.MemoryMax), u64("MemorySwapMax", spec.Limits.MemorySwapMax))
+		if spec.Limits.MemoryHigh > 0 {
+			props = append(props, u64("MemoryHigh", spec.Limits.MemoryHigh))
+		}
 	}
 	if spec.Delegate {
 		props = append(props, sd.Property{Name: "Delegate", Value: dbus.MakeVariant(true)})

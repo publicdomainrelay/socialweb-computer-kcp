@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-4.hostprocesses.socialweb.computer
+  name: v1alpha1-5.hostprocesses.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -80,6 +80,10 @@ spec:
                 type: object
                 properties:
                   memoryMax:
+                    type: string
+                  memoryHigh:
+                    type: string
+                  memorySwapMax:
                     type: string
                   cpuWeight:
                     type: integer

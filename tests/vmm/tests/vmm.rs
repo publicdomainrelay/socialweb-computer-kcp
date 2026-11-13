@@ -85,11 +85,20 @@ fn exercise(vmm: Option<&str>, want: &str) {
         "no network out"
     );
 
-    let touched = guest.sh(
-        "python3 -c \"m=int([l for l in open('/proc/meminfo') if l.startswith('MemAvailable')][0].split()[1])*1024*9//10; \
-         b=bytearray(m); b[::4096]=b'\\x01'*len(range(0,m,4096)); print(m>>20)\"",
+    let touched = guest.sh_in(
+        "for i in 1 2; do python3 -c \"
+c=[]
+try:
+    while True:
+        b=bytearray(64<<20); b[::4096]=b'\\x01'*len(range(0,len(b),4096)); c.append(b)
+except MemoryError:
+    pass
+\" || true; dd if=/dev/zero of=/root/fill bs=1M count=1024 conv=fsync status=none; rm -f /root/fill; cat /dev/vda > /dev/null; done; \
+         awk '/MemTotal/{print int($2/1024)}' /proc/meminfo",
+        b"",
+        Duration::from_secs(600),
     );
-    eprintln!("{want}: the guest touched {touched} MiB");
+    eprintln!("{want}: the guest filled its {touched} MiB twice, with 1 GiB fsync'd writes and a full disk read");
     assert_eq!(field(&vm.inspect(), "verdict"), "Running", "the VM did not survive its guest filling its memory");
 
     iroh_tunnel(&guest, &dir, &name);

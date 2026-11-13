@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	contracthost "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/memsize"
 )
 
@@ -76,7 +77,7 @@ func (b *Bidder) sizeRefused(record vmRecord) string {
 	if limits.memMiB > 0 && mib > limits.memMiB {
 		return fmt.Sprintf("the RFP asks for %s of memory; this bidder offers at most %s (its offering's maxMem)", record.Mem, limits.mem())
 	}
-	return b.capacityRefused(limits, int64(record.CPUs), mib)
+	return b.capacityRefused(limits, int64(record.CPUs), contracthost.VMCommitMiB(mib))
 }
 
 func (b *Bidder) liveGuest(vm v1alpha1.ComputeVM) bool {
@@ -89,7 +90,7 @@ func (b *Bidder) committed() (int64, int) {
 	for _, vm := range b.vms.Filter(b.liveGuest) {
 		cpus += int64(vm.Spec.VM.Cpus)
 		if m, err := memsize.ParseMiB(vm.Spec.VM.Mem); err == nil {
-			mib += m
+			mib += contracthost.VMCommitMiB(m)
 		}
 	}
 	return cpus, mib

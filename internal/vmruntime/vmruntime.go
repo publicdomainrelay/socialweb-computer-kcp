@@ -24,7 +24,6 @@ const (
 	DefaultBootTime   = 30 * time.Second
 	DefaultStopGrace  = 10 * time.Second
 	DefaultConsoleCap = 8 << 20
-	VMMOverheadMiB    = 192
 	StopTimeout       = 10 * time.Second
 	RefFile           = "ref.json"
 	GrantsFile        = "grants.json"

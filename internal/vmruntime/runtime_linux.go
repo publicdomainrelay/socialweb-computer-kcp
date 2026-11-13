@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	contracthost "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/host"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/fcapi"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestdisk"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
@@ -238,6 +239,7 @@ func (r *hostRuntime) refVMM(ref RuntimeRef) string {
 
 func (r *hostRuntime) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 	uidBase, gidBase, _ := r.slotIDs(slot)
+	memoryMax, memoryHigh, swapMax := contracthost.VMLimits(p.MemMiB)
 	tasks := uint64(64 + 4*p.Vcpu)
 	if r.vmmOf(p.WorkDir) == VMMQEMU {
 		tasks += QEMUExtraTasks
@@ -252,7 +254,9 @@ func (r *hostRuntime) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 		WorkDir:     p.WorkDir,
 		Output:      hostsvc.Output{StdoutFile: filepath.Join(p.WorkDir, VMMLogFile), StderrFile: filepath.Join(p.WorkDir, VMMLogFile)},
 		Limits: hostsvc.Limits{
-			MemoryMax:       uint64(p.MemMiB+VMMOverheadMiB) << 20,
+			MemoryMax:       memoryMax,
+			MemoryHigh:      memoryHigh,
+			MemorySwapMax:   swapMax,
 			CPUWeight:       100,
 			CPUQuotaPercent: 100 * p.Vcpu,
 			TasksMax:        tasks,

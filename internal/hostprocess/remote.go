@@ -121,6 +121,12 @@ func SpecOf(u hostsvc.UnitSpec) v1alpha1.HostProcessSpec {
 		if l.MemoryMax > 0 {
 			s.Limits.MemoryMax = strconv.FormatUint(l.MemoryMax, 10)
 		}
+		if l.MemoryHigh > 0 {
+			s.Limits.MemoryHigh = strconv.FormatUint(l.MemoryHigh, 10)
+		}
+		if l.MemorySwapMax > 0 {
+			s.Limits.MemorySwapMax = strconv.FormatUint(l.MemorySwapMax, 10)
+		}
 	}
 	return s
 }
