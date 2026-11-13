@@ -645,6 +645,10 @@
       "type": "string",
       "description": "run request: memory of the rented VM, such as 8G (spec.mem, the RFP's compute.vm mem; unset: 4G); a bidder whose offering advertises a lower maxMem refuses it"
     },
+    "nested-virt": {
+      "type": "boolean",
+      "description": "run request: the rented VM runs VMs of its own (spec.nestedVirt, the RFP's compute.vm nestedVirt); only a bidder whose offering sets nestedVirt is asked or accepted"
+    },
     "guest-tools": {
       "type": "string",
       "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"

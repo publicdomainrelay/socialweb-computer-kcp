@@ -1320,20 +1320,21 @@ func (v *ComputeGuestSubscribeEventsEvent) UnmarshalJSON(b []byte) error {
 }
 
 type ComputeVM struct {
-	Type      string                     `json:"$type"`
-	Cpus      int64                      `json:"cpus,omitempty"`
-	CreatedAt string                     `json:"createdAt,omitempty"`
-	Disk      string                     `json:"disk,omitempty"`
-	ExpiresAt string                     `json:"expiresAt,omitempty"`
-	Kind      string                     `json:"kind,omitempty"`
-	Location  *ComputeVMLocation         `json:"location,omitempty"`
-	Mem       string                     `json:"mem,omitempty"`
-	Net       bool                       `json:"net,omitempty"`
-	Network   string                     `json:"network,omitempty"`
-	Role      string                     `json:"role"`
-	UserData  string                     `json:"user_data,omitempty"`
-	Extra     map[string]json.RawMessage `json:"-"`
-	absent    map[string]json.RawMessage
+	Type       string                     `json:"$type"`
+	Cpus       int64                      `json:"cpus,omitempty"`
+	CreatedAt  string                     `json:"createdAt,omitempty"`
+	Disk       string                     `json:"disk,omitempty"`
+	ExpiresAt  string                     `json:"expiresAt,omitempty"`
+	Kind       string                     `json:"kind,omitempty"`
+	Location   *ComputeVMLocation         `json:"location,omitempty"`
+	Mem        string                     `json:"mem,omitempty"`
+	NestedVirt bool                       `json:"nestedVirt,omitempty"`
+	Net        bool                       `json:"net,omitempty"`
+	Network    string                     `json:"network,omitempty"`
+	Role       string                     `json:"role"`
+	UserData   string                     `json:"user_data,omitempty"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
 }
 
 func (ComputeVM) NSID() string {
@@ -1585,6 +1586,7 @@ type Offering struct {
 	Ingress     []StrongRef                `json:"ingress,omitempty"`
 	MaxCpus     int64                      `json:"maxCpus,omitempty"`
 	MaxMem      string                     `json:"maxMem,omitempty"`
+	NestedVirt  bool                       `json:"nestedVirt,omitempty"`
 	RefreshedAt string                     `json:"refreshedAt,omitempty"`
 	WithdrawnAt string                     `json:"withdrawnAt,omitempty"`
 	Extra       map[string]json.RawMessage `json:"-"`

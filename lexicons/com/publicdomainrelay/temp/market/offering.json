@@ -18,8 +18,9 @@
             "items": { "type": "string", "format": "nsid" }
           },
           "maxCpus": { "type": "integer", "minimum": 1, "description": "The most vCPUs one compute.vm may ask for; the bidder refuses an RFP that asks for more. Absent: no limit advertised." },
-        "maxMem": { "type": "string", "description": "The most memory one compute.vm may ask for, such as 16G; the bidder refuses an RFP that asks for more. Absent: no limit advertised." },
-        "createdAt": { "type": "string", "format": "datetime" },
+          "maxMem": { "type": "string", "description": "The most memory one compute.vm may ask for, such as 16G; the bidder refuses an RFP that asks for more. Absent: no limit advertised." },
+          "nestedVirt": { "type": "boolean", "description": "The bidder's VMs can run VMs of their own (QEMU on a host with KVM nested virtualization on). A requester whose compute.vm sets nestedVirt skips a bidder without it; the bidder refuses such an RFP." },
+          "createdAt": { "type": "string", "format": "datetime" },
           "refreshedAt": { "type": "string", "format": "datetime" },
           "withdrawnAt": { "type": "string", "format": "datetime", "description": "Set when the bidder stopped taking RFPs; appliesTo is empty then." }
         }

@@ -129,6 +129,8 @@ type Config struct {
 
 	ComputeKinds []string
 
+	NestedVirt bool
+
 	StateDir string
 
 	Sandbox sandbox.Runner

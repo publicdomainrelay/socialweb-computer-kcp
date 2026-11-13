@@ -75,6 +75,8 @@ type Deps struct {
 	OAuthCallbacks *oauthcallback.Registry
 
 	Sandbox sandbox.Runner
+
+	NestedVirt bool
 }
 
 type Service struct {

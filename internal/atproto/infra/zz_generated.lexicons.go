@@ -273,6 +273,7 @@ type InfraContract struct {
 	GuestTools         []string                   `json:"guestTools,omitempty"`
 	Mem                string                     `json:"mem,omitempty"`
 	Name               string                     `json:"name"`
+	NestedVirt         bool                       `json:"nestedVirt,omitempty"`
 	Net                bool                       `json:"net,omitempty"`
 	Policy             string                     `json:"policy,omitempty"`
 	PolicyArgs         string                     `json:"policyArgs,omitempty"`
