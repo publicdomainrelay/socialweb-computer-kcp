@@ -437,6 +437,8 @@ const (
 
 	MaxGuestSecretsVia = 16
 
+	MaxGuestImageMarker = 256
+
 	ageArmorHeader = "-----BEGIN AGE ENCRYPTED FILE-----"
 )
 
@@ -586,6 +588,17 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		}
 		if r.Kills < 1 || r.Total < r.Kills {
 			return "", fmt.Errorf("%w: kills is at least 1 and total at least kills", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestImageNSID:
+		r, err := market.ParseComputeEventsGuestImage(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
+			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+		}
+		if r.Marker == "" || len(r.Marker) > MaxGuestImageMarker || !printableASCII(r.Marker) {
+			return "", fmt.Errorf("%w: marker is printable ASCII of 1 to %d bytes", ErrReportRefused, MaxGuestImageMarker)
 		}
 	default:
 		return "", fmt.Errorf("%w: %q is not a guest event", ErrReportRefused, nsid)

@@ -35,9 +35,10 @@
 | `guest.r2Release` | requester only | requester repo | guest: runs `socialweb-r2-release.service` | same |
 | `guest.r2Released` | guest only | bidder repo | requester: `status.contract.r2Release` | `internal/market/requester/guestrequester.go` |
 | `guest.memoryPressure`, `guest.oomKill` | guest only | bidder repo | requester: one `requester_market_event` line each (`reportMarketEvent`), which the test modules read (`steps::market_event`: an OOM fails the run, pressure goes to readings.memory) | `internal/guestagent/memory.go`; cap `memoryEventCapped` in `internal/market/bidder/guestevents.go` |
+| `guest.image` | guest only | bidder repo | requester: `requester_guest_image` {marker, expected, ok}; a contract with `spec.image` releases on a mismatch | `internal/guestagent/image.go`; one per contract (`guestEventSent` in `internal/market/bidder/guestevents.go`) |
 | `vm.started`, `vm.registerIdentity` | defined, no Go writer | none | none | `internal/atproto/market/nsid.go` constants only |
 
-- guest-originated set: `market.IsGuestOriginatedEventNSID` (publicKey, signalWebRTC, secretsApplied, secretsRequested, requesterDid, r2Released, memoryPressure, oomKill). the guest control plane refuses any other kind (`guestEvent` in `internal/guestidentity/service.go`)
+- guest-originated set: `market.IsGuestOriginatedEventNSID` (publicKey, signalWebRTC, secretsApplied, secretsRequested, requesterDid, r2Released, memoryPressure, oomKill, image). the guest control plane refuses any other kind (`guestEvent` in `internal/guestidentity/service.go`)
 - requester-originated set: `market.IsRequesterGuestEventNSID` (publicKey, signalWebRTC, secrets, agentStart, secretsUpdated, r2Start, r2Release). the bidder refuses any other kind from a requester (`applyGuestEvent`)
 - kinds the requester's submitEvent takes: `isGuestEventNSID` in `internal/market/requester/events.go`
 - direction of `publicKey` and `signalWebRTC` comes from the author: requester-authored ones go to the guest, bidder-authored ones carry what the guest said
@@ -130,6 +131,7 @@ sequenceDiagram
 | `guest.r2Released` | `ok`, `message` | |
 | `guest.memoryPressure` | `kind` psi / swap, `threshold`, `psiSomeAvg10`, `psiFullAvg10`, `swapUsed`, `swapTotal`, `observedAt` | every VM whose bidder serves the guest agent (`memory.json`); edge-triggered: PSI some avg10 >= 10.00% or swap >= 10% in use, re-armed after 5 min under half; one per kind per 10 min, ten memory events per contract (agent and bidder) |
 | `guest.oomKill` | `kills` (since the last one), `total` (oom_kill since boot), `observedAt` | one per /proc/vmstat oom_kill rise, same caps |
+| `guest.image` | `marker` (first line of `/etc/swc-image`, printable ASCII, at most 256 bytes) | once at agent start, when the file exists; the bidder publishes one per contract |
 
 ## Boot: hostKeys And onNetwork
 

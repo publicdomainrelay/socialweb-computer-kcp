@@ -63,6 +63,7 @@
 | `compute/events/guest/r2Released.json` | [compute.events.guest.r2Released](#computeeventsguestr2released) | x |
 | `compute/events/guest/memoryPressure.json` | [compute.events.guest.memoryPressure](#computeeventsguestmemorypressure) | x |
 | `compute/events/guest/oomKill.json` | [compute.events.guest.oomKill](#computeeventsguestoomkill) | x |
+| `compute/events/guest/image.json` | [compute.events.guest.image](#computeeventsguestimage) | x |
 | `compute/guest/subscribeEvents.json` | [compute.guest.subscribeEvents](#computeguestsubscribeevents) | x |
 | `ingress/webRTC.json` | [ingress.webRTC](#ingresswebrtc) | x |
 | no file (`SecretsNSID`) | [compute.secrets.getSecrets](#computesecretsgetsecrets) | x |
@@ -237,7 +238,7 @@
 |---|---|
 | file | `market/offering.json` |
 | type | record, key any (writers use `self`) |
-| key fields | `appliesTo`* (holds `compute.vm`), `createdAt`*, `endpoints[]` (`{kind: iroh|webrtc|https, address}`), `ingress[]`, `refreshedAt`, `withdrawnAt` |
+| key fields | `appliesTo`* (holds `compute.vm`), `createdAt`*, `endpoints[]` (`{kind: iroh|webrtc|https, address}`), `ingress[]`, `maxCpus`, `maxMem`, `nestedVirt`, `images` (boots a requester image), `refreshedAt`, `withdrawnAt` |
 | rkey | `self` (`market.OfferingRKey`) |
 | written by | bidder: `putOffering`, `withdraw` in `internal/market/bidder/offering.go` |
 | read by | requester: `market.ReadOffering` (`self`, else the rkey the heartbeat names), `market.OfferingApplies`; relays list its repos by `listReposByCollection` |
@@ -360,7 +361,7 @@
 |---|---|
 | file | `compute/vm.json` |
 | type | record, key any |
-| key fields | `role`* (VM name in the contract), `kind` (`vm` default, `deno`), `cpus` (2), `mem` (`4G`), `disk` (`50G`), `network`, `location`, `user_data`, `createdAt` |
+| key fields | `role`* (VM name in the contract), `kind` (`vm` default, `deno`), `cpus` (2), `mem` (`4G`), `disk` (`50G`), `nestedVirt`, `image` (`{url, sha256}`: an https base holding `image.json`, sha256 of that file), `network`, `location`, `user_data`, `createdAt` |
 | rkey | TID (`CreateRecord`) |
 | written by | requester: `runner.go` with `DefaultComputeCPUs`, `DefaultComputeMem`, `DefaultComputeDisk` (`internal/market/requester/requester.go`); `user_data` from `cloudinit.BuildUserData` (`internal/atproto/cloudinit`) |
 | read by | bidder through `rfp.payload`: kind check (`rfpKind` in `submit.go`), boot (`acceptContract`, `internal/guestseed` adds the binaries unit) |
@@ -603,6 +604,17 @@
 | rkey | bidder `EventRKeys("guest:...")` |
 | written by | bidder for the guest agent (`internal/guestagent/memory.go`), capped by `memoryEventCapped` |
 | read by | requester (`requester_market_event`), the test modules (fail the run), the watch page |
+
+## compute.events.guest.image
+
+| item | value |
+|---|---|
+| file | `compute/events/guest/image.json` |
+| type | record, key any |
+| key fields | `marker`* (the first line of the guest's `/etc/swc-image`), `createdAt`* |
+| rkey | bidder `EventRKeys("guest:...")` |
+| written by | bidder for the guest agent (`internal/guestagent/image.go`), one per contract |
+| read by | requester: `requester_guest_image` {marker, expected, ok}; a contract with an image releases on a mismatch |
 
 ## compute.guest.subscribeEvents
 

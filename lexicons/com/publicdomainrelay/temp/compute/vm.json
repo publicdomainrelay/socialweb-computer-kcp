@@ -15,7 +15,8 @@
           "cpus": { "type": "integer", "minimum": 1 },
           "mem": { "type": "string", "description": "Memory size, such as 4G." },
           "nestedVirt": { "type": "boolean", "description": "The VM must run VMs of its own; only a bidder whose offering sets nestedVirt runs it." },
-          "disk": { "type": "string", "description": "Disk size, such as 50G." },
+          "disk": { "type": "string", "description": "Disk size, such as 50G. A requester image's kernel and rootfs together fit in it." },
+          "image": { "type": "ref", "ref": "#image" },
           "network": { "type": "string", "description": "Network transfer allowance, such as 500G." },
           "location": { "type": "ref", "ref": "#location" },
           "user_data": { "type": "string", "description": "cloud-init user data." },
@@ -23,6 +24,15 @@
           "expiresAt": { "type": "string", "format": "datetime", "description": "When the requester wants the VM ended. The bidder ends it then (it may end it earlier by its own policy) and refuses an RFP whose expiresAt has passed; without it, the bidder ends the VM 24 h after the accept." },
           "createdAt": { "type": "string", "format": "datetime" }
         }
+      }
+    },
+    "image": {
+      "type": "object",
+      "description": "kind vm: a requester-chosen VM image the bidder boots instead of its own pinned one; only a bidder whose offering sets images runs it.",
+      "required": ["url", "sha256"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "maxLength": 2048, "description": "An https base URL of a directory holding image.json, the kernel and the rootfs that image.json names." },
+        "sha256": { "type": "string", "minLength": 64, "maxLength": 64, "description": "The hex sha256 of that image.json; the bidder checks it before it reads the file." }
       }
     },
     "location": {

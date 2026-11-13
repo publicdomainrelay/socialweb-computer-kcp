@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.image",
+  "description": "The guest reports the image it booted: the marker in its /etc/swc-image; sent as the payload of a market.event. One per contract, from a guest whose image has the file. Guest-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["marker", "createdAt"],
+        "properties": {
+          "marker": { "type": "string", "minLength": 1, "maxLength": 256, "description": "The first line of /etc/swc-image, printable ASCII without spaces; the requester compares it with the marker of the image.json it asked for." },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}
