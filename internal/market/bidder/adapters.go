@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
+
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
@@ -468,6 +470,9 @@ func (b *Bidder) provisionAccept(ctx context.Context, request participant.Outbox
 	acceptResolved, err := b.records.Resolve(ctx, market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID})
 	if errors.Is(err, market.ErrNotFound) && b.bidForAcceptStatus(payload.Accept.URI, payload.Accept.CID) != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: the accept was resolved before and is gone now: %w: %w", err, participant.ErrObsolete)
+	}
+	if errors.Is(err, identity.ErrDIDNotFound) {
+		return participant.Observation{}, fmt.Errorf("bidder: the accept's author does not resolve on this bidder's PLC: %w: %w", err, participant.ErrObsolete)
 	}
 	if err != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: resolving the accept: %w", err)

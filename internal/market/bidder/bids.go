@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/identity"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -256,6 +258,12 @@ func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time
 	if err := b.verifier.VerifyRecord(ctx, resolved); err != nil {
 		b.failBid(ctx, bid, "InvalidSignature", err.Error(), now)
 		return nil, nil
+	}
+	if did, err := syntax.ParseDID(bid.Spec.Requester); err == nil && b.directory != nil {
+		if _, err := b.directory.LookupDID(ctx, did); errors.Is(err, identity.ErrDIDNotFound) {
+			b.failBid(ctx, bid, "RequesterUnresolvable", "the requester's DID does not resolve on this bidder's PLC: "+err.Error(), now)
+			return nil, nil
+		}
 	}
 	refused, err := b.payloadRefused(ctx, rfp)
 	if err != nil {
