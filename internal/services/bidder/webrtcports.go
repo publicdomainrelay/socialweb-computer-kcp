@@ -46,7 +46,9 @@ func (w webrtcPorts) Held() []string {
 	leases := w.reg.Leases()
 	out := make([]string, 0, len(leases))
 	for _, l := range leases {
-		out = append(out, l.Name)
+		if l.Name != meshUDPPortName {
+			out = append(out, l.Name)
+		}
 	}
 	return out
 }

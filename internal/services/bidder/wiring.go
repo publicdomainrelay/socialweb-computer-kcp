@@ -177,27 +177,29 @@ func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*cor
 		HTTP:        httpClient,
 		Directory:   s.dir,
 		Operators:   s.operators(),
-		Mesh:        s.mesh(ctx),
+		Mesh:        s.mesh(ctx, ports),
 		Policy:      s.policyRuns(),
 		Log:         s.log,
 	})
 }
 
-func (s *Service) mesh(ctx context.Context) core.Mesh {
+func (s *Service) mesh(ctx context.Context, ports core.GuestUDPPorts) core.Mesh {
 	if !s.inboundXRPC() || s.mux == nil {
 		return nil
 	}
-	port := 0
-	if ports, err := s.webrtcPorts(); err == nil {
-		if port, err = ports.Allocate(meshUDPPortName); err != nil {
-			s.log.Warn("bidder_mesh_udp_port", "err", err.Error())
-		}
+	port, err := ports.Allocate(meshUDPPortName)
+	if err != nil {
+		s.log.Warn("bidder_mesh_udp_port", "err", err.Error())
 	}
 	mesh, err := webrtc.NewMesh(ctx, webrtc.MeshConfig{StateDir: s.stateDir(), Handler: s.mux, Log: s.log, UDPPort: port})
 	if err != nil {
 		s.log.Warn("bidder_mesh_unavailable", "err", err.Error())
 		return nil
 	}
+	s.wg.Go(func() {
+		<-ctx.Done()
+		_ = mesh.Close()
+	})
 	return mesh
 }
 

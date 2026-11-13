@@ -56,6 +56,8 @@ type Mesh struct {
 
 	api *webrtc.API
 
+	mux ice.UDPMux
+
 	handler http.Handler
 
 	log *slog.Logger
@@ -103,16 +105,25 @@ func NewMesh(ctx context.Context, cfg MeshConfig) (*Mesh, error) {
 	}
 	settings := webrtc.SettingEngine{}
 	tuneSettings(&settings)
+	var mux ice.UDPMux
 	if cfg.UDPPort > 0 {
 		conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.UDPPort})
 		if err != nil {
 			log.Warn("webrtc_mesh_udp_port_unbound", "port", cfg.UDPPort, "err", err.Error())
 		} else {
-			settings.SetICEUDPMux(ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn}))
+			mux = ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
+			settings.SetICEUDPMux(mux)
 		}
 	}
 	return &Mesh{identity: identity, certificate: certificate, fingerprint: fingerprint, handler: cfg.Handler, log: log, ctx: ctx,
-		api: webrtc.NewAPI(webrtc.WithSettingEngine(settings))}, nil
+		mux: mux, api: webrtc.NewAPI(webrtc.WithSettingEngine(settings))}, nil
+}
+
+func (m *Mesh) Close() error {
+	if m.mux == nil {
+		return nil
+	}
+	return m.mux.Close()
 }
 
 func (m *Mesh) Recipient() string { return m.identity.Recipient().String() }
