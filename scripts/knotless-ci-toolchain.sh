@@ -5,14 +5,21 @@
 #   scripts/knotless-ci-toolchain.sh [--wasm] [--deno] [--arm64]    --wasm: also the wasm32 target (tests/modules);
 #   --deno: the pinned deno of internal/versions/versions.json (the policy engine tests, scripts/*.ts); --arm64: qemu
 #   user binfmt, so the release build runs its linux/arm64 binary (`version`) on this amd64 VM, as hat-8 does
+# --bake: the same into a guest image's rootfs (scripts/build-ci-image.sh runs it in a container of the base rootfs, cwd a
+#   kcp checkout): no docker daemon is started or asked and no binfmt is registered (the booted VM's systemd starts docker
+#   and registers qemu-aarch64 from /usr/lib/binfmt.d); a job on that image only sources /opt/ci/env
 set -euo pipefail
+bake=false
+case " $* " in *" --bake "*) bake=true ;; esac
 ci=/opt/ci
 mkdir -p "$ci"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git jq zstd unzip xz-utils build-essential docker.io util-linux >/dev/null
-systemctl start docker 2>/dev/null || service docker start
-docker version --format 'docker {{.Server.Version}}'
+if [ "$bake" = false ]; then
+	systemctl start docker 2>/dev/null || service docker start
+	docker version --format 'docker {{.Server.Version}}'
+fi
 
 # the zstd the pins were made with (stage-assets packs with the zstd CLI; another version packs other bytes, so
 # make check-pins differs in zstdBytes and the release's embedded blobs differ): 1.5.7 from its release tarball
@@ -41,8 +48,10 @@ case " $* " in *" --wasm "*) rustup target add wasm32-unknown-unknown ;; esac
 case " $* " in *" --arm64 "*)
 	apt-get install -y -qq --no-install-recommends qemu-user-static binfmt-support >/dev/null ||
 		apt-get install -y -qq --no-install-recommends qemu-user-binfmt >/dev/null
-	update-binfmts --enable qemu-aarch64 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
-	[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || { echo "toolchain: no qemu-aarch64 binfmt" >&2; exit 1; }
+	if [ "$bake" = false ]; then
+		update-binfmts --enable qemu-aarch64 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
+		[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || { echo "toolchain: no qemu-aarch64 binfmt" >&2; exit 1; }
+	fi
 	;;
 esac
 deno_path=
