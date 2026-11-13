@@ -18,11 +18,11 @@ anyhow = "1"
 # atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh, identlink: the atlibs pin set (atlibs pins.json, one copy of
 # each; AGENTS.md: pins.sh check). atlibs-host: app-password sessions saved in a state dir (no createSession per
 # run), service auth, PDS/PLC reads.
-atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "77ae4d3ee5deaa639a763642a1e6e1e2b115fdf6" }
+atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "fba979b9ca3235c6ca0a5b9855a23be5f5cdce90" }
 # iroh tickets of offering / onNetwork addresses; its raw `dumbpipe connect` is the iroh stream
-atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "647e231ba083cdee2541afb15159800d419fd7fe" }
-atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "3dce55a0142a9b854d742ab0faa7c884bd3d9813" }
-atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "4a0b2d338ab80f09d2c3e98cf361a96cc1cdba90" }
+atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "444bad4ced73b1dc87cdbae22836c379cce9f10d" }
+atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "ea96c72eefa77f5496a099ecc2653d82a84d6799" }
+atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "8c1bea08fb5f1c7d5a10632eb5563f18125eab62" }
 # ident.link walks over verified sync.getRecord, the market's computed rkeys
 identlink = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-identlink", rev = "aa7cacc3b355b217d7087cb3a95eb61ab16c8ad7", features = ["native"] }
 futures = "0.3"

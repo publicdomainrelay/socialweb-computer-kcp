@@ -31,7 +31,7 @@ cargo run -p testkit --bin last-pass -- readings/0004-*.json          # passing 
   ```sh
   mkdir -p ~/.tmp/swc-system-tests/page && cd ~/.tmp/swc-system-tests/page
   git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs-socialweb-computer-requester
-  git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh && git -C atlibs-iroh checkout -q 647e231
+  git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh && git -C atlibs-iroh checkout -q 444bad4
   (cd atlibs-iroh && cargo wasm) && (cd atlibs-socialweb-computer-requester && cargo wasm)
   ```
 - `requester`: the orchestrator binary: `release` (newest `v*` tag), `release:<tag>`, `sha:<commit>` (CI's `main/<sha>`),
