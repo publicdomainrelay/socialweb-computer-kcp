@@ -1,0 +1,36 @@
+# knotless CI: the staging composition (tests/compositions/staging) on the published build of this commit
+# (testkit's `sha:<commit>`, checked against the bucket's SHA256SUMS). On a 4 vCPU / 8 GB VM (binding kcp-test). The
+# run's dump is an artifact (runs/), kept on failure.
+# TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
+# then `after: [build]` and its artifacts again (build.yml).
+on:
+  push:
+    refs: [refs/heads/main, refs/heads/knotless-ci]
+runners: [aliceoa.bsky.social]
+executor: kcp-test
+artifacts: [runs]
+env:
+  SWC_RUNS: /work/runs
+steps:
+  - name: toolchain
+    run: bash scripts/knotless-ci-toolchain.sh --wasm
+  - name: swc-test-host
+    timeout: 60
+    run: |
+      . /opt/ci/env
+      (cd tests/modules && cargo wasm)
+      (cd tests && cargo build --release -p swc-test-host)
+  - name: staging
+    timeout: 110
+    run: |
+      # as the guest requester R2 (the runner associated it with the pusher's session; kcp refuses root): no creds here
+      id r2
+      install -d -o r2 /work/runs
+      # TEMPORARY (until build.yml is back): the newest published main build at or below this commit
+      bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
+      for c in $(git rev-list --max-count 30 HEAD); do curl -sfo /dev/null "$bucket/main/$c/binaries/SHA256SUMS" && break; c=; done
+      test -n "$c" && echo "requester sha:$c"
+      jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
+      chown r2 /home/r2/target-ci.json
+      cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs CI=1 \
+        target/release/swc-test-host compositions/staging --account r2 --on-fail cleanup
