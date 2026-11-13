@@ -211,7 +211,7 @@ dependencies = [
 [[package]]
 name = "atlibs-kube"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-kube?rev=ea96c72eefa77f5496a099ecc2653d82a84d6799#ea96c72eefa77f5496a099ecc2653d82a84d6799"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-kube?rev=8a71567cf7bcb2fa7440dd9a035d53602679f0a8#8a71567cf7bcb2fa7440dd9a035d53602679f0a8"
 dependencies = [
  "atlibs-host",
  "atlibs-iroh",
