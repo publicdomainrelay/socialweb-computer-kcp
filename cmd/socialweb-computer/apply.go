@@ -228,3 +228,15 @@ func runApply(ctx context.Context, a *app, vals clicfg.Values, rest []string) in
 	a.printJSON(all)
 	return exitOK
 }
+
+func readSpecFile[T any](path string) (T, error) {
+	var s T
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return s, err
+	}
+	if err := yaml.UnmarshalStrict(b, &s); err != nil {
+		return s, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
+}

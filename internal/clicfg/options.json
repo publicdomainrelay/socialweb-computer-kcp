@@ -534,6 +534,16 @@
       "description": "run bidder: hono-bidder options, written as after -- (for example \"--bid-ttl-sec 1800 --offering-refresh-sec 60\"), each an options entry of market-bidder in deploy/apps/option-map.yaml; they become MarketBidder spec.options and so the bidder component's argv. Set it in config.json of an installed bidder; an option after -- wins. Values are split on spaces: a value with a space goes in its own key (bidder-policy-args)",
       "env": "SOCIALWEB_BIDDER_OPTIONS"
     },
+    "bidder-spec-file": {
+      "type": "string",
+      "description": "run bidder outside a market network: a YAML MarketBidderSpec of network (the MarketNetworkValue: plcDirectoryUrl, caBundle, ingressProxyHost, hosts, discoveryRelays, comms), identity (mode, handle, pdsUrl), comms, ingress, policy, options, guestNetwork and computeKinds; options after -- and the run bidder options win. install bidder writes it to config.json; the file must be readable by the bidder account",
+      "env": "SOCIALWEB_BIDDER_SPEC_FILE"
+    },
+    "ssh-gateway-spec-file": {
+      "type": "string",
+      "description": "run gateway ssh outside a market network: a YAML SshGatewaySpec of network (the MarketNetworkValue: plcDirectoryUrl, caBundle, ingressProxyHost, hosts, discoveryRelays, comms), comms, requesterIngress, bidderDids, options and ssh; options after -- win",
+      "env": "SOCIALWEB_SSH_GATEWAY_SPEC_FILE"
+    },
     "gateway-spec-file": {
       "type": "string",
       "description": "serve gateway kcp: a YAML GatewaySpec (network, bidderDids, options of the socialweb-computer-k8s web app, marketNetwork values, webAppFront) the Gateway root object is applied with; its profile is gateway-profile, and the PLC, the web app's gateway-audience and kcp-public-host default to SOCIALWEB_GATEWAY_PLC_URL, SOCIALWEB_GATEWAY_AUDIENCES and SOCIALWEB_GATEWAY_KCP_PUBLIC_HOST; webAppFront, the edge entry point caddy proxies to, defaults to 127.0.0.1:8788 in profile prod and 127.0.0.1:0 otherwise",

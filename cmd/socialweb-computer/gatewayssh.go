@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,7 +26,7 @@ import (
 )
 
 var gatewaySshOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"})
+	"network-timeout", "ssh-gateway-spec-file", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "asset-cache"})
 
 type gatewaySshRun struct {
 	a                *app
@@ -33,6 +34,7 @@ type gatewaySshRun struct {
 	profile          string
 	network          string
 	options          []v1alpha1.ApplicationOption
+	specOptions      []v1alpha1.ApplicationOption
 	comms            *v1alpha1.MarketComms
 	value            *v1alpha1.MarketNetworkValue
 	bidderDids       []string
@@ -66,7 +68,10 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 		return err
 	}
 	var nv v1alpha1.MarketNetworkValue
-	nvSet := false
+	nvSet := r.value != nil
+	if nvSet {
+		nv = *r.value
+	}
 	for _, p := range parsed {
 		switch p.Name {
 		case "test-owner-sessions-file":
@@ -135,6 +140,19 @@ func (r *gatewaySshRun) passthrough(args []string) error {
 	return nil
 }
 
+func (r *gatewaySshRun) readSpec(path string) error {
+	s, err := readSpecFile[v1alpha1.SshGatewaySpec](path)
+	if err != nil {
+		return err
+	}
+	r.value, r.comms, r.requesterIngress, r.bidderDids, r.specOptions, r.ssh = s.Network, s.Comms, s.RequesterIngress, s.BidderDids, s.Options, s.Ssh
+	s.Network, s.Comms, s.RequesterIngress, s.BidderDids, s.Options, s.Ssh = nil, nil, nil, nil, nil, nil
+	if !reflect.DeepEqual(s, v1alpha1.SshGatewaySpec{}) {
+		return fmt.Errorf("%s: run gateway ssh takes only network, comms, requesterIngress, bidderDids, options and ssh", path)
+	}
+	return nil
+}
+
 func (r *gatewaySshRun) applySshOption(name, value string) error {
 	if r.ssh == nil {
 		r.ssh = &v1alpha1.SshGatewaySsh{}
@@ -186,8 +204,21 @@ func runGatewaySsh(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 	if !slices.Contains(sshgateway.SshGatewayProfiles, r.profile) {
 		return a.fail(exitRefused, "run gateway ssh: --profile %q: want one of %s", r.profile, strings.Join(sshgateway.SshGatewayProfiles, ", "))
 	}
+	if p := vals.String("ssh-gateway-spec-file"); p != "" {
+		if r.network != "" {
+			return a.fail(exitRefused, "run gateway ssh: --network hands the ssh gateway the market network's value; --ssh-gateway-spec-file is for one outside it")
+		}
+		if err := r.readSpec(p); err != nil {
+			return a.fail(exitRefused, "run gateway ssh: --ssh-gateway-spec-file: %v", err)
+		}
+	}
 	if err := r.passthrough(pass); err != nil {
 		return a.fail(exitRefused, "run gateway ssh: %v", err)
+	}
+	for _, o := range r.specOptions {
+		if !slices.ContainsFunc(r.options, func(have v1alpha1.ApplicationOption) bool { return have.Name == o.Name }) {
+			r.options = append(r.options, o)
+		}
 	}
 	backend, err := hostsvc.ParseBackend(vals.String(backendOpt))
 	if err != nil {
