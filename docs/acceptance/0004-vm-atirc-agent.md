@@ -16,7 +16,14 @@ endorsements and grants and tombstones both DIDs.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md) (Q1)
 - Plan [0035](../plans/0035-atirc-agent.yaml) item ACC35-AGENT; the p2p cut-over (P6)
 - Paths: CLI (`run request --agent`), page (Agent checkbox + row Agent button), iOS app ([0010](0010-ios-app.md))
-- Last pass: 2026-11-12 21:13-21:18Z, kcp e190a3b1 (release 66f3bd4d, rollout 19), alice by QR, winner hat-8: association
+- Last pass: 2026-11-13 00:20-00:53Z, kcp e190a3b1 (release 66f3bd4d, rollout 19), alice by QR (consent qr.fedfork.com
+  for @aliceoa.bsky.social), no bidders list, winner hat-7 (`cli-agent-1794529242`): Held 00:23:05Z; agentStart
+  00:48:29Z; `requester_association_written` +97 s (R2 reported 1 s before), the chain renter -> R2 -> agent with roots
+  [alice] and the agent's peer record (`iroh`, no `lease`); unit active, `/etc/atirc/*` root 0600; the owner node
+  (`--peer`) saw `<nick> online` by 00:51:14Z (+165 s); a message each way; `<nick>: uname -m` answered `x86_64`
+  within 10 s. Release 00:52:40Z: `r2Released` 9.4 s, Released +10.1 s, association deleted, both DIDs
+  `plc_tombstone` by the guest, records 14/14 (no leftover release event), RecordNotFound x6, requester core.log 0 ERROR,
+  hosts empty. Before: 2026-11-12 21:13-21:18Z, kcp e190a3b1 (rollout 19), alice by QR, winner hat-8: association
   +103 s, online +180 s, answer 3.0 s, `r2Released` 8.8 s after release, the CLI stops 5.3 s after Released, 0 ERROR.
   Before: 2026-11-12 18:38-18:44Z, kcp cdd93727 (release 6380eee4, rollout 16), alice by QR, winner hat-8: the release
   answers at once: `r2Released` posted by the guest 8 s after release, `requester_guest_requester_released` 18:44:05Z,
