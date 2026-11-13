@@ -2,8 +2,9 @@
 # The toolchain of a knotless CI job on a fresh rented VM (root, Debian). Go of go.mod and rust of
 # rust/rust-toolchain.toml (each download checked against its published sha256), docker for the swc-userns-stage build,
 # jq, zstd. Writes /opt/ci/env to source in later steps.
-#   scripts/knotless-ci-toolchain.sh [--wasm] [--deno]    --wasm: also the wasm32 target (tests/modules); --deno: the
-#   pinned deno of internal/versions/versions.json (the policy engine tests, scripts/*.ts)
+#   scripts/knotless-ci-toolchain.sh [--wasm] [--deno] [--arm64]    --wasm: also the wasm32 target (tests/modules);
+#   --deno: the pinned deno of internal/versions/versions.json (the policy engine tests, scripts/*.ts); --arm64: qemu
+#   user binfmt, so the release build runs its linux/arm64 binary (`version`) on this amd64 VM, as hat-8 does
 set -euo pipefail
 ci=/opt/ci
 mkdir -p "$ci"
@@ -37,6 +38,13 @@ chmod 0755 "$init" && "$init" -y --quiet --no-modify-path --profile minimal --de
 export PATH="$ci/go/bin:$CARGO_HOME/bin:$PATH"
 (cd rust && rustup toolchain install)
 case " $* " in *" --wasm "*) rustup target add wasm32-unknown-unknown ;; esac
+case " $* " in *" --arm64 "*)
+	apt-get install -y -qq --no-install-recommends qemu-user-static binfmt-support >/dev/null ||
+		apt-get install -y -qq --no-install-recommends qemu-user-binfmt >/dev/null
+	update-binfmts --enable qemu-aarch64 2>/dev/null || systemctl restart systemd-binfmt 2>/dev/null || true
+	[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || { echo "toolchain: no qemu-aarch64 binfmt" >&2; exit 1; }
+	;;
+esac
 deno_path=
 case " $* " in *" --deno "*)
 	deno_url="$(jq -er '.assets.deno.fetch["linux/amd64"].url' internal/versions/versions.json)"

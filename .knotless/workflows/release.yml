@@ -20,7 +20,7 @@ env:
   OUT: /root/ci-out
 steps:
   - name: toolchain
-    run: bash scripts/knotless-ci-toolchain.sh --deno
+    run: bash scripts/knotless-ci-toolchain.sh --deno --arm64
   - name: binaries
     timeout: 110
     run: |
