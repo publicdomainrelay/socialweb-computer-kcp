@@ -882,7 +882,30 @@ impl Swc {
         Ok(tree)
     }
 
-    /// Release every invocation, stop every requester (Ctrl-C), remove the password env files. The errors.
+    /// Wait (5 min) until the run requester `name` holds no ComputeContract that is not Released or Failed.
+    async fn requester_contracts_released(&self, name: &str) -> Result<(), String> {
+        let input = json!({ "cluster": format!("requester:{name}"), "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeContract" });
+        let deadline = Instant::now() + Duration::from_secs(300);
+        loop {
+            let listed = self.kube.call(atlibs_kube::LIST.into(), Request { input: Some(input.clone()), ..Default::default() }).await;
+            let left: Vec<String> = match &listed {
+                Ok(o) => o.as_ref().and_then(|o| o["items"].as_array()).into_iter().flatten()
+                    .filter(|c| !matches!(c["status"]["phase"].as_str(), Some("Released" | "Failed")))
+                    .filter_map(|c| c["metadata"]["name"].as_str().map(String::from)).collect(),
+                Err(_) => vec![],
+            };
+            if left.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() > deadline {
+                return Err(format!("run requester {name}: contracts not released 5 min after cleanup: {}", left.join(", ")));
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+
+    /// Release every invocation, wait for each run requester's contracts, stop every requester (Ctrl-C), remove the
+    /// password env files. The errors.
     pub async fn cleanup(&self) -> Vec<String> {
         let mut errors = self.knotless_cleanup().await;
         errors.extend(self.more_cleanup().await);
@@ -905,6 +928,11 @@ impl Swc {
         }))
         .await;
         errors.extend(released.into_iter().filter_map(Result::err));
+        // a run requester releases the contracts of the Infra/EphemeralInfra objects kube.cleanup just deleted only
+        // while it runs: wait for them before the Ctrl-C (it leaves Held VMs to adopt), bounded
+        let live: Vec<String> = self.requesters.lock().await.keys().cloned().collect();
+        let settled = futures::future::join_all(live.iter().map(|n| self.requester_contracts_released(n))).await;
+        errors.extend(settled.into_iter().filter_map(Result::err));
         for (name, (_, mut c)) in self.requesters.lock().await.drain() {
             if let Ok(None) = c.try_wait() {
                 if let Some(pid) = c.id() {
