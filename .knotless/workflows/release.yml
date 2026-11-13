@@ -6,6 +6,8 @@
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
+  asked:
+    refs: [refs/heads/main, refs/heads/knotless-ci]
 runners: [aliceoa.bsky.social]
 executor: kcp-build
 after: [gate, pins]
