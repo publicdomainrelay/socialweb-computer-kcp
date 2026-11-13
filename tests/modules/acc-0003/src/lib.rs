@@ -110,15 +110,24 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
             };
             match id.as_str() {
                 "ssh2" => {
-                    let t = s.since("ssh2");
+                    let wall = s.since("ssh2");
                     let txt = o["output"].as_str().unwrap_or_default();
                     if o["ok"] != true || !txt.contains("Linux") || !txt.contains("uid=") {
                         return Ok(s.fail(format!("restarted ssh: {txt}")));
                     }
+                    // the runbook's number is the CLI's own `ssh returned` seconds (the wall time adds the kcp's restart
+                    // from its state dir and its stop)
+                    let t = txt
+                        .lines()
+                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                        .find(|l| l["msg"] == "ssh returned")
+                        .and_then(|l| l["seconds"].as_f64())
+                        .map_or(wall, |x| (x * 10.0).round() / 10.0);
                     if t > 10.0 {
                         return Ok(s.fail(format!("the restarted invocation's ssh took {t} s (want <= 10 s)")));
                     }
                     s.st["restarted"] = json!(t);
+                    s.st["restarted_wall"] = json!(wall);
                     h = h.call(host("summary", "request.summary", json!({ "name": name })));
                 }
                 "summary" => {
@@ -170,7 +179,7 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
 
 /// Record the round, then the next one (re-arranged), or resume every bidder / pass.
 fn next(s: &mut S, mut h: Handle, i: usize, rounds: usize, bidders: &[Value], per_host: bool) -> Handle {
-    let r = json!({ "winner": s.st["winner"]["name"], "fresh_s": s.st["fresh"], "restarted_s": s.st["restarted"], "release_s": s.st["release_s"], "records_checked": s.st["records_checked"] });
+    let r = json!({ "winner": s.st["winner"]["name"], "fresh_s": s.st["fresh"], "restarted_s": s.st["restarted"], "restarted_wall_s": s.st["restarted_wall"], "release_s": s.st["release_s"], "records_checked": s.st["records_checked"] });
     let key = if per_host { bidders[i]["name"].as_str().unwrap_or("?").to_string() } else { "discovery".into() };
     s.st["readings"][key] = r;
     s.st["i"] = json!(i + 1);
