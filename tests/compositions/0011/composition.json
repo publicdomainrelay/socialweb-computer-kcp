@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0011",
+	"description": "Acceptance 0011 atirc: deploy gates (run), a minted token posts and is refused after its revoke (token). (docs/acceptance/0011-atirc.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0011"
+		}
+	]
+}
+

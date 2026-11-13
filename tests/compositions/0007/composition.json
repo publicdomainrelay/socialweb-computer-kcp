@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0007",
+	"description": "Acceptance 0007: an operator delete of this run's own VM on its bidder kcp ends it cleanly. (docs/acceptance/0007-bidder-termination.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0007"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "the contract records RecordNotFound after the termination"
+		}
+	]
+}
+

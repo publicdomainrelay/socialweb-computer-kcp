@@ -1,0 +1,34 @@
+{
+	"name": "acc-0007",
+	"description": "Acceptance 0007: an operator delete of this run's own VM on its bidder kcp ends it cleanly.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0007",
+			"description": "Fault injection on the winner, scoped to the receipt."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.records",
+		"com.atproto.repo.getRecord",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.delete",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "the contract records RecordNotFound after the termination"
+		},
+		{
+			"nsid": "com.fedfork.exec.kube.delete",
+			"required": true,
+			"entries": [
+				"run"
+			],
+			"reason": "the operator delete on the bidder kcp"
+		}
+	]
+}

@@ -1,0 +1,30 @@
+{
+	"name": "acc-0006",
+	"description": "Acceptance 0006 rollout checks: every bidder signed in on bidder-tangled-vouch (run), the unchanged CLI rents and releases (compat).",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0006 bidders",
+			"description": "Each bidder kcp the host reaches."
+		},
+		{
+			"entry": "compat",
+			"label": "Run 0006 compat",
+			"description": "SWC_COMPAT_REQUESTER against the new servers."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.checkLogs",
+		"computer.socialweb.test.request.records",
+		"com.fedfork.exec.kube.get",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "every record of the compat run RecordNotFound"
+		}
+	]
+}

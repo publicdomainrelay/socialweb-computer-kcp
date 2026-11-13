@@ -1,0 +1,26 @@
+{
+	"name": "acc-0008",
+	"description": "Acceptance 0008 host observer: the VM on its host while Held, vm.terminated pinned, the orphan check.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0008",
+			"description": "One VM, its host timeline, the release."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"com.atproto.repo.getRecord",
+		"com.fedfork.exec.kube.list",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "the release's records RecordNotFound"
+		}
+	]
+}

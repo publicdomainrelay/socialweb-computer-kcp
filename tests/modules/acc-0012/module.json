@@ -1,0 +1,36 @@
+{
+	"name": "acc-0012",
+	"description": "Acceptance 0012 Infra quickstart: dry runs, vm.yaml ssh, deno stdout, restart keeps Held, deletes release.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0012",
+			"description": "The examples on the target's market."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.requester.start",
+		"computer.socialweb.test.requester.ssh",
+		"computer.socialweb.test.requester.restart",
+		"computer.socialweb.test.requester.records",
+		"computer.socialweb.test.example",
+		"com.fedfork.exec.kube.get",
+		"com.fedfork.exec.kube.apply",
+		"com.fedfork.exec.kube.delete",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "every record of the run RecordNotFound"
+		},
+		{
+			"nsid": "computer.socialweb.test.requester.start",
+			"required": true,
+			"entries": [
+				"run"
+			],
+			"reason": "the long-lived requester"
+		}
+	]
+}

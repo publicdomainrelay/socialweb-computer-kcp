@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0008",
+	"description": "Acceptance 0008 host observer: the VM on its host while Held, vm.terminated pinned, the orphan check. (docs/acceptance/0008-host-observer.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0008"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "the release's records RecordNotFound"
+		}
+	]
+}
+

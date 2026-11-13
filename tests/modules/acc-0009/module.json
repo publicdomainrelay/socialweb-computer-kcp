@@ -1,0 +1,24 @@
+{
+	"name": "acc-0009",
+	"description": "Acceptance 0009 A3/A6: the page's requester module in headless Chrome over each bidder's webrtc endpoint.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0009",
+			"description": "page-round per bidder."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.page.round"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.page.round",
+			"required": true,
+			"entries": [
+				"run"
+			],
+			"reason": "the requester page in headless Chrome"
+		}
+	]
+}

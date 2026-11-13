@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0009",
+	"description": "Acceptance 0009 A3/A6: the page's requester module in headless Chrome over each bidder's webrtc endpoint. (docs/acceptance/0009-browser-page.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0009"
+		}
+	]
+}
+

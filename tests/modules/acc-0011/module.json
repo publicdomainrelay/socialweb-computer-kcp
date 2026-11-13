@@ -1,0 +1,35 @@
+{
+	"name": "acc-0011",
+	"description": "Acceptance 0011 atirc: deploy gates (run), a minted token posts and is refused after its revoke (token).",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0011 gates",
+			"description": "Section 2."
+		},
+		{
+			"entry": "token",
+			"label": "Run 0011 token",
+			"description": "Section 3 from the client."
+		}
+	],
+	"calls": [
+		"com.fedfork.exec.http.fetch",
+		"computer.socialweb.test.atirc.observer",
+		"computer.socialweb.test.atirc.observerPub",
+		"computer.socialweb.test.atirc.observerRevoke"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.atirc.observer",
+			"required": true,
+			"entries": [
+				"token"
+			],
+			"reason": "an atirc token minted the normal way"
+		}
+	],
+	"http": [
+		"*"
+	]
+}

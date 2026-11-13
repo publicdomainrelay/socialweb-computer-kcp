@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0012",
+	"description": "Acceptance 0012 Infra quickstart: dry runs, vm.yaml ssh, deno stdout, restart keeps Held, deletes release. (docs/acceptance/0012-infra-quickstart.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0012"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "every record of the run RecordNotFound"
+		}
+	]
+}
+
