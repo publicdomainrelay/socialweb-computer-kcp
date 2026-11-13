@@ -125,8 +125,9 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
                         .find(|l| l["msg"] == "ssh returned")
                         .and_then(|l| l["seconds"].as_f64())
                         .map_or(wall, |x| (x * 10.0).round() / 10.0);
-                    if t > 10.0 {
-                        return Ok(s.fail(format!("the restarted invocation's ssh took {t} s (want <= 10 s)")));
+                    let max = args["restartSshMaxS"].as_f64().unwrap_or(10.0);
+                    if t > max {
+                        return Ok(s.fail(format!("the restarted invocation's ssh took {t} s (want <= {max} s)")));
                     }
                     s.st["restarted"] = json!(t);
                     s.st["restarted_wall"] = json!(wall);

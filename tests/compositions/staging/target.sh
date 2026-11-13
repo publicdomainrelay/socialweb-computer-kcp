@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # On the staging VM, as stg, after dev up: two throwaway accounts on the network's bidder PDS and the suite's target
 # file (the targets/prod.json shape) for the market network instance stg. Usage: target.sh <run> > target-staging.json
+# restartSshMaxS 20: with --network a restarted invocation re-places itself as a network child (~7 s) and its requester
+# becomes Ready again (~7 s) before ssh; prod keeps 10.
 set -euo pipefail
 run=$1
 S=${SWC:-/home/stg/stg/socialweb-computer-linux-amd64} ST=${SWC_STATE:-/home/stg/stg/s} I=${SWC_INSTANCE:-stg} C=${SWC_CREDS:-/home/stg}
@@ -25,7 +27,7 @@ bidders=$(jq -c '[.network.status.apps[] | select(.kind == "MarketBidder") | {na
 done | jq -sc .)
 jq -n --arg plc "$plc" --arg pds "$pds" --arg relay "http://$(host relay.default.relay.svc.kcp.local)" \
   --argjson accounts "$accounts" --argjson bidders "$bidders" --arg s "$S" --arg i "$I" --arg st "$ST" '{
-  name: "staging", plc: $plc, pds: $pds, relay: $relay, requester: ("path:" + $s),
+  name: "staging", restartSshMaxS: 20, plc: $plc, pds: $pds, relay: $relay, requester: ("path:" + $s),
   network: {instance: $i, stateDir: $st}, accounts: $accounts, bidders: $bidders,
   gateway: {url: "https://gateway.staging.invalid", aud: "did:web:gateway.staging.invalid", ssh: "gateway.staging.invalid"}
 }'

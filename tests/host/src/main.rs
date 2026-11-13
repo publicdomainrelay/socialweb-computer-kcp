@@ -532,7 +532,7 @@ async fn main_() -> Result<bool> {
     let mut input: serde_json::Map<String, Value> = json!({
         "did": acc.did, "handle": acc.handle, "name": name, "target": target.name, "bidders": bidders,
         "gateway": { "url": target.gateway.url, "aud": target.gateway.aud, "ssh": target.gateway.ssh, "requesterDid": target.gateway.requester_did, "cluster": target.gateway.kcp.as_ref().map(|_| "gateway") },
-        "atirc": target.atirc, "plc": target.plc, "pds": target.pds, "requester": target.requester, "perHost": args.iter().any(|a| a == "--per-host"),
+        "atirc": target.atirc, "plc": target.plc, "pds": target.pds, "requester": target.requester, "restartSshMaxS": target.restart_ssh_max_s, "perHost": args.iter().any(|a| a == "--per-host"),
     })
     .as_object()
     .unwrap()
