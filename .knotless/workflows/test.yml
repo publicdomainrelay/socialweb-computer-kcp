@@ -3,7 +3,7 @@
 # run's dump is an artifact (runs/), kept on failure.
 # TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
 # then `after: [build]` and its artifacts again (build.yml).
-# A run rents, as R2, a 4 vCPU / 8 GB nested-virt staging VM (only the temp bidder offers one): pushes to knotless-ci only,
+# A run rents, as R2, the multi-VM staging layout (four VMs, two of them 4/8 nested-virt): pushes to knotless-ci only,
 # and when asked at main (`knotless run rerun knotless://<owner>/socialweb-computer-kcp --ref refs/heads/main --workflow test`).
 on:
   push:
@@ -68,18 +68,27 @@ steps:
       git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
       git -C /opt/swc-watch checkout -q c74ff0a4b6456856676e25d121f94fd542427477
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
-      # TEMPORARY (until build.yml is back): the newest published main build at or below this commit
+      # the newest published release build at or below this commit: knotless release's main/<sha>, else a hat-8 release
+      # build by hand at local/<sha> (AGENTS.md: Release pipeline)
       bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
-      for c in $(git rev-list --max-count 30 HEAD); do curl -sfo /dev/null "$bucket/main/$c/binaries/SHA256SUMS" && break; c=; done
-      test -n "$c" && echo "requester sha:$c"
-      jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
+      spec=
+      for c in $(git rev-list --max-count 30 HEAD); do
+        for p in main:sha local:local; do
+          curl -sfo /dev/null "$bucket/${p%%:*}/$c/binaries/SHA256SUMS" && { spec="${p#*:}:$c"; break 2; }
+        done
+      done
+      test -n "$spec" && echo "requester $spec"
+      jq --arg b "$spec" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
+      # r2's user manager (the requester's units): its runtime dir, else mkdir /run/user/0/swc is refused
+      loginctl enable-linger r2
+      for i in $(seq 60); do [ -d "/run/user/$(id -u r2)" ] && break; sleep 1; done
       rc=0
-      # the single-VM layout; `"layout": "multi"` (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay)
-      # once R2 rents through one long-lived requester (a guest requester holds one contract)
-      (cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" \
-        SWC_MESHD=/usr/local/bin/socialweb-meshd CI=1 target/release/swc-test-host compositions/staging --account r2 --on-fail freeze \
-        --freeze-ttl 3600 --input '{"suite": false}') || rc=$?
+      # the multi-VM layout (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay), its four contracts
+      # held by one long-lived guest requester (provision infra: an EphemeralInfra of R2's `run requester`)
+      (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
+        SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd CI=1 target/release/swc-test-host \
+        compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false, "layout": "multi", "provision": "infra"}') || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc
