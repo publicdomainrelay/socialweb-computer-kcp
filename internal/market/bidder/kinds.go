@@ -8,8 +8,10 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/identlink"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/memsize"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
@@ -70,7 +72,32 @@ func (b *Bidder) payloadRefused(ctx context.Context, rfpURI string, rfp *market.
 	if at, err := market.ParseTime(record.ExpiresAt); err == nil && !at.After(b.now()) {
 		return fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt), nil
 	}
-	return b.reserve(rfpURI, record, 0), nil
+	if refused := b.reserve(rfpURI, record, 0); refused != "" {
+		return refused, nil
+	}
+	return b.imageRefused(ctx, record), nil
+}
+
+func (b *Bidder) imageRefused(ctx context.Context, record vmRecord) string {
+	if record.Image == nil {
+		return ""
+	}
+	pin, err := guestimage.PinFor(b.cfg.ImageTarget)
+	if err != nil {
+		return err.Error()
+	}
+	diskMiB, err := memsize.ParseMiB(record.Disk)
+	if err != nil {
+		return err.Error()
+	}
+	m, _, err := guestimage.FetchManifest(ctx, guestimage.PublicClient(), *record.Image)
+	if err == nil {
+		err = m.CheckFor(pin, int64(diskMiB)<<20)
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 func (b *Bidder) guestToolsRefused(ctx context.Context, rfp *market.RFP) (string, error) {

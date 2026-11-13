@@ -94,7 +94,7 @@ func ForHost(cfg Config) (Runtime, error) {
 func (r *hostRuntime) Capabilities() Capabilities {
 	c := r.cfg.Manager.Capabilities()
 	return Capabilities{Backend: c.Backend, Hypervisor: r.cfg.VMM, EnforcesLimits: c.EnforcesLimits, GracefulStop: GracefulStop(),
-		NestedVirt: r.cfg.VMM == VMMQEMU && HostNestedVirt()}
+		NestedVirt: r.cfg.VMM == VMMQEMU && HostNestedVirt(), ImageTarget: r.target}
 }
 
 func (r *hostRuntime) imagePin() (guestimage.Pin, error) { return guestimage.PinFor(r.target) }
@@ -112,7 +112,12 @@ func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		return Prepared{}, err
 	}
 	store := r.imageStore()
-	img, err := store.Ensure(ctx, pin, r.cfg.ImageSource)
+	var img guestimage.Result
+	if spec.Image != nil {
+		img, err = store.EnsureRequested(ctx, *spec.Image, pin, int64(spec.DiskMiB)<<20)
+	} else {
+		img, err = store.Ensure(ctx, pin, r.cfg.ImageSource)
+	}
 	if err != nil {
 		return Prepared{}, err
 	}
@@ -526,14 +531,13 @@ func (r *hostRuntime) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 		return RuntimeRef{}, err
 	}
 	_, _, vmmUID := r.slotIDs(slot)
-	pin, _ := r.imagePin()
 	ref := RuntimeRef{
 		Backend: id.Backend, Hypervisor: vmm, Handle: p.Spec.Handle, Name: p.Spec.Name,
 		Unit: p.Unit, InvocationID: id.InvocationID, PID: id.PID, StartTicks: id.StartTicks,
 		StartTime: time.Now().UTC(), HostBootID: id.BootID, Manager: id.Manager, VMMID: p.VMMID,
 		Slot: slot, VMMUID: vmmUID, WorkDir: p.WorkDir, Socket: p.Socket,
 		GuestAddress: guestnet.GuestAddress, HostAddress: guestnet.HostAddress,
-		ImageSHA256: pin.Files[guestimage.ManifestName].SHA256,
+		ImageSHA256: filepath.Base(p.ImageDir),
 	}
 	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
 		return RuntimeRef{}, err

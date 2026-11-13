@@ -1296,6 +1296,11 @@ func (in *BidderSpec) DeepCopyInto(out *BidderSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.RequesterImages != nil {
+		in, out := &in.RequesterImages, &out.RequesterImages
+		*out = new(bool)
+		**out = **in
+	}
 	return
 }
 

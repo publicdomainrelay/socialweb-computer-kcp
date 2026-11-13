@@ -164,6 +164,9 @@ func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*cor
 		Sandbox:             s.deps.Sandbox,
 		NestedVirt:          s.deps.NestedVirt,
 	}
+	if s.spec.RequesterImages == nil || *s.spec.RequesterImages {
+		cfg.ImageTarget = s.deps.ImageTarget
+	}
 	if s.spec.Kcp != nil {
 		cfg.StopGraceSeconds = s.spec.Kcp.StopGraceSeconds
 	}

@@ -141,6 +141,8 @@ type Config struct {
 
 	NestedVirt bool
 
+	ImageTarget string
+
 	StateDir string
 
 	Sandbox sandbox.Runner

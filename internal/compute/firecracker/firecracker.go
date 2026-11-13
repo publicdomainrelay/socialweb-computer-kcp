@@ -133,6 +133,13 @@ func CapMessage(s string) string {
 	return s[:MessageCap/2] + "\n...\n" + s[len(s)-MessageCap/2:]
 }
 
+func requestedImage(req *v1alpha1.ComputeVMImageRequest) *guestimage.Requested {
+	if req == nil || req.URL == "" {
+		return nil
+	}
+	return &guestimage.Requested{URL: req.URL, SHA256: req.Sha256}
+}
+
 func hostPorts(ports []int32) []int {
 	out := make([]int, 0, len(ports))
 	for _, p := range ports {
@@ -351,9 +358,13 @@ func (p *Provider) Boot(ctx context.Context, vm *v1alpha1.FirecrackerVM, write f
 		started := time.Now()
 		prep, err := p.rt.Prepare(ctx, vmruntime.VMSpec{Handle: h, Name: vm.Name, UserData: userData, Vcpu: int(vm.Spec.Vcpu), MemMiB: mem, DiskMiB: disk,
 			HostPorts: hostPorts(vm.Spec.HostPorts), LANUDP: vm.Spec.GuestNetwork.LANUDPAllowed(),
-			HostUDP: vm.Spec.GuestNetwork.HostUDPAllowed(), WebRTCUDPPort: int(vm.Spec.GuestNetwork.WebRTCUDPPortOf())})
+			HostUDP: vm.Spec.GuestNetwork.HostUDPAllowed(), WebRTCUDPPort: int(vm.Spec.GuestNetwork.WebRTCUDPPortOf()), Image: requestedImage(vm.Spec.Image)})
 		if err != nil {
-			return p.fail(ctx, vm, st, err), nil
+			st = p.fail(ctx, vm, st, err)
+			if errors.Is(err, guestimage.ErrRequestedRefused) {
+				st.LostReason = v1alpha1.ComputeVMLostImageRefused
+			}
+			return st, nil
 		}
 		var imageMiB int64
 		if fi, err := os.Stat(filepath.Join(prep.ImageDir, guestimage.RootfsName)); err == nil {
