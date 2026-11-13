@@ -96,10 +96,16 @@ pub struct Swc {
     extra: more::Extra,
 }
 
+/// A call's input; a subscription's arguments come as params (strings), its structure in the `json` param.
 fn input_of(r: &Request) -> Value {
-    r.input
-        .clone()
-        .unwrap_or_else(|| Value::Object(r.params.clone().unwrap_or_default()))
+    if let Some(i) = &r.input {
+        return i.clone();
+    }
+    let params = r.params.clone().unwrap_or_default();
+    match params.get("json").and_then(Value::as_str).and_then(|j| serde_json::from_str::<Value>(j).ok()) {
+        Some(v) => v,
+        None => Value::Object(params),
+    }
 }
 
 fn str_of<'a>(v: &'a Value, k: &str) -> Result<&'a str, String> {

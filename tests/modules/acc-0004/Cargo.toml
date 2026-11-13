@@ -11,3 +11,4 @@ crate-type = ["cdylib"]
 [dependencies]
 abi.workspace = true
 serde_json.workspace = true
+steps.workspace = true

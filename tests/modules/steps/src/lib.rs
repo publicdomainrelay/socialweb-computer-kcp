@@ -32,9 +32,10 @@ pub fn host(id: &str, what: &str, input: Value) -> Call {
 }
 
 /// A subscription of the test host (its log events, an observer): atlibs takes a non-exec subscription's arguments as
-/// params, never input.
-pub fn host_sub(id: &str, what: &str, params: Value) -> Call {
-    Call::new(id, format!("{T}{what}")).params(params).subscribe()
+/// params, never input, and makes every param a string (an array would be comma-joined): the arguments go as one
+/// `json` param, which the host parses.
+pub fn host_sub(id: &str, what: &str, args: Value) -> Call {
+    Call::new(id, format!("{T}{what}")).params(json!({ "json": args.to_string() })).subscribe()
 }
 
 /// A kube call: com.fedfork.exec.kube.<verb> on `cluster`.
