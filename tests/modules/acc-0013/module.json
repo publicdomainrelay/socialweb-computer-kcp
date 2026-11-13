@@ -39,7 +39,8 @@
 		"com.fedfork.exec.kube.delete",
 		"com.fedfork.exec.kube.raw",
 		"computer.socialweb.test.assert.recordsGone",
-		"computer.socialweb.test.assert.tombstoned"
+		"computer.socialweb.test.assert.tombstoned",
+		"computer.socialweb.test.atirc.meshRun"
 	],
 	"hooks": [
 		{

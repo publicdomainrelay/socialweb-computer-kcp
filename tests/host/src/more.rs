@@ -30,6 +30,8 @@ pub struct Extra {
     tokens: Mutex<HashMap<String, String>>,
     /// requester name -> its run requester argv (restart)
     pub argv: Mutex<HashMap<String, Vec<String>>>,
+    /// owner mesh nodes this run started (`atirc mesh run`): name -> (atirc, its config dir, the process)
+    pub nodes: tokio::sync::Mutex<HashMap<String, (PathBuf, PathBuf, tokio::process::Child)>>,
 }
 
 fn origin(url: &str) -> Result<String, String> {
@@ -609,6 +611,45 @@ impl Swc {
                     .map(|ok| json!({ "ok": ok })),
                 Err(e) => Err(e),
             },
+            // the owner's mesh node, as the hand run does it: `atirc mesh run --peer <identity>@<did>` as the account
+            // (an AtircNode's spec.peers takes no @did yet)
+            "atirc.meshRun" => {
+                let (Ok(name), Some(peer)) = (str_of(input, "name"), input["peer"].as_str()) else { return Some(Err("name and peer are required".into())) };
+                async {
+                    let a = self.acct()?;
+                    let bin = self.atirc()?;
+                    let dir = self.dir.join(format!("atirc-{name}"));
+                    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                    std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700)).map_err(|e| e.to_string())?;
+                    let chan = format!("#{}", a.handle.replace(['.', '-'], "_"));
+                    let log = std::fs::File::create(dir.join("mesh.log")).map_err(|e| e.to_string())?;
+                    let child = tokio::process::Command::new(&bin)
+                        .args(["mesh", "run", "-c", &chan, "--peer", peer, "--irc-port", "0"])
+                        .env("ATP_USERNAME", &a.handle)
+                        .env("ATP_PASSWORD", self.password()?)
+                        .env("ATIRC_CONFIG_DIR", &dir)
+                        .stdin(Stdio::null())
+                        .stdout(log.try_clone().map_err(|e| e.to_string())?)
+                        .stderr(log)
+                        .kill_on_drop(true)
+                        .spawn()
+                        .map_err(|e| e.to_string())?;
+                    self.extra.nodes.lock().await.insert(name.to_string(), (bin.clone(), dir.clone(), child));
+                    // ready when `mesh peers` answers
+                    let deadline = Instant::now() + Duration::from_secs(90);
+                    loop {
+                        let ok = tokio::process::Command::new(&bin).args(["mesh", "peers"]).env("ATIRC_CONFIG_DIR", &dir).env("ATP_USERNAME", &a.handle).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().await.is_ok_and(|s| s.success());
+                        if ok {
+                            return Ok(json!({ "node": name }));
+                        }
+                        if Instant::now() > deadline {
+                            return Err("atirc mesh run did not answer in 90 s (mesh.log in the work dir)".into());
+                        }
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                }
+                .await
+            }
             "requester.ssh" => {
                 let (Ok(name), Ok(contract), Some(exec)) = (
                     str_of(input, "name"),
@@ -838,6 +879,9 @@ impl Swc {
 
     pub(crate) async fn more_cleanup(&self) -> Vec<String> {
         let mut errors = vec![];
+        for (_, (_, _, mut c)) in self.extra.nodes.lock().await.drain() {
+            let _ = c.kill().await;
+        }
         let nicks: Vec<String> = self.extra.tokens.lock().unwrap().keys().cloned().collect();
         for n in nicks {
             if let Err(e) = self.observer_run(&n, &["revoke"]).await {

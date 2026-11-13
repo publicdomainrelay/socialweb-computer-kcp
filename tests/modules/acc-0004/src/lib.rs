@@ -112,7 +112,8 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                         return Ok(fail(&st, format!("chain (after 3 min): {}", out["problems"])));
                     }
                     st["readings"]["chain_after_association_s"] = json!(now - st["t_chain"].as_f64().unwrap_or(now));
-                    h = h.call(call("envfile", "account.envFile", json!({})));
+                    // the owner's mesh node: `atirc mesh run --peer <identity>@<agent DID>` as the renter (the hand run's)
+                    h = h.call(call("node", "atirc.meshRun", json!({ "name": "st-owner", "peer": st["peer"] })));
                 }
                 "envfile" => {
                     let node = json!({

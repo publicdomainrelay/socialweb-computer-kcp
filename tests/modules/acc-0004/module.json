@@ -36,7 +36,8 @@
 		"com.fedfork.exec.kube.apply",
 		"computer.socialweb.test.assert.recordsGone",
 		"computer.socialweb.test.assert.tombstoned",
-		"computer.socialweb.test.assert.agentChain"
+		"computer.socialweb.test.assert.agentChain",
+		"computer.socialweb.test.atirc.meshRun"
 	],
 	"hooks": [
 		{

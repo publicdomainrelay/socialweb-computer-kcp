@@ -34,6 +34,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.records",
     "computer.socialweb.test.account.envFile",
     "computer.socialweb.test.atirc.meshSub",
+    "computer.socialweb.test.atirc.meshRun",
     "computer.socialweb.test.atirc.meshPub",
     "computer.socialweb.test.atirc.meshPeers",
     "computer.socialweb.test.kube.addCluster",
@@ -414,8 +415,11 @@ impl Swc {
 
     /// The owner node's atirc and config dir: the AtircNode's HostProcess (same host).
     async fn mesh_node(&self, input: &Value) -> Result<(PathBuf, String), String> {
-        let cluster = input["cluster"].as_str().ok_or("cluster is required")?;
         let node = str_of(input, "node")?;
+        if let Some((bin, dir, _)) = self.extra.nodes.lock().await.get(node) {
+            return Ok((bin.clone(), dir.display().to_string()));
+        }
+        let cluster = input["cluster"].as_str().ok_or("cluster is required")?;
         let get = |kind: &str, name: &str| {
             let input = json!({ "cluster": cluster, "apiVersion": "socialweb.computer/v1alpha1", "kind": kind, "name": name });
             self.kube.call(

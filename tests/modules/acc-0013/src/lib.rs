@@ -58,7 +58,7 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 let t = s.since("agentStart");
                 s.reading("association_after_agent_start_s", t);
                 s.set("owner");
-                h = h.call(host("envfile", "account.envFile", json!({})));
+                h = h.call(host("node", "atirc.meshRun", json!({ "name": "st-owner", "peer": s.st["peer"] })));
             }
             if s.is("released") && s.has("recordsDeleted") {
                 s.set("records");
