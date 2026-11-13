@@ -103,6 +103,15 @@ func (r *hostRuntime) imageStore() guestimage.Store {
 	return guestimage.Store{Root: filepath.Join(r.cfg.StateDir, "images"), Out: r.cfg.ImageOut, TTY: r.cfg.ImageTTY}
 }
 
+func (r *hostRuntime) EnsureImage(ctx context.Context) error {
+	pin, err := r.imagePin()
+	if err != nil {
+		return err
+	}
+	_, err = r.imageStore().Ensure(ctx, pin, r.cfg.ImageSource)
+	return err
+}
+
 func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error) {
 	if err := ValidateSpec(spec); err != nil {
 		return Prepared{}, err

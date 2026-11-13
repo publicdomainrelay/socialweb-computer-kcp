@@ -78,6 +78,8 @@ type Deps struct {
 	Sandbox sandbox.Runner
 
 	NestedVirt bool
+
+	ImageReady func(context.Context) error
 }
 
 type Service struct {

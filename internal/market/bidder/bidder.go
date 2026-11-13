@@ -37,6 +37,8 @@ const (
 
 	ReservedVMSeenGrace = time.Minute
 
+	ImageRetry = time.Minute
+
 	PublishStallThreshold = 3
 
 	StatusMessageLimit = 512
@@ -140,6 +142,8 @@ type Config struct {
 	ComputeKinds []string
 
 	NestedVirt bool
+
+	ImageReady func(context.Context) error
 
 	StateDir string
 
@@ -362,6 +366,8 @@ type Bidder struct {
 	offerMu sync.Mutex
 
 	offerWrite sync.Mutex
+
+	imageErr atomic.Pointer[string]
 
 	offeringURI string
 
