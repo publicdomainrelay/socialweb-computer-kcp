@@ -566,12 +566,22 @@ func (r *reconciler[T]) finalize(ctx context.Context, req ctlruntime.Request, ob
 		statuses = append(statuses, contractStatus(cc.Labels[v1alpha1.InfraContractLabel], cc, step.Phase))
 		left++
 	}
+	present := map[string]bool{}
+	for _, st := range statuses {
+		present[st.Name] = true
+	}
+	for _, st := range v.status.Contracts {
+		if present[st.Name] {
+			continue
+		}
+		if st.Phase != v1alpha1.InfraContractPhaseFailed && st.Phase != v1alpha1.InfraContractPhaseStaged {
+			st.Phase = v1alpha1.InfraContractPhaseReleased
+		}
+		statuses = append(statuses, st)
+	}
 	status := v1alpha1.InfraStatus{ObservedGeneration: v.object.GetGeneration(), Phase: v1alpha1.InfraPhaseDeleting, Contracts: statuses,
 		Record: v.status.Record, Conditions: slices.Clone(v.status.Conditions),
 		Message: fmt.Sprintf("%d ComputeContract(s) releasing", left)}
-	if left == 0 && len(v.status.Contracts) > 0 {
-		status.Contracts = v.status.Contracts
-	}
 	backoff := false
 	var retry, giveUp, deadline time.Duration
 	if left == 0 && (v.spec.Record != nil || (v.status.Record != nil && v.status.Record.Direction != v1alpha1.InfraSyncRetained)) {
