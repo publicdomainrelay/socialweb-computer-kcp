@@ -347,6 +347,8 @@ type Bidder struct {
 
 	delivered sync.Map
 
+	caughtUp sync.Map
+
 	offerMu sync.Mutex
 
 	offerWrite sync.Mutex
@@ -464,6 +466,7 @@ func (b *Bidder) Observe(ctx context.Context, change contract.Change) (time.Dura
 	case contract.KindComputeVM:
 		if cached, ok := b.vms.Get(change.Name); ok {
 			b.observeSandbox(&cached)
+			b.catchUp(cached)
 		}
 		return b.observeVM(ctx, change.Name)
 	default:
@@ -509,6 +512,7 @@ func submitAhead(held, incoming *v1alpha1.BidSubmit) bool {
 
 func (b *Bidder) Synced() {
 	b.synced.Store(true)
+	b.catchUpAll()
 }
 
 func (b *Bidder) observeVM(ctx context.Context, name string) (time.Duration, error) {
