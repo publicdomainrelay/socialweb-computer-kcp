@@ -119,4 +119,20 @@ The run releases every rental (`run request release`) and checks; `--on-fail fre
 
 ## Evidence
 
-(filled by the passing runs)
+Dev market network `capt` on hat-8 (3 bidders, `--vmm qemu`, 16 CPUs each in their offering), binary bcf42c0d
+(capacity 8b04fd2c + the reservation fix 91103758), test host and modules of this branch, account alice (generated):
+
+- `concurrent` PASS 2026-11-13 21:38:47-21:40:58Z: fillers 12 vCPUs on each bidder (Held 35 s), four 2-vCPU rentals
+  Held in 56 s; one refused 409 by bidder zdt45... (`requester_submit_accept_declined`, `requester_accept_declined_replace`)
+  and Held on tngqo...; 2 per bidder, liveCpus 16/16 on both; 19 records gone, no ComputeVM left
+- `run` PASS 2026-11-13 21:41:08-21:44:43Z: fillers 14 vCPUs on each of 3 bidders, three 2-vCPU rentals Held in 73 s;
+  rental 1 refused by lqkfi... then tngqo... (two 409s) and Held on zdt45... (the third); rental 2 refused once; 3
+  refusals, liveCpus 16/16 on all three; 21 records gone
+- `exhausted` PASS 2026-11-13 21:51:55-21:53:35Z: fillers 14 vCPUs on each of 2 bidders, three 2-vCPU rentals; two
+  Held (one per bidder, liveCpus 16/16), rental 0 refused 409 by both, `requester_bids_exhausted_new_rfp`, its new RFP
+  Failed at once with `requester_no_bidders` (both "denied by the contract"); 12 records gone (the old RFP too)
+- Env failures on the way (not the code under test): four 8-vCPU guests at once on a loaded hat-8 missed the 2 min
+  on-network window (hence the fillers); one `exhausted` try lost a 2-vCPU guest the same way (21:48Z)
+- Found by the first runs (22c89875): a reservation whose ComputeVM was released before the bidder's next capacity
+  check counted for its whole 10 min hold: bidder-2 refused 409 "hold 16 of its 16" with one live VM, a rental was
+  refused by both bidders and failed (fixed in 91103758)
