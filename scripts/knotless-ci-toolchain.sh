@@ -14,6 +14,15 @@ apt-get install -y -qq --no-install-recommends ca-certificates curl git jq zstd 
 systemctl start docker 2>/dev/null || service docker start
 docker version --format 'docker {{.Server.Version}}'
 
+# the zstd the pins were made with (stage-assets packs with the zstd CLI; another version packs other bytes, so
+# make check-pins differs in zstdBytes and the release's embedded blobs differ): 1.5.7 from its release tarball
+zstd_v=1.5.7 zstd_sha=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+curl -fsSL --max-time 120 -o "$ci/zstd.tar.gz" "https://github.com/facebook/zstd/releases/download/v$zstd_v/zstd-$zstd_v.tar.gz"
+echo "$zstd_sha  $ci/zstd.tar.gz" | sha256sum -c --quiet -
+rm -rf "$ci/zstd-src" && mkdir -p "$ci/zstd-src" && tar -C "$ci/zstd-src" --strip-components 1 -xzf "$ci/zstd.tar.gz"
+make -s -C "$ci/zstd-src/programs" -j"$(nproc)" zstd >/dev/null
+install -D -m 0755 "$ci/zstd-src/programs/zstd" "$ci/bin/zstd" && rm -rf "$ci/zstd-src" "$ci/zstd.tar.gz"
+
 go_version="$(awk '$1 == "go" {print $2}' go.mod)"
 go_file="go$go_version.linux-amd64.tar.gz"
 go_sha="$(curl -fsSL --max-time 60 'https://go.dev/dl/?mode=json&include=all' | jq -er --arg f "$go_file" '.[].files[] | select(.filename == $f) | .sha256')"
@@ -42,7 +51,7 @@ esac
 
 cat >"$ci/env" <<EOF
 export RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME
-export PATH=$deno_path$ci/go/bin:$CARGO_HOME/bin:\$PATH
+export PATH=$ci/bin:$deno_path$ci/go/bin:$CARGO_HOME/bin:\$PATH
 export GOTOOLCHAIN=local CONTAINER=docker
 EOF
-go version && rustc --version && (cd rust && rustc --version)
+go version && rustc --version && (cd rust && rustc --version) && "$ci/bin/zstd" -V

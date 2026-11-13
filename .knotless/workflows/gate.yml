@@ -14,6 +14,7 @@ steps:
       . /opt/ci/env
       # the VM's memory and load each minute (the binding's size, and a step that loses the VM)
       (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
+      trap "kill $! 2>/dev/null" EXIT
       go mod download
       go build ./...
       go vet ./...
