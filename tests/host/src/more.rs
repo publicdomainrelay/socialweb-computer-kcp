@@ -491,19 +491,32 @@ impl Swc {
                 };
                 let path = self.dir.join(format!("tenant-{name}.kubeconfig"));
                 let r = write_private(&path, input["kubeconfig"].as_str().unwrap_or_default());
+                // viaRoot: a kcp front on a staging VM's loopback, through an ssh forward to that VM
+                let via = match (input["viaRoot"] == true, self.target.root_hosts.first()) {
+                    (true, Some(h)) if self.target.name != "prod" => atlibs_kube::Via::Ssh { host: h.clone() },
+                    _ => Default::default(),
+                };
                 r.map(|_| {
-                    self.kube.add_cluster(
-                        &format!("tenant:{name}"),
-                        Cluster {
-                            kubeconfig: path.display().to_string(),
-                            workspace: None,
-                            via: Default::default(),
-                        },
-                    );
+                    self.kube.add_cluster(&format!("tenant:{name}"), Cluster { kubeconfig: path.display().to_string(), workspace: None, via });
                     json!({ "cluster": format!("tenant:{name}") })
                 })
             }
             "page.signin" => self.page_signin(input).await,
+            // an OAuth sign-in with no page session of ours (a QR session transfer): the account's consent, Authorize
+            "oauth.signin" => match input["url"].as_str() {
+                Some(url) => {
+                    let mut extra = vec![];
+                    if let Some(d) = input["done"].as_str() {
+                        extra.extend(["--done", d]);
+                    }
+                    let r = match self.acct() {
+                        Ok(a) => oauth_signin_with(a, url, &extra).await.map_err(|e| e.to_string()),
+                        Err(e) => Err(e),
+                    };
+                    Ok(json!({ "ok": r.is_ok(), "note": r.err() }))
+                }
+                None => Err("url is required".into()),
+            },
             "page.fetch" => match input["url"].as_str() {
                 Some(url) => {
                     self.page_fetch(

@@ -297,4 +297,6 @@ fn next_step(s: &mut S, h: Handle, tenant: &str) -> Handle {
     h.call(kube("scale", "patch", tenant, json!({ "apiVersion": "apps/v1", "kind": "Deployment", "namespace": "default", "name": "scale-check", "patch": { "spec": { "replicas": STEPS[i] } } })))
 }
 
-entries! { run => run_0001 }
+mod s2;
+
+entries! { run => run_0001, s2 => s2::s2 }

@@ -99,7 +99,22 @@ headless Chrome and its WebRTC session.
 
 Owner-approved (2026-11-12): each runbook becomes a composition on atlibs' step loop (events `start`, `result`,
 `message`/`closed`, `timer`; outputs `calls`, `send`, `cancel`, `timers`, `state`, `done`). A runbook's Rust test here
-stays until its composition passes on staging and prod. Done: 0004.
+stays until its composition passes on staging and prod.
+
+| composition | entries (`--entry`) | live |
+| --- | --- | --- |
+| 0001 | `run` (sections 3-6), `s2` (staging: a temporary oauthQr bidder) | not yet |
+| 0002 | `run` | not yet |
+| 0003 (0001 section 9) | `run` (`--per-host`: each host in turn) | not yet |
+| 0004 | `run` | not yet |
+| 0005 | `run` (A), `b` | not yet |
+| 0006 | `run` (bidders), `compat` (`SWC_COMPAT_REQUESTER`) | not yet |
+| 0007, 0008, 0009, 0012 | `run` | not yet |
+| 0011 | `run` (gates), `token` | gates: pass 2026-11-13 (signed out) |
+| 0013 | `run` (A), `c`, `b` (staging) | not yet |
+
+0010 (iOS) is paused. Follow-ups: the CI freeze on the knotless orchestrator VM (a frozen run's check names its attach
+route); `freeze::attach` ends when stdin closes (with the next atlibs-host change).
 
 ```sh
 cd tests/modules && cargo wasm && cd ..                                     # the modules (wasm32)

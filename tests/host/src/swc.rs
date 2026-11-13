@@ -53,6 +53,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.root.exec",
     "computer.socialweb.test.root.putBinary",
     "computer.socialweb.test.example",
+    "computer.socialweb.test.oauth.signin",
     "computer.socialweb.test.request.r2",
     "computer.socialweb.test.request.checkLogs",
     "com.fedfork.exec.identlink.walk",
