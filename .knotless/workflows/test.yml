@@ -48,11 +48,20 @@ steps:
       # as the guest requester R2 (the runner associated it with the pusher's session; kcp refuses root): no creds here
       id r2
       install -d -o r2 /work/runs
+      # the market's relays and Jetstreams over the run, for https://watch.socialweb.computer/ (runs/watch.ndjson)
+      command -v git >/dev/null && dpkg -s libatomic1 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git libatomic1 >/dev/null; }
+      git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
+      git -C /opt/swc-watch checkout -q 7a56d9021997a7306fb1fc7b88ebde06e934a059
+      sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
       # TEMPORARY (until build.yml is back): the newest published main build at or below this commit
       bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
       for c in $(git rev-list --max-count 30 HEAD); do curl -sfo /dev/null "$bucket/main/$c/binaries/SHA256SUMS" && break; c=; done
       test -n "$c" && echo "requester sha:$c"
       jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
-      cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" CI=1 \
-        target/release/swc-test-host compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false}'
+      rc=0
+      (cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" CI=1 \
+        target/release/swc-test-host compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false}') || rc=$?
+      kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
+      echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
+      exit $rc

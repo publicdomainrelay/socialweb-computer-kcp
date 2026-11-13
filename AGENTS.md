@@ -679,6 +679,8 @@ knotless run artifacts knotless://johnandersen777.bsky.social/socialweb-computer
 knotless run artifacts knotless://johnandersen777.bsky.social/socialweb-computer-kcp --workflow test --commit <sha> --out ./artifacts
 R=./artifacts/runs/<runbook>-composition-<ms>       # locally: ~/.tmp/swc-system-tests/runs/<...>
 jq . "$R/failure.json"
+# 1b. the market as the run saw it (test.yml captures the relays and Jetstreams into runs/watch.ndjson): load
+#    ./artifacts/runs/watch.ndjson in https://watch.socialweb.computer/ with its file picker
 # 2. replay it offline (from tests/, after `cargo wasm` in tests/modules; a CI run's composition is this checkout's of
 #    the same name): the first diverging tick, then the states there
 cd tests && SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- replay "$R"
