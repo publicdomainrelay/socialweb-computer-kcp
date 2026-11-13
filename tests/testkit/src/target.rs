@@ -45,6 +45,16 @@ pub struct Target {
     /// a staging network's knotless (dev up --with-knotless)
     #[serde(default)]
     pub knotless: Option<Knotless>,
+    /// a market network's XRPC front (status.network.xrpcFront): every named request of the run goes there
+    #[serde(default)]
+    pub xrpc_front: Option<XrpcFront>,
+}
+
+/// The network's front (host:port) and the CA bundle (PEM file) its names chain to.
+#[derive(Debug, Clone, Deserialize)]
+pub struct XrpcFront {
+    pub address: std::net::SocketAddr,
+    pub ca: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -243,6 +243,7 @@ async fn run_dir_cmd(cmd: &str, args: &[String]) -> Result<bool> {
             let meta: Value =
                 serde_json::from_slice(&std::fs::read(dir.join("run.json")).context("run.json")?)?;
             let target = Target::load()?;
+            network_env(&target);
             let bin =
                 Binary::resolve(meta["requester"].as_str().unwrap_or(&target.requester)).await?;
             let errors = swc::cleanup_from_disk(
@@ -310,6 +311,18 @@ async fn run_dir_cmd(cmd: &str, args: &[String]) -> Result<bool> {
     }
 }
 
+/// A module's atproto calls (atlibs-host) read DIDs at ATLIBS_PLC_URL; a staging or dev network's names are private
+/// (`*.relay.localhost` behind its front), so a non-prod target sets ATLIBS_ALLOW_PRIVATE=1 too. Before any thread
+/// reads the environment.
+fn network_env(t: &Target) {
+    unsafe {
+        std::env::set_var("ATLIBS_PLC_URL", &t.plc);
+        if t.name != "prod" {
+            std::env::set_var("ATLIBS_ALLOW_PRIVATE", "1");
+        }
+    }
+}
+
 async fn main_() -> Result<bool> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(cmd) = args
@@ -342,6 +355,7 @@ async fn main_() -> Result<bool> {
     let runbook = comp_dir.file_name().unwrap().to_string_lossy().to_string();
 
     let target = Target::load()?;
+    network_env(&target);
     let acc = target.account(&account)?;
     let bin = Binary::resolve(&target.requester).await?;
     let comp = compose::load(&manifest, &loader(tests.join("modules")))
@@ -458,7 +472,7 @@ async fn main_() -> Result<bool> {
         let at = testkit::Atproto::new(&target);
         (Some(at.session(acc).await?), Arc::new(at.http.clone()))
     } else {
-        (None, Arc::new(reqwest::Client::new()))
+        (None, Arc::new(testkit::atproto::http_client(&target)))
     };
     let mut calls = HashMap::new();
     for (name, module) in &comp.modules {

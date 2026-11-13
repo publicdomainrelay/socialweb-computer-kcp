@@ -34,13 +34,35 @@ pub fn home_tmp(sub: &str) -> std::path::PathBuf {
         .join(sub)
 }
 
+/// Every name to the network's XRPC front, which serves its PLC, relay and PDSes by name (the TLS SNI and the Host
+/// stay the URL's): a network has one entry, no per-host routes. An IP literal never asks a resolver.
+struct FrontResolver(std::net::SocketAddr);
+
+impl reqwest::dns::Resolve for FrontResolver {
+    fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let front = self.0;
+        Box::pin(async move { Ok(Box::new(std::iter::once(front)) as reqwest::dns::Addrs) })
+    }
+}
+
+/// The HTTP client of a run against `t`: with a network's xrpcFront, every named request connects to the front,
+/// trusting the network CA bundle.
+pub fn http_client(t: &Target) -> reqwest::Client {
+    atlibs_host::tls();
+    let mut b = reqwest::Client::builder().timeout(Duration::from_secs(30));
+    if let Some(f) = &t.xrpc_front {
+        b = b.dns_resolver(Arc::new(FrontResolver(f.address)));
+        let pem = std::fs::read(crate::target::expand(&f.ca)).unwrap_or_default();
+        for c in reqwest::Certificate::from_pem_bundle(&pem).unwrap_or_default() {
+            b = b.add_root_certificate(c);
+        }
+    }
+    b.build().unwrap()
+}
+
 impl Atproto {
     pub fn new(t: &Target) -> Self {
-        atlibs_host::tls();
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
+        let http = http_client(t);
         let mut net = Net::new(Arc::new(http.clone()) as Arc<dyn Fetch>);
         net.plc = t.plc.clone();
         // staging lives on private overlay addresses

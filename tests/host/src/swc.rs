@@ -141,10 +141,7 @@ impl Swc {
         ssh: Arc<atlibs_ssh::Ssh>,
         dump: PathBuf,
     ) -> Arc<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
+        let http = testkit::atproto::http_client(&target);
         Arc::new(Self {
             target,
             account: account.into(),

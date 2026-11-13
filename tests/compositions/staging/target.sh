@@ -25,9 +25,20 @@ bidders=$(jq -c '[.network.status.apps[] | select(.kind == "MarketBidder") | {na
   op=$(curl -fsS "$plc/$(jq -r .did <<<"$b")" | jq -r '[.alsoKnownAs[] | select(startswith("https://ident.link/agent-of/"))][0] // "" | ltrimstr("https://ident.link/agent-of/")')
   jq -c --arg op "$op" --arg kc "$KUBECONFIG" --arg ws "root:$n" '. + {operator: $op, kcp: {kubeconfig: $kc, workspace: $ws, via: {kind: "direct"}}}' <<<"$b"
 done | jq -sc .)
-jq -n --arg plc "$plc" --arg pds "$pds" --arg relay "http://$(host relay.default.relay.svc.kcp.local)" \
+# the network's one XRPC entry: its front (status.network.xrpcFront) serves the PLC, the relay and every PDS by name
+# (their ingress Exposures, *.relay.localhost); the test host sends every named request there, trusting the network CA
+ca=$C/network-ca.pem
+jq -r '.network.status.network.caBundle' <<<"$st" > "$ca"
+front=$(jq -r '.network.status.network.xrpcFront // empty' <<<"$st")
+[ -n "$front" ] || front=$(host dispatcher-tls.default.relay.svc.kcp.local)
+# an ingress Exposure's https name, from the network's kcp root (curl on the admin token: no kubectl on a staging VM)
+ktoken=$(awk '/ token:/{print $2; exit}' "$KUBECONFIG") kserver=$(awk '/ server:/{print $2; exit}' "$KUBECONFIG")
+named() { curl -fsSk -H "Authorization: Bearer $ktoken" "${kserver%%/clusters/*}/clusters/root/apis/exposure.socialweb.computer/v1alpha1/exposures/$1" | jq -er .status.address; }
+# pds stays the bidder PDS's own URL: the requester under test (run request) signs in there, and it does not go through the front
+jq -n --arg plc "$(named svc-plc-plc-ingress)" --arg pds "$pds" --arg relay "$(named svc-relay-relay-ingress)" \
+  --arg front "$front" --arg ca "$ca" \
   --argjson accounts "$accounts" --argjson bidders "$bidders" --arg s "$S" --arg i "$I" --arg st "$ST" '{
-  name: "staging", restartSshMaxS: 20, plc: $plc, pds: $pds, relay: $relay, requester: ("path:" + $s),
+  name: "staging", restartSshMaxS: 20, plc: $plc, pds: $pds, relay: $relay, xrpcFront: {address: $front, ca: $ca}, requester: ("path:" + $s),
   network: {instance: $i, stateDir: $st}, accounts: $accounts, bidders: $bidders,
   gateway: {url: "https://gateway.staging.invalid", aud: "did:web:gateway.staging.invalid", ssh: "gateway.staging.invalid"}
 }'
