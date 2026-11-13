@@ -54,6 +54,7 @@ spec:
     - {name: KNOTLESS_DID_WEB_SCHEME, value: "http"}
     - {name: KNOTLESS_NO_UPDATE_CHECK, value: "1"}
     - {name: ATLIBS_ALLOW_PRIVATE, value: "1"}
+    - {name: ATLIBS_PLC_URL, value: "{{.Knotless.Plc}}"}
     - {name: HTTPS_PROXY, value: "{{.Knotless.Proxy}}"}
     - {name: HOME, value: "{{.Knotless.Dir}}/runner"}
     - {name: PATH, value: "{{.Knotless.Bin}}:/usr/local/bin:/usr/bin:/bin"}
