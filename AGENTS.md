@@ -631,10 +631,13 @@ again; user_data installs `atirc-agent.service`
 - A failed composition run freezes (outside CI): attach with `swc-test-host attach <run dir>` (MCP), read `failure`,
   `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then `cleanup`; `swc-test-host replay <run dir>` reruns the
   module's decisions offline. Never leave a frozen run past its TTL by hand.
-- atlibs pins: the tests (`tests/Cargo.toml`) and the knotless runner (fork branch `runner-atlibs-composition`,
-  deployed by knotless-fork-infra `versions.env`) pin the same atlibs-host / atlibs-iroh revs. Bump both together.
-  A runner on an older atlibs-host lacks host calls newer modules need (2026-11-13: no `identity.resolveDid`, so the
-  requester's vouch policy denied every bid).
+- atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh and identlink follow one tested
+  set, atlibs `pins.json`, as the knotless runner does (fork branch `runner-atlibs-composition`, deployed by
+  knotless-fork-infra `versions.env`). CI's `atlibs-pins` job fails when they are behind; catch up (rewrites the revs,
+  `cargo update --workspace`, `cargo check`), then commit:
+  `curl -sSf https://knotless.dev/johnandersen777.bsky.social/atlibs/raw/main/pins.sh | sh -s -- sync`.
+  A host older than its modules refuses them before they run: `this host lacks <nsid>; update atlibs-host (pins
+  sync)` (2026-11-13: a runner without `identity.resolveDid` made the requester's vouch policy deny every bid).
 - A change is done when the system tests covering it pass on staging.
 - No Go tests, except the policy engine specification tests (owner, 2026-10-30): `internal/policyengine/spec`, the
   policy decision tests in `internal/market/bidder` and `internal/market/requester`, their harness
