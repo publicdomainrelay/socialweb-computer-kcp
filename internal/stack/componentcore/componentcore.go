@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -136,6 +137,8 @@ type Core struct {
 
 	tls *tls.Config
 
+	egressTLS *tls.Config
+
 	hosts component.NetworkHosts
 
 	runtime *component.Runtime
@@ -266,7 +269,7 @@ func New(ctx context.Context, cfg Config) (*Core, error) {
 	dispatcher := newIngressDispatcher(registry, registrar, fallbackName, cfg.Log)
 	runtime := component.NewRuntime(component.RuntimeConfig{Log: cfg.Log, StateDir: cfg.StateDir, Registry: registry, Bus: handlers}, nil)
 	runtime.SetStateDirMaker(func(dir string) error { return os.MkdirAll(dir, 0o700) })
-	core := &Core{cfg: cfg, tls: tlsConfig, hosts: registryHosts{registry: registry}, runtime: runtime,
+	core := &Core{cfg: cfg, tls: tlsConfig, egressTLS: egressTLS(tlsConfig, cfg.Network), hosts: registryHosts{registry: registry}, runtime: runtime,
 		logins: openbao.NewLogins(nil), oauthCallbacks: oauthcallback.NewRegistry(),
 		registry: registry, ports: ports, store: store, handlers: handlers, linkPolicy: exposure.NewLinkPolicy(handlers),
 		ingressRegistrar: dispatcher, scope: newWorkspaceScope(cfg.Workspaces, cfg.WorkspacesFunc), nodeClaims: newNodeClaims(handlers, cfg.Log)}
@@ -280,7 +283,7 @@ func (c *Core) register() error {
 	c.provideComponents()
 	kcp, tlsConfig, hosts, registry, identity := c.cfg.KCP, c.tls, c.hosts, c.registry, c.cfg.ExposureIngressIdentity
 	egress := func(in component.Instance) component.Egress {
-		return component.Egress{Hosts: hosts, TLS: tlsConfig, Log: in.Log}
+		return component.Egress{Hosts: hosts, TLS: c.egressTLS, Log: in.Log}
 	}
 	for _, entry := range []struct {
 		kind    string
@@ -415,6 +418,19 @@ func NewDynamicFactory(kubeconfig string) (DynamicFactory, error) {
 	return func(workspace string) (*kube.Client, error) {
 		return dynamicForRestConfig(cfg, workspace)
 	}, nil
+}
+
+func egressTLS(front *tls.Config, n *v1alpha1.MarketNetworkValue) *tls.Config {
+	if n == nil || strings.TrimSpace(n.CABundle) == "" {
+		return front
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || !pool.AppendCertsFromPEM([]byte(n.CABundle)) {
+		return front
+	}
+	out := front.Clone()
+	out.RootCAs = pool
+	return out
 }
 
 func frontTLS(cfg Config) (*tls.Config, error) {
