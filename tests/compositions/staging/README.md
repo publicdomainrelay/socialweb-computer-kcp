@@ -60,6 +60,31 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/sta
   Accepted (owner, 2026-11-12): the overlay lives one run, holds only throwaway accounts.
 - The orchestrator rents as the trigger; throwaway accounts live only on the staging PDS and PLC.
 
+## Files
+
+- `services.json`: PLC (+ postgres), PDS, relay, Jetstream, the VIP pod; images by digest; `{{zone}}`,
+  `{{secret:NAME}}`.
+- `gateway.user-data`, `bidder.user-data`: `install gateway` (spec file, prod's flags) and `install bidder --vmm qemu`
+  (a unit drop-in for the network flags install cannot pass); not yet wired into the module.
+
+## Gaps: kcp assumes prod (blockers to a full staging)
+
+1. https everywhere: a PDS writes `https://<host>` into DID docs; the gateway, OAuth metadata and did:key ingress
+   (`https://<label>.<host>`) are https only. Staging has no TLS edge. Needs a staging CA passed as `network.caBundle`
+   (no host trust store), and TLS fronts on the VIP and the gateway VM.
+2. PLC: a local PDS sends a non-loopback `http://` PLC to in-process handlers (`internal/services/pds/service.go:195`);
+   the gateway's and ssh gateway's cores fall back to plc.directory (`internal/stack/componentcore/controllers.go:420`);
+   identity misses retry plc.directory (`internal/eventstream/watches.go:59`).
+3. Relay and Jetstream: built-in prod defaults (`internal/app/compose/streams.go:108`,
+   `api/v1alpha1/types_application.go:46,84,196`); bidders have no Jetstream flag.
+4. `install bidder` takes no network options (`cmd/socialweb-computer/install.go:81`): the drop-in works around it.
+5. meshd DNS: A/AAAA per peer only; handles need `_atproto` TXT, did:key ingress a wildcard.
+6. Nested KVM: no request field asks for it; a bidder VM can land on a host without it.
+7. Vouches: each staging bidder and requester account vouches the others (`bidder-tangled-vouch`), or `open` policy.
+8. atirc agents refuse DIDs not on plc.directory (`internal/market/requester/agent.go:23`).
+9. PDS on port 80 (the relay refuses ports in hostnames); the orchestrator must `requestCrawl` the PDS as
+   `http://pds.<zone>` before the first account. The current PLC image is not public: pinned to the last public build.
+
 ## Open
 
 - kcp components (gateway, ssh gateway, ingress proxy) run as host processes only: on the gateway VM by `install

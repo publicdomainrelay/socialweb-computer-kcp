@@ -1,0 +1,47 @@
+# A bidder VM's piece (bidder-1..3), appended to the meshd user-data (tests/modules/staging fn user_data): its
+# write_files and runcmd gain these entries, after meshd's. The host fills {{...}}; {{password}} lands only in 0600 files.
+packages: [uidmap]
+write_files:
+- path: /etc/socialweb-staging/atproto.env
+  permissions: '0600'
+  content: |
+    ATPROTO_PASSWORD={{password}}
+- path: /usr/local/sbin/swc-staging-bidder
+  permissions: '0700'
+  content: |
+    #!/bin/sh
+    # install bidder (as infra/bidder/deploy.sh), QEMU, against the staging PLC/PDS/relay. install bidder takes no
+    # PLC/PDS/relay/comms/identity options and its unit passes none after --, so a drop-in on the unit template
+    # passes them (run bidder ... -- <hono-bidder options>), in place before the first start.
+    set -eu
+    A=swc-bidder
+    ST=/var/lib/socialweb-computer/$A
+    BIN=/var/lib/socialweb-computer/incoming-{{binarySha256}}
+    D=$ST/.config/systemd/user/socialweb-computer-bidder@.service.d
+    RELAY=$(printf %s '{{relayUrl}}' | sed -E 's#^[a-z]+://##; s#/.*##')
+    # meshd answers REFUSED outside the zone when it has no --dns-upstream; glibc then asks the next server
+    grep -q '^nameserver 127.0.0.53' /etc/resolv.conf || echo 'nameserver 127.0.0.53' >> /etc/resolv.conf
+    up() { n=0; until curl -fsS -o /dev/null "$1"; do n=$((n+1)); [ $n -lt 360 ] || { echo "not up in 30 min: $1"; exit 1; }; sleep 5; done; }
+    up '{{plcUrl}}/_health'
+    up '{{pdsUrl}}/xrpc/_health'
+    install -d -m 0755 /var/lib/socialweb-computer
+    curl -fsSL --retry 5 -o "$BIN.partial" '{{binaryUrl}}'
+    echo "{{binarySha256}}  $BIN.partial" | sha256sum -c -
+    chmod 0755 "$BIN.partial"
+    mv "$BIN.partial" "$BIN"
+    # the account exists before install (--adopt-account), so its env file and drop-in are its own before the first start
+    id -u $A >/dev/null 2>&1 || useradd --system --user-group --no-create-home --home-dir $ST --shell /usr/sbin/nologin --comment socialweb-computer $A
+    install -d -m 0700 -o $A -g $A $ST
+    install -d -m 0755 -o $A -g $A $ST/.config $ST/.config/systemd $ST/.config/systemd/user $D
+    install -m 0600 -o $A -g $A /etc/socialweb-staging/atproto.env $ST/staging.env
+    cat > $D/10-staging.conf <<EOF
+    [Service]
+    EnvironmentFile=$ST/staging.env
+    ExecStart=
+    ExecStart=$ST/bin/current/socialweb-computer run bidder --handle %i --fg -- --atproto-identity-mode pdsAccount --atproto-pds-url {{pdsUrl}} --plc-directory-url {{plcUrl}} --ingress-proxy-host gateway.{{zone}}:8790 --network-hosts relay.default.relay.svc.kcp.local=$RELAY --comms-mode Firehose
+    EOF
+    chown $A:$A $D/10-staging.conf
+    "$BIN" install bidder --handle '{{handle}}' --account $A --state-dir $ST --adopt-account --host-backend systemd-user \
+      --vmm qemu --ready-timeout 5m --network-timeout 15m
+runcmd:
+- [sh, -c, "/usr/local/sbin/swc-staging-bidder > /var/log/swc-staging-bidder.log 2>&1"]

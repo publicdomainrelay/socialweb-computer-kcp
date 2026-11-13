@@ -10,7 +10,7 @@ const ROSTER: &str = "computer.socialweb.mesh.roster";
 const MIN: u64 = 60_000;
 /// (peer, overlay address, cpus, mem)
 const VMS: [(&str, &str, u32, &str); 4] = [
-    ("gateway", "10.44.0.10", 2, "4G"),
+    ("gateway", "10.44.0.10", 4, "8G"),
     ("bidder-1", "10.44.0.11", 4, "8G"),
     ("bidder-2", "10.44.0.12", 4, "8G"),
     ("bidder-3", "10.44.0.13", 4, "8G"),
@@ -46,7 +46,7 @@ fn roster(st: &Value, zone: &str) -> Value {
 
 fn user_data(peer: &str, ip: &str, url: &str, zone: &str) -> String {
     format!(
-        "#cloud-config\nwrite_files:\n- path: /etc/socialweb-meshd/staging.secret\n  permissions: '0600'\n  content: \"@meshKey:{peer}\"\nruncmd:\n- [sh, -c, \"nohup socialweb-meshd run --secret-file /etc/socialweb-meshd/staging.secret --roster '{url}' --dns-zone {zone} --dns-listen {ip}:53 > /var/log/socialweb-meshd-staging.log 2>&1 &\"]\n- [sh, -c, \"printf 'nameserver {ip}\\\\n' > /etc/resolv.conf\"]\n"
+        "#cloud-config\nwrite_files:\n- path: /etc/socialweb-meshd/staging.secret\n  permissions: '0600'\n  content: \"@meshKey:{peer}\"\nruncmd:\n- [sh, -c, \"nohup socialweb-meshd run --secret-file /etc/socialweb-meshd/staging.secret --roster '{url}' --dns-zone {zone} --dns-listen {ip}:53 --dns-upstream 127.0.0.53:53 > /var/log/socialweb-meshd-staging.log 2>&1 &\"]\n- [sh, -c, \"printf 'nameserver {ip}\\\\n' > /etc/resolv.conf\"]\n"
     )
 }
 
