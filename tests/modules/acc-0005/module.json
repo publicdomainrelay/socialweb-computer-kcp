@@ -1,0 +1,30 @@
+{
+	"name": "acc-0005",
+	"description": "Acceptance 0005 guest requester R2: run (A: nested VM, grant + endorsement, cascade), b (B: co-located mesh1, out-of-band loss).",
+	"actions": [
+		{ "entry": "run", "label": "Run 0005 A", "description": "Part A end to end." },
+		{ "entry": "b", "label": "Run 0005 B", "description": "Part B end to end." }
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.r2",
+		"computer.socialweb.test.request.ssh",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.records",
+		"com.atproto.repo.getRecord",
+		"com.atproto.repo.listRecords",
+		"com.fedfork.exec.identlink.walk",
+		"com.fedfork.exec.identlink.plc",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.delete",
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.assert.tombstoned"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "records RecordNotFound after the release" },
+		{ "nsid": "computer.socialweb.test.assert.tombstoned", "reason": "R2 (and mesh1) tombstoned" },
+		{ "nsid": "computer.socialweb.test.request.start", "required": true, "entries": ["run", "b"], "reason": "run request --associate guest" },
+		{ "nsid": "com.fedfork.exec.identlink.walk", "required": true, "entries": ["run", "b"], "reason": "the walk of R2 and mesh1" }
+	]
+}
