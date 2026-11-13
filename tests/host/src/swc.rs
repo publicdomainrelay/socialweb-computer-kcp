@@ -26,6 +26,9 @@ mod more;
 pub use more::cleanup_from_disk;
 
 const P: &str = "computer.socialweb.test.";
+/// Where the guest requester reads its association ref (the renter writes it), and how long it may take to come.
+const R2_REF: &str = "/run/socialweb-r2/association-ref";
+const R2_REF_WAIT: Duration = Duration::from_secs(15 * 60);
 pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.requester.start",
     "computer.socialweb.test.request.start",
@@ -185,9 +188,16 @@ impl Swc {
         // the guest requester's `run request` holds a dev instance (its PDS, its kcp) whose sockets under
         // requests/<name>/run/ must fit sun_path (107 bytes): a short dir of its own, ~/.swc/<run ms>
         if self.target.network.is_none() && self.acct().is_ok_and(|a| a.guest_requester) {
-            let name = self.dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = self
+                .dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let ms = name.rsplit('-').next().unwrap_or_default().to_string();
-            return PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".swc").join(ms);
+            return PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                .join(".swc")
+                .join(ms);
         }
         match &self.target.network {
             Some(n) => expand(&n.state_dir),
@@ -219,11 +229,14 @@ impl Swc {
         let name = str_of(input, "name")?;
         let remote = input["remote"].as_str().unwrap_or_default();
         if !remote.starts_with('/') || remote.contains(['\'', ' ', '\n']) {
-            return Err(format!("remote {remote:?}: an absolute path without quotes or spaces"));
+            return Err(format!(
+                "remote {remote:?}: an absolute path without quotes or spaces"
+            ));
         }
         let bytes = match str_of(input, "what")? {
             "testHost" => {
-                let p = std::env::var("SWC_TEST_HOST_STATIC").map_err(|_| "SWC_TEST_HOST_STATIC is not set (tests/build-static-host.sh)")?;
+                let p = std::env::var("SWC_TEST_HOST_STATIC")
+                    .map_err(|_| "SWC_TEST_HOST_STATIC is not set (tests/build-static-host.sh)")?;
                 std::fs::read(&p).map_err(|e| format!("{p}: {e}"))?
             }
             "suite" => {
@@ -235,7 +248,11 @@ impl Swc {
                     .await
                     .map_err(|e| e.to_string())?;
                 if !out.status.success() {
-                    return Err(format!("tar of the suite in {}: {}", tests.display(), String::from_utf8_lossy(&out.stderr)));
+                    return Err(format!(
+                        "tar of the suite in {}: {}",
+                        tests.display(),
+                        String::from_utf8_lossy(&out.stderr)
+                    ));
                 }
                 out.stdout
             }
@@ -257,7 +274,10 @@ impl Swc {
         drop(sin);
         let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
         if !out.status.success() {
-            return Err(format!("put {remote}: {}", tail(&String::from_utf8_lossy(&out.stderr))));
+            return Err(format!(
+                "put {remote}: {}",
+                tail(&String::from_utf8_lossy(&out.stderr))
+            ));
         }
         Ok(json!({ "remote": remote, "bytes": bytes.len() }))
     }
@@ -428,6 +448,12 @@ impl Swc {
         let _ = tx.send(Ok(json!({ "msg": "requester_binary", "version": bin.version, "compat": input["compat"] == true })));
         let (commands, mut cmds) = mpsc::unbounded_channel::<SubCmd>();
         let receipts = self.receipts.clone();
+        // R2 waits for its association ref, which the renter writes once it verified R2: one that never comes is an
+        // error of its own, not a request that waits until the run's deadline
+        let ref_by = self
+            .acct()?
+            .guest_requester
+            .then(|| Instant::now() + R2_REF_WAIT);
         tokio::spawn(async move {
             let mut offsets = vec![0usize; logs.len()];
             let mut exited = false;
@@ -474,6 +500,17 @@ impl Swc {
                 if !exited && let Ok(Some(st)) = child.try_wait() {
                     exited = true;
                     let _ = tx.send(Ok(json!({ "msg": "exited", "code": st.code() })));
+                }
+                let referred =
+                    || std::fs::read_to_string(R2_REF).is_ok_and(|r| !r.trim().is_empty());
+                if !exited && ref_by.is_some_and(|by| Instant::now() > by) && !referred() {
+                    exited = true;
+                    let _ = child.start_kill();
+                    let why = format!(
+                        "no association ref in {R2_REF} after {} min: the renter's associate failed or never ran (the knotless check's log says why)",
+                        R2_REF_WAIT.as_secs() / 60
+                    );
+                    let _ = tx.send(Ok(json!({ "msg": "exited", "code": null, "error": why })));
                 }
                 tokio::select! {
                     cmd = cmds.recv() => match cmd {
