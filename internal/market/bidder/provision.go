@@ -22,6 +22,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	contract "github.com/johnandersen777/socialweb-computer-kcp/internal/contract/market"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestnet"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestseed"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
@@ -76,6 +77,8 @@ type vmRecord struct {
 
 	NestedVirt bool `json:"nestedVirt"`
 
+	Image *guestimage.Requested `json:"image"`
+
 	ExpiresAt string `json:"expiresAt"`
 }
 
@@ -99,6 +102,14 @@ func parseVMRecord(value map[string]any) (vmRecord, error) {
 		return out, fmt.Errorf("bidder: the RFP payload names %d cpus", out.CPUs)
 	case strings.TrimSpace(out.UserData) == "":
 		return out, errors.New("bidder: the RFP payload carries no user_data; a guest without it is unreachable")
+	}
+	if out.Image != nil {
+		if out.Kind == string(v1alpha1.ComputeKindDeno) {
+			return out, errors.New("bidder: image is a computeKind vm option")
+		}
+		if err := out.Image.Valid(); err != nil {
+			return out, fmt.Errorf("bidder: the RFP payload's image: %w", err)
+		}
 	}
 	if out.ExpiresAt != "" {
 		if _, err := market.ParseTime(out.ExpiresAt); err != nil {
@@ -223,6 +234,9 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		return "", err
 	}
 	vm.Spec.AssociationExpiresAt = b.associationExpiry(ctx, req.requesterDID, req.acceptedAt, record.ExpiresAt)
+	if record.Image != nil {
+		vm.Spec.Image = &v1alpha1.ComputeVMImageRequest{URL: record.Image.URL, Sha256: record.Image.SHA256}
+	}
 	created := true
 	if err := b.intents.CreateComputeVM(ctx, *vm); err != nil {
 		if !errors.Is(err, contract.ErrExists) {

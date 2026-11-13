@@ -54,6 +54,7 @@ type Manifest struct {
 	SourceDateEpoch int64            `json:"sourceDateEpoch"`
 	Bake            guestrootfs.Bake `json:"bake"`
 	Inputs          map[string]Input `json:"inputs"`
+	Marker          string           `json:"marker,omitempty"`
 }
 
 type FilePin = versions.GuestImageFile
@@ -242,7 +243,11 @@ func (s Store) fetchOne(ctx context.Context, pin Pin, source, name, dst string) 
 	h := sha256.New()
 	pw := progress.New(name, want.Bytes, s.Out, s.TTY && !localSource(source), 0)
 	defer pw.Finish()
-	n, err := io.Copy(io.MultiWriter(out, h, pw), in)
+	var src io.Reader = in
+	if want.Bytes > 0 {
+		src = io.LimitReader(in, want.Bytes+1)
+	}
+	n, err := io.Copy(io.MultiWriter(out, h, pw), src)
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
@@ -250,7 +255,7 @@ func (s Store) fetchOne(ctx context.Context, pin Pin, source, name, dst string) 
 		return fmt.Errorf("guestimage: fetching %s of %s: %w", name, pin.Target, err)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != want.SHA256 {
-		return fmt.Errorf("guestimage: %s of %s from %s hashes to %s and versions.json pins %s; "+
+		return fmt.Errorf("guestimage: %s of %s from %s hashes to %s and is pinned at %s; "+
 			"the image is refused", name, pin.Target, source, got, want.SHA256)
 	}
 	if want.Bytes > 0 && n != want.Bytes {

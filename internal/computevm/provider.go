@@ -315,6 +315,8 @@ func GoneReason(lost v1alpha1.ComputeVMLostReason) string {
 		return "identity_mismatch"
 	case v1alpha1.ComputeVMLostGuestPoweroff:
 		return "guest_poweroff"
+	case v1alpha1.ComputeVMLostImageRefused:
+		return "image_refused"
 	default:
 		return "vmm_exited"
 	}

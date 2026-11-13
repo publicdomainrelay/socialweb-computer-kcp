@@ -457,6 +457,8 @@ type BidderSpec struct {
 	SuspendParticipation bool `json:"suspendParticipation,omitempty"`
 
 	ComputeKinds []string `json:"computeKinds,omitempty" apigen:"listType=set"`
+
+	RequesterImages *bool `json:"requesterImages,omitempty"`
 }
 
 type SecretsFallback string

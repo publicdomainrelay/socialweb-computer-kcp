@@ -214,6 +214,10 @@ type ComputeVMContract struct {
 
 type ComputeVMImageRequest struct {
 	ReuseStale bool `json:"reuseStale,omitempty"`
+
+	URL string `json:"url,omitempty" apigen:"userEndpoint"`
+
+	Sha256 string `json:"sha256,omitempty"`
 }
 
 type ComputeVMPhase string
@@ -250,6 +254,8 @@ const (
 	ComputeVMLostGuestPoweroff ComputeVMLostReason = "GuestPoweroff"
 
 	ComputeVMLostIdentityMismatch ComputeVMLostReason = "IdentityMismatch"
+
+	ComputeVMLostImageRefused ComputeVMLostReason = "ImageRefused"
 )
 
 type ComputeVMAddresses struct {
