@@ -216,7 +216,6 @@ async fn main_() -> Result<bool> {
 
     let target = Target::load()?;
     let acc = target.account(&account)?;
-    acc.password()?;
     let bin = Binary::resolve(&target.requester).await?;
     let comp = compose::load(&manifest, &loader(tests.join("modules")))
         .await
@@ -284,6 +283,10 @@ async fn main_() -> Result<bool> {
                 anyhow::bail!("instance {name}: required hook {} has no edge (a host call is a call, not a hook)", hk.nsid);
             }
         }
+    }
+    // a dry run touches no account: its creds are read only to run
+    if !dry {
+        acc.password()?;
     }
     if dry {
         println!(
