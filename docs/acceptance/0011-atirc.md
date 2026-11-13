@@ -4,6 +4,34 @@ How to prove an atirc change is safe to ship: repo-level suites, then the prod
 token-lifecycle checks every contract smoke must pass.
 
 - Source of truth: atirc repo `git@tangled.org:did:plc:vtad4w7ujsvz7t6o6iuvmhjq`, `docs/acceptance/0001-atirc.md` at `2f9e8a2` (author: `atirc-dev`). This is a copy; edit upstream first
+- Last run (sections 1-4): 2026-11-13 01:40-02:40Z, kcp 038bd32e (v0.0.0-rc165-pre1, rollout 20), atirc e962ee8 (repo
+  main; server binary cd0d0d67 = 9e83813), alice. Section 1 PASS on hat-8 (`git archive e962ee8`): `cargo fmt --check`
+  clean, `peer.json` identical to kcp's, `cargo test` 17 + 239 passed, `mesh::` 17 passed, `test_mesh_*.py` 2 OK,
+  `webrtc_loopback.ts` ok (CHROME + ATLIBS_WEBRTC_DIR = atlibs-webrtc 07bf5b7; it skips without them). Section 2 PASS over
+  HTTP: `GET /` (UA curl) 200 53788000 B sha256 cd0d0d67, `/chat` 200 and linked from `/`, `/dl/v0.1.0-9e83813` 200 same
+  sha, `chat.atirc.revoke` 401 without auth and with a foreign Origin; serve pid / iroh restart not checked (no ssh to
+  irc.fedfork.com; no upgrade today). Section 3 + section 4 ssh gateway agent PASS (consent: ssh.socialweb.computer for
+  @aliceoa.bsky.social, temp key on `/keys` removed after, winner hat-8, no bidders list): `ssh -F /dev/null -p 22
+  aliceoa.bsky.social@socialweb.computer atirc agent run r20s4 < <agent config>`: `requester_session_atirc_minted`
+  `r20s4.aliceoa.bsky.social` 02:26:38.67Z, JOIN `r20s4@r20s4.r20s4.aliceoa.bsky.social` (the guest's child) 02:27:00.9Z,
+  `r20s4 online` 02:28:01.8Z, prompt answered `x86_64 / r20s4` in 3.2 s; disconnect 02:28:11.42Z ->
+  `requester_session_atirc_revoked` 02:28:11.45Z, hat-8 termination StateSync 02:28:12.70Z (revoke 1.26 s before),
+  Released 02:28:12.76Z, `requester_contract_records_deleted` 02:28:13.39Z, 0 ERROR (the run before, r20s3, the same
+  lifecycle; its prompt went out 13 s before the agent was online and was never seen: prompt only after the `online` line).
+  Section 4 page / CLI token-less: [0005](0005-guest-requester-association.md) on rollout 20 (no `token_minted`, chain to
+  the nested agent, the owner node's `atirc mesh peers` lists it, all DIDs `plc_tombstone` after release) and
+  [0004](0004-vm-atirc-agent.md) on rollout 19. `/chat` PASS: signed out 200, no session injected (the page only reads
+  `window.__ATIRC_SESSION__`); signed in (`/login`, consent irc.fedfork.com client-metadata for @aliceoa.bsky.social):
+  session injected (channel, did, handle), no sign-in banner, member snapshot, a post 200 as `aliceoa` (the presence nick),
+  the `?format=json` subscribe socket 2 text frames, 0 binary; a cookie POST `chat.atirc.post` 401 with a foreign Origin
+  and with none, 200 with `Origin: https://irc.fedfork.com`. Lease death PASS with a note: `atirc token r20lease
+  --lease-receipt <receipt>#<cid> --lease-termination at://<bidder>/...vm.terminated/termination-payload-<sha256(terminated:<receipt>)[:16]>`
+  on a held contract (hat-8), pub ok; `kb delete` of the VM 02:30:04Z, no revoke, `vm.terminated` at the leased key
+  `deleted_on_request` 02:30:05Z; pubs at +4 s and +25 s still succeeded (within 60 s of the token's last alive
+  confirmation), from 02:31:58Z every pub `Unauthorized: atirc token lease is not alive` (latched; the persistent latch
+  across a server restart not checked). Not run: send/recv pipes on prod (they publish peer records into the account's
+  repo; the section 1 loopback covers send/recv), `revocations.ndjson` (no ssh to irc.fedfork.com: the gateway's
+  `requester_session_atirc_revoked` and the server's `token revoked` answer are the evidence)
 - Last run (section 4, held session): 2026-11-12 21:25-21:33Z, kcp e190a3b1 (rollout 19): `ssh -o SetEnv=LC_SESSION=r19s
   ... atirc agent run r19bot < <agent config>`: atirc in the guest, JOIN 21:27:34Z, answer 3.0 s; disconnect -> the
   per-command token revoked 10 ms later; idle release 21:33:21Z -> Released (revoke 5.5 min before); the agent process

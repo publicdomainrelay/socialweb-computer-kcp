@@ -12,7 +12,30 @@ is tombstoned.
 - Design: [../design/ident-link-associations.md](../design/ident-link-associations.md)
 
 - Plan [0036](../plans/0036-record-association.yaml) item V1 (A4-A8)
-- Last pass: 2026-11-11 16:22-16:46Z, kcp f482083c (release 4656466c, rollout 14), alice by QR, no bidders list
+- Last pass: 2026-11-13 01:38-02:17Z, kcp 038bd32e (v0.0.0-rc165-pre1, release 24a8b530, rollout 20), alice by QR
+  (consent: qr.fedfork.com for @aliceoa.bsky.social), no bidders list, parts A and B and step 5. A (`cli-v1-1794533915`,
+  winner hat-8): outer Held 01:39:46Z; `run request r2 --r2-name r2-v1 --agent --hold` 01:39:47Z; R2 reported 01:40:23.0Z,
+  `requester_association_written` 01:40:23.9Z, R2's ref arrived 01:40:25.7Z, its RFP 01:40:29Z, its `--agent` contract Held
+  on the nested VM (hat-8) 01:41:05Z, `agentStart` out; chain alice -> R2 -> nested R3 -> nested agent, walk roots [alice]
+  at depth 1/2/3, rotationKeys shared down the chain; the owner node's `atirc mesh peers` lists the nested agent.
+  Outer-only release 01:46:26Z: exit 0 in 72 s, `requester_guest_requester_released` 46.5 s after the r2Release,
+  `requester_guest_dids_tombstoned by=the guest`, `r2Release: Released`, `atircRevokes: Done`, grant + endorsement
+  RecordNotFound x3, R2, R3 and the agent `plc_tombstone`, 9/9 URIs RecordNotFound x3 (0 `market.event` left), hosts empty.
+  (The renter CLI was stopped by a harness kill while Held at 01:40:42Z; the release ran from the stopped state.) B
+  (`cli-v1-1794535699`, winner hat-8): R2 with `R2_COLOCATED=mesh1` (R2 handle `aliceoa-<id>.aliceoa.bsky.social`):
+  association 02:10:05Z, `colocated-mesh1-{grant,endorsement,peer}` and `peer` written, `svc-pds-pds-iroh` dumbpipe
+  listening, crawl ok (one `participant_request_crawl_unresolved` retry first); R2 and mesh1 peer records `iroh`, no
+  `lease`; R2's grant of mesh1 (same contract + expiresAt as R2's) and endorsement; mesh1 `alsoKnownAs`
+  [at://mesh1.<R2 handle>, agent-of/R2], rotationKeys as R2's; walk exit 0, roots [alice], ancestors R2 (1), alice (2);
+  release: exit 0 in 28 s, `r2Released` 22 s, both `plc_tombstone`, 8/8 URIs RecordNotFound x3, 0 ERROR. Step 5
+  (`cli-v1-1794535982`, outer on hat-8): `kb delete` of the outer ComputeVM 02:15:36Z -> mesh1's walk exit 1 within 1 s
+  (errors: R2's repo unreachable, HTTP 500: its PDS ran in the deleted VM); the renter `requester_tombstoned` R2 and mesh1
+  `by=the renter rotation key` 02:15:38Z (both `plc_tombstone`), `requester_contract_records_deleted` 02:15:38.6Z (7/7
+  RecordNotFound x3), Released "the bidder ended the contract: deleted_on_request"; R2's nested VM stayed Running with
+  `spec.associationExpiresAt` = the chain's expiresAt (the bidder backstop), removed with [0007](0007-bidder-termination.md).
+  Not run: the `association.maxDepth: 1` policy denial (no prod bidder runs that policy), atirc-dev `revocations.ndjson`
+  (no ssh to irc.fedfork.com; no r2 token is minted any more)
+- Previous pass: 2026-11-11 16:22-16:46Z, kcp f482083c (release 4656466c, rollout 14), alice by QR, no bidders list
   (winner hat-8 for every VM), no workaround. A (`cli-v1-1794414131`): outer Held 16:23:52Z; `run request r2 --r2-name r2-v1
   --agent --hold` 16:24:09Z; R2 reported 16:24:39Z, `requester_association_written` 16:24:40Z, R2 Ready 16:24:46Z, its
   `--agent` contract Held on the nested VM 16:25:52Z (no handle refusal); chain alice -> R2 -> nested R3 (identity-only) ->
@@ -127,7 +150,8 @@ Timings (V1 rc125): R2 DID reported 17:15:48 -> Verified 17:15:52 -> hat-7 bid o
 4. Release the outer contract: for R2 and mesh1 `curl -s -o /dev/null -w '%{http_code}' https://plc.directory/<did>` is
    404 and `/<did>/log/last` is `plc_tombstone`; the owner's endorsement and grant at rkey = R2 DID are RecordNotFound (3 reads).
 5. Out-of-band loss (a second round): delete the outer ComputeVM on its bidder (0007) without a release;
-   `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated`. With the bidder down
+   `internal association <mesh1 DID>` exits 1, its log says `the contract was terminated` (or, when R2's PDS ran in the
+   deleted VM, its errors name R2's repo unreachable: `getRecord ... HTTP 500`, 2026-11-13). With the bidder down
    instead, the verdict holds only until the chain's earliest `expiresAt` (accept + 24 h). R2 never retires (its VM is
    gone), so on the bidder's vm.terminated the owner's requester tombstones both DIDs with its own rotation key (first in
    their rotationKeys): `requester_tombstoned did=<R2 DID>` and `did=<mesh1 DID>` with `key=<renter did:key>` (none
@@ -182,6 +206,7 @@ bidder queues the guest event for R2's nested VM, and the release again leaves n
 | cross-contract clobber / impersonation via authority vouch | review HIGHs fixed: nonce proof record in the R2 repo; a grant at rkey = R2 DID bound to another contract is refused (`is bound to another contract`) |
 | R2 Ready but its RFPs denied, `internal association <R2>` no roots | the renter's endorsement is missing: `requester_endorsement_skipped` (the optional scope); sign the renter in again |
 | R2 waits for the association ref forever (`/run/socialweb-r2/association-ref` empty) | kcp e496cbff mirrored the ref only with a non-empty `r2-atirc.env`; fixed in 982ba545, passed 2026-11-11 |
+| R2 never reports its DID; the renter logs no `requester_guest_requester_reported`; R2's journal: `handing the requester DID to the guest agent` `open /run/socialweb-r2/requester-did.part: permission denied` | `/run/socialweb-r2` lost its group write (2026-11-13: an extra `install -d -m 0750` on the guest agent's existing dir before writing `r2-start.env`); write only the env file. R2 tries the hand-off once (INFO, no retry) |
 | R2's `--agent` contract `refused: the atirc agent needs a requester handle that resolves to <R2 DID>` | kcp e496cbff; fixed in e9f1de4a (identlink.HandleOK), passed 2026-11-11 |
 | the cascade takes minutes; R2's log has the nested contract waiting on its own guest requester | a nested identity-only R2 (the `--agent` of R2's contract) answers `r2Release`, but the bidder refuses the message (`printableASCII` rejects spaces), so its renter waits its timeout (kcp f482083c-60d0d3b7); fixed in 36b05233, verified in [0004](0004-vm-atirc-agent.md) 2026-11-12 |
 | denied accept, no receipt, guest stays | bounded denied-accept release (A8) |
