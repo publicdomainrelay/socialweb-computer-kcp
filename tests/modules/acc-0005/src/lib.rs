@@ -15,6 +15,11 @@ fn plc(id: &str, did: &str) -> Call {
     Call::new(id, "com.fedfork.exec.identlink.plc").input(json!({ "did": did }))
 }
 
+/// A contract as its accept's URI: the associationRequest names it by URI, the grant by strongRef.
+fn uri_of(c: &Value) -> &Value {
+    if c.is_string() { c } else { &c["uri"] }
+}
+
 fn run_a(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state.clone(), args["now"].as_str().unwrap_or_default());
@@ -45,6 +50,8 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
         }
         Event::Message { id, data, .. } if id == "req" => {
             match data["msg"].as_str().unwrap_or_default() {
+                "contract" if data["phase"] == "Failed" && !s.has("held") => return Ok(s.fail(format!("the contract failed before Held: {}", data["message"]))),
+                "exited" if !s.has("held") => return Ok(s.fail("run request exited before the VM was Held")),
                 "contract" if data["phase"] == "Held" => s.flag("held"),
                 "exited" => s.flag("exited"),
                 "requester_association_written" => s.st["r2"] = data["subject"].clone(),
@@ -110,7 +117,7 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
                         if g["endorse"]["value"]["agent"] != r2.as_str() {
                             p.push(format!("renter endorsement {}", g["endorse"]));
                         }
-                        if g["areq"]["value"]["principal"] != renter.as_str() || g["areq"]["value"]["contract"] != g["grant"]["value"]["contract"] {
+                        if g["areq"]["value"]["principal"] != renter.as_str() || uri_of(&g["areq"]["value"]["contract"]) != uri_of(&g["grant"]["value"]["contract"]) {
                             p.push(format!("associationRequest {}", g["areq"]));
                         }
                         if !g["plc"]["alsoKnownAs"].as_array().is_some_and(|a| a.contains(&json!(format!("https://ident.link/agent-of/{renter}")))) {
@@ -132,7 +139,8 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
                 }
                 "release" => {
                     s.reading("release_s", o["seconds"].clone());
-                    if s.has("r2released") && s.has("assocDeleted") {
+                    // the log may have reported both before the release returned: then the records are asked already
+                    if s.is("released") && s.has("r2released") && s.has("assocDeleted") {
                         s.set("records");
                         h = h.call(host("records", "request.records", json!({ "name": name })));
                     }
@@ -209,6 +217,8 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                 s.st["receipt"] = data["receipt"].clone();
             }
             match data["msg"].as_str().unwrap_or_default() {
+                "contract" if data["phase"] == "Failed" && !s.has("held") => return Ok(s.fail(format!("the contract failed before Held: {}", data["message"]))),
+                "exited" if !s.has("held") => return Ok(s.fail("run request exited before the VM was Held")),
                 "contract" if data["phase"] == "Held" => s.flag("held"),
                 "exited" => s.flag("exited"),
                 "requester_association_written" => s.st["r2"] = data["subject"].clone(),

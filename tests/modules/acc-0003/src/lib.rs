@@ -51,6 +51,8 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
         }
         Event::Message { id, data, .. } if id == "req" => {
             match data["msg"].as_str().unwrap_or_default() {
+                "contract" if data["phase"] == "Failed" && !s.has("held") => return Ok(s.fail(format!("the contract failed before Held: {}", data["message"]))),
+                "exited" if !s.has("held") => return Ok(s.fail("run request exited before the VM was Held")),
                 "contract" if data["phase"] == "Held" && !s.has("held") => {
                     s.flag("held");
                     s.mark("held");

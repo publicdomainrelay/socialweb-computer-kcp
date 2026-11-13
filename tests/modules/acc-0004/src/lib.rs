@@ -124,6 +124,11 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     }
                     set(&mut st, "released");
                     h = h.call(call("summary", "request.summary", json!({ "name": name })));
+                    // the log may have reported both before the release returned: no message comes after it
+                    if st["f"]["r2released"] == true && st["f"]["guestTomb"] == true {
+                        set(&mut st, "records");
+                        h = h.call(call("records", "request.records", json!({ "name": name })));
+                    }
                 }
                 "records" => {
                     let mut uris = out["uris"].as_array().cloned().unwrap_or_default();
@@ -172,6 +177,10 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
         Event::Message { id, data, .. } if id == "req" => {
             let msg = data["msg"].as_str().unwrap_or_default();
             match msg {
+                "contract" if data["phase"] == "Failed" && st["f"]["held"].is_null() => {
+                    return Ok(fail(&st, format!("the contract failed before Held: {}", data["message"])));
+                }
+                "exited" if st["f"]["held"].is_null() => return Ok(fail(&st, "run request exited before the VM was Held".into())),
                 "contract" if data["phase"] == "Held" && st["f"]["held"].is_null() => {
                     st["f"]["held"] = json!(true);
                     st["readings"]["held_s"] = json!(t(&st));
