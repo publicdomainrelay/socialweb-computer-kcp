@@ -102,14 +102,26 @@ func TestEngineVerdictCache(t *testing.T) {
 		})
 		t.Run("cache/engine/"+workflow+"/scope/trust-ttl-expires", func(t *testing.T) {
 			t.Parallel()
-			h := policytest.NewWith(t, policytest.Options{TrustTTL: trustTTL})
-			h.World.Vouch(p.Self, p.CP)
-			evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil).mustAllow(t)
-			h.World.Unvouch(p.Self, p.CP)
-			cached := evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil)
-			cached.mustRun(t, workflow)
-			cached.mustAllow(t)
-			time.Sleep(trustTTL + time.Second)
+			var h *policytest.Harness
+			ttl := trustTTL
+			for {
+				h = policytest.NewWith(t, policytest.Options{TrustTTL: ttl})
+				h.World.Vouch(p.Self, p.CP)
+				start := time.Now()
+				evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil).mustAllow(t)
+				h.World.Unvouch(p.Self, p.CP)
+				cached := evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil)
+				cached.mustRun(t, workflow)
+				if time.Since(start) < ttl {
+					cached.mustAllow(t)
+					break
+				}
+				if ttl >= 8*trustTTL {
+					t.Fatalf("two scope decisions took %s, past a trust ttl of %s", time.Since(start), ttl)
+				}
+				ttl *= 2
+			}
+			time.Sleep(ttl + time.Second)
 			expired := evaluate(t, h, workflow, perspective, scope, p.Self, p.CP, nil)
 			expired.mustRun(t, workflow)
 			expired.mustDeny(t, "")
