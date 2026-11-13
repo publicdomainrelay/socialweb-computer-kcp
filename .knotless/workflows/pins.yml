@@ -1,8 +1,7 @@
 # knotless CI: `make check-pins` (make pins re-stages and re-pins the owned assets; it fails when
 # internal/versions/versions.json differs from the commit). 4 vCPU / 8 GB (binding kcp-small).
+# Runs only when asked for now (owner, 2026-11-13): off on push while we iterate; release no longer waits for it.
 on:
-  push:
-    refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
   asked:
     refs: [refs/heads/main, refs/heads/knotless-ci]
 runners: [aliceoa.bsky.social]

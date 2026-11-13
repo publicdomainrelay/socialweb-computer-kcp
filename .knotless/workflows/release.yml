@@ -11,7 +11,7 @@ on:
     refs: [refs/heads/main, refs/heads/knotless-ci]
 runners: [aliceoa.bsky.social]
 executor: kcp-build
-after: [gate, pins]
+after: [gate]
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
 env:
   SPACES_BUCKET: socialweb-computer-kcp
