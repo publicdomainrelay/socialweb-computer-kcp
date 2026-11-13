@@ -1,5 +1,5 @@
 # knotless CI: the gate (AGENTS.md: How to verify): go build, go vet, deploy/check.sh --fast (the release builds
-# included), and a clean tree after. 16 vCPU / 32 GB (binding kcp-build).
+# included), and a clean tree after. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]

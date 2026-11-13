@@ -51,7 +51,7 @@ steps:
       # the market's relays and Jetstreams over the run, for https://watch.socialweb.computer/ (runs/watch.ndjson)
       command -v git >/dev/null && dpkg -s libatomic1 >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq git libatomic1 >/dev/null; }
       git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
-      git -C /opt/swc-watch checkout -q 7a56d9021997a7306fb1fc7b88ebde06e934a059
+      git -C /opt/swc-watch checkout -q c74ff0a4b6456856676e25d121f94fd542427477
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
       # TEMPORARY (until build.yml is back): the newest published main build at or below this commit
       bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
