@@ -897,7 +897,7 @@ impl Swc {
     pub async fn write_resources(&self) {
         let v = self.resources().await;
         let _ = std::fs::write(
-            self.dir.join("resources.json"),
+            self.dump.join("resources.json"),
             serde_json::to_string_pretty(&v).unwrap_or_default(),
         );
     }

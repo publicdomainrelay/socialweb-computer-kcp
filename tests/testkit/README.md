@@ -140,7 +140,11 @@ outside CI; `CI` set: cleanup): no more events reach the module, every VM, reque
 run dir holds the dump. `--freeze-at <step|phase>` (repeatable) is a breakpoint; `kill -USR1 <pid>` freezes a live
 run. A freeze ends at `continue` / `cleanup` or its TTL (`--freeze-ttl`, default 7200 s), then cleanup runs.
 
-| file in the run dir | what |
+A run has two dirs: its dump (`$SWC_RUNS/<run>`, default `~/.tmp/swc-system-tests/runs/<run>`: the files below, no
+secret; a CI workflow sets `SWC_RUNS=runs` and declares `artifacts: [runs/]`) and its work dir
+(`~/.tmp/swc-system-tests/work/<run>`: requester state, kubeconfigs, keys, the store; never uploaded).
+
+| file in the dump | what |
 | --- | --- |
 | `ticks.ndjson.zst` | every tick of every instance (atlibs-host `ticks`): seq, times, what woke it (a call's NSID and latency), the event, the output, the state's hash and diff, full snapshots; secret-named keys redacted; zstd, rotated past 64 MiB |
 | `state.json`, `failure.json`, `freeze.ndjson` | the root's state; the failure with the last ticks; freezes and thaws |

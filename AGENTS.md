@@ -653,9 +653,12 @@ Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.js
 `resources.json`, `run.json`; no secret in any of them):
 
 ```sh
-# 1. the failed check's run dir: TODO `dev.knotless.getArtifact` (knotless workflow artifacts), until then on the runner:
-ls ~/.tmp/swc-system-tests/runs/
-R=~/.tmp/swc-system-tests/runs/<runbook>-composition-<ms>
+# 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to
+#    the owner and collaborators, kept 14 days); from knotless docs, the list form (no --out) not yet run against one
+export KNOTLESS_APPVIEW=https://knotless.socialweb.computer
+knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha>                    # list
+knotless run artifacts knotless://<owner>/<repo> --workflow <wf> --commit <sha> --out ./artifacts  # or --pull <pull at-uri>
+R=./artifacts/runs/<runbook>-composition-<ms>       # locally: ~/.tmp/swc-system-tests/runs/<...>
 jq . "$R/failure.json"
 # 2. replay it offline: the first diverging tick, then the states there
 cd tests && SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- replay "$R"
@@ -669,8 +672,11 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- compositions/
 SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- cleanup "$R"
 ```
 
-Never paste creds anywhere; dumps and ticks hold none (secret-named keys are redacted, kubeconfigs and tokens stay in
-the host).
+A later workflow job (`after: [build]`) reads an artifact with
+`curl -sfo <file> -H "Authorization: Bearer $KNOTLESS_ARTIFACTS_TOKEN" "$KNOTLESS_ARTIFACTS_URL?workflow=build&name=<path>"`.
+Never paste creds anywhere. A run's dump dir (`$SWC_RUNS/<run>`) holds none: secret-named keys are redacted,
+kubeconfigs, keys, tokens and the requester state stay in its work dir (`~/.tmp/swc-system-tests/work/<run>`), never
+an artifact.
 
 Pipeline, in order; cut the rc only when both suites are green:
 

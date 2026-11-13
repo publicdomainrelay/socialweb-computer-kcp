@@ -19,6 +19,15 @@ pub struct Atproto {
     pds: String,
 }
 
+/// Where runs write their dumps (ticks, state, failure, resources: no secret): SWC_RUNS (a CI workflow's `runs/`,
+/// its declared artifacts), else ~/.tmp/swc-system-tests/runs.
+pub fn runs_dir() -> std::path::PathBuf {
+    match std::env::var("SWC_RUNS") {
+        Ok(d) if !d.is_empty() => std::path::absolute(d).unwrap_or_default(),
+        _ => home_tmp("runs"),
+    }
+}
+
 pub fn home_tmp(sub: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
         .join(".tmp/swc-system-tests")

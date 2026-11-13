@@ -81,7 +81,10 @@ pub struct Swc {
     pub target: Target,
     pub account: String,
     pub bin: Binary,
+    /// the work dir: requester state, kubeconfigs, keys (secrets; never an artifact)
     pub dir: PathBuf,
+    /// the dump dir: resources.json beside the ticks (no secret)
+    pub dump: PathBuf,
     pub kube: Arc<Kube>,
     /// receipts of this run's contracts: the kube guard lets a test delete only VMs of these
     pub receipts: Arc<Mutex<Vec<String>>>,
@@ -114,6 +117,7 @@ impl Swc {
         kube: Arc<Kube>,
         receipts: Arc<Mutex<Vec<String>>>,
         ssh: Arc<atlibs_ssh::Ssh>,
+        dump: PathBuf,
     ) -> Arc<Self> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -124,6 +128,7 @@ impl Swc {
             account: account.into(),
             bin,
             dir,
+            dump,
             kube,
             receipts,
             requesters: Default::default(),

@@ -221,10 +221,15 @@ async fn main_() -> Result<bool> {
     let comp = compose::load(&manifest, &loader(tests.join("modules")))
         .await
         .map_err(|e| anyhow!(e))?;
-    let dir =
-        testkit::home_tmp("runs").join(format!("{runbook}-composition-{}", atlibs_host::now_ms()));
-    std::fs::create_dir_all(&dir)?;
-    std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    // two dirs per run: the dump (SWC_RUNS: ticks, state, failure, resources, run.json; no secret, a CI artifact) and
+    // the work dir (requester state, kubeconfigs, keys, the store: secrets, never uploaded)
+    let run_name = format!("{runbook}-composition-{}", atlibs_host::now_ms());
+    let dump = testkit::runs_dir().join(&run_name);
+    let dir = testkit::home_tmp("work").join(&run_name);
+    for d in [&dump, &dir] {
+        std::fs::create_dir_all(d)?;
+        std::fs::set_permissions(d, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    }
 
     // transports: kube (bidder and gateway kcps; requesters add theirs), ssh, iroh, the socialweb handler
     let receipts: Arc<Mutex<Vec<String>>> = Default::default();
@@ -261,6 +266,7 @@ async fn main_() -> Result<bool> {
         kube.clone(),
         receipts,
         ssh.clone(),
+        dump.clone(),
     );
     let transports = vec![
         kube.transport(),
@@ -291,9 +297,9 @@ async fn main_() -> Result<bool> {
         .unwrap_or_default()
         .to_string();
     std::fs::write(
-        dir.join("run.json"),
+        dump.join("run.json"),
         serde_json::to_string_pretty(
-            &json!({ "composition": comp_dir.canonicalize()?, "account": account, "requester": target.requester, "rootModule": root_key, "instance": instance, "entry": entry }),
+            &json!({ "composition": comp_dir.canonicalize()?, "account": account, "requester": target.requester, "rootModule": root_key, "instance": instance, "entry": entry, "work": dir }),
         )?,
     )?;
     let _lock = if signed_in {
@@ -333,8 +339,8 @@ async fn main_() -> Result<bool> {
 
     // freeze: the gate, the recorder, SIGUSR1, the control socket (MCP) with this host's tools
     // every tick of every instance (ticks.ndjson.zst), a full state each 50 ticks of a run
-    let ticks = atlibs_host::ticks::Ticks::new(&dir, 50);
-    let freezer = Freezer::new(&dir, breaks, Some(ticks.clone()));
+    let ticks = atlibs_host::ticks::Ticks::new(&dump, 50);
+    let freezer = Freezer::new(&dump, breaks, Some(ticks.clone()));
     let signal = Signal::new();
     {
         let f = freezer.clone();
@@ -434,7 +440,7 @@ async fn main_() -> Result<bool> {
         })))
         .collect::<Vec<_>>()
     };
-    let server = tokio::spawn(freezer.clone().serve(dir.join("control.sock"), host_tools));
+    let server = tokio::spawn(freezer.clone().serve(dump.join("control.sock"), host_tools));
     // resources.json every few seconds (kube writes do not pass the socialweb handler); a breakpoint freeze past
     // its TTL aborts the run
     let ticker = {
@@ -458,8 +464,8 @@ async fn main_() -> Result<bool> {
     };
     eprintln!(
         "run dir: {} (attach: swc-test-host attach {})",
-        dir.display(),
-        dir.display()
+        dump.display(),
+        dump.display()
     );
 
     let options = Options {
@@ -557,7 +563,7 @@ async fn main_() -> Result<bool> {
     swc.write_resources().await;
     ticker.abort();
     server.abort();
-    let _ = std::fs::remove_file(dir.join("control.sock"));
+    let _ = std::fs::remove_file(dump.join("control.sock"));
     let pass = !failed && cleanup.is_empty();
     let mut readings = result["readings"].clone();
     if !readings.is_object() {
@@ -566,7 +572,7 @@ async fn main_() -> Result<bool> {
     readings["requester"] = json!({ "spec": target.requester, "version": bin.version });
     let doc = json!({
         "runbook": runbook, "test": "composition", "target": target.name, "startedAt": started, "endedAt": atlibs_host::iso_now(),
-        "pass": pass, "error": result.get("error"), "phase": result.get("phase"), "cleanupErrors": cleanup, "readings": readings, "scratch": dir,
+        "pass": pass, "error": result.get("error"), "phase": result.get("phase"), "cleanupErrors": cleanup, "readings": readings, "dump": dump, "work": dir,
     });
     if signed_in {
         let out = std::env::var("SWC_READINGS")

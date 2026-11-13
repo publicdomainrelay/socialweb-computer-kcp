@@ -21,7 +21,7 @@ pub use anyhow::{Context, Result, anyhow, bail, ensure};
 use futures::FutureExt;
 pub use serde_json::{Value, json};
 
-pub use atproto::{Atproto, home_tmp};
+pub use atproto::{Atproto, home_tmp, runs_dir};
 pub use kcp::Kcp;
 pub use requester::{Binary, Requester, RunRequest, SignIn};
 pub use target::{Account, Target};

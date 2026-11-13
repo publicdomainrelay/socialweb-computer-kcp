@@ -45,8 +45,16 @@ fn newest_tag() -> Result<String> {
     // v0.0.0-rcN[-preM]: N, then a final rc after its pre-releases
     let key = |t: &str| {
         let rest = t.rsplit_once("-rc").map(|(_, r)| r).unwrap_or_default();
-        let n: u64 = rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0);
-        let pre: u64 = rest.rsplit_once("-pre").and_then(|(_, p)| p.parse().ok()).unwrap_or(u64::MAX);
+        let n: u64 = rest
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap_or(0);
+        let pre: u64 = rest
+            .rsplit_once("-pre")
+            .and_then(|(_, p)| p.parse().ok())
+            .unwrap_or(u64::MAX);
         (n, pre)
     };
     String::from_utf8(out.stdout)?
