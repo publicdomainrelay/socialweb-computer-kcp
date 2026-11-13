@@ -34,7 +34,7 @@
 | `guest.r2Start` | requester only | requester repo | guest: starts `socialweb-r2.service` | `internal/guestagent/association.go` |
 | `guest.r2Release` | requester only | requester repo | guest: runs `socialweb-r2-release.service` | same |
 | `guest.r2Released` | guest only | bidder repo | requester: `status.contract.r2Release` | `internal/market/requester/guestrequester.go` |
-| `guest.memoryPressure`, `guest.oomKill` | guest only | bidder repo | requester: logged (`requester_guest_memory_event`); swc-test-host: warning / failure | `internal/guestagent/memory.go`; cap `memoryEventCapped` in `internal/market/bidder/guestevents.go` |
+| `guest.memoryPressure`, `guest.oomKill` | guest only | bidder repo | requester: one `requester_market_event` line each (`reportMarketEvent`), which the test modules read (`steps::market_event`: an OOM fails the run, pressure goes to readings.memory) | `internal/guestagent/memory.go`; cap `memoryEventCapped` in `internal/market/bidder/guestevents.go` |
 | `vm.started`, `vm.registerIdentity` | defined, no Go writer | none | none | `internal/atproto/market/nsid.go` constants only |
 
 - guest-originated set: `market.IsGuestOriginatedEventNSID` (publicKey, signalWebRTC, secretsApplied, secretsRequested, requesterDid, r2Released, memoryPressure, oomKill). the guest control plane refuses any other kind (`guestEvent` in `internal/guestidentity/service.go`)

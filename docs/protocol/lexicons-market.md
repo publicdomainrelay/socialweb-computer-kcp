@@ -591,7 +591,7 @@
 | key fields | `kind`* psi / swap, `threshold`*, `psiSomeAvg10`, `psiFullAvg10`, `swapUsed`*, `swapTotal`*, `observedAt`*, `createdAt`* (percentages in hundredths) |
 | rkey | bidder `EventRKeys("guest:...")` |
 | written by | bidder for the guest agent (`internal/guestagent/memory.go`), capped by `memoryEventCapped` |
-| read by | requester (logged), swc-test-host (a warning in run.json), the watch page |
+| read by | requester (`requester_market_event`), the test modules (readings.memory), the watch page |
 
 ## compute.events.guest.oomKill
 
@@ -602,7 +602,7 @@
 | key fields | `kills`*, `total`*, `observedAt`*, `createdAt`* |
 | rkey | bidder `EventRKeys("guest:...")` |
 | written by | bidder for the guest agent (`internal/guestagent/memory.go`), capped by `memoryEventCapped` |
-| read by | requester (logged), swc-test-host (fails the run), the watch page |
+| read by | requester (`requester_market_event`), the test modules (fail the run), the watch page |
 
 ## compute.guest.subscribeEvents
 

@@ -552,9 +552,11 @@ again; user_data installs `atirc-agent.service`
   state in `/run/socialweb-guest-agent/memory-state.json`): edge-triggered guest.memoryPressure (PSI some avg10
   >= 10% or swap >= 10% in use; re-armed after 5 min under half the threshold) and guest.oomKill per oom_kill
   rise; one per kind per 10 min and ten per contract, enforced again by the bidder from its StateSyncs
-  (`memoryEventCapped`; a capped event is answered 200 and dropped). swc-test-host fails a run on an
-  oom kill of one of its contracts (guest.oomKill, vm.oomKilled, vm.terminated reason oom) and lists pressure
-  in run.json `memory`.
+  (`memoryEventCapped`; a capped event is answered 200 and dropped). The requester logs each market event
+  of its contracts (those, vm.memoryPressure, vm.oomKilled, vm.terminated with its reason) as one
+  `requester_market_event` line; swc-test-host forwards it to the composition like Held, and the test modules
+  decide (`steps::market_event`, first in every module: an OOM kill fails the run naming the VM, pressure goes to
+  readings.memory, which gate.sh lists). No memory policy in the host.
 - Signaling is sealed. Each side publishes a `guest.publicKey` (kind `age-x25519`) per tag; an offer
   is age ciphertext sealed to the guest's latest key, with plaintext `{sdp, replyTo}`; the answer is
   sealed to `replyTo`. A signal names no recipient: a reader trial-opens every signal for its tag.
