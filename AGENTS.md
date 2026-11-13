@@ -631,6 +631,10 @@ again; user_data installs `atirc-agent.service`
 - A failed composition run freezes (outside CI): attach with `swc-test-host attach <run dir>` (MCP), read `failure`,
   `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then `cleanup`; `swc-test-host replay <run dir>` reruns the
   module's decisions offline. Never leave a frozen run past its TTL by hand.
+- atlibs pins: the tests (`tests/Cargo.toml`) and the knotless runner (fork branch `runner-atlibs-composition`,
+  deployed by knotless-fork-infra `versions.env`) pin the same atlibs-host / atlibs-iroh revs. Bump both together.
+  A runner on an older atlibs-host lacks host calls newer modules need (2026-11-13: no `identity.resolveDid`, so the
+  requester's vouch policy denied every bid).
 - A change is done when the system tests covering it pass on staging.
 - No Go tests, except the policy engine specification tests (owner, 2026-10-30): `internal/policyengine/spec`, the
   policy decision tests in `internal/market/bidder` and `internal/market/requester`, their harness
