@@ -13,6 +13,9 @@ on:
 runners: [aliceoa.bsky.social]
 executor: kcp-test
 artifacts: [runs]
+# a failed run freezes (--on-fail freeze): `knotless run attach` gives the owner's or a collaborator's key this, as
+# root on the CI VM, only while the run goes (AGENTS.md: Debug a failed CI run)
+attach: runuser -u r2 -- /usr/local/bin/swc-test-host attach /work/runs
 env:
   SWC_RUNS: /work/runs
 steps:
@@ -24,6 +27,7 @@ steps:
       . /opt/ci/env
       (cd tests/modules && cargo wasm)
       (cd tests && cargo build --release -p swc-test-host)
+      install -m 0755 tests/target/release/swc-test-host /usr/local/bin/swc-test-host
   - name: staging
     timeout: 110
     run: |

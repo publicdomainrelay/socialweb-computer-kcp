@@ -3,8 +3,10 @@
 //!
 //!   swc-test-host <composition dir> [--account a] [--on-fail freeze|cleanup] [--freeze-at <step|phase>]...
 //!                 [--freeze-ttl <seconds>] [--dry-run] [--instance i --entry e --input '<json>']
-//!   swc-test-host attach <run dir>     stdio MCP to a live run's control socket
+//!   swc-test-host attach <run dir>     stdio MCP to a live run's control socket (a runs dir: its newest live run)
 //!   swc-test-host cleanup <run dir>    from resources.json (the host may be gone)
+//!   swc-test-host attach|cleanup --ci <handle.json> --key <private key>
+//!                                      a frozen CI run, over the handle `knotless run attach` printed
 //!   swc-test-host replay <run dir> [--upto <step>]
 //!
 //! A failure (pass false, an error) freezes the run when --on-fail freeze (the default outside CI): no more events,
@@ -161,11 +163,75 @@ fn tool(
     }
 }
 
+/// A frozen CI run, from the attach handle `knotless run attach` printed ({ticket, hostKeys}): ssh over iroh with
+/// the private `key` whose public half the runner gave the CI VM, which runs only the workflow's `attach` (this
+/// host's attach to the frozen run there). `cleanup`: its MCP `cleanup` tool, the run's cleanup and release.
+async fn ci_session(handle: &str, key: &str, cleanup: bool) -> Result<bool> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let h: Value = serde_json::from_slice(
+        &std::fs::read(handle).context("the attach handle (knotless run attach > <file>)")?,
+    )?;
+    let ticket = h["ticket"].as_str().context("the handle has no ticket")?;
+    let dir = testkit::home_tmp(&format!("attach-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let kh = dir.join("known_hosts");
+    std::fs::write(
+        &kh,
+        atlibs_iroh::known_hosts("guest", h.get("hostKeys")).map_err(|e| anyhow!(e))?,
+    )?;
+    let mut ssh = tokio::process::Command::new("ssh");
+    ssh.args(atlibs_iroh::ssh_args(Path::new(key), ticket, &kh, "attach"));
+    let ok = if !cleanup {
+        ssh.status().await?.success()
+    } else {
+        let mut c = ssh
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
+        let mut sin = c.stdin.take().context("stdin")?;
+        let call = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "cleanup", "arguments": {} } });
+        let init = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} });
+        sin.write_all(format!("{init}\n{call}\n").as_bytes()).await?;
+        let mut lines = tokio::io::BufReader::new(c.stdout.take().context("stdout")?).lines();
+        let mut ok = false;
+        while let Some(l) = lines.next_line().await? {
+            let v: Value = serde_json::from_str(&l).unwrap_or_default();
+            if v["id"] == 2 {
+                println!("{l}");
+                ok = v["result"]["isError"] == false;
+                break;
+            }
+        }
+        drop(sin);
+        let _ = c.wait().await;
+        ok
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(ok)
+}
+
+/// The control socket of `dir`: a run dir's, or the newest run's under a runs dir (SWC_RUNS) that serves one.
+fn control_socket(dir: &Path) -> Result<PathBuf> {
+    if dir.join("control.sock").exists() {
+        return Ok(dir.join("control.sock"));
+    }
+    std::fs::read_dir(dir)?
+        .flatten()
+        .map(|e| e.path().join("control.sock"))
+        .filter(|s| s.exists())
+        .max_by_key(|s| s.metadata().and_then(|m| m.modified()).ok())
+        .with_context(|| format!("{}: no run serving a control socket", dir.display()))
+}
+
 async fn run_dir_cmd(cmd: &str, args: &[String]) -> Result<bool> {
+    if let Some(handle) = flag(args, "--ci") {
+        let key = flag(args, "--key").context("--key <the private key of the public one given>")?;
+        return ci_session(&handle, &key, cmd == "cleanup").await;
+    }
     let dir = PathBuf::from(args.first().context("a run dir")?);
     match cmd {
         "attach" => {
-            atlibs_host::freeze::attach(&dir.join("control.sock"))
+            atlibs_host::freeze::attach(&control_socket(&dir)?)
                 .await
                 .map_err(|e| anyhow!(e))?;
             Ok(true)
