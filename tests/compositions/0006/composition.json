@@ -18,6 +18,12 @@
 			"nsid": "computer.socialweb.test.assert.recordsGone",
 			"to": "assert",
 			"reason": "every record of the compat run RecordNotFound"
+		},
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.noneSince",
+			"to": "assert",
+			"reason": "no market or compute record of the account created during the run is left (the hand runs' listRecords scan)"
 		}
 	]
 }

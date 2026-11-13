@@ -19,12 +19,19 @@
 		"computer.socialweb.test.request.checkLogs",
 		"computer.socialweb.test.request.records",
 		"com.fedfork.exec.kube.get",
-		"computer.socialweb.test.assert.recordsGone"
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.bidder.health",
+		"computer.socialweb.test.assert.noneSince",
+		"com.fedfork.exec.kube.list"
 	],
 	"hooks": [
 		{
 			"nsid": "computer.socialweb.test.assert.recordsGone",
 			"reason": "every record of the compat run RecordNotFound"
+		},
+		{
+			"nsid": "computer.socialweb.test.assert.noneSince",
+			"reason": "no market or compute record of the account created during the run is left (the hand runs' listRecords scan)"
 		}
 	]
 }
