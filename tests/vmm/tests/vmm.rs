@@ -211,6 +211,31 @@ fn firecracker_stays_selectable() {
 /// A market network inside a QEMU guest: `dev up --profile market-network` with one bidder, then a `run request
 /// --network` the guest's bidder must hold, so the guest kernel can fence a guest of its own (bridge-family nf_tables
 /// reject). Needs SWC_GUEST_BIN, a release-like socialweb-computer for linux/amd64 (assets embedded).
+const INNER_DUMP: &str = r#"
+echo "--- outer guest: $(date -u +%T) uptime: $(uptime)"; free -m | head -2
+cat > /tmp/milestones.py <<'PY'
+import json, re, sys
+keep = re.compile(r"guest ComputeVM is applied|prepared|handed to its placement|unit watch|onNetwork|on-network|guest_image|receipt|provision|lost|failed|fetch|image|submitAccept|accept|release|bids|winner", re.I)
+for line in open(sys.argv[1], errors="replace"):
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    m = d.get("msg", "")
+    if d.get("level") in ("ERROR", "WARN") or keep.search(m):
+        extra = {k: d[k] for k in ("err", "computevm", "firecrackervm", "unit", "state", "reason", "phase", "contractPhase", "message", "bidder", "status") if k in d}
+        print(d.get("time", "")[11:23], d.get("level", ""), m[:90], json.dumps(extra)[:240])
+PY
+for f in $(find /home/stg/s -name core.log \( -path '*bidder*' -o -path '*/requests/*' \) 2>/dev/null); do
+  echo "--- $f (milestones, time level msg extra)"
+  python3 /tmp/milestones.py "$f" | tail -n 90
+done
+echo "--- image store fetches seen every 2 s (time: .fetch-* dirs and sizes)"; cat /tmp/fetches.log 2>/dev/null | tail -n 80
+echo "--- image store now"; find /home/stg/s -maxdepth 9 -type d -name images -exec ls -ld --time-style=full-iso {} \; -exec ls -la --time-style=full-iso {} \; 2>/dev/null | head -20
+for f in /tmp/con-*.log; do echo "--- $f (copied every 2 s)"; tail -n 60 "$f"; done
+for f in $(find /home/stg/s -name vmm.log 2>/dev/null); do echo "--- $f"; tail -n 20 "$f"; done
+"#;
+
 #[test]
 fn qemu_guest_hosts_a_market_network_bidder() {
     let bin = PathBuf::from(need("SWC_GUEST_BIN"));
@@ -245,9 +270,20 @@ fn qemu_guest_hosts_a_market_network_bidder() {
     let st = "--instance g --state-dir /home/stg/s";
     let up = guest.sh_in(&as_stg(&format!("/home/stg/swc dev up {st} --profile market-network --bidders 1 --host-backend proc --network-timeout 15m")), b"", Duration::from_secs(1200));
     eprintln!("dev up: {}", &up[up.len().saturating_sub(300)..]);
-    let req = guest.sh_in(&as_stg(&format!("/home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec \"uname -r\"")), b"", Duration::from_secs(900));
+    // the inner guest's console outlives its release (the bidder removes the work dir): copy it every 2 s
+    const KEEP_CONSOLE: &str = "while :; do for f in $(find /home/stg/s -name console.log 2>/dev/null); do cp $f /tmp/con-$(basename $(dirname $f)).log; done; d=$(find /home/stg/s -maxdepth 9 -type d -name '.fetch-*' 2>/dev/null); [ -n \"$d\" ] && echo \"$(date -u +%T) $(du -sm $d 2>/dev/null | tr '\\n' ' ')\" >> /tmp/fetches.log; sleep 2; done\n";
+    guest.sh_in("cat > /tmp/keep-console.sh && chmod 0644 /tmp/keep-console.sh", KEEP_CONSOLE.as_bytes(), Duration::from_secs(30));
+    guest.sh_in(&as_stg("setsid sh /tmp/keep-console.sh </dev/null >/dev/null 2>&1 &"), b"", Duration::from_secs(30));
+    let req = guest.sh_in(&as_stg("/home/stg/swc run request --network g --state-dir /home/stg/s --name r1 --exec \"uname -r\""), b"", Duration::from_secs(900));
+    let held = !req.contains("fencing the guest") && req.contains("Held");
+    if !held {
+        // the failure's evidence before dev down removes it: the inner bidder's and requester's milestones with times,
+        // the inner guest's serial console, the outer guest's load
+        let dump = guest.try_sh(&as_stg("sh -s"), INNER_DUMP.as_bytes(), Duration::from_secs(120));
+        eprintln!("=== inner dump ===\n{}\n{}\n=== end inner dump ===", dump.stdout, dump.stderr);
+    }
     let _ = guest.try_sh(&as_stg(&format!("/home/stg/swc dev down {st}")), b"", Duration::from_secs(300));
     let _ = vm.stop();
     let _ = fs::remove_dir_all(&dir);
-    assert!(!req.contains("fencing the guest") && req.contains("Held"), "the guest's bidder did not hold a guest of its own:\n{}", &req[req.len().saturating_sub(3000)..]);
+    assert!(held, "the guest's bidder did not hold a guest of its own:\n{}", &req[req.len().saturating_sub(3000)..]);
 }
