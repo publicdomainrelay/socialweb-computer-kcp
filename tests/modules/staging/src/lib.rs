@@ -9,8 +9,8 @@ use steps::{MIN, S, host};
 
 const BUCKET: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com";
 const BIN: &str = "socialweb-computer-linux-amd64";
-/// the instance on the VM (a short state dir: tenant socket paths must fit in 107 bytes)
-const INST: &str = "--instance stg --state-dir ~/stg/s";
+/// the instance on the VM, as the account stg (dev refuses root; a short state dir: socket paths fit in 107 bytes)
+const INST: &str = "--instance stg --state-dir /home/stg/stg/s";
 /// dev up's market network: 3 bidders (nested VMs), the gateway, vm and deno compute
 const DEV_UP: &str = "--profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m";
 
@@ -23,13 +23,21 @@ fn prefix(spec: &str) -> Result<String, String> {
     }
 }
 
+/// As root on the VM: the account stg (kvm, one subordinate id range above the image's, uidmap, lingering), the
+/// binary under test in /home/stg/stg checked against SHA256SUMS.
 fn install(prefix: &str) -> String {
     let b = format!("{BUCKET}/{prefix}/binaries");
-    format!("set -e; mkdir -p ~/stg; cd ~/stg; curl -fsSLO {b}/{BIN}; curl -fsSL {b}/SHA256SUMS | grep '  {BIN}$' | sha256sum -c; chmod +x {BIN}; ./{BIN} version")
+    format!(
+        "set -e; id stg >/dev/null 2>&1 || useradd -m -s /bin/bash -G kvm stg; sed -i /^stg:/d /etc/subuid /etc/subgid; \
+         usermod --add-subuids 1000000-2048575 --add-subgids 1000000-2048575 stg; \
+         command -v newuidmap >/dev/null || {{ apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q uidmap >/dev/null; }}; \
+         loginctl enable-linger stg; install -d -o stg -g stg /home/stg/stg /home/stg/stg/s; cd /home/stg/stg; \
+         curl -fsSLO {b}/{BIN}; curl -fsSL {b}/SHA256SUMS | grep '  {BIN}$' | sha256sum -c; chmod 0755 {BIN}; echo \"VERSION $(./{BIN} version | head -1)\""
+    )
 }
 
 fn swc(args: &str) -> String {
-    format!("~/stg/{BIN} {args} 2>&1")
+    format!("cd /home/stg && runuser -u stg -- env HOME=/home/stg XDG_RUNTIME_DIR=/run/user/$(id -u stg) /home/stg/stg/{BIN} {args} 2>&1")
 }
 
 fn run_staging(run: Run<Value>) -> Result<Handle, String> {
@@ -82,10 +90,10 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             match id.as_str() {
                 "install" if o["ok"] == true => {
                     s.flag("installed");
-                    s.st["readings"]["version"] = json!(text.lines().last());
+                    s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
                     s.mark("installed");
                     s.set("up");
-                    h = h.call(ssh("up", format!("mkdir -p ~/stg/s && {}", swc(&format!("dev up {INST} {DEV_UP}")))));
+                    h = h.call(ssh("up", swc(&format!("dev up {INST} {DEV_UP}"))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
                 "up" if o["ok"] == true => {
