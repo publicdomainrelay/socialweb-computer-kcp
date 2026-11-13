@@ -575,7 +575,7 @@ impl Swc {
                     if !ok {
                         return Err(format!("run requester cluster: {}", tail(&out)));
                     }
-                    let deadline = Instant::now() + Duration::from_secs(300);
+                    let deadline = Instant::now() + Duration::from_secs(600);
                     let path = loop {
                         let (ok, out) = self
                             .requester_cli("kubeconfig", name, &["--cluster", cluster])
@@ -589,7 +589,7 @@ impl Swc {
                             break p.to_string();
                         }
                         if Instant::now() > deadline {
-                            return Err(format!("cluster {cluster}: no kubeconfig in 5 min"));
+                            return Err(format!("cluster {cluster}: no kubeconfig in 10 min"));
                         }
                         tokio::time::sleep(Duration::from_secs(5)).await;
                     };

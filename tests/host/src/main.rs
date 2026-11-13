@@ -217,18 +217,19 @@ async fn main_() -> Result<bool> {
     }
     let rs = receipts.clone();
     // fault injection reaches only this run's own VMs; a bidder root's spec is patched only to be restored
-    let guard: atlibs_kube::Guard =
-        Arc::new(move |_cluster: &str, verb: &str, obj: &Value| {
-            match (verb, obj["kind"].as_str()) {
-                ("delete", Some("ComputeVM" | "FirecrackerVM" | "QemuVM")) => {
-                    obj["spec"]["contract"]["receipt"]["uri"]
-                        .as_str()
-                        .is_some_and(|r| rs.lock().unwrap().iter().any(|x| x == r))
-                }
-                ("patch", Some("MarketBidder")) => true,
-                _ => false,
+    let guard: atlibs_kube::Guard = Arc::new(move |_cluster: &str, verb: &str, obj: &Value| {
+        match (verb, obj["kind"].as_str()) {
+            ("delete", Some("ComputeVM" | "FirecrackerVM" | "QemuVM")) => {
+                obj["spec"]["contract"]["receipt"]["uri"]
+                    .as_str()
+                    .is_some_and(|r| rs.lock().unwrap().iter().any(|x| x == r))
             }
-        });
+            ("patch", Some("MarketBidder")) => true,
+            // a staging tenant node follows the run's roster (restored at cleanup)
+            ("patch", Some("Node")) => _cluster.starts_with("tenant:"),
+            _ => false,
+        }
+    });
     let kube = Kube::new(clusters, Some(guard));
     let ssh = atlibs_ssh::Ssh::new(HashMap::new(), HashMap::new());
     let swc = swc::Swc::new(
@@ -514,8 +515,9 @@ async fn main_() -> Result<bool> {
             _ = cleaned.notified() => {}
         }
     }
-    let mut cleanup = swc.cleanup().await;
-    cleanup.extend(kube.cleanup().await);
+    // the run's kube objects first (a tenant cluster's pods, so its nodes scale down), then Infras and requesters
+    let mut cleanup = kube.cleanup().await;
+    cleanup.extend(swc.cleanup().await);
     swc.write_resources().await;
     ticker.abort();
     server.abort();

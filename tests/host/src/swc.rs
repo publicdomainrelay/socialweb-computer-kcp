@@ -26,6 +26,11 @@ pub use more::cleanup_from_disk;
 const P: &str = "computer.socialweb.test.";
 pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.requester.start",
+    "computer.socialweb.test.requester.infra",
+    "computer.socialweb.test.staging.meshKeys",
+    "computer.socialweb.test.staging.meshJoin",
+    "computer.socialweb.test.staging.probe",
+    "computer.socialweb.test.staging.apply",
     "computer.socialweb.test.request.start",
     "computer.socialweb.test.request.ssh",
     "computer.socialweb.test.request.agent",
@@ -83,6 +88,12 @@ pub struct Swc {
     requesters: tokio::sync::Mutex<HashMap<String, (PathBuf, tokio::process::Child)>>,
     requests: Mutex<HashMap<String, PathBuf>>,
     env_files: Mutex<Vec<PathBuf>>,
+    /// requester name -> its kcp's kubeconfig
+    kubeconfigs: Mutex<HashMap<String, String>>,
+    /// (requester, kind, name) of each Infra/EphemeralInfra this run applied: released by cleanup()
+    infras: Mutex<Vec<(String, String, String)>>,
+    /// this host's meshd on a staging overlay (sudo: it makes a tun), stopped by cleanup()
+    meshd: tokio::sync::Mutex<Option<tokio::process::Child>>,
     http: reqwest::Client,
     ssh: Arc<atlibs_ssh::Ssh>,
     extra: more::Extra,
@@ -124,6 +135,9 @@ impl Swc {
             requesters: Default::default(),
             requests: Default::default(),
             env_files: Default::default(),
+            kubeconfigs: Default::default(),
+            infras: Default::default(),
+            meshd: Default::default(),
             http,
             ssh,
             extra: Default::default(),
@@ -246,6 +260,7 @@ impl Swc {
             .as_str()
             .ok_or("ready file without kubeconfig")?
             .to_string();
+        (self.kubeconfigs.lock().unwrap()).insert(name.clone(), kubeconfig.clone());
         self.kube.add_cluster(
             &format!("requester:{name}"),
             Cluster {
@@ -258,6 +273,307 @@ impl Swc {
             json!({ "did": r["did"], "handle": r["handle"], "identityMode": r["identityMode"], "cluster": format!("requester:{name}"),
                     "gateway": r["gateway"], "sshKey": r["sshPublicKey"].as_str().and_then(|p| std::fs::read_to_string(p).ok()).map(|k| k.trim().to_string()) }),
         )
+    }
+
+    /// Applies an Infra or EphemeralInfra into requester `name`'s kcp, `@meshKey:<peer>` in a contract's userData
+    /// replaced by that peer's meshd secret (the module never holds one). cleanup() releases it.
+    async fn requester_infra(&self, input: &Value) -> Result<Value, String> {
+        let name = str_of(input, "name")?;
+        let kubeconfig = (self.kubeconfigs.lock().unwrap().get(name).cloned())
+            .ok_or(format!("no requester {name}"))?;
+        let mut obj = input["object"].clone();
+        let kind = obj["kind"].as_str().unwrap_or_default().to_string();
+        if !matches!(kind.as_str(), "Infra" | "EphemeralInfra") {
+            return Err(format!(
+                "requester.infra applies Infra or EphemeralInfra, not {kind}"
+            ));
+        }
+        let iname = str_of(&obj["metadata"], "name")?.to_string();
+        for c in obj["spec"]["contracts"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(ud) = c["userData"].as_str() {
+                c["userData"] = json!(self.fill(ud, &input["vars"])?);
+            }
+        }
+        let kcp = testkit::kcp::Kcp::kubeconfig(&kubeconfig)
+            .await
+            .map_err(|e| e.to_string())?;
+        (self.infras.lock().unwrap()).push((name.into(), kind, iname.clone()));
+        kcp.apply(&obj).await.map_err(|e| e.to_string())?;
+        Ok(json!({ "name": iname }))
+    }
+
+    /// `{{secret:NAME}}`: the run's secret NAME (32 random bytes, hex, made 0600 on first use); `{{key}}`: `vars[key]`;
+    /// then `@meshKey:<peer>`. Secrets stay on the host: the module passes names, never values.
+    fn fill(&self, text: &str, vars: &Value) -> Result<String, String> {
+        let (mut out, mut rest) = (String::new(), text);
+        while let Some(i) = rest.find("{{") {
+            out.push_str(&rest[..i]);
+            let j = i + rest[i..].find("}}").ok_or("unclosed {{")?;
+            let key = &rest[i + 2..j];
+            let v = match key.strip_prefix("secret:") {
+                Some(name) => self.secret(name)?,
+                None => match &vars[key] {
+                    Value::String(v) => v.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return Err(format!("{{{{{key}}}}}: no value")),
+                },
+            };
+            out.push_str(&v);
+            rest = &rest[j + 2..];
+        }
+        out.push_str(rest);
+        self.with_mesh_keys(&out)
+    }
+
+    fn secret(&self, name: &str) -> Result<String, String> {
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(format!("{name}: not a secret name"));
+        }
+        let dir = self.dir.join("secrets");
+        let path = dir.join(name);
+        if let Ok(v) = std::fs::read_to_string(&path) {
+            return Ok(v);
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut b = [0u8; 32];
+        getrandom::fill(&mut b).map_err(|e| e.to_string())?;
+        let v: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        std::fs::write(&path, &v).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+        Ok(v)
+    }
+
+    /// Applies `tests/compositions/staging/<file>` (a JSON array of objects) to kube `cluster`, filled host-side
+    /// (`fill`): atlibs-kube's apply, so its cleanup deletes them. Only the applied names come back.
+    async fn staging_apply(&self, input: &Value) -> Result<Value, String> {
+        let (cluster, file) = (str_of(input, "cluster")?, str_of(input, "file")?);
+        if file.contains('/') || !file.ends_with(".json") {
+            return Err(format!(
+                "{file}: a .json file in tests/compositions/staging"
+            ));
+        }
+        let path = testkit::repo()
+            .join("tests/compositions/staging")
+            .join(file);
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let objects: Vec<Value> = serde_json::from_str(&self.fill(&text, &input["vars"])?)
+            .map_err(|e| format!("{file}: {e}"))?;
+        let mut applied = vec![];
+        for o in objects {
+            let what = format!(
+                "{}/{}",
+                o["kind"].as_str().unwrap_or("?"),
+                o["metadata"]["name"].as_str().unwrap_or("?")
+            );
+            let req = Request {
+                input: Some(json!({ "cluster": cluster, "object": o })),
+                ..Default::default()
+            };
+            self.kube
+                .call("com.fedfork.exec.kube.apply".into(), req)
+                .await
+                .map_err(|e| format!("{what}: {e}"))?;
+            applied.push(what);
+        }
+        Ok(json!({ "applied": applied }))
+    }
+
+    fn with_mesh_keys(&self, text: &str) -> Result<String, String> {
+        let mut out = text.to_string();
+        while let Some(at) = out.find("@meshKey:") {
+            let end = out[at + 9..]
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .map_or(out.len(), |e| at + 9 + e);
+            let peer = &out[at + 9..end];
+            let key = std::fs::read_to_string(self.dir.join("mesh").join(format!("{peer}.key")))
+                .map_err(|e| format!("@meshKey:{peer}: {e}"))?;
+            out.replace_range(at..end, key.trim());
+        }
+        Ok(out)
+    }
+
+    /// A meshd secret per peer, kept 0600 in the run's dir; only the endpoints (ed25519 public keys) come back.
+    fn mesh_keys(&self, input: &Value) -> Result<Value, String> {
+        let dir = self.dir.join("mesh");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut peers = serde_json::Map::new();
+        for n in input["names"].as_array().into_iter().flatten() {
+            let n = n.as_str().ok_or("names are strings")?;
+            if n.is_empty() || !n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                return Err(format!("{n}: not a peer name"));
+            }
+            let mut secret = [0u8; 32];
+            getrandom::fill(&mut secret).map_err(|e| e.to_string())?;
+            let public = ed25519_dalek::SigningKey::from_bytes(&secret)
+                .verifying_key()
+                .to_bytes();
+            let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+            let path = dir.join(format!("{n}.key"));
+            std::fs::write(&path, hex(&secret)).map_err(|e| e.to_string())?;
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+            peers.insert(n.into(), json!(hex(&public)));
+        }
+        Ok(json!({ "endpoints": peers }))
+    }
+
+    /// This host joins the overlay as `peer` (its meshd secret from meshKeys): `socialweb-meshd run` (`$SWC_MESHD`) on the
+    /// roster, serving the zone on `address`:53. Back once /healthz answers (routes synced).
+    async fn mesh_join(&self, input: &Value) -> Result<Value, String> {
+        let (peer, address) = (str_of(input, "peer")?, str_of(input, "address")?);
+        let (roster, zone) = (str_of(input, "roster")?, str_of(input, "zone")?);
+        let meshd = std::env::var("SWC_MESHD").unwrap_or_else(|_| "socialweb-meshd".into());
+        let secret = self.dir.join("mesh").join(format!("{peer}.key"));
+        let log = std::fs::File::create(self.dir.join("meshd.log")).map_err(|e| e.to_string())?;
+        let metrics = "127.0.0.1:19791";
+        let child = tokio::process::Command::new("sudo")
+            .args(["-n", &meshd, "run", "--secret-file"])
+            .arg(&secret)
+            .args([
+                "--roster",
+                roster,
+                "--dns-zone",
+                zone,
+                "--dns-listen",
+                &format!("{address}:53"),
+            ])
+            .args(["--tun-name", "swcstg0", "--metrics-listen", metrics])
+            .stdout(log.try_clone().map_err(|e| e.to_string())?)
+            .stderr(log)
+            .spawn()
+            .map_err(|e| format!("{meshd}: {e}"))?;
+        *self.meshd.lock().await = Some(child);
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            let ok = self
+                .http
+                .get(format!("http://{metrics}/healthz"))
+                .send()
+                .await;
+            if ok.is_ok_and(|r| r.status().is_success()) {
+                return Ok(json!({ "peer": peer, "address": address }));
+            }
+            if let Some(c) = self.meshd.lock().await.as_mut()
+                && let Ok(Some(st)) = c.try_wait()
+            {
+                return Err(format!(
+                    "meshd exited {st}: {}",
+                    self.dir.join("meshd.log").display()
+                ));
+            }
+            if Instant::now() > deadline {
+                return Err("meshd not ready in 2 min".into());
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+
+    /// Each `<name>.<zone>` from the overlay DNS at `dns` (ip:port), retried until `timeoutS`: {resolved, failed}.
+    async fn probe(&self, input: &Value) -> Result<Value, String> {
+        let (dns, zone) = (str_of(input, "dns")?, str_of(input, "zone")?);
+        let (ip, port) = dns.rsplit_once(':').ok_or("dns is ip:port")?;
+        let deadline =
+            Instant::now() + Duration::from_secs(input["timeoutS"].as_u64().unwrap_or(60));
+        let mut resolved = serde_json::Map::new();
+        let names: Vec<&str> = input["names"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        loop {
+            let pending: Vec<&str> = names
+                .iter()
+                .copied()
+                .filter(|n| !resolved.contains_key(*n))
+                .collect();
+            for n in pending {
+                let fqdn = format!("{n}.{zone}");
+                let out = tokio::process::Command::new("dig")
+                    .args([
+                        "+short",
+                        "+time=2",
+                        "+tries=1",
+                        &format!("@{ip}"),
+                        "-p",
+                        port,
+                        &fqdn,
+                        "A",
+                    ])
+                    .output()
+                    .await
+                    .map_err(|e| format!("dig: {e}"))?;
+                let text = String::from_utf8_lossy(&out.stdout);
+                if let Some(a) = text
+                    .lines()
+                    .find(|l| l.parse::<std::net::Ipv4Addr>().is_ok())
+                {
+                    resolved.insert(n.to_string(), json!(a));
+                }
+            }
+            let failed: Vec<&str> = names
+                .iter()
+                .copied()
+                .filter(|n| !resolved.contains_key(*n))
+                .collect();
+            if failed.is_empty() || Instant::now() > deadline {
+                return Ok(json!({ "resolved": resolved, "failed": failed }));
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+
+    /// Sets every contract of each Infra this run applied to Released, then waits (15 min) until none is Held.
+    async fn release_infras(&self) -> Vec<String> {
+        let mut errors = vec![];
+        let infras: Vec<_> = self.infras.lock().unwrap().drain(..).collect();
+        for (requester, kind, name) in infras {
+            let Some(kubeconfig) = self.kubeconfigs.lock().unwrap().get(&requester).cloned() else {
+                continue;
+            };
+            let released = async {
+                let kcp = testkit::kcp::Kcp::kubeconfig(&kubeconfig).await?;
+                let Some(obj) = kcp.get(&kind, &name).await? else {
+                    return anyhow::Ok(());
+                };
+                let mut contracts = obj["spec"]["contracts"].clone();
+                for c in contracts.as_array_mut().into_iter().flatten() {
+                    c["state"] = json!("Released");
+                }
+                kcp.merge(&kind, &name, &json!({ "spec": { "contracts": contracts } }))
+                    .await?;
+                let deadline = Instant::now() + Duration::from_secs(900);
+                loop {
+                    let o = kcp.get(&kind, &name).await?.unwrap_or_default();
+                    let held: Vec<String> =
+                        (o["status"]["contracts"].as_array().into_iter().flatten())
+                            .filter(|c| !matches!(c["phase"].as_str(), Some("Released" | "Failed")))
+                            .map(|c| format!("{} {}", c["name"], c["phase"]))
+                            .collect();
+                    if held.is_empty() {
+                        return Ok(());
+                    }
+                    if Instant::now() > deadline {
+                        anyhow::bail!("not released in 15 min: {}", held.join(", "));
+                    }
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            };
+            if let Err(e) = released.await {
+                errors.push(format!("{kind} {name}: {e:#}"));
+            }
+        }
+        errors
     }
 
     fn request_args(&self, input: &Value) -> Result<Vec<String>, String> {
@@ -490,6 +806,11 @@ impl Swc {
         let what = nsid.strip_prefix(P).unwrap_or(nsid);
         match what {
             "requester.start" => self.requester_start(&input).await,
+            "requester.infra" => self.requester_infra(&input).await,
+            "staging.meshKeys" => self.mesh_keys(&input),
+            "staging.meshJoin" => self.mesh_join(&input).await,
+            "staging.probe" => self.probe(&input).await,
+            "staging.apply" => self.staging_apply(&input).await,
             "request.ssh" => {
                 let name = str_of(&input, "name")?;
                 let exec = input["exec"].as_str().ok_or("exec is required")?;
@@ -576,9 +897,10 @@ impl Swc {
         }
     }
 
-    /// Release every invocation, stop every requester (Ctrl-C), remove the password env files. The errors.
+    /// Release every invocation and Infra, stop every requester (Ctrl-C), remove the password env files. The errors.
     pub async fn cleanup(&self) -> Vec<String> {
         let mut errors = self.more_cleanup().await;
+        errors.extend(self.release_infras().await);
         let names: Vec<String> = self.requests.lock().unwrap().keys().cloned().collect();
         for n in names {
             if let Err(e) = self.release(&n).await {
@@ -599,6 +921,21 @@ impl Swc {
                     let _ = c.kill().await;
                     errors.push(format!("run requester {name} did not stop in 120 s"));
                 }
+            }
+        }
+        if let Some(mut c) = self.meshd.lock().await.take()
+            && let Ok(None) = c.try_wait()
+        {
+            if let Some(pid) = c.id() {
+                let _ = std::process::Command::new("kill")
+                    .args(["-INT", &pid.to_string()])
+                    .status();
+            }
+            if tokio::time::timeout(Duration::from_secs(30), c.wait())
+                .await
+                .is_err()
+            {
+                errors.push("meshd did not stop in 30 s".into());
             }
         }
         for p in self.env_files.lock().unwrap().drain(..) {

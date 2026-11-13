@@ -1,0 +1,34 @@
+{
+	"name": "staging",
+	"description": "The staging stand-up (tests/compositions/staging): orchestrator, tenant cluster, overlay, VMs, names.",
+	"actions": [{ "entry": "run", "label": "Stand up staging", "description": "Up to every name resolving on the overlay; the result says pass, the phase and the readings." }],
+	"config": [
+		{ "key": "name", "label": "name", "type": "string", "description": "the run: the roster's rkey, the zone's first label" },
+		{ "key": "pds", "label": "pds", "type": "string", "description": "the orchestrator account's PDS, where meshd reads the roster" }
+	],
+	"calls": [
+		"computer.socialweb.test.requester.start",
+		"computer.socialweb.test.requester.cluster",
+		"computer.socialweb.test.requester.infra",
+		"computer.socialweb.test.staging.meshKeys",
+		"computer.socialweb.test.staging.meshJoin",
+		"computer.socialweb.test.staging.probe",
+		"com.fedfork.exec.kube.get",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.patch",
+		"computer.socialweb.test.staging.apply",
+		"com.atproto.repo.putRecord"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.requester.start", "required": true, "entries": ["run"], "reason": "the orchestrator (run requester --with-gateway)" },
+		{ "nsid": "computer.socialweb.test.requester.cluster", "required": true, "entries": ["run"], "reason": "the tenant cluster stg" },
+		{ "nsid": "computer.socialweb.test.requester.infra", "required": true, "entries": ["run"], "reason": "the VMs, released by the host" },
+		{ "nsid": "computer.socialweb.test.staging.meshKeys", "required": true, "entries": ["run"], "reason": "meshd secrets kept by the host" },
+		{ "nsid": "computer.socialweb.test.staging.meshJoin", "required": true, "entries": ["run"], "reason": "the orchestrator on the overlay" },
+		{ "nsid": "computer.socialweb.test.staging.probe", "required": true, "entries": ["run"], "reason": "names resolve on the overlay" },
+		{ "nsid": "com.fedfork.exec.kube.get", "required": true, "entries": ["run"], "reason": "contracts Held, the services node" },
+		{ "nsid": "com.fedfork.exec.kube.list", "required": true, "entries": ["run"], "reason": "the services pods Ready" },
+		{ "nsid": "com.fedfork.exec.kube.patch", "required": true, "entries": ["run"], "reason": "the services node follows the roster" },
+		{ "nsid": "computer.socialweb.test.staging.apply", "required": true, "entries": ["run"], "reason": "services.json on stg, secrets filled by the host" }
+	]
+}
