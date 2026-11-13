@@ -2,7 +2,7 @@
 # Each member is one module: its module.json beside its Cargo.toml.
 [workspace]
 resolver = "3"
-members = ["steps", "assert", "acc-0004", "acc-0001", "acc-0013", "acc-0005", "acc-0003", "acc-0002", "acc-0006", "acc-0007", "acc-0008", "acc-0009", "acc-0011", "acc-0012", "staging"]
+members = ["steps", "assert", "acc-0004", "acc-0001", "acc-0013", "acc-0005", "acc-0003", "acc-0002", "acc-0006", "acc-0007", "acc-0008", "acc-0009", "acc-0011", "acc-0012", "staging", "knotless"]
 
 [workspace.package]
 edition = "2024"

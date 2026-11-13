@@ -19,6 +19,8 @@ use testkit::requester::{Binary, SignIn, identity_args, kept_by_rule, tail, uris
 use testkit::target::{Account, Target, check_private, expand};
 use tokio::sync::mpsc;
 
+#[path = "knotless.rs"]
+mod knotless;
 #[path = "more.rs"]
 mod more;
 pub use more::cleanup_from_disk;
@@ -60,6 +62,8 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.oauth.signin",
     "computer.socialweb.test.request.r2",
     "computer.socialweb.test.request.checkLogs",
+    "computer.socialweb.test.knotless.seed",
+    "computer.socialweb.test.knotless.sh",
     "com.fedfork.exec.identlink.walk",
     "com.fedfork.exec.identlink.plc",
 ];
@@ -667,14 +671,18 @@ impl Swc {
             }
             other => match self.more(other, &input).await {
                 Some(r) => r,
-                None => Err(format!("{nsid}: not a call of this host")),
+                None => match self.knotless(other, &input).await {
+                    Some(r) => r,
+                    None => Err(format!("{nsid}: not a call of this host")),
+                },
             },
         }
     }
 
     /// Release every invocation, stop every requester (Ctrl-C), remove the password env files. The errors.
     pub async fn cleanup(&self) -> Vec<String> {
-        let mut errors = self.more_cleanup().await;
+        let mut errors = self.knotless_cleanup().await;
+        errors.extend(self.more_cleanup().await);
         let names: Vec<String> = self.requests.lock().unwrap().keys().cloned().collect();
         for n in names {
             if let Err(e) = self.release(&n).await {

@@ -32,6 +32,8 @@ pub struct Extra {
     pub argv: Mutex<HashMap<String, Vec<String>>>,
     /// owner mesh nodes this run started (`atirc mesh run`): name -> (atirc, its config dir, the process)
     pub nodes: tokio::sync::Mutex<HashMap<String, (PathBuf, PathBuf, tokio::process::Child)>>,
+    /// knotless cleanups: "sh <script>" and "record <at-uri>", in the order made
+    pub knotless: Mutex<Vec<String>>,
 }
 
 fn origin(url: &str) -> Result<String, String> {

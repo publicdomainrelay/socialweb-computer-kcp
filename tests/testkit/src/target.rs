@@ -39,6 +39,25 @@ pub struct Target {
     /// atirc agent config (harness, model) for agent VMs; mode 0600, never printed
     #[serde(default)]
     pub agent_config: Option<String>,
+    /// a staging network's knotless (dev up --with-knotless)
+    #[serde(default)]
+    pub knotless: Option<Knotless>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Knotless {
+    /// the gateway's knotless/client.env: the appview, the runner, the PLC, the CA, the egress; no secret
+    pub env: String,
+    /// the published composition the runner's is seeded from (at://<did>/com.fedfork.exec.composition/<rkey>)
+    pub source: String,
+    /// where its publisher's DID resolves
+    #[serde(default = "default_source_plc")]
+    pub source_plc: String,
+}
+
+fn default_source_plc() -> String {
+    "https://plc.directory".into()
 }
 
 fn default_requester() -> String {

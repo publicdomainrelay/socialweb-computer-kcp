@@ -685,6 +685,25 @@ Never paste creds anywhere. A run's dump dir (`$SWC_RUNS/<run>`) holds none: sec
 kubeconfigs, keys, tokens and the requester state stay in its work dir (`~/.tmp/swc-system-tests/work/<run>`), never
 an artifact.
 
+Staging knotless (`dev up --with-knotless <dir>`, with `--with-gateway`): the gateway runs knotless-serve and
+knotless-run (the fork's image, binaries copied out) on the network's PLC, PDSes and relay; the runner is the gateway's
+owner account, trusts only its repo's compositions and rents from the network's bidders. Guests reach both by the
+network's `*.localhost` hosts. Tests: `tests/compositions/knotless/README.md`.
+
+```sh
+K=/var/tmp/<work>-knbin; mkdir -p $K; c=$(docker create knotless-fork:<commit12>)  # knotless-fork-infra scripts/build.sh
+for b in knotless knotless-serve knotless-run git-remote-knotless dumbpipe; do docker cp -q $c:/usr/local/bin/$b $K/; done; docker rm $c
+socialweb-computer dev up --instance <i> --profile market-network --with-gateway --with-knotless $K ...   # as test-0001
+socialweb-computer dev status --instance <i> | jq '.network.status.apps[]|select(.name=="gateway").listeners[]|select(.component=="knotless")'
+G=<state>/dev/<i>/apps/dev/<i>-gateway/knotless           # client.env (no secret), owner.env (0600), serve.log, run.log
+set -a; . $G/client.env; . $G/owner.env; set +a; PATH=$KNOTLESS_BIN:$PATH knotless repo list $KNOTLESS_IDENTIFIER
+grep '"run ended"' $G/run.log                             # a failed run: knotless run list <url> --commit <sha> --log
+```
+
+A new repo's refs run only once the runner watches it (it acts on nothing already there): wait for the appview to
+list it (`$KNOTLESS_APPVIEW/xrpc/dev.knotless.listRepos?runner=$KNOTLESS_IDENTIFIER`) and a `--sweep` (10 s) before
+pushing.
+
 Pipeline, in order; cut the rc only when both suites are green:
 
 1. Build the release of the commit (`scripts/build-socialweb-computer.sh`), `deploy/check.sh --fast`.

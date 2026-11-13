@@ -45,6 +45,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "serde_json",
+ "steps",
 ]
 
 [[package]]
@@ -131,6 +132,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "serde_json",
+ "steps",
 ]
 
 [[package]]
@@ -727,6 +729,15 @@ dependencies = [
  "sha2 0.11.1",
  "signature",
  "wnaf",
+]
+
+[[package]]
+name = "knotless"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "serde_json",
+ "steps",
 ]
 
 [[package]]
