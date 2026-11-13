@@ -24,15 +24,17 @@ import (
 )
 
 const (
-	RetryAfter       = 2 * time.Second
-	TidyRetryAfter   = time.Minute
-	PassTimeout      = 30 * time.Second
-	DefaultListen    = rootvault.LoopbackHost + ":0"
-	DefaultShares    = 1
-	DefaultThreshold = 1
-	DirName          = "openbaoservers"
-	ChildPrefix      = "bao-"
-	OwnerLabel       = "socialweb.computer/openbaoserver"
+	RetryAfter     = 2 * time.Second
+	TidyRetryAfter = time.Minute
+
+	OIDCIssuerRetryAfter = 5 * time.Second
+	PassTimeout          = 30 * time.Second
+	DefaultListen        = rootvault.LoopbackHost + ":0"
+	DefaultShares        = 1
+	DefaultThreshold     = 1
+	DirName              = "openbaoservers"
+	ChildPrefix          = "bao-"
+	OwnerLabel           = "socialweb.computer/openbaoserver"
 
 	ConditionReady       = "Ready"
 	ConditionInitialized = "Initialized"
@@ -660,9 +662,18 @@ func (s *Servers) Reconcile(ctx context.Context, o v1alpha1.OpenBaoServer, grant
 	st.Phase, st.Message, st.Ready = v1alpha1.OpenBaoServerPhaseReady, "initialized and unsealed", true
 	conds.Set(&st.Conditions, gen, ConditionReady, true, "Ready", st.Message)
 	out.Status, out.Err = st, held
+	if held != nil && oidcIssuerDown(held) {
+		log.Info("a jwt auth mount waits for its OIDC issuer to answer its discovery URL", "retryIn", OIDCIssuerRetryAfter.String(), "err", held.Error())
+		out.Err, out.RequeueAfter = nil, OIDCIssuerRetryAfter
+		return out
+	}
 	out.RequeueAfter = tidyIn(st.Tidy, tidyEvery, time.Now())
 	if out.RequeueAfter <= 0 {
 		out.RequeueAfter = TidyRetryAfter
 	}
 	return out
+}
+
+func oidcIssuerDown(err error) bool {
+	return strings.Contains(err.Error(), "error checking oidc discovery URL")
 }

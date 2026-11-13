@@ -59,6 +59,7 @@ internal/openbaoctl	server.go:Servers.Reconcile	requeue	RetryAfter 2s constant	t
 internal/openbaoctl	server.go:Servers.Reconcile	requeue	RetryAfter 2s constant	the server stays sealed after an unseal; OpenBao has no seal event
 internal/openbaoctl	server.go:Servers.Reconcile	requeue	spec.tidy.interval (DefaultTidyInterval 6h, validated >= 1m) from status.tidy.lastRunAt	auth/token/tidy and sys/leases/tidy on OpenBao and a resync of the declared layout; OpenBao has no watch
 internal/openbaoctl	server.go:Servers.Reconcile	requeue	TidyRetryAfter 1m constant	the tidy is due and has not run; retry it
+internal/openbaoctl	server.go:Servers.Reconcile	requeue	OIDCIssuerRetryAfter 5s constant	a jwt auth mount's OIDC issuer does not answer its discovery URL yet (a guest issuer still booting); an external HTTPS issuer has no event source
 internal/clusterprovider	provider.go:Provider.AddOnsDueIn	origin	DefaultAddOnInterval 30m (Options.AddOnInterval <=0 uses 30m); only for a Ready cluster with Tenant and InstallTenant wired	reinstall tenant add-ons and reissue the External Secrets client certificate before it expires; a renewal with no watch
 internal/providermain	vaultsync.go:nodeHosts.reconcileVault	origin	VaultSyncInterval 30s constant, only while the cluster holds NodeClaims	make the cluster OpenBao match the live market nodes; OpenBao offers no watch
 internal/materialiser	materialiser.go:Reconciler.probeIn	origin	ProbeRetry 2s constant, capped at InitTimeout 3m	tenant apiserver /readyz probe; no event source
