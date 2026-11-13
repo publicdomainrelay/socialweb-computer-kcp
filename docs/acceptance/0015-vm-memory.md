@@ -63,4 +63,8 @@ kill the hog when its page cache needs room), `ssh_missed`, `computevm`, `memory
 
 ## Evidence
 
-(filled by the passing runs)
+- Dev market network `capt` on hat-8, binary 22c89875, account alice: PASS 2026-11-13 20:58:17-21:04:49Z. Winner
+  hm7ge..., Held 29.5 s, peak 95% used (lowest MemAvailable 109 MB of 2.0 GB), 1118 fsync'd 64 MiB writes in 349 s,
+  boot id unchanged, ComputeVM `fc-65f2xp54oloh-a6ff487f` Running, no lostReason, no memory reports (the network's
+  bidders run VMs with the proc backend: no per-VM cgroup, so this proves the guest side only), 3 records gone
+- Prod (bob): waits until the release gate is done
