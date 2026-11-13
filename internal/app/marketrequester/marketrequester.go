@@ -103,7 +103,7 @@ func (p *pass) wait(msg string) (ctlruntime.Result, error) {
 
 func (p *pass) ingressDown(snap compose.Snapshot, plan compose.AccountPlan) string {
 	name := compose.ServiceNameFor(compose.ComponentKindRequester, RequesterComponent) + compose.ExposureIngressSuffix
-	mode := compose.RequesterCommsMode(p.o.Spec.Comms, compose.OAuthReceiveOnly(plan.Mode))
+	mode := compose.RequesterCommsMode(p.o.Spec.Network.MergeComms(p.o.Spec.Comms), compose.OAuthReceiveOnly(plan.Mode))
 	if down := compose.SetIngressRegisteredCondition(&p.st.Conditions, p.o.Generation, snap, name, mode, p.o.Spec.SecretsFallback); down != "" {
 		return "; " + down
 	}
@@ -291,7 +291,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		Association:          o.Spec.Association.DeepCopy(),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
-		Comms:                o.Spec.Comms,
+		Comms:                o.Spec.Network.MergeComms(o.Spec.Comms),
 		Ingress:              o.Spec.RequesterIngress,
 		SecretsFallback:      o.Spec.SecretsFallback,
 		AtircParentRef:       o.Spec.AtircParentRef.DeepCopy(),
@@ -320,7 +320,8 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		spec.PdsDID = plan.PdsDID
 	}
 	out = append(out, compose.Desired{Kind: compose.ComponentKindRequester, Name: RequesterComponent, Spec: spec})
-	inbound := o.Spec.Comms == nil || o.Spec.Comms.Mode != v1alpha1.MarketCommsModeFirehose
+	comms := o.Spec.Network.MergeComms(o.Spec.Comms)
+	inbound := comms == nil || comms.Mode != v1alpha1.MarketCommsModeFirehose
 	out = append(out, compose.HTTPServiceExposures(ws, compose.ComponentKindRequester, RequesterComponent, "http", network, hostnames, false, inbound)...)
 	if plan.Local {
 		out = append(out, compose.PdsExposures(ws, compose.PdsComponent, network, hostnames, ingress)...)
@@ -377,7 +378,7 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 }
 
 func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID string) error {
-	comms := compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindRequester, RequesterComponent, p.o.Spec.Comms)
+	comms := compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindRequester, RequesterComponent, p.o.Spec.Network.MergeComms(p.o.Spec.Comms))
 	force := compose.OAuthReceiveOnly(plan.Mode)
 	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.RequesterStreamRole, Comms: comms,
 		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: force,

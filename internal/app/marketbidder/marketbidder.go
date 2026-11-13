@@ -391,7 +391,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 	if err != nil {
 		return nil, err
 	}
-	if dumbpipe == "" && p.c.Config().Record != nil && servesMarketInbound(o.Spec.Comms) {
+	if dumbpipe == "" && p.c.Config().Record != nil && servesMarketInbound(o.Spec.Network.MergeComms(o.Spec.Comms)) {
 		return nil, errors.New("marketbidder: the instance records no dumbpipe, so the offering would carry no iroh market endpoint " +
 			"(https only on a test profile, none on prod-qr); run a release build or one from scripts/build-socialweb-computer.sh, or give --dumbpipe-path")
 	}
@@ -428,7 +428,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		Association:          o.Spec.Association.DeepCopy(),
 		GuestNetwork:         o.Spec.GuestNetwork,
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
-		Comms:                o.Spec.Comms,
+		Comms:                o.Spec.Network.MergeComms(o.Spec.Comms),
 		SuspendParticipation: o.Spec.Suspend,
 		Storage:              guestSpec.Storage,
 	}}
@@ -526,7 +526,7 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 }
 
 func (p *pass) streams(ctx context.Context, plan compose.AccountPlan, localDID string) error {
-	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.BidderStreamRole, Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindBidder, BidderComponent, p.o.Spec.Comms),
+	streams, err := p.c.ApplyMarketStreams(ctx, p.r, compose.Streams{Role: compose.BidderStreamRole, Comms: compose.OverrideComms(p.o.Spec.Components, compose.ComponentKindBidder, BidderComponent, p.o.Spec.Network.MergeComms(p.o.Spec.Comms)),
 		Sources: compose.SourceInput{Network: p.o.Spec.Network, LocalDID: localDID}, ForceFirehose: compose.OAuthReceiveOnly(plan.Mode)})
 	if err != nil {
 		return err

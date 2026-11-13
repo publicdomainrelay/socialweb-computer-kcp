@@ -44,6 +44,8 @@ const (
 
 	publicSourcePrefix = "firehose-"
 
+	networkSourcePrefix = "network-"
+
 	publicSourceValue = "public-"
 )
 
@@ -105,9 +107,23 @@ func OAuthReceiveOnly(mode v1alpha1.MarketIdentityMode) bool {
 }
 
 func watchSources(network *v1alpha1.MarketNetworkValue) []rootSource {
-	if network != nil {
-		if relay := network.RelayURL(); relay != "" {
-			return []rootSource{{Name: NetworkRelaySourceName, Relay: &eventsv1alpha1.RelayEventSourceSpec{URL: relay}}}
+	if relay := network.RelayURL(); relay != "" {
+		return []rootSource{{Name: NetworkRelaySourceName, Relay: &eventsv1alpha1.RelayEventSourceSpec{URL: relay}}}
+	}
+	if comms := network.MergeComms(nil); comms != nil && (comms.RelayURLs != nil || comms.JetstreamURLs != nil) {
+		var out []rootSource
+		if comms.RelayURLs != nil {
+			for _, u := range comms.FirehoseRelays(network) {
+				out = append(out, rootSource{Name: ObjectName(networkSourcePrefix+"relay", u), Relay: &eventsv1alpha1.RelayEventSourceSpec{URL: u}})
+			}
+		}
+		if comms.JetstreamURLs != nil {
+			for _, u := range comms.FirehoseJetstreams() {
+				out = append(out, rootSource{Name: ObjectName(networkSourcePrefix+"jetstream", u), Jetstream: &eventsv1alpha1.JetstreamEventSourceSpec{URL: u}})
+			}
+		}
+		if len(out) > 0 {
+			return out
 		}
 	}
 	return []rootSource{
@@ -151,7 +167,7 @@ func marketSourceRefs(ws string, comms *v1alpha1.MarketComms, network *v1alpha1.
 		add(EventSourceRef(NetworkRelaySourceName))
 	}
 	if len(out) == 0 && oauth {
-		add(EventSourceRef(JetstreamEastSourceName))
+		add(EventSourceRef(watchSources(network)[0].Name))
 	}
 	return out
 }
@@ -450,7 +466,8 @@ func (c *Composer) applySources(ctx context.Context, r Root, ws, role, value str
 }
 
 func (c *Composer) userSourceLink(ctx context.Context, role string, ref commonv1.ObjectRef) ([]Link, error) {
-	if ref.Name == NetworkRelaySourceName || ref.Name == LocalRepoSourceName || ref.Name == JetstreamEastSourceName || ref.Name == JetstreamWestSourceName {
+	if ref.Name == NetworkRelaySourceName || ref.Name == LocalRepoSourceName || ref.Name == JetstreamEastSourceName || ref.Name == JetstreamWestSourceName ||
+		strings.HasPrefix(ref.Name, networkSourcePrefix) {
 		return nil, nil
 	}
 	source, err := Get[eventsv1alpha1.EventSource](ctx, c, ref.Workspace, eventsv1alpha1.EventSourceGVR, ref.Name)
