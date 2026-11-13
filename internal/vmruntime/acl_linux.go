@@ -220,3 +220,21 @@ func revokeAll(grants []Grant) error {
 	}
 	return errors.Join(errs...)
 }
+
+func (g *granter) tree(root string) error {
+	if err := g.traverse(root, ""); err != nil {
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir():
+			return g.need(path, 1, true)
+		case d.Type().IsRegular():
+			return g.need(path, 4, true)
+		}
+		return nil
+	})
+}

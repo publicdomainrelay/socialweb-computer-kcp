@@ -14,7 +14,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimage"
 )
 
-func (r *firecracker) imagesOfWorkDirs(keep map[string]string) {
+func (r *hostRuntime) imagesOfWorkDirs(keep map[string]string) {
 	configs, _ := filepath.Glob(filepath.Join(r.cfg.StateDir, "handles", "*", "vms", "*", ConfigFile))
 	for _, p := range configs {
 		var c fcapi.Config
@@ -29,7 +29,7 @@ func (r *firecracker) imagesOfWorkDirs(keep map[string]string) {
 	}
 }
 
-func (r *firecracker) CollectImages(ctx context.Context, keep map[string]string) (guestimage.GCReport, error) {
+func (r *hostRuntime) CollectImages(ctx context.Context, keep map[string]string) (guestimage.GCReport, error) {
 	all := map[string]string{}
 	maps.Copy(all, keep)
 	names, err := guestimage.Names()

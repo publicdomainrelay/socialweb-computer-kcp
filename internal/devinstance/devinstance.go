@@ -259,6 +259,7 @@ type VMRuntime struct {
 	ImageSource string            `json:"imageSource,omitempty"`
 	StopGrace   string            `json:"stopGrace,omitempty"`
 	RuntimeDir  string            `json:"runtimeDir"`
+	VMM         string            `json:"vmm,omitempty"`
 	Executables map[string]string `json:"executables"`
 }
 

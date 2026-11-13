@@ -700,26 +700,22 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 	if !filepath.IsAbs(runtimeDir) {
 		return r.a.fail(exitRefused, "%s: vm-runtime-dir %q must be absolute (the account's XDG_RUNTIME_DIR)", verb, runtimeDir)
 	}
-	vm := devinstance.VMRuntime{Handle: r.handle, Backend: hostsvc.BackendSystemdUser, ImageSource: r.vals.String("guest-image-source"),
-		StopGrace: grace.String(), RuntimeDir: runtimeDir, Executables: map[string]string{}}
-	var vexe vmruntime.Executables
-	for _, x := range []struct {
-		dst          *string
-		name, option string
-	}{{&vexe.Stage, "swc-userns-stage", "userns-stage-path"}, {&vexe.Pasta, "pasta", "pasta-path"},
-		{&vexe.VMExec, "socialweb-vmexec", "vmexec-path"}, {&vexe.Firecracker, "firecracker", "firecracker-path"}} {
-		p, err := r.a.vmExe(r.vals, x.name, x.option)
-		if err != nil {
-			return r.a.fail(exitRefused, "%s: %v", verb, err)
-		}
-		*x.dst, vm.Executables[x.name] = p, p
+	vmm, err := vmruntime.ParseVMM(r.vals.String("vmm"))
+	if err != nil {
+		return r.a.fail(exitRefused, "%s: %v", verb, err)
 	}
+	paths, err := r.a.vmExes(r.vals, vmm)
+	if err != nil {
+		return r.a.fail(exitRefused, "%s: %v", verb, err)
+	}
+	vm := devinstance.VMRuntime{Handle: r.handle, Backend: hostsvc.BackendSystemdUser, ImageSource: r.vals.String("guest-image-source"),
+		StopGrace: grace.String(), RuntimeDir: runtimeDir, VMM: vmm, Executables: paths}
 	m, err := hostsvc.Open(ctx, hostsvc.Config{Backend: hostsvc.BackendSystemdUser, UnitPrefix: prefix})
 	if err != nil {
 		return r.a.fail(exitFailed, "%s: the systemd-user backend: %v", verb, err)
 	}
 	defer m.Close()
-	rt, err := vmruntime.ForHost(vmruntime.Config{Manager: m, StateDir: state, RuntimeDir: runtimeDir, Exec: vexe,
+	rt, err := vmruntime.ForHost(vmruntime.Config{Manager: m, StateDir: state, RuntimeDir: runtimeDir, VMM: vmm, Exec: vmExecutables(paths, vmm),
 		ImageSource: vm.ImageSource, StopGrace: grace, Binaries: installedBinaries(state),
 		ImageOut: r.a.stderr, ImageTTY: progress.IsTTYWriter(r.a.stderr)})
 	if err != nil {

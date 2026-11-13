@@ -29,7 +29,7 @@ const (
 	EnvInvoc            = "INVOCATION_ID"
 )
 
-var VMAssets = []string{"firecracker", "pasta"}
+var VMAssets = []string{"firecracker", "pasta", "qemu"}
 
 type Proc struct {
 	PID    int    `json:"pid"`

@@ -56,6 +56,7 @@ type VMExec struct {
 	Wiring  Wiring   `json:"wiring"`
 	VMM     string   `json:"vmm"`
 	Argv    []string `json:"argv"`
+	Env     []string `json:"env,omitempty"`
 	Console string   `json:"console"`
 }
 

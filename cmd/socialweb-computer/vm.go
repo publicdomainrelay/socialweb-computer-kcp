@@ -20,8 +20,8 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/vmruntime"
 )
 
-var vmOptions = append([]string{backendOpt, "instance", "state-dir", "asset-cache", "handle", "vm-runtime-dir", "guest-image-source", "vm-stop-grace"},
-	devOnly("userns-stage-path", "pasta-path", "vmexec-path", "firecracker-path")...)
+var vmOptions = append([]string{backendOpt, "instance", "state-dir", "asset-cache", "handle", "vm-runtime-dir", "guest-image-source", "vm-stop-grace", "vmm"},
+	devOnly("userns-stage-path", "pasta-path", "vmexec-path", "firecracker-path", "qemu-path")...)
 
 func (a *app) vmExe(vals clicfg.Values, executable, option string) (string, error) {
 	if !assets.Release() {
@@ -50,21 +50,13 @@ func (a *app) vmRuntime(ctx context.Context, vals clicfg.Values) (vmruntime.Runt
 	if vals.String("handle") == "" {
 		return nil, nil, fmt.Errorf("handle is required: VM units are named by the handle of the bidder instance that owns them")
 	}
-	var exe vmruntime.Executables
-	for _, x := range []struct {
-		dst          *string
-		name, option string
-	}{
-		{&exe.Stage, "swc-userns-stage", "userns-stage-path"},
-		{&exe.Pasta, "pasta", "pasta-path"},
-		{&exe.VMExec, "socialweb-vmexec", "vmexec-path"},
-		{&exe.Firecracker, "firecracker", "firecracker-path"},
-	} {
-		p, err := a.vmExe(vals, x.name, x.option)
-		if err != nil {
-			return nil, nil, err
-		}
-		*x.dst = p
+	vmm, err := vmruntime.ParseVMM(vals.String("vmm"))
+	if err != nil {
+		return nil, nil, err
+	}
+	paths, err := a.vmExes(vals, vmm)
+	if err != nil {
+		return nil, nil, err
 	}
 	p, err := a.placement(ctx, vals)
 	if err != nil {
@@ -76,7 +68,7 @@ func (a *app) vmRuntime(ctx context.Context, vals clicfg.Values) (vmruntime.Runt
 		return nil, nil, err
 	}
 	rt, err := vmruntime.ForHost(vmruntime.Config{
-		Manager: p.manager, StateDir: state, RuntimeDir: vals.String("vm-runtime-dir"), Exec: exe,
+		Manager: p.manager, StateDir: state, RuntimeDir: vals.String("vm-runtime-dir"), VMM: vmm, Exec: vmExecutables(paths, vmm),
 		ImageSource: vals.String("guest-image-source"), StopGrace: grace,
 		ImageOut: a.stderr, ImageTTY: progress.IsTTYWriter(a.stderr),
 	})
@@ -87,33 +79,55 @@ func (a *app) vmRuntime(ctx context.Context, vals clicfg.Values) (vmruntime.Runt
 	return rt, p.manager, nil
 }
 
-var vmExecutables = []struct{ name, option string }{
-	{"swc-userns-stage", "userns-stage-path"},
-	{"pasta", "pasta-path"},
-	{"socialweb-vmexec", "vmexec-path"},
-	{"firecracker", "firecracker-path"},
+var vmExeOptions = map[string]string{
+	"swc-userns-stage":       "userns-stage-path",
+	"pasta":                  "pasta-path",
+	"socialweb-vmexec":       "vmexec-path",
+	"firecracker":            "firecracker-path",
+	vmruntime.QEMUExecutable: "qemu-path",
 }
 
-var devVMOptions = append([]string{"handle", "vm-host-backend", "vm-runtime-dir", "guest-image-source", "vm-stop-grace"},
-	devOnly("userns-stage-path", "pasta-path", "vmexec-path", "firecracker-path")...)
+func (a *app) vmExes(vals clicfg.Values, vmm string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, n := range vmruntime.ExecutableNames(vmm) {
+		p, err := a.vmExe(vals, n, vmExeOptions[n])
+		if err != nil {
+			return nil, err
+		}
+		out[n] = p
+	}
+	return out, nil
+}
+
+func vmExecutables(paths map[string]string, vmm string) vmruntime.Executables {
+	return vmruntime.Executables{Stage: paths["swc-userns-stage"], Pasta: paths["pasta"], VMExec: paths["socialweb-vmexec"],
+		VMM: paths[vmruntime.VMMExecutable(vmm)]}
+}
+
+var devVMOptions = append([]string{"handle", "vm-host-backend", "vm-runtime-dir", "guest-image-source", "vm-stop-grace", "vmm"},
+	devOnly("userns-stage-path", "pasta-path", "vmexec-path", "firecracker-path", "qemu-path")...)
 
 func (a *app) devVMExecutables(vals clicfg.Values) (map[string]devinstance.Executable, error) {
 	out := map[string]devinstance.Executable{}
-	for _, x := range vmExecutables {
-		if !assets.Release() && vals.String(x.option) == "" {
+	vmm, err := vmruntime.ParseVMM(vals.String("vmm"))
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range vmruntime.ExecutableNames(vmm) {
+		if !assets.Release() && vals.String(vmExeOptions[n]) == "" {
 			continue
 		}
-		p, err := a.vmExe(vals, x.name, x.option)
+		p, err := a.vmExe(vals, n, vmExeOptions[n])
 		if err != nil {
 			if assets.Release() {
 				if a.log != nil {
-					a.log.Warn("the dev VM executable does not resolve; the network will record it missing", "executable", x.name, "err", err.Error())
+					a.log.Warn("the dev VM executable does not resolve; the network will record it missing", "executable", n, "err", err.Error())
 				}
 				continue
 			}
 			return nil, err
 		}
-		out[x.name] = devinstance.Executable{Path: p}
+		out[n] = devinstance.Executable{Path: p}
 	}
 	downloads, err := a.guestDownloads(vals)
 	switch {
@@ -161,16 +175,16 @@ func (a *app) devVM(vals clicfg.Values, l devinstance.Layout) (*devinstance.VMRu
 	if err != nil {
 		return nil, err
 	}
-	vm := &devinstance.VMRuntime{Handle: handle, Backend: backend, ImageSource: vals.String("guest-image-source"),
-		StopGrace: grace.String(), RuntimeDir: rt, Executables: map[string]string{}}
-	for _, x := range vmExecutables {
-		p, err := a.vmExe(vals, x.name, x.option)
-		if err != nil {
-			return nil, err
-		}
-		vm.Executables[x.name] = p
+	vmm, err := vmruntime.ParseVMM(vals.String("vmm"))
+	if err != nil {
+		return nil, err
 	}
-	return vm, nil
+	paths, err := a.vmExes(vals, vmm)
+	if err != nil {
+		return nil, err
+	}
+	return &devinstance.VMRuntime{Handle: handle, Backend: backend, ImageSource: vals.String("guest-image-source"),
+		StopGrace: grace.String(), RuntimeDir: rt, VMM: vmm, Executables: paths}, nil
 }
 
 func vmStopGrace(vals clicfg.Values) (time.Duration, error) {
@@ -202,9 +216,9 @@ func (a *app) instanceVMRuntime(ctx context.Context, rec devinstance.Record) (vm
 		m.Close()
 		return nil, nil, err
 	}
+	vmm := cmp.Or(v.VMM, vmruntime.VMMFirecracker)
 	rt, err := vmruntime.ForHost(vmruntime.Config{Manager: m, StateDir: rec.Layout.StateDir, RuntimeDir: v.RuntimeDir,
-		Exec: vmruntime.Executables{Stage: v.Executables["swc-userns-stage"], Pasta: v.Executables["pasta"],
-			VMExec: v.Executables["socialweb-vmexec"], Firecracker: v.Executables["firecracker"]},
+		VMM: vmm, Exec: vmExecutables(v.Executables, vmm),
 		ImageSource: v.ImageSource, StopGrace: grace, ImageOut: a.stderr, ImageTTY: progress.IsTTYWriter(a.stderr)})
 	if err != nil {
 		m.Close()

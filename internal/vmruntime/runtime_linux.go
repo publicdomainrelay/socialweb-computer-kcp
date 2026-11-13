@@ -27,7 +27,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
 )
 
-type firecracker struct {
+type hostRuntime struct {
 	cfg    Config
 	subuid hostcontract.SubidEntry
 	subgid hostcontract.SubidEntry
@@ -42,8 +42,13 @@ func ForHost(cfg Config) (Runtime, error) {
 	if !filepath.IsAbs(cfg.StateDir) || !filepath.IsAbs(cfg.RuntimeDir) {
 		return nil, fmt.Errorf("vmruntime: state dir %q and runtime dir %q must be absolute", cfg.StateDir, cfg.RuntimeDir)
 	}
+	vmm, err := ParseVMM(cfg.VMM)
+	if err != nil {
+		return nil, err
+	}
+	cfg.VMM = vmm
 	for name, p := range map[string]string{"swc-userns-stage": cfg.Exec.Stage, "pasta": cfg.Exec.Pasta,
-		"socialweb-vmexec": cfg.Exec.VMExec, "firecracker": cfg.Exec.Firecracker} {
+		"socialweb-vmexec": cfg.Exec.VMExec, VMMExecutable(vmm): cfg.Exec.VMM} {
 		if !filepath.IsAbs(p) {
 			return nil, fmt.Errorf("vmruntime: %s path %q is not absolute", name, p)
 		}
@@ -82,21 +87,21 @@ func ForHost(cfg Config) (Runtime, error) {
 	if slots < 1 {
 		return nil, fmt.Errorf("vmruntime: the subordinate range of %s holds %d ids, under one %d-id slot", me.Username, min(su.Count, sg.Count), hostcontract.VMSlotIDs)
 	}
-	return &firecracker{cfg: cfg, subuid: su, subgid: sg, slots: slots, target: target}, nil
+	return &hostRuntime{cfg: cfg, subuid: su, subgid: sg, slots: slots, target: target}, nil
 }
 
-func (r *firecracker) Capabilities() Capabilities {
+func (r *hostRuntime) Capabilities() Capabilities {
 	c := r.cfg.Manager.Capabilities()
-	return Capabilities{Backend: c.Backend, Hypervisor: "firecracker", EnforcesLimits: c.EnforcesLimits, GracefulStop: GracefulStop()}
+	return Capabilities{Backend: c.Backend, Hypervisor: r.cfg.VMM, EnforcesLimits: c.EnforcesLimits, GracefulStop: GracefulStop()}
 }
 
-func (r *firecracker) imagePin() (guestimage.Pin, error) { return guestimage.PinFor(r.target) }
+func (r *hostRuntime) imagePin() (guestimage.Pin, error) { return guestimage.PinFor(r.target) }
 
-func (r *firecracker) imageStore() guestimage.Store {
+func (r *hostRuntime) imageStore() guestimage.Store {
 	return guestimage.Store{Root: filepath.Join(r.cfg.StateDir, "images"), Out: r.cfg.ImageOut, TTY: r.cfg.ImageTTY}
 }
 
-func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error) {
+func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error) {
 	if err := ValidateSpec(spec); err != nil {
 		return Prepared{}, err
 	}
@@ -183,9 +188,15 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 	}
 	params := guestnet.VMExec{
 		Wiring:  guestnet.Plan(spec.HostPorts, spec.LANUDP, spec.HostUDP, hostAddrs, spec.WebRTCUDPPort),
-		VMM:     r.cfg.Exec.Firecracker,
+		VMM:     r.cfg.Exec.VMM,
 		Argv:    fcapi.Argv("firecracker", p.VMMID, filepath.Join(p.WorkDir, ConfigFile), p.Socket),
 		Console: console,
+	}
+	if r.cfg.VMM == VMMQEMU {
+		if params.Argv, err = qemuArgv(r.cfg.Exec.VMM, p.VMMID, conf, p.Socket); err != nil {
+			return Prepared{}, err
+		}
+		params.Env = qemuEnv(r.cfg.Exec.VMM)
 	}
 	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, ParamsFile), params, 0o600); err != nil {
 		return Prepared{}, err
@@ -199,14 +210,37 @@ func (r *firecracker) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 	return p, nil
 }
 
-func (r *firecracker) slotIDs(k int) (uidBase, gidBase, vmmUID int) {
+func (r *hostRuntime) slotIDs(k int) (uidBase, gidBase, vmmUID int) {
 	uidBase = int(r.subuid.Start) + k*hostcontract.VMSlotIDs
 	gidBase = int(r.subgid.Start) + k*hostcontract.VMSlotIDs
 	return uidBase, gidBase, uidBase + r.cfg.InnerID
 }
 
-func (r *firecracker) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
+func (r *hostRuntime) vmmOf(workDir string) string {
+	var params guestnet.VMExec
+	raw, err := os.ReadFile(filepath.Join(workDir, ParamsFile))
+	if err != nil || json.Unmarshal(raw, &params) != nil || params.VMM == "" {
+		return r.cfg.VMM
+	}
+	if filepath.Base(params.VMM) == "firecracker" {
+		return VMMFirecracker
+	}
+	return VMMQEMU
+}
+
+func (r *hostRuntime) refVMM(ref RuntimeRef) string {
+	if ref.Hypervisor != "" {
+		return ref.Hypervisor
+	}
+	return r.vmmOf(cmp.Or(ref.WorkDir, WorkDir(r.cfg.StateDir, ref.Handle, ref.Name)))
+}
+
+func (r *hostRuntime) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 	uidBase, gidBase, _ := r.slotIDs(slot)
+	tasks := uint64(64 + 4*p.Vcpu)
+	if r.vmmOf(p.WorkDir) == VMMQEMU {
+		tasks += QEMUExtraTasks
+	}
 	exec := []string{r.cfg.Exec.Stage, strconv.Itoa(uidBase), strconv.Itoa(gidBase), strconv.Itoa(hostcontract.VMSlotIDs), strconv.Itoa(r.cfg.InnerID)}
 	exec = append(exec, guestnet.PastaArgv(r.cfg.Exec.Pasta, guestnet.PastaUDPForwards(p.Spec.WebRTCUDPPort, p.WebRTCAddresses), r.cfg.Exec.VMExec, filepath.Join(p.WorkDir, ParamsFile))...)
 	return hostsvc.UnitSpec{
@@ -220,7 +254,7 @@ func (r *firecracker) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 			MemoryMax:       uint64(p.MemMiB+VMMOverheadMiB) << 20,
 			CPUWeight:       100,
 			CPUQuotaPercent: 100 * p.Vcpu,
-			TasksMax:        uint64(64 + 4*p.Vcpu),
+			TasksMax:        tasks,
 		},
 		OOMPolicy:   "stop",
 		KillSignal:  syscall.SIGKILL,
@@ -230,7 +264,7 @@ func (r *firecracker) UnitSpec(p Prepared, slot int) hostsvc.UnitSpec {
 	}
 }
 
-func (r *firecracker) Start(ctx context.Context, p Prepared) (RuntimeRef, error) {
+func (r *hostRuntime) Start(ctx context.Context, p Prepared) (RuntimeRef, error) {
 	slot, err := r.Reserve(ctx, p, func(ctx context.Context, _ int, spec hostsvc.UnitSpec) error {
 		_, err := r.cfg.Manager.Start(ctx, spec)
 		return err
@@ -250,7 +284,7 @@ func (r *firecracker) Start(ctx context.Context, p Prepared) (RuntimeRef, error)
 	return ref, nil
 }
 
-func (r *firecracker) Placed(handle, name string) Prepared {
+func (r *hostRuntime) Placed(handle, name string) Prepared {
 	p := Prepared{
 		Spec:      VMSpec{Handle: handle, Name: name},
 		Unit:      UnitName(handle, name),
@@ -262,9 +296,9 @@ func (r *firecracker) Placed(handle, name string) Prepared {
 	return p
 }
 
-func (r *firecracker) StopGrace() time.Duration { return r.cfg.StopGrace }
+func (r *hostRuntime) StopGrace() time.Duration { return r.cfg.StopGrace }
 
-func (r *firecracker) awaitDown(ctx context.Context, unit string, grace time.Duration) (bool, error) {
+func (r *hostRuntime) awaitDown(ctx context.Context, unit string, grace time.Duration) (bool, error) {
 	gctx, cancel := context.WithTimeout(ctx, grace)
 	defer cancel()
 	_, err := hostsvc.Await(gctx, r.cfg.Manager, unit, func(st hostsvc.UnitStatus) bool { return !hostsvc.Live(st) })
@@ -279,7 +313,7 @@ func (r *firecracker) awaitDown(ctx context.Context, unit string, grace time.Dur
 	return false, err
 }
 
-func (r *firecracker) Shutdown(ctx context.Context, ref RuntimeRef, grace time.Duration) (bool, error) {
+func (r *hostRuntime) Shutdown(ctx context.Context, ref RuntimeRef, grace time.Duration) (bool, error) {
 	st, err := r.cfg.Manager.Inspect(ctx, ref.Unit)
 	if err != nil {
 		return false, err
@@ -290,13 +324,13 @@ func (r *firecracker) Shutdown(ctx context.Context, ref RuntimeRef, grace time.D
 	if !GracefulStop() || ref.Socket == "" {
 		return false, nil
 	}
-	if err := fcapi.NewClient(ref.Socket, 2*time.Second).SendCtrlAltDel(ctx); err != nil {
+	if err := apiFor(r.refVMM(ref), ref.Socket).SendCtrlAltDel(ctx); err != nil {
 		return false, nil
 	}
 	return r.awaitDown(ctx, ref.Unit, grace)
 }
 
-func (r *firecracker) Reserve(ctx context.Context, p Prepared, place Placer) (int, error) {
+func (r *hostRuntime) Reserve(ctx context.Context, p Prepared, place Placer) (int, error) {
 	unlock, err := r.lock()
 	if err != nil {
 		return 0, err
@@ -326,7 +360,7 @@ func (r *firecracker) Reserve(ctx context.Context, p Prepared, place Placer) (in
 	return slot, nil
 }
 
-func (r *firecracker) grant(p Prepared, vmmUID int) error {
+func (r *hostRuntime) grant(p Prepared, vmmUID int) error {
 	if err := os.MkdirAll(filepath.Dir(p.SocketDir), 0o700); err != nil {
 		return fmt.Errorf("vmruntime: %w", err)
 	}
@@ -359,14 +393,24 @@ func (r *firecracker) grant(p Prepared, vmmUID int) error {
 	if err := g.traverse(p.SocketDir, ""); err != nil {
 		return err
 	}
-	for _, f := range []string{filepath.Join(p.ImageDir, guestimage.KernelName), r.cfg.Exec.Pasta, r.cfg.Exec.VMExec, r.cfg.Exec.Firecracker} {
+	for _, f := range []string{filepath.Join(p.ImageDir, guestimage.KernelName), r.cfg.Exec.Pasta, r.cfg.Exec.VMExec, r.cfg.Exec.VMM} {
 		if err := g.traverse(f, ""); err != nil {
 			return err
 		}
 	}
-	for _, f := range []string{r.cfg.Exec.Pasta, r.cfg.Exec.VMExec, r.cfg.Exec.Firecracker} {
+	for _, f := range []string{r.cfg.Exec.Pasta, r.cfg.Exec.VMExec, r.cfg.Exec.VMM} {
 		if err := g.need(f, 5, true); err != nil {
 			return err
+		}
+	}
+	if r.vmmOf(p.WorkDir) == VMMQEMU {
+		if err := g.tree(qemuDataDir(r.cfg.Exec.VMM)); err != nil {
+			return err
+		}
+		if lib := qemuLibDir(r.cfg.Exec.VMM); lib != "" {
+			if err := g.tree(lib); err != nil {
+				return err
+			}
 		}
 	}
 	if err := g.need(filepath.Join(p.ImageDir, guestimage.KernelName), 4, true); err != nil {
@@ -386,7 +430,7 @@ const (
 	DialRetryMax = time.Second
 )
 
-func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
+func (r *hostRuntime) awaitBoot(ctx context.Context, p Prepared) error {
 	bctx, cancel := context.WithTimeout(ctx, r.cfg.BootTimeout)
 	defer cancel()
 	sock, err := fswatch.Shared().Subscribe(p.SocketDir)
@@ -406,7 +450,7 @@ func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
 			return err
 		}
 	}
-	client := fcapi.NewClient(p.Socket, 2*time.Second)
+	client := apiFor(r.vmmOf(p.WorkDir), p.Socket)
 	last := fmt.Errorf("the API socket %s is not there", p.Socket)
 	delay := DialRetryMin
 	var again <-chan time.Time
@@ -459,7 +503,7 @@ func (r *firecracker) awaitBoot(ctx context.Context, p Prepared) error {
 	}
 }
 
-func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
+func (r *hostRuntime) Await(ctx context.Context, p Prepared, slot int) (RuntimeRef, error) {
 	if err := r.awaitBoot(ctx, p); err != nil {
 		return RuntimeRef{}, err
 	}
@@ -467,7 +511,8 @@ func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 	if err != nil {
 		return RuntimeRef{}, err
 	}
-	pid, err := vmmPID(st.MainPID)
+	vmm := r.vmmOf(p.WorkDir)
+	pid, err := vmmPID(st.MainPID, vmm)
 	if err != nil {
 		return RuntimeRef{}, err
 	}
@@ -478,7 +523,7 @@ func (r *firecracker) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 	_, _, vmmUID := r.slotIDs(slot)
 	pin, _ := r.imagePin()
 	ref := RuntimeRef{
-		Backend: id.Backend, Hypervisor: "firecracker", Handle: p.Spec.Handle, Name: p.Spec.Name,
+		Backend: id.Backend, Hypervisor: vmm, Handle: p.Spec.Handle, Name: p.Spec.Name,
 		Unit: p.Unit, InvocationID: id.InvocationID, PID: id.PID, StartTicks: id.StartTicks,
 		StartTime: time.Now().UTC(), HostBootID: id.BootID, Manager: id.Manager, VMMID: p.VMMID,
 		Slot: slot, VMMUID: vmmUID, WorkDir: p.WorkDir, Socket: p.Socket,
@@ -496,14 +541,14 @@ func identity(ref RuntimeRef) hostsvc.Identity {
 		BootID: ref.HostBootID, Backend: ref.Backend, Manager: ref.Manager}
 }
 
-func (r *firecracker) Inspect(ctx context.Context, ref RuntimeRef) (Observation, error) {
+func (r *hostRuntime) Inspect(ctx context.Context, ref RuntimeRef) (Observation, error) {
 	obs, err := r.cfg.Manager.Check(ctx, identity(ref))
 	out := Observation{Verdict: obs.Verdict.String(), Reason: obs.Reason, Detail: obs.Detail, Stopped: obs.Stopped, State: string(obs.Status.State)}
 	if err != nil || obs.Verdict != hostsvc.VerdictRunning {
 		return out, err
 	}
 	r.rotate(ref.WorkDir)
-	in, err := fcapi.NewClient(ref.Socket, 2*time.Second).Describe(ctx)
+	in, err := apiFor(r.refVMM(ref), ref.Socket).Describe(ctx)
 	if err != nil {
 		return Observation{Verdict: hostsvc.VerdictUnknown.String(), Detail: err.Error(), State: out.State}, nil
 	}
@@ -518,7 +563,7 @@ func (r *firecracker) Inspect(ctx context.Context, ref RuntimeRef) (Observation,
 	return out, nil
 }
 
-func (r *firecracker) Stop(ctx context.Context, ref RuntimeRef) (StopResult, error) {
+func (r *hostRuntime) Stop(ctx context.Context, ref RuntimeRef) (StopResult, error) {
 	start := time.Now()
 	res := StopResult{}
 	st, err := r.cfg.Manager.Inspect(ctx, ref.Unit)
@@ -526,7 +571,7 @@ func (r *firecracker) Stop(ctx context.Context, ref RuntimeRef) (StopResult, err
 		return res, err
 	}
 	if GracefulStop() && (st.State == hostsvc.Active || st.State == hostsvc.Activating) {
-		if err := fcapi.NewClient(ref.Socket, 2*time.Second).SendCtrlAltDel(ctx); err == nil {
+		if err := apiFor(r.refVMM(ref), ref.Socket).SendCtrlAltDel(ctx); err == nil {
 			if res.Graceful, err = r.awaitDown(ctx, ref.Unit, r.cfg.StopGrace); err != nil {
 				return res, err
 			}
@@ -545,7 +590,7 @@ func (r *firecracker) Stop(ctx context.Context, ref RuntimeRef) (StopResult, err
 	return res, r.Cleanup(ctx, ref.Handle, ref.Name)
 }
 
-func (r *firecracker) Cleanup(ctx context.Context, handle, name string) error {
+func (r *hostRuntime) Cleanup(ctx context.Context, handle, name string) error {
 	unit := UnitName(handle, name)
 	st, err := r.cfg.Manager.Inspect(ctx, unit)
 	if err != nil {
@@ -579,7 +624,7 @@ func (r *firecracker) Cleanup(ctx context.Context, handle, name string) error {
 	return errors.Join(errs...)
 }
 
-func (r *firecracker) List(ctx context.Context, handle string) ([]Listed, error) {
+func (r *hostRuntime) List(ctx context.Context, handle string) ([]Listed, error) {
 	units, err := r.cfg.Manager.List(ctx, UnitPrefix(handle))
 	if err != nil {
 		return nil, err
@@ -614,11 +659,11 @@ func (r *firecracker) List(ctx context.Context, handle string) ([]Listed, error)
 	return out, nil
 }
 
-func (r *firecracker) Watch(ctx context.Context, handle string) (<-chan hostsvc.UnitEvent, error) {
+func (r *hostRuntime) Watch(ctx context.Context, handle string) (<-chan hostsvc.UnitEvent, error) {
 	return r.cfg.Manager.Watch(ctx, UnitPrefix(handle))
 }
 
-func (r *firecracker) Load(handle, name string) (RuntimeRef, error) {
+func (r *hostRuntime) Load(handle, name string) (RuntimeRef, error) {
 	var ref RuntimeRef
 	raw, err := os.ReadFile(filepath.Join(WorkDir(r.cfg.StateDir, handle, name), RefFile))
 	if err != nil {
@@ -627,7 +672,7 @@ func (r *firecracker) Load(handle, name string) (RuntimeRef, error) {
 	return ref, json.Unmarshal(raw, &ref)
 }
 
-func (r *firecracker) slotLockPath() (string, error) {
+func (r *hostRuntime) slotLockPath() (string, error) {
 	account := filepath.Join("/run/user", strconv.Itoa(os.Getuid()))
 	if st, err := os.Stat(account); err == nil && st.IsDir() {
 		return filepath.Join(account, "socialweb-vmslots.lock"), nil
@@ -638,7 +683,7 @@ func (r *firecracker) slotLockPath() (string, error) {
 	return filepath.Join(r.cfg.StateDir, "vmslots.lock"), nil
 }
 
-func (r *firecracker) lock() (func(), error) {
+func (r *hostRuntime) lock() (func(), error) {
 	path, err := r.slotLockPath()
 	if err != nil {
 		return nil, err
@@ -657,7 +702,7 @@ func (r *firecracker) lock() (func(), error) {
 	}, nil
 }
 
-func (r *firecracker) usedSlots(ctx context.Context) (map[int]bool, error) {
+func (r *hostRuntime) usedSlots(ctx context.Context) (map[int]bool, error) {
 	units, err := r.cfg.Manager.List(ctx, UnitKind)
 	if err != nil {
 		return nil, err
@@ -675,7 +720,7 @@ func (r *firecracker) usedSlots(ctx context.Context) (map[int]bool, error) {
 	return used, nil
 }
 
-func (r *firecracker) rotate(work string) {
+func (r *hostRuntime) rotate(work string) {
 	for _, name := range []string{ConsoleFile, VMMLogFile} {
 		path := filepath.Join(work, name)
 		st, err := os.Stat(path)
@@ -697,7 +742,11 @@ func (r *firecracker) rotate(work string) {
 	}
 }
 
-func vmmPID(pastaPID int) (int, error) {
+func vmmPID(pastaPID int, vmm string) (int, error) {
+	comm := "firecracker"
+	if vmm == VMMQEMU {
+		comm = QEMUComm
+	}
 	if pastaPID <= 0 {
 		return 0, fmt.Errorf("vmruntime: the unit has no main pid")
 	}
@@ -712,13 +761,13 @@ func vmmPID(pastaPID int) (int, error) {
 			if err != nil {
 				continue
 			}
-			comm, _ := os.ReadFile(filepath.Join("/proc", f, "comm"))
-			if strings.TrimSpace(string(comm)) == "firecracker" {
+			c, _ := os.ReadFile(filepath.Join("/proc", f, "comm"))
+			if strings.TrimSpace(string(c)) == comm {
 				return pid, nil
 			}
 		}
 	}
-	return 0, fmt.Errorf("vmruntime: no firecracker child under pasta pid %d", pastaPID)
+	return 0, fmt.Errorf("vmruntime: no %s child under pasta pid %d", comm, pastaPID)
 }
 
 type imageManifest struct {

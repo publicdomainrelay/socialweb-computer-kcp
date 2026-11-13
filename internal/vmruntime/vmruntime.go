@@ -44,17 +44,48 @@ type (
 	LostReason = hostsvc.LostReason
 )
 
+const (
+	VMMQEMU        = "qemu"
+	VMMFirecracker = "firecracker"
+	QEMUExecutable = "qemu-system-x86_64"
+)
+
+func DefaultVMM() string {
+	if runtime.GOARCH == "amd64" {
+		return VMMQEMU
+	}
+	return VMMFirecracker
+}
+
+func ParseVMM(s string) (string, error) {
+	switch s {
+	case "":
+		return DefaultVMM(), nil
+	case VMMQEMU, VMMFirecracker:
+		return s, nil
+	}
+	return "", fmt.Errorf("vmruntime: vmm %q is not qemu or firecracker", s)
+}
+
+func VMMExecutable(vmm string) string {
+	if vmm == VMMFirecracker {
+		return "firecracker"
+	}
+	return QEMUExecutable
+}
+
 type Executables struct {
-	Stage       string
-	Pasta       string
-	VMExec      string
-	Firecracker string
+	Stage  string
+	Pasta  string
+	VMExec string
+	VMM    string
 }
 
 type Config struct {
 	Manager     hostsvc.Manager
 	StateDir    string
 	RuntimeDir  string
+	VMM         string
 	Exec        Executables
 	ImageSource string
 	InnerID     int
@@ -235,4 +266,6 @@ func ImageTarget() string {
 
 func GracefulStop() bool { return runtime.GOARCH == "amd64" }
 
-var ExecutableNames = []string{"swc-userns-stage", "pasta", "socialweb-vmexec", "firecracker"}
+func ExecutableNames(vmm string) []string {
+	return []string{"swc-userns-stage", "pasta", "socialweb-vmexec", VMMExecutable(vmm)}
+}

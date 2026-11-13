@@ -52,8 +52,12 @@ func ChildVM(app v1alpha1.NetworkApp, l devinstance.Layout, parent devinstance.R
 	}
 	vm := &devinstance.VMRuntime{Handle: KcpHandle(app), Backend: backend, ImageSource: k.GuestImageSource, StopGrace: grace,
 		RuntimeDir: l.RuntimeDir, Executables: map[string]string{}}
+	vm.VMM = vmruntime.DefaultVMM()
+	if parent.Executables[vmruntime.VMMExecutable(vm.VMM)].Path == "" && parent.Executables["firecracker"].Path != "" {
+		vm.VMM = vmruntime.VMMFirecracker
+	}
 	var missing []string
-	for _, n := range vmruntime.ExecutableNames {
+	for _, n := range vmruntime.ExecutableNames(vm.VMM) {
 		e := parent.Executables[n]
 		if e.Path == "" {
 			missing = append(missing, n)
@@ -62,7 +66,7 @@ func ChildVM(app v1alpha1.NetworkApp, l devinstance.Layout, parent devinstance.R
 		vm.Executables[n] = e.Path
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("apps[%s].kcp: the network instance records no %s; dev up takes the VM runtime's paths (userns-stage-path, pasta-path, vmexec-path, firecracker-path in a dev build)",
+		return nil, fmt.Errorf("apps[%s].kcp: the network instance records no %s; dev up takes the VM runtime's paths (userns-stage-path, pasta-path, vmexec-path and qemu-path or firecracker-path in a dev build)",
 			app.Name, strings.Join(missing, ", "))
 	}
 	return vm, nil

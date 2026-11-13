@@ -428,6 +428,16 @@
       "description": "Absolute path of the pinned firecracker (dev build: explicit, never PATH)",
       "env": "SOCIALWEB_FIRECRACKER_PATH"
     },
+    "qemu-path": {
+      "type": "string",
+      "description": "Absolute path of the pinned qemu-system-x86_64 (dev build: explicit, never PATH); LD_LIBRARY_PATH <root>/usr/lib/sys and -L <root>/usr/share/qemu are taken from it, <root> three directories up",
+      "env": "SOCIALWEB_QEMU_PATH"
+    },
+    "vmm": {
+      "type": "string",
+      "description": "internal vm, dev up, run bidder and install bidder (written to config.json): the VMM new VMs boot under, qemu or firecracker; default qemu on x86_64 (its guests get /dev/kvm on a host with nested virtualization), firecracker on arm64. A VM keeps the VMM it booted under",
+      "env": "SOCIALWEB_VMM"
+    },
     "account": {
       "type": "string",
       "description": "install/uninstall: the system account (socialweb for a gateway, swc-bidder for bidders when unset)"

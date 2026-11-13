@@ -670,8 +670,8 @@ Claude's, open to the user's veto in the plan files.
 
 **Invariant: no socialweb-computer code in a running VM's process tree (user).** The service manager
 launches the VMM; our code only does one-shot prep before the unit starts, and the tiny `socialweb-vmexec`
-helper creates the tap and `execve`s firecracker, so after start a VM unit's cgroup holds exactly `pasta`
-and `firecracker`. There is no `socialweb-nodeboot` and no resident namespace verb; the firecracker
+helper creates the tap and `execve`s the VMM, so after start a VM unit's cgroup holds exactly `pasta`
+and the VMM (`qemu-system-x86_64` or `firecracker`). There is no `socialweb-nodeboot` and no resident namespace verb; the firecracker
 provider's only path is the VM unit of `internal/vmruntime`. The instrument that proves it (every
 process in a VM unit's cgroup must hash to a pinned asset) exists as
 `socialweb-computer units audit` (`internal/hostsvc/treeaudit`), which exits 1 naming the unit and the
@@ -775,11 +775,33 @@ verifies them with `StrictHostKeyChecking=yes`, and no host scans a guest. The g
 the VM's work dir and is deleted with it; tenant data never enters the host journal. Stop is graceful
 first: `SendCtrlAltDel` over the API socket, a grace window measured live through the RFP flow, then
 `KillSignal=SIGKILL` (firecracker, PID 1 of pasta's PID namespace, ignores SIGTERM); arm64 goes straight
-to SIGKILL. The Bidder component runs inside the bidder's core, which shares a uid with the user
+to SIGKILL. Under QEMU the same: `send-key ctrl-alt-delete` over QMP on the same socket path. The Bidder component runs inside the bidder's core, which shares a uid with the user
 manager it places units in; the VM units are what is isolated (below).
 
+**The VMM: QEMU by default, Firecracker selectable (user, 2026-11-12).** Staging environments run on VMs
+rented from the live market and their bidders run inside those VMs, so a guest needs `/dev/kvm`; Firecracker
+exposes no virtualization extensions, QEMU with `-cpu host` does when the host has nested KVM on
+(`scripts/host-nested-kvm.sh`). `vmm` (`--vmm`, `SOCIALWEB_VMM`, written to config.json by install) picks the
+VMM of new VMs: `qemu` (default on x86_64) or `firecracker` (default on arm64, which has no QEMU asset). Both run
+the same path: one unit, `swc-userns-stage` -> pasta -> `socialweb-vmexec` (tap `fctap0`, fence, then `execve`
+with `params.json`'s `env`), one guest image (`firecracker-x86_64`, its kernel built with KVM), the same cidata
+seed, address plan, slots, ACL grants and cleanup. QEMU runs `-M microvm,acpi=off` (ACPI on loses the
+virtio-mmio disks and once hit a divide error at timer init; acpi=off boots like Firecracker from the MP table and
+`virtio_mmio.device=` arguments) with `-device i8042` for ctrl-alt-delete, virtio-blk `vda` (rootfs) and `vdb`
+(cidata), virtio-net on the tap, `-serial stdio` onto the console file, `-sandbox on` with obsolete,
+elevateprivileges, spawn and resourcecontrol denied, and QMP at the API socket path; `query-name` (= the VMM id)
+and `query-status` answer what Firecracker's `GET /` does. The unit's TasksMax gets 64 more for QEMU's I/O
+threads. Each VM keeps the VMM it booted under: the runtime record's `hypervisor`, else the VMM named in its
+`params.json`, so a host that changes `vmm` still inspects and stops its older VMs. The `qemu` asset is the
+Ubuntu noble `qemu-system-x86` 8.2.2 with its library closure (glibc 2.38 floor, so it also runs inside a noble
+guest), relocated with `LD_LIBRARY_PATH=<root>/usr/lib/sys` and `-L <root>/usr/share/qemu`, both derived from
+the executable path. Proof: `tests/vmm` (Rust, on a KVM host) boots each VMM through `internal vm`, checks
+user-data, size, disk, network out, ssh over a reverse tunnel, ssh over an iroh (dumbpipe) tunnel, the webrtc
+UDP forward, a guest filling its memory, a nested QEMU guest kernel under KVM (QEMU), graceful stop and that no
+unit, process, work dir, socket dir or ACL grant is left.
+
 **VM isolation without on-demand accounts (user).** The bidder account is shared by every
-handle, but each VM unit runs pasta and firecracker in its own user namespace mapped to a distinct 65536-id
+handle, but each VM unit runs pasta and the VMM in its own user namespace mapped to a distinct 65536-id
 sub-range of the account's reserved subuid/subgid range (the rootless-podman pattern through `newuidmap`),
 with access to exactly its own work files by ACL, so a VMM escape lands in an unprivileged uid that owns no
 bidder file.

@@ -1,6 +1,6 @@
 # Host a bidder
 
-A bidder sells firecracker VMs (and, with `--compute-kinds vm,deno`, Deno sandboxes) on the market.
+A bidder sells VMs (QEMU; [VMM](#vmm)) (and, with `--compute-kinds vm,deno`, Deno sandboxes) on the market.
 
 ## Prerequisites
 
@@ -23,6 +23,15 @@ sudo dnf install -y shadow-utils openssh-clients curl tzdata jq
 
 - ports: no inbound TCP. ssh to a guest goes over iroh (outbound, n0 relays) or webrtc; webrtc leases one UDP port
   per VM from 31000-31999 on the host's private (RFC1918 / ULA) addresses: allow that range from your LAN
+- nested virtualization, so guests get `/dev/kvm` (staging bidders run inside rented VMs), from a checkout of this repo:
+
+```sh
+scripts/host-nested-kvm.sh
+sudo scripts/host-nested-kvm.sh --apply
+```
+
+  `--apply` reloads the KVM module only when nested is off and no VM runs; otherwise it persists the setting for the
+  next boot
 - `check-host -role bidder` runs at the end of an install and before a foreground start
 
 ## Identity
@@ -131,6 +140,17 @@ socialweb-computer internal association "$BIDDER_DID" | jq -c '{roots, errors}'
 ```
 
 `roots` is `[<your DID>]` once it holds. `--remove` deletes the endorsement, then the grant.
+
+## VMM
+
+QEMU on x86_64 (guests get `/dev/kvm` when nested is on), Firecracker on arm64. Pick one for new VMs; a VM keeps
+the VMM it booted under:
+
+```sh
+sudo "$(command -v socialweb-computer)" install bidder --handle <your handle> --vmm firecracker
+```
+
+Foreground: `run bidder ... --vmm firecracker`. VMM integration tests: [tests/vmm](../tests/vmm/README.md).
 
 ## End a VM
 

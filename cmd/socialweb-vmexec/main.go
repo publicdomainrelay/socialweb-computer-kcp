@@ -47,5 +47,5 @@ func run(args []string) error {
 		return fmt.Errorf("console onto stderr: %w", err)
 	}
 	syscall.Umask(0)
-	return syscall.Exec(p.VMM, p.Argv, []string{"TZ=UTC"})
+	return syscall.Exec(p.VMM, p.Argv, append([]string{"TZ=UTC"}, p.Env...))
 }
