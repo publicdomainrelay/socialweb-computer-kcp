@@ -1,6 +1,7 @@
 // docs/acceptance/0006-rollout-compat.md. run: on each bidder kcp the host reaches, the MarketIdentity is Ready and
 // signed in with no pending action, the Bidder runs bidder-tangled-vouch, the DID is the target's, and its host (bidder.health,
-// no sudo) has 0 ERROR in the bidder's first 10 min, 0 automatic restarts, no VM process without a Running ComputeVM. compat: the
+// no sudo) has 0 ERROR in the bidder's first 10 min, 0 automatic restarts, bidder_guest_image_ready since its start, no VM
+// process without a Running ComputeVM. compat: the
 // unchanged CLI (SWC_COMPAT_REQUESTER) rents and releases against the new servers: Held, `id` ran, Released, every
 // record of the run gone (the release's vm.delete too: no release leftovers since rc165), none created in the repo during
 // the run left (the release process's own records), the CLI's version a reading.
@@ -69,7 +70,7 @@ fn bidders(run: Run<Value>) -> Result<Handle, String> {
                     if o["error"].is_string() {
                         return Ok(s.fail(format!("{name} health: {}", o["error"])));
                     }
-                    for k in ["started", "errors", "startupErrors", "restarts", "vmProcesses"] {
+                    for k in ["started", "errors", "startupErrors", "restarts", "vmProcesses", "guestImageReadyAt", "guestImageUnready"] {
                         s.st["readings"][&name][k] = o[k].clone();
                     }
                     if o["errors"].as_u64().unwrap_or(0) > 0 {
@@ -77,6 +78,10 @@ fn bidders(run: Run<Value>) -> Result<Handle, String> {
                     }
                     if o["startupErrors"] != 0 || o["restarts"] != 0 {
                         return Ok(s.fail(format!("{name}: {} startup ERROR lines, {} automatic restarts since {}", o["startupErrors"], o["restarts"], o["started"])));
+                    }
+                    // the bidder verified its pinned guest image since it started (until then it offers nothing)
+                    if o["guestImageReadyAt"].as_str().unwrap_or_default().is_empty() {
+                        return Ok(s.fail(format!("{name}: no bidder_guest_image_ready since it started {} ({} bidder_guest_image_unready)", o["started"], o["guestImageUnready"])));
                     }
                 }
             }

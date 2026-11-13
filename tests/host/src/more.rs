@@ -593,7 +593,8 @@ impl Swc {
                 None => Err("url is required".into()),
             },
             // a bidder host's health without sudo (0006, 0008): its `run bidder` unit's ERROR lines since the process
-            // started (and in its first 10 min), automatic restarts since the last stop, VM processes
+            // started (and in its first 10 min), automatic restarts since the last stop, VM processes, when it verified
+            // its pinned guest image (bidder_guest_image_ready) and how often it could not
             "bidder.health" => {
                 let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
                 let Some(b) = self.target.bidders.iter().find(|b| b.name == name) else { return Some(Err(format!("no bidder {name} in the target"))) };
@@ -1122,9 +1123,13 @@ startup=$(log --until "@$((start + 600))" | grep -c '"level":"ERROR"\|unsupporte
 sample=$(log | grep '"level":"ERROR"' | tail -3 | jq -c '{time, msg, err: ((.err // .error // "") | tostring | .[0:160])}' | jq -sc .)
 restarts=$(journalctl _UID=$U USER_UNIT=$unit --since -14d -o cat --no-pager 2>/dev/null | awk '/Stopping /{n=0} /Scheduled restart job/{n++} END{print n+0}')
 procs=$(( $(pgrep -c -u swc-bidder -x firecracker) + $(pgrep -c -u swc-bidder -f qemu-system) ))
+ready=$(log | grep -m1 '"msg":"bidder_guest_image_ready"' | jq -r '.time // ""')
+unready=$(log | grep -c '"msg":"bidder_guest_image_unready"')
 jq -nc --arg unit "$unit" --arg started "$(date -u -d @$start +%FT%TZ)" \
   --argjson errors "$errors" --argjson startup "$startup" --argjson restarts "$restarts" --argjson procs "$procs" --argjson sample "${sample:-[]}" \
-  '{unit: $unit, started: $started, errors: $errors, startupErrors: $startup, restarts: $restarts, vmProcesses: $procs, errorSample: $sample}'
+  --arg ready "$ready" --argjson unready "$unready" \
+  '{unit: $unit, started: $started, errors: $errors, startupErrors: $startup, restarts: $restarts, vmProcesses: $procs, errorSample: $sample,
+    guestImageReadyAt: $ready, guestImageUnready: $unready}'
 "#;
 
 /// A script on this host (`bash -s`) or on an ssh alias (`ssh -o BatchMode=yes <host> bash -s`), its stdout.
