@@ -16,12 +16,18 @@
 			"entry": "exhausted",
 			"label": "Run 0014 exhausted",
 			"description": "Three rentals on two one-VM bidders: two Held, the third refused by both, its new RFP fails at once."
+		},
+		{
+			"entry": "backtoback",
+			"label": "Run 0014 back to back",
+			"description": "Six small VMs one after another on one bidder: every one Held, none ended before it came on network."
 		}
 	],
 	"calls": [
 		"computer.socialweb.test.request.start",
 		"computer.socialweb.test.request.release",
 		"computer.socialweb.test.request.records",
+		"computer.socialweb.test.bidder.logCount",
 		"com.atproto.repo.getRecord",
 		"com.fedfork.exec.kube.list",
 		"computer.socialweb.test.assert.recordsGone"

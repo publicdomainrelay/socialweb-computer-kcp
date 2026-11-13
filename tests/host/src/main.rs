@@ -397,7 +397,8 @@ async fn main_() -> Result<bool> {
     let transports = vec![
         kube.transport(),
         ssh.transport(),
-        atlibs_iroh::transport(testkit::home_tmp("iroh_ed25519")),
+        // SWC_IROH_KEY: a key of its own per concurrent run (gate.sh's slots); two runs on one key are one iroh node
+        atlibs_iroh::transport(std::env::var_os("SWC_IROH_KEY").map(PathBuf::from).unwrap_or_else(|| testkit::home_tmp("iroh_ed25519"))),
         swc.transport(),
     ];
     let provides = Arc::new(atlibs_host::transport::provides(&transports));

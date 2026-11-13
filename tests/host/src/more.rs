@@ -592,6 +592,48 @@ impl Swc {
                 }
                 None => Err("url is required".into()),
             },
+            // a network bidder's core restarted in place (staging; 0007 restart): `dev restart <network> <bidder>/core` with
+            // the network's own binary; its VMs stay up and the new core adopts them
+            "bidder.restart" => {
+                let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
+                if !self.target.bidders.iter().any(|b| b.name == name) {
+                    return Some(Err(format!("no bidder {name} in the target")));
+                }
+                let Some(n) = self.target.network.clone() else { return Some(Err("bidder.restart: the target is no market network (staging only)".into())) };
+                let t = Instant::now();
+                let bin = self.bin.path.display().to_string();
+                let args: Vec<String> = ["dev", "restart", &n.instance, &format!("{name}/core"), "--state-dir", &testkit::target::expand(&n.state_dir).display().to_string(), "--binary", &bin]
+                    .map(String::from).to_vec();
+                self.cli(&args).await.and_then(|(ok, out)| {
+                    if ok {
+                        Ok(json!({ "seconds": (t.elapsed().as_secs_f64() * 10.0).round() / 10.0, "report": tail(&out) }))
+                    } else {
+                        Err(format!("dev restart {name}/core: {}", tail(&out)))
+                    }
+                })
+            }
+            // how many lines of a bidder's log hold each text (a text: a string, or a list of strings a line must all
+            // hold), counted now (a module diffs two counts): a network bidder's core.log under the network's dev
+            // state, an installed one's journal (swc-bidder, read-only, over ssh); the texts never reach a shell
+            "bidder.logCount" => {
+                let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
+                let Some(b) = self.target.bidders.iter().find(|b| b.name == name) else { return Some(Err(format!("no bidder {name} in the target"))) };
+                let texts: Vec<Vec<String>> = input["texts"].as_array().into_iter().flatten().map(|t| match t {
+                    Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+                    t => t.as_str().map(|x| vec![x.to_string()]).unwrap_or_default(),
+                }).collect();
+                if texts.is_empty() || texts.iter().any(|t| t.is_empty() || t.iter().any(|x| x.is_empty() || x.chars().any(char::is_control))) {
+                    return Some(Err("texts: strings or lists of strings, none empty".into()));
+                }
+                let count = |log: &str| json!(texts.iter().map(|t| (t.join(" & "), json!(log.lines().filter(|l| t.iter().all(|x| l.contains(x.as_str()))).count()))).collect::<serde_json::Map<_, _>>());
+                if let Some(n) = &self.target.network {
+                    let i = &n.instance;
+                    let p = testkit::target::expand(&n.state_dir).join(format!("dev/{i}/apps/dev/{i}-{name}/logs/core.log"));
+                    return Some(std::fs::read_to_string(&p).map(|l| json!({ "counts": count(&l), "log": p.display().to_string() })).map_err(|e| format!("{}: {e}", p.display())));
+                }
+                let Some(testkit::target::Via::Ssh { host }) = b.kcp.as_ref().map(|k| &k.via) else { return Some(Err(format!("{name}: the host reaches its bidder log by ssh or in the network only"))) };
+                on_host(Some(host), BIDDER_LOG).await.map(|l| json!({ "counts": count(&l), "log": "journal" }))
+            }
             // a bidder host's health without sudo (0006, 0008): its `run bidder` unit's ERROR lines since the process
             // started (and in its first 10 min), automatic restarts since the last stop, VM processes, when it verified
             // its pinned guest image (bidder_guest_image_ready) and how often it could not
@@ -1110,6 +1152,12 @@ pub async fn cleanup_from_disk(
     }
     errors
 }
+
+/// bidder.logCount on a bidder host: the swc-bidder account's journal since its run bidder process started.
+const BIDDER_LOG: &str = r#"pid=$(pgrep -u swc-bidder -f "socialweb-computer run bidder" | head -1)
+[ -n "$pid" ] || exit 0
+journalctl _UID=$(id -u swc-bidder) --since "@$(date -d "$(ps -o lstart= -p $pid)" +%s)" -o cat --no-pager 2>/dev/null
+"#;
 
 /// bidder.health on a bidder host: read-only, no sudo (journal of the account swc-bidder, /proc), one JSON line.
 const BIDDER_HEALTH: &str = r#"pid=$(pgrep -u swc-bidder -f "socialweb-computer run bidder" | head -1)
