@@ -150,6 +150,27 @@ type Gateway struct {
 	Vault             GatewayVault
 	Requester         GatewayRequester
 	Pds               RepoPds
+	Knotless          Knotless
+}
+
+type Knotless struct {
+	ServeUnit    string `json:",omitempty"`
+	RunUnit      string `json:",omitempty"`
+	Bin          string `json:",omitempty"`
+	Dir          string `json:",omitempty"`
+	ServeListen  string `json:",omitempty"`
+	RunListen    string `json:",omitempty"`
+	Appview      string `json:",omitempty"`
+	Origin       string `json:",omitempty"`
+	Owner        string `json:",omitempty"`
+	Plc          string `json:",omitempty"`
+	CA           string `json:",omitempty"`
+	Proxy        string `json:",omitempty"`
+	Firehose     string `json:",omitempty"`
+	Relay        string `json:",omitempty"`
+	EnvFile      string `json:",omitempty"`
+	PasswordFile string `json:",omitempty"`
+	RestartKey   string `json:",omitempty"`
 }
 
 type GatewayRequester struct {

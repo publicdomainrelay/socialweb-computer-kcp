@@ -1,0 +1,70 @@
+apiVersion: socialweb.computer/v1alpha1
+kind: HostProcess
+metadata:
+  name: knotless-serve
+spec:
+  unit: "{{.Knotless.ServeUnit}}"
+  description: "knotless-serve: the market network's knotless appview, on its PLC, PDSes and relay (dev up --with-knotless)"
+  exec: "{{.Knotless.Bin}}/knotless-serve"
+  argv: ["--listen", "{{.Knotless.ServeListen}}", "--public-url", "{{.Knotless.Appview}}", "--index", "{{.Knotless.Dir}}/serve/index.db", "--default-runner", "{{.Knotless.Owner}}",
+    "--firehose", "{{.Knotless.Firehose}}", "--relay", "{{.Knotless.Relay}}"]
+  env:
+    - {name: KNOTLESS_APPVIEW, value: "{{.Knotless.Appview}}"}
+    - {name: KNOTLESS_CONFIG_DIR, value: "{{.Knotless.Dir}}/serve/config"}
+    - {name: KNOTLESS_CACHE_DIR, value: "{{.Knotless.Dir}}/serve/cache"}
+    - {name: KNOTLESS_PLC_URL, value: "{{.Knotless.Plc}}"}
+    - {name: KNOTLESS_CA_CERTS, value: "{{.Knotless.CA}}"}
+    - {name: KNOTLESS_HANDLE_RESOLVER, value: "well-known:https"}
+    - {name: KNOTLESS_DID_WEB_SCHEME, value: "http"}
+    - {name: KNOTLESS_NO_UPDATE_CHECK, value: "1"}
+    - {name: HTTPS_PROXY, value: "{{.Knotless.Proxy}}"}
+    - {name: HOME, value: "{{.Knotless.Dir}}/serve"}
+    - {name: PATH, value: "{{.Knotless.Bin}}:/usr/local/bin:/usr/bin:/bin"}
+    - {name: RUST_LOG, value: "info"}
+  output:
+    stdout: "{{.Knotless.Dir}}/serve.log"
+    stderr: "{{.Knotless.Dir}}/serve.log"
+  restartKey: "{{.Knotless.RestartKey}}"
+  restartPolicy: Always
+  stop:
+    signal: SIGTERM
+    graceSeconds: 30
+  placement: supervisor
+---
+apiVersion: socialweb.computer/v1alpha1
+kind: HostProcess
+metadata:
+  name: knotless-run
+spec:
+  unit: "{{.Knotless.RunUnit}}"
+  description: "knotless-run --executor composition: the market network's knotless runner, as the gateway owner, renting from the network's bidders (dev up --with-knotless)"
+  exec: "{{.Knotless.Bin}}/knotless-run"
+  argv: ["--executor", "composition", "--trust-publisher", "{{.Knotless.Owner}}", "--app-password", "{{.Knotless.Owner}}={{.Knotless.PasswordFile}}",
+    "--origin", "{{.Knotless.Origin}}", "--listen", "{{.Knotless.RunListen}}", "--composition-state", "{{.Knotless.Dir}}/runner/compositions",
+    "--iroh-key", "{{.Knotless.Dir}}/runner/iroh", "--state", "{{.Knotless.Dir}}/runner/state.json", "--work", "{{.Knotless.Dir}}/runner/work",
+    "--artifact-total", "1", "--jetstream", "", "--sweep", "10", "--discover", "--pulls"]
+  env:
+    - {name: KNOTLESS_IDENTIFIER, value: "{{.Knotless.Owner}}"}
+    - {name: KNOTLESS_APPVIEW, value: "{{.Knotless.Appview}}"}
+    - {name: KNOTLESS_CONFIG_DIR, value: "{{.Knotless.Dir}}/runner/config"}
+    - {name: KNOTLESS_CACHE_DIR, value: "{{.Knotless.Dir}}/runner/cache"}
+    - {name: KNOTLESS_PLC_URL, value: "{{.Knotless.Plc}}"}
+    - {name: KNOTLESS_CA_CERTS, value: "{{.Knotless.CA}}"}
+    - {name: KNOTLESS_HANDLE_RESOLVER, value: "well-known:https"}
+    - {name: KNOTLESS_DID_WEB_SCHEME, value: "http"}
+    - {name: KNOTLESS_NO_UPDATE_CHECK, value: "1"}
+    - {name: ATLIBS_ALLOW_PRIVATE, value: "1"}
+    - {name: HTTPS_PROXY, value: "{{.Knotless.Proxy}}"}
+    - {name: HOME, value: "{{.Knotless.Dir}}/runner"}
+    - {name: PATH, value: "{{.Knotless.Bin}}:/usr/local/bin:/usr/bin:/bin"}
+    - {name: RUST_LOG, value: "info"}
+  envFiles: ["{{.Knotless.EnvFile}}"]
+  output:
+    stdout: "{{.Knotless.Dir}}/run.log"
+    stderr: "{{.Knotless.Dir}}/run.log"
+  restartKey: "{{.Knotless.RestartKey}}"
+  restartPolicy: Always
+  stop:
+    signal: SIGTERM
+    graceSeconds: 120
+  placement: supervisor

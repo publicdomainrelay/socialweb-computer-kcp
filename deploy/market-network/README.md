@@ -508,6 +508,23 @@ AtprotoRecords labelled `apps.socialweb.computer/network-vouch`). `run request
 meets `bidder-tangled-vouch` and the attached `requester-tangled-vouch` with the
 vouches in place. No network app runs `open` unless its spec names it.
 
+### Add knotless
+
+`dev up --with-gateway --with-knotless <dir>` (`<dir>`: knotless-serve, knotless-run, knotless,
+git-remote-knotless and dumbpipe from the knotless fork's image) gives the gateway the option `knotless`. Its
+core runs two HostProcesses of the set's phase `knotless@market-network` (`deploy/apps/gateway/knotless.yaml`):
+knotless-serve on the owner's PDS firehose and the relay, and `knotless-run --executor composition` as the owner
+account of `owner-sessions.json`, trusting only that account's compositions. Their ports are leased in
+`<gateway state>/knotless/ports.json`; the gateway lists `http://knotless.localhost:<port>` (appview) and
+`http://knotless-runner.localhost:<port>` (runner) in its listeners, and `<gateway state>/knotless/client.env`
+holds the CLI's environment (no secret; the password is in `owner.env`, 0600).
+
+The network copies every `*.localhost` listener of its gateway into the hosts of the value it hands its children.
+A bidder hands each guest those hosts: `/etc/hosts` at `192.0.2.1`, their ports in `spec.hostPorts`, and a
+`systemd-socket-proxyd` on the guest's own `127.0.0.1:<port>` (curl and git resolve `*.localhost` to loopback
+whatever `/etc/hosts` says). It also adds the network CA bundle to every guest's `ca_certs`, so a guest of a
+requester that did not (the knotless runner's composition) still trusts the guest TLS front.
+
 ### Point an installed bidder account at the network
 
 An installed bidder account (`install bidder`, host-backend systemd-user) is not

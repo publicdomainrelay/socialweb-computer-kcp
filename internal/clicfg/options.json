@@ -54,6 +54,11 @@
       "type": "boolean",
       "description": "dev up --profile market-network: also compose a Gateway child application in its own workspace of the network's kcp. run requester: also apply a Gateway root of profile requester (spec.requesterRef: the MarketRequester app) into the requester's workspace and run its clusterprovider in the run requester process, so a tenant cluster's k3s and kine are HostProcesses of the requester's core and its nodes are rented by the MarketRequester's Requester under the user's DID; preflights cgroup v2, delegation, subuid/subgid and the uidmap helpers; recorded in requester.json, so a restart keeps it"
     },
+    "with-knotless": {
+      "type": "string",
+      "description": "dev up --profile market-network --with-gateway: a directory holding knotless-serve, knotless-run, knotless, git-remote-knotless and dumbpipe (the knotless fork's image, knotless-fork-infra scripts/build.sh); the gateway runs knotless-serve and knotless-run as HostProcesses on the network's PLC, PDSes and relay, the runner signed in as the gateway's owner account and renting from the network's bidders. dev status lists their URLs and <gateway state>/knotless/client.env in the gateway app's listeners",
+      "env": "SOCIALWEB_DEV_WITH_KNOTLESS"
+    },
     "node-download-base": {
       "type": "string",
       "description": "run requester --with-gateway: the public base a tenant cluster's node fetches socialweb-meshd and socialweb-node from, as <base>/downloads/<sha256>/<name>, checking the sha256 its contract pins; the default is the public bucket CI publishes the pinned downloads tree to by sha256. With --network the default is unused and the node fetches from the requester's local Exposure (the network's bidders share its host); an empty value does the same everywhere",

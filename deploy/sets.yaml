@@ -418,6 +418,10 @@ sets:
         workspace: root:app
         files:
           - path: apps/repo-pds/association-watch.market-network.yaml
+      - name: knotless@market-network
+        workspace: root
+        files:
+          - path: apps/gateway/knotless.yaml
   - name: market-requester
     summary: the components of a MarketRequester application (one `run request` invocation) in its own kcp - the ComputeContract and MarketIdentity schemas bound in root, its own OpenBaoServer and the account the requester reads its objects with, the root:app workspace and, per profile, the requester; applied by internal/appctl (plan 0008 M4-RUN-REQUEST)
     values: MarketRequester

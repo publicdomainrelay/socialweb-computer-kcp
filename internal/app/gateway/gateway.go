@@ -91,6 +91,8 @@ type pass struct {
 	st v1alpha1.ApplicationStatus
 
 	vault []v1alpha1.ApplicationComponent
+
+	knotlessListeners []v1alpha1.ApplicationListener
 }
 
 func (p *pass) write(phase v1alpha1.ApplicationPhase, msg string) (ctlruntime.Result, error) {
@@ -346,20 +348,26 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 			values.Pds = pds
 		}
 	}
-	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(GatewaySet, o.Spec.Profile, values, "association-watch"))
+	include := []string{"association-watch"}
+	if values.Knotless, p.knotlessListeners, err = p.knotless(); err != nil {
+		return p.fail(err)
+	} else if values.Knotless.Bin != "" {
+		include = append(include, KnotlessPhase)
+	}
+	intact, err := c.CheckWorkloads(ctx, r)(c.SetWorkloads(GatewaySet, o.Spec.Profile, values, include...))
 	if err != nil {
 		return p.retry("its set workloads", err)
 	}
 	if !c.Applied(r) {
 		identity := p.identitySpec(plan)
-		digest, digestErr := compose.InfraDigest(GatewaySet, o.Spec.Profile, values, identity, "association-watch")
+		digest, digestErr := compose.InfraDigest(GatewaySet, o.Spec.Profile, values, identity, include...)
 		if intact && digestErr == nil && c.AppliedBefore(r, o.Status.AppliedSet, digest) {
 			c.MarkApplied(r)
 		} else {
 			if _, err := p.write(v1alpha1.ApplicationPhaseProvisioning, "applying its workspace, its records and its requester identity"); err != nil {
 				return ctlruntime.Result{}, err
 			}
-			if err := c.ApplyInfra(ctx, r, GatewaySet, o.Spec.Profile, values, "association-watch"); err != nil {
+			if err := c.ApplyInfra(ctx, r, GatewaySet, o.Spec.Profile, values, include...); err != nil {
 				return p.retry("its workspace", err)
 			}
 			if err := c.ApplyIdentitySpec(ctx, r, ws, marketrequester.RequesterIdentity, identity); err != nil {
@@ -718,6 +726,7 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	}
 	p.st.Did = id.Status.Did
 	compose.FillApplicationStatus(&p.st, o.Generation, false, o.Spec.Components, all, snap, nil)
+	p.st.Listeners = append(p.st.Listeners, p.knotlessListeners...)
 	if !plan.Local {
 		repoLinks, err := c.AccountRepo(ctx, r, ws, marketrequester.RequesterIdentity, plan, id.Status.Did, id.Status.PdsURL)
 		if err != nil {

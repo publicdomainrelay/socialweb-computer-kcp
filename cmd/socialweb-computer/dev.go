@@ -19,6 +19,7 @@ import (
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/gateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/marketnetwork"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/sshgateway"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
@@ -455,12 +456,19 @@ func bringUp(ctx context.Context, a *app, vals clicfg.Values, host bool) (upRepo
 		if networkSpec, err = marketnetwork.NetworkSpec(l.ID, vals.Int("bidders"), vals.Bool("with-gateway"), networkOverlay, vm); err != nil {
 			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
 		}
+		knotless, err := knotlessDir(vals.String("with-knotless"), vals.Bool("with-gateway"))
+		if err != nil {
+			return upReport{}, a.fail(exitRefused, "dev up: %v", err)
+		}
 		for i := range networkSpec.Apps {
 			if networkSpec.Apps[i].Kind != v1alpha1.ApplicationKindGateway {
 				continue
 			}
 			if networkSpec.Apps[i].ClusterProvider, err = gatewaykcp.ClusterProviderFromEnv(a.env.LookupEnv, networkSpec.Apps[i].ClusterProvider); err != nil {
 				return upReport{}, a.fail(exitRefused, "dev up: the gateway's clusterprovider settings: %v", err)
+			}
+			if knotless != "" {
+				networkSpec.Apps[i].Options = append(networkSpec.Apps[i].Options, v1alpha1.ApplicationOption{Name: gateway.KnotlessOption, Value: knotless})
 			}
 		}
 	}
@@ -1048,4 +1056,25 @@ func runDevCore(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		return a.fail(exitFailed, "internal dev-core: %v", err)
 	}
 	return exitOK
+}
+
+var knotlessBinaries = []string{"knotless-serve", "knotless-run", "knotless", "git-remote-knotless", "dumbpipe"}
+
+func knotlessDir(dir string, withGateway bool) (string, error) {
+	if dir = strings.TrimSpace(dir); dir == "" {
+		return "", nil
+	}
+	if !withGateway {
+		return "", errors.New("--with-knotless runs knotless in the gateway: it takes --with-gateway")
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, b := range knotlessBinaries {
+		if st, err := os.Stat(filepath.Join(abs, b)); err != nil || st.Mode()&0o111 == 0 {
+			return "", fmt.Errorf("--with-knotless %s holds no executable %s (the knotless fork's image: docker cp its /usr/local/bin/%s)", abs, b, b)
+		}
+	}
+	return abs, nil
 }
