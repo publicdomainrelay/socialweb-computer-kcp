@@ -50,7 +50,7 @@ fn swc(args: &str) -> String {
 
 /// The first subset of the suite that runs inside the VM (no atirc, no public https origin, no browser yet).
 /// 0014 needs 3 (run) or 2 (concurrent, exhausted) network bidders (input `bidders`) and SKIPs with fewer.
-const SUITE: [&str; 11] = ["0003", "0005", "0006", "0007", "0008", "0012", "0013", "0014", "0014:concurrent", "0014:exhausted", "0015"];
+const SUITE: [&str; 13] = ["0003", "0005", "0006", "0007", "0007:restart", "0008", "0012", "0013", "0014", "0014:concurrent", "0014:exhausted", "0014:backtoback", "0015"];
 
 /// A long VM command detached from the ssh session (a dropped session must not end it): `<step>.rc` when done.
 fn bg(step: &str, cmd: String) -> String {

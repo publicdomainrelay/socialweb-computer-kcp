@@ -790,7 +790,7 @@ cd tests && SWC_COMPAT_REQUESTER=release:<previous rc tag> ./gate.sh $PWD/target
 
 It runs the compositions as many at once as there are accounts (one driver per account: the test host's account lock;
 each slot its own iroh key, `SWC_IROH_KEY`), each holding its entry's VM weight of `GATE_VMS` (4) so the bidders are
-not oversubscribed; an exclusive entry (0001: k8s nodes one per host) runs alone
+not oversubscribed; an exclusive entry (0001: k8s nodes one per host; 0007:restart; 0014: bidders filled or booked) runs alone
 (`GATE_EXCLUSIVE`); `GATE_JOBS=1` is the serial gate. `--on-fail freeze`, `GATE_FREEZE_TTL` 900 s; one
 `RESULT <runbook>:<entry> PASS|FAIL|SKIP <seconds> <note>` line each as it ends, a summary table in gate order with the
 wall time, exit 1 on a FAIL. A SKIP

@@ -493,4 +493,151 @@ fn exhausted_0014(r: Run<Value>) -> Result<Handle, String> {
     drive(r, Shape { bidders: 2, rentals: 3, fit: 1, need_refusal: true, rounds: 1, fails: 1 })
 }
 
-entries! { run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014 }
+
+/// The bidder log line of a VM its placer saw inactive and killed before the VMM answered (91103758, fixed f15dda15).
+const EARLY_KILL: &str = "before its VMM answered";
+
+/// backtoback: `count` (6) small VMs one after another on ONE bidder (the target's first), each pinned to it: rent,
+/// Held, release, the next; a unit of the same slot was just reset each time. Every one Held, none ended before it
+/// came on network, the bidder's log gains no EARLY_KILL line. A rental that ends before Held is recorded and the run
+/// goes on, so the readings count them all.
+fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
+    let name = args["name"].as_str().ok_or("name")?.to_string();
+    let count = args["count"].as_u64().unwrap_or(6);
+    let mut h = Handle::new();
+    let i = s.st["i"].as_u64().unwrap_or(0);
+    let rental = |i: u64| format!("{name}-b{i}");
+    let next = |s: &mut S, h: Handle, i: u64| -> Handle {
+        s.st["i"] = json!(i);
+        s.set("held");
+        s.mark("rent");
+        let a = json!(["--hold", "--cpus", s.st["cpus"].to_string(), "--mem", s.st["mem"], "--expires-in", "1h"]);
+        h.call(steps::host_sub(&format!("req:{i}"), "request.start", json!({ "name": rental(i), "args": a, "bidderDids": [s.st["bidder"]["did"]] })))
+            .timer(&format!("held:{i}"), 6 * MIN)
+    };
+    match run.event {
+        Event::Start => {
+            if args["target"] == "prod" {
+                return Ok(s.skip("staging only: it books one bidder for a run of VMs (prod bidders are shared)"));
+            }
+            let Some(b) = args["bidders"].as_array().and_then(|a| a.first()).cloned() else {
+                return Ok(s.skip("needs a bidder; the target has none"));
+            };
+            s.st["bidder"] = b.clone();
+            s.st["cpus"] = json!(args["cpus"].as_i64().unwrap_or(1));
+            s.st["mem"] = json!(args["mem"].as_str().unwrap_or("1G"));
+            s.st["results"] = json!([]);
+            s.reading("bidder", b["did"].clone());
+            s.set("baseline");
+            h = h
+                .call(host("log0", "bidder.logCount", json!({ "name": b["name"], "texts": [EARLY_KILL] })))
+                .timer("deadline", (count * 7 + 10) * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in time (phase {}, VM {i})", s.phase()))),
+        Event::Timer { id } if id == format!("held:{i}") && s.is("held") => {
+            s.st["results"].as_array_mut().map(|a| a.push(json!({ "vm": rental(i), "held": false, "why": "not Held in 6 min" })));
+            s.set("release");
+            h = h.cancel(&format!("req:{i}")).call(host(&format!("rel:{i}"), "request.release", json!({ "name": rental(i) })));
+        }
+        Event::Message { id, data, .. } if id == format!("req:{i}") && s.is("held") => {
+            if data["receipt"].is_string() && s.st["receipt"].is_null() {
+                s.st["receipt"] = data["receipt"].clone();
+            }
+            if data["msg"] == "requester_guest_on_network" {
+                s.flag(&format!("on:{i}"));
+            }
+            let ended = match (data["msg"].as_str().unwrap_or_default(), data["phase"].as_str().unwrap_or_default()) {
+                ("contract", "Held") => Some(json!({ "vm": rental(i), "held": true, "heldS": s.since("rent"), "winner": data["receipt"].as_str().or(s.st["receipt"].as_str()).map(|r| r.trim_start_matches("at://").split('/').next().unwrap_or_default().to_string()) })),
+                // the bidder ended it (vm.terminated) or the contract failed before the guest came up
+                ("contract", p @ ("Released" | "Failed")) => Some(json!({ "vm": rental(i), "held": false, "phase": p, "onNetwork": s.has(&format!("on:{i}")), "why": data["message"] })),
+                ("exited", _) => Some(json!({ "vm": rental(i), "held": false, "why": format!("run request exited: {data}") })),
+                _ => None,
+            };
+            if let Some(r) = ended {
+                s.st["results"].as_array_mut().map(|a| a.push(r));
+                s.st["receipt"] = Value::Null;
+                s.set("release");
+                h = h.cancel(&format!("req:{i}")).call(host(&format!("rel:{i}"), "request.release", json!({ "name": rental(i) })));
+            }
+        }
+        Event::Result { id, result, .. } => {
+            let r = result.output();
+            match id.as_str() {
+                "log0" | "log1" => {
+                    let o = match out(&s, &id, r) {
+                        Ok(o) => o,
+                        Err(f) => return Ok(f),
+                    };
+                    let n = o["counts"][EARLY_KILL].as_u64().unwrap_or(0);
+                    if id == "log0" {
+                        s.st["early0"] = json!(n);
+                        h = next(&mut s, h, 0);
+                    } else {
+                        let early = n.saturating_sub(s.st["early0"].as_u64().unwrap_or(0));
+                        s.reading("earlyKillLines", early);
+                        let rs = s.st["results"].as_array().cloned().unwrap_or_default();
+                        let bad: Vec<Value> = rs.iter().filter(|r| r["held"] != true).cloned().collect();
+                        s.reading("vms", json!(rs));
+                        s.reading("held", rs.len() - bad.len());
+                        if !bad.is_empty() || early > 0 {
+                            return Ok(s.fail(format!("{} of {} VMs never Held on one bidder back to back, {early} '{EARLY_KILL}' lines: {}", bad.len(), rs.len(), json!(bad))));
+                        }
+                        s.set("records");
+                        s.st["wait"] = json!(count);
+                        s.st["uris"] = json!([]);
+                        for k in 0..count {
+                            h = h.call(host(&format!("rec:{k}"), "request.records", json!({ "name": rental(k) })));
+                        }
+                    }
+                }
+                x if x.starts_with("rel:") => {
+                    // a Failed invocation leaves nothing to release
+                    if let Err(e) = &r
+                        && !e.contains("no invocation")
+                    {
+                        return Ok(s.fail(format!("{id}: {e}")));
+                    }
+                    if i + 1 < count {
+                        h = next(&mut s, h, i + 1);
+                    } else {
+                        s.set("log");
+                        h = h.call(host("log1", "bidder.logCount", json!({ "name": s.st["bidder"]["name"], "texts": [EARLY_KILL] })));
+                    }
+                }
+                x if x.starts_with("rec:") => {
+                    let o = match out(&s, &id, r) {
+                        Ok(o) => o,
+                        Err(f) => return Ok(f),
+                    };
+                    for u in o["uris"].as_array().into_iter().flatten() {
+                        s.st["uris"].as_array_mut().map(|a| a.push(u.clone()));
+                    }
+                    if landed(&mut s) {
+                        s.reading("recordsChecked", s.st["uris"].as_array().map_or(0, Vec::len));
+                        h = h.call(host("gone", "assert.recordsGone", json!({ "uris": s.st["uris"] })));
+                    }
+                }
+                "gone" => {
+                    let o = match out(&s, &id, r) {
+                        Ok(o) => o,
+                        Err(f) => return Ok(f),
+                    };
+                    if o["left"].as_array().is_none_or(|l| !l.is_empty()) {
+                        return Ok(s.fail(format!("records left: {} {}", o["left"], o["errors"])));
+                    }
+                    return Ok(s.pass());
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(s.keep(h))
+}
+
+entries! { run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, backtoback => backtoback_0014 }

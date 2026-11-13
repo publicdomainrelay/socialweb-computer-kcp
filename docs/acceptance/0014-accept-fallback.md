@@ -8,7 +8,7 @@ next bid; with no bid left it deletes the RFP and issues a new one without the r
 - Code: `internal/market/bidder/vmsize.go` (bid-time check, accept-time reservation keyed by RFP URI, 10 min hold,
   dropped once the ComputeVM exists), `internal/market/requester/runner.go` (`replaceDeclined`, `reRFPAfterRefusals`,
   up to 3 replacements)
-- Test: `tests/compositions/0014` (module `tests/modules/acc-0014`), entries `run`, `concurrent` and `exhausted`, through the kcp
+- Test: `tests/compositions/0014` (module `tests/modules/acc-0014`), entries `run`, `concurrent`, `exhausted` and `backtoback`, through the kcp
   CLI requester (`run request`); staging only. The same fallback in the atlibs requester module (the cicd
   composition's) is `tests/compositions/knotless` entry `fallback` (concurrent workflows, one accept refused 409, the
   checks still succeed, the refused accept gone)
@@ -42,6 +42,7 @@ from the bidders' offerings (`maxCpus`) less the guests already on their kcp, so
 | --- | --- | --- | --- | --- |
 | `run` | first 3 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required; up to 3 rounds (a round where every first pick had room has none) |
 | `concurrent` | first 2 of the target | 4 | `min(free)/2` (two per bidder) | a reading |
+| `backtoback` | the target's first | 6 (input `count`), one after another | 1 (input `cpus`), mem 1G | none: every VM Held |
 | `exhausted` | first 2 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required: one rental is refused by both, its bids run out, its new RFP (the refusers excluded, as specified) has no bidder: Failed at once |
 
 Every rental is pinned to the entry's bidders (`--allow-bidder-dids`); mem 1G (input `mem`).
@@ -51,6 +52,19 @@ VM each, pinned to that bidder (`--allow-bidder-dids <it>`), sized to leave room
 (input `cpus`); the rentals are then 2-vCPU guests. Without fillers a 16-CPU host gets four 8-vCPU guests booting at
 once, and on a loaded host they miss the requester's 2 min on-network window. The fillers are released with the
 rentals and their records checked too.
+
+## backtoback
+
+VMs booted one after another on one bidder reuse its VM slots: each unit was just reset when the next is placed. Before
+f15dda15 the placer took a unit that was merely loaded (inactive) for placed, awaitBoot read "went inactive (result
+success, status 0) before its VMM answered" and killed the VM some 100 ms after the hand-off; the requester saw "the
+bidder reported vm.terminated before the guest came up". The entry rents, waits for Held, releases, `count` times,
+each pinned to the bidder; a rental that ends before Held is recorded and the run goes on. It needs the bidder's VMs
+placed by a service manager (`--vm-host-backend systemd-user`, as prod): with the proc backend the race does not show.
+
+Pass: every VM Held (none Released or Failed before it, `onNetwork` in the readings for the ones that ended), the
+bidder's log gains no "before its VMM answered" line over the run (`bidder.logCount`: the network bidder's core.log, an
+installed bidder's journal), every record gone.
 
 ## Preconditions
 
