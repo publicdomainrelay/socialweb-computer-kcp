@@ -191,7 +191,8 @@ async fn agent_run_transient_and_held() {
                         .as_str()
                         .is_some_and(|i| i.starts_with(&format!("{name}.")))
             };
-            obs.wait_message("the agent joins", 10 * MIN, from_agent)
+            // the agent JOINs ~18 s before it reads: prompt only after its "online - monitoring atirc" line
+            obs.wait_message("the agent online", 10 * MIN, |m| from_agent(m) && m["text"].as_str().is_some_and(|t| t.contains("online")))
                 .await?;
             let joined = ctx.t() - t;
             let seen = obs.messages().len();

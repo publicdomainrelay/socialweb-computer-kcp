@@ -2,8 +2,21 @@
 	"name": "acc-0005",
 	"description": "Acceptance 0005 guest requester R2: run (A: nested VM, grant + endorsement, cascade), b (B: co-located mesh1, out-of-band loss).",
 	"actions": [
-		{ "entry": "run", "label": "Run 0005 A", "description": "Part A end to end." },
-		{ "entry": "b", "label": "Run 0005 B", "description": "Part B end to end." }
+		{
+			"entry": "run",
+			"label": "Run 0005 A",
+			"description": "Part A end to end."
+		},
+		{
+			"entry": "b",
+			"label": "Run 0005 B",
+			"description": "Part B end to end."
+		},
+		{
+			"entry": "r2fail",
+			"label": "Run 0005 failed R2",
+			"description": "A failed R2 leaves no live DID at PLC (known gap for rc166)."
+		}
 	],
 	"calls": [
 		"computer.socialweb.test.request.start",
@@ -22,9 +35,31 @@
 		"computer.socialweb.test.assert.tombstoned"
 	],
 	"hooks": [
-		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "records RecordNotFound after the release" },
-		{ "nsid": "computer.socialweb.test.assert.tombstoned", "reason": "R2 (and mesh1) tombstoned" },
-		{ "nsid": "computer.socialweb.test.request.start", "required": true, "entries": ["run", "b"], "reason": "run request --associate guest" },
-		{ "nsid": "com.fedfork.exec.identlink.walk", "required": true, "entries": ["run", "b"], "reason": "the walk of R2 and mesh1" }
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "records RecordNotFound after the release"
+		},
+		{
+			"nsid": "computer.socialweb.test.assert.tombstoned",
+			"reason": "R2 (and mesh1) tombstoned"
+		},
+		{
+			"nsid": "computer.socialweb.test.request.start",
+			"required": true,
+			"entries": [
+				"run",
+				"b"
+			],
+			"reason": "run request --associate guest"
+		},
+		{
+			"nsid": "com.fedfork.exec.identlink.walk",
+			"required": true,
+			"entries": [
+				"run",
+				"b"
+			],
+			"reason": "the walk of R2 and mesh1"
+		}
 	]
 }

@@ -107,7 +107,7 @@ stays until its composition passes on staging and prod.
 | 0002 | `run` | not yet |
 | 0003 (0001 section 9) | `run` (`--per-host`: each host in turn) | not yet |
 | 0004 | `run` | not yet |
-| 0005 | `run` (A), `b` | not yet |
+| 0005 | `run` (A), `b`, `r2fail` (a failed R2 leaves no live DID at PLC: known gap, fails until rc166) | not yet |
 | 0006 | `run` (bidders), `compat` (`SWC_COMPAT_REQUESTER`) | not yet |
 | 0007, 0008, 0009, 0012 | `run` | not yet |
 | 0011 | `run` (gates), `token` | gates: pass 2026-11-13 (signed out) |

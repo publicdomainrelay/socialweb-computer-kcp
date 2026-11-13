@@ -181,6 +181,8 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
             }
             if s.is("held") && s.has("held") && s.has("exited") {
                 s.set("start-r2");
+                // the runbook's start, exactly: never `install -d /run/socialweb-r2` (it resets the mode the guest agent set,
+                // and R2 cannot write requester-did)
                 let cmd = "printf 'R2_NAME=r2\\nR2_HOLD=1\\nR2_COLOCATED=mesh1\\n' > /run/socialweb-r2/r2-start.env && chown root:socialweb-r2 /run/socialweb-r2/r2-start.env && chmod 0640 /run/socialweb-r2/r2-start.env && systemctl start --no-block socialweb-r2.service";
                 h = h.call(host("r2", "request.ssh", json!({ "name": name, "exec": cmd })));
             }
@@ -300,4 +302,75 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-entries! { run => run_a, b => run_b }
+
+/// r2fail: an R2 that fails after it reported its DID (its unit killed) leaves no live DID at PLC once the outer
+/// contract is released (the renter's tombstone fallback). KNOWN GAP for rc166: a failed attempt left
+/// did:plc:7f2a7u2jjxft6fngc4yzmxyr live, so this fails on rc165.
+fn run_r2fail(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    let name = args["name"].as_str().ok_or("name")?.to_string();
+    let mut h = Handle::new();
+    match run.event {
+        Event::Start => {
+            s.set("held");
+            let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
+            h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 40 * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 40 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "poll" => h = h.call(host("tomb", "assert.tombstoned", json!({ "dids": [s.st["r2"]] }))),
+        Event::Message { id, data, .. } if id == "req" => {
+            match data["msg"].as_str().unwrap_or_default() {
+                "contract" if data["phase"] == "Held" => s.flag("held"),
+                "exited" => s.flag("exited"),
+                "requester_guest_requester_reported" if s.st["r2"].is_null() => s.st["r2"] = data["did"].clone(),
+                _ => {}
+            }
+            if s.is("held") && s.has("held") && s.has("exited") {
+                s.set("r2");
+                h = h.call(host("r2", "request.r2", json!({ "name": name, "r2Name": "r2-fail" })));
+            }
+            if s.is("reported") && s.st["r2"].is_string() {
+                s.set("kill");
+                s.reading("r2", s.st["r2"].clone());
+                h = h.call(host("kill", "request.ssh", json!({ "name": name, "exec": "systemctl kill --signal=KILL socialweb-r2.service; systemctl stop socialweb-r2.service; true" })));
+            }
+        }
+        Event::Result { id, result, .. } => {
+            let o = match out(&s, &id, result.output()) {
+                Ok(o) => o,
+                Err(f) => return Ok(f),
+            };
+            match id.as_str() {
+                "r2" => {
+                    s.set("reported");
+                    if s.st["r2"].is_string() {
+                        s.set("kill");
+                        s.reading("r2", s.st["r2"].clone());
+                        h = h.call(host("kill", "request.ssh", json!({ "name": name, "exec": "systemctl kill --signal=KILL socialweb-r2.service; systemctl stop socialweb-r2.service; true" })));
+                    }
+                }
+                "kill" => h = h.call(host("release", "request.release", json!({ "name": name }))),
+                "release" => {
+                    s.mark("release");
+                    h = h.timer("poll", 5_000);
+                }
+                "tomb" => {
+                    if o["alive"].as_array().is_some_and(Vec::is_empty) {
+                        return Ok(s.pass());
+                    }
+                    if s.since("release") > 300.0 {
+                        return Ok(s.fail(format!("KNOWN GAP rc166: the failed R2 left {} live at PLC 5 min after the release", o["alive"])));
+                    }
+                    h = h.timer("poll", 10_000);
+                }
+                _ => {}
+            }
+        }
+        Event::Closed { id, error } if id == "req" => return Ok(s.fail(format!("req closed: {}", error.unwrap_or_default()))),
+        _ => {}
+    }
+    Ok(s.keep(h))
+}
+
+entries! { run => run_a, b => run_b, r2fail => run_r2fail }

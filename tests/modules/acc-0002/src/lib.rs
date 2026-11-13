@@ -25,7 +25,8 @@ fn run_0002(run: Run<Value>) -> Result<Handle, String> {
             let from = data["nick"] == a.as_str() || data["identity"].as_str().is_some_and(|i| i.starts_with(&format!("{a}.")));
             let text = data["text"].as_str().unwrap_or_default();
             let form = if held { "held" } else { "transient" };
-            if (s.is("transient") || s.is("held")) && from && !s.has(&format!("{form}-joined")) {
+            // the agent JOINs ~18 s before it reads: prompt only after its "online - monitoring atirc" line
+            if (s.is("transient") || s.is("held")) && from && text.contains("online") && !s.has(&format!("{form}-joined")) {
                 s.flag(&format!("{form}-joined"));
                 let t = s.since("session");
                 s.st["readings"][form]["join_s"] = json!(t);
