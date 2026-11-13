@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-32.marketnetworks.socialweb.computer
+  name: v1alpha1-33.marketnetworks.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -1408,6 +1408,8 @@ spec:
                     type: array
                     items:
                       type: string
+                  atircUrl:
+                    type: string
                 required:
                   - plcDirectoryUrl
                   - ingressProxyHost

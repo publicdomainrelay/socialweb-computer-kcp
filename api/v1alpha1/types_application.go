@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"cmp"
 	"net"
 	"slices"
 	"strings"
@@ -26,6 +27,8 @@ type MarketNetworkValue struct {
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	DiscoveryRelays []string `json:"discoveryRelays,omitempty" apigen:"userEndpoint"`
+
+	AtircURL string `json:"atircUrl,omitempty" apigen:"userEndpoint"`
 }
 
 type NetworkHost struct {
@@ -81,6 +84,9 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 	var extra []string
 	if n != nil {
 		extra = n.DiscoveryRelays
+		if len(extra) == 0 && n.Comms != nil && n.Comms.RelayURLs != nil {
+			extra = *n.Comms.RelayURLs
+		}
 	}
 	if len(extra) == 0 && len(out) == 0 {
 		extra = []string{DefaultDiscoveryRelayURL, DefaultMarketRelayURL}
@@ -199,6 +205,27 @@ var (
 		PublicJetstreamWestURL,
 	}
 )
+
+func (n *MarketNetworkValue) MergeComms(c *MarketComms) *MarketComms {
+	if n == nil || n.Comms == nil {
+		return c
+	}
+	if c == nil {
+		return n.Comms
+	}
+	out := *c
+	out.Mode = cmp.Or(out.Mode, n.Comms.Mode)
+	if out.EventSourceRefs == nil {
+		out.EventSourceRefs = n.Comms.EventSourceRefs
+	}
+	if out.RelayURLs == nil {
+		out.RelayURLs = n.Comms.RelayURLs
+	}
+	if out.JetstreamURLs == nil {
+		out.JetstreamURLs = n.Comms.JetstreamURLs
+	}
+	return &out
+}
 
 func (c *MarketComms) FirehoseRelays(network *MarketNetworkValue) []string {
 	if c != nil && c.RelayURLs != nil {

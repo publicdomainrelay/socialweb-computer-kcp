@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,7 +41,7 @@ import (
 const bidderIdentityWait = 5 * time.Minute
 
 var bidderOptions = slices.Concat([]string{backendOpt, "profile", "network", "name", "instance", "state-dir", "fg", "ready-timeout",
-	"network-timeout", "market-network-file", "bidder-policy", "bidder-policy-args", "bidder-operator-signin", "bidder-options", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
+	"network-timeout", "market-network-file", "bidder-spec-file", "bidder-policy", "bidder-policy-args", "bidder-operator-signin", "bidder-options", "kcp-path", "kine-path", "bao-path", "dumbpipe-path", "openbao-plugin-dir", "asset-cache", "unit-prefix", "kcp-front-address", "guest-image-release-base", "no-guest-lan-udp", "guest-host-udp", "compute-kinds"},
 	devVMOptions)
 
 type bidderRun struct {
@@ -52,6 +53,7 @@ type bidderRun struct {
 	network        string
 	policy         string
 	options        []v1alpha1.ApplicationOption
+	specOptions    []v1alpha1.ApplicationOption
 	value          *v1alpha1.MarketNetworkValue
 	ingress        *v1alpha1.IngressConfig
 	comms          *v1alpha1.MarketComms
@@ -120,7 +122,10 @@ func (r *bidderRun) passthrough(args []string) error {
 		return err
 	}
 	var nv v1alpha1.MarketNetworkValue
-	nvSet := false
+	nvSet := r.value != nil
+	if nvSet {
+		nv = *r.value
+	}
 	for _, p := range parsed {
 		if r.network != "" && strings.HasPrefix(p.To, compose.MapToNetwork) {
 			return fmt.Errorf("--%s maps to %s, which the market network sets for its child applications", p.Name, p.To)
@@ -214,6 +219,27 @@ func (r *bidderRun) passthrough(args []string) error {
 	return nil
 }
 
+func (r *bidderRun) readSpec(path string) error {
+	s, err := readSpecFile[v1alpha1.MarketBidderSpec](path)
+	if err != nil {
+		return err
+	}
+	if h := strings.ToLower(s.Identity.Handle); h != "" {
+		if r.handle != "" && r.handle != h {
+			return fmt.Errorf("identity.handle %s and --handle %s name two accounts", h, r.handle)
+		}
+		r.handle = h
+	}
+	r.value, r.identityMode, r.pdsURL, r.comms, r.ingress = s.Network, s.Identity.Mode, s.Identity.PdsURL, s.Comms, s.Ingress
+	r.policy, r.specOptions, r.guestNetwork, r.computeKinds = s.Policy, s.Options, s.GuestNetwork, s.ComputeKinds
+	s.Network, s.Identity.Mode, s.Identity.Handle, s.Identity.PdsURL, s.Comms, s.Ingress = nil, "", "", "", nil, nil
+	s.Policy, s.Options, s.GuestNetwork, s.ComputeKinds = "", nil, nil, nil
+	if !reflect.DeepEqual(s, v1alpha1.MarketBidderSpec{}) {
+		return fmt.Errorf("%s: run bidder takes only network, identity (mode, handle, pdsUrl), comms, ingress, policy, options, guestNetwork and computeKinds", path)
+	}
+	return nil
+}
+
 func (r *bidderRun) configOptions(words string) error {
 	parsed, err := compose.ParseAppArgs(marketbidder.BidderApp, strings.Fields(words))
 	if err != nil {
@@ -259,11 +285,24 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 	if r.networkTimeout, err = time.ParseDuration(vals.String("network-timeout")); err != nil {
 		return a.fail(exitRefused, "run bidder: network-timeout: %v", err)
 	}
+	if p := vals.String("bidder-spec-file"); p != "" {
+		if r.network != "" {
+			return a.fail(exitRefused, "run bidder: --network hands the bidder the market network's value; --bidder-spec-file is for a bidder outside it")
+		}
+		if err := r.readSpec(p); err != nil {
+			return a.fail(exitRefused, "run bidder: --bidder-spec-file: %v", err)
+		}
+	}
 	if err := r.passthrough(pass); err != nil {
 		return a.fail(exitRefused, "run bidder: %v", err)
 	}
 	if err := r.configOptions(vals.String("bidder-options")); err != nil {
 		return a.fail(exitRefused, "run bidder: bidder-options: %v", err)
+	}
+	for _, o := range r.specOptions {
+		if !slices.ContainsFunc(r.options, func(have v1alpha1.ApplicationOption) bool { return have.Name == o.Name }) {
+			r.options = append(r.options, o)
+		}
 	}
 	flags, err := guestNetworkFlags(vals)
 	if err != nil {
@@ -275,8 +314,12 @@ func runBidder(ctx context.Context, a *app, vals clicfg.Values, rest []string) i
 			return a.fail(exitRefused, "run bidder: --atproto-password: %v", err)
 		}
 	}
-	if r.computeKinds, err = computeKindsFlag(vals); err != nil {
+	kinds, err := computeKindsFlag(vals)
+	if err != nil {
 		return a.fail(exitRefused, "run bidder: %v", err)
+	}
+	if len(kinds) > 0 {
+		r.computeKinds = kinds
 	}
 	if len(r.computeKinds) == 0 {
 		r.computeKinds = []string{string(v1alpha1.ComputeKindVM)}
@@ -345,7 +388,7 @@ func (r *bidderRun) readMarketNetwork(path string) error {
 		return fmt.Errorf("it names a market network, whose profile is %s, not %s", marketbidder.BidderProfileNetwork, r.profile)
 	}
 	if r.value != nil {
-		return errors.New("it and the --network-* options both name the network value")
+		return errors.New("it and --bidder-spec-file or the --network-* options both name the network value")
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

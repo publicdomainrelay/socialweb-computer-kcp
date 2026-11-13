@@ -23,7 +23,7 @@ import (
 )
 
 var installOptions = []string{backendOpt, "handle", "account", "state-dir", "vm-slots", "dry-run", "adopt-account", "json", "root", "unit-prefix", "allow-dev-binary",
-	install.OptKcpFront, install.OptTLSFront, install.OptCertFront, install.OptSpecFile, install.OptGuestImg, install.OptGuestImgBase, install.OptReadyTimeout, install.OptNetworkTimeout, install.OptNoGuestLANUDP, install.OptGuestHostUDP, install.OptBidderPolicy, install.OptBidderOperator, install.OptComputeKinds, install.OptVMM}
+	install.OptKcpFront, install.OptTLSFront, install.OptCertFront, install.OptSpecFile, install.OptBidderSpecFile, install.OptGuestImg, install.OptGuestImgBase, install.OptReadyTimeout, install.OptNetworkTimeout, install.OptNoGuestLANUDP, install.OptGuestHostUDP, install.OptBidderPolicy, install.OptBidderOperator, install.OptComputeKinds, install.OptVMM}
 
 var installRequesterOptions = []string{backendOpt, "name", "account", "state-dir", "dry-run", "adopt-account", "json", "root", "unit-prefix", "allow-dev-binary",
 	install.OptReadyTimeout, install.OptNetworkTimeout}
@@ -116,6 +116,11 @@ func runInstall(role hostcontract.Role) verbFunc {
 				continue
 			}
 			if v := passed(k); v != "" {
+				if k == install.OptSpecFile || k == install.OptBidderSpecFile {
+					if abs, err := filepath.Abs(v); err == nil {
+						v = abs
+					}
+				}
 				listen[k] = v
 			}
 		}

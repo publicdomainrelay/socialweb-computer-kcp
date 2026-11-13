@@ -126,8 +126,6 @@ type Placement struct {
 type Config struct {
 	Spec v1alpha1.RequesterSpec
 
-	AtircURL string
-
 	Placement
 
 	IdentityMode IdentityMode

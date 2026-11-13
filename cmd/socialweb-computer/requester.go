@@ -140,6 +140,8 @@ func parseRequesterSpec(args []string, verb string, verbOptions []string, networ
 				nv.IngressProxyHost = p.Value
 			case "network.qrOrigin":
 				nv.QrOrigin = p.Value
+			case "network.atircUrl":
+				nv.AtircURL = p.Value
 			case "network.hosts":
 				for _, h := range splitList(p.Value) {
 					name, addr, ok := strings.Cut(h, "=")

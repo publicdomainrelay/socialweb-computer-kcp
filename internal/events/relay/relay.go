@@ -3,6 +3,7 @@ package relay
 import (
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +63,8 @@ type Config struct {
 type Deps struct {
 	Dial wsconn.DialFunc
 
+	TLS *tls.Config
+
 	Log *slog.Logger
 }
 
@@ -69,6 +72,8 @@ type Source struct {
 	base string
 
 	dial wsconn.DialFunc
+
+	tls *tls.Config
 
 	log *slog.Logger
 }
@@ -87,7 +92,7 @@ func New(cfg Config, deps Deps) (*Source, error) {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Source{base: base, dial: deps.Dial, log: log}, nil
+	return &Source{base: base, dial: deps.Dial, tls: deps.TLS, log: log}, nil
 }
 
 func (s *Source) Address() string {
@@ -131,7 +136,7 @@ func (s *Source) Subscribe(ctx context.Context, filter events.Filter) (events.St
 	parsed.RawQuery = query.Encode()
 	s.log.Info("relay_subscribe_dial", "url", endpoint, events.WantedCollectionsParam, collections,
 		"wantedDidsCount", len(dids), events.WantedDIDsParam, events.LogDIDs(dids), "cursor", cursor)
-	conn, err := wsconn.Dial(ctx, parsed.String(), s.dial)
+	conn, err := wsconn.DialConfig(ctx, parsed.String(), wsconn.Config{Dial: s.dial, TLSConfig: s.tls})
 	if err != nil {
 		return nil, fmt.Errorf("relay: %w", err)
 	}

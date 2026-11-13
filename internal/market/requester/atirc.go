@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -236,9 +237,9 @@ func (q *Requester) serviceAtircIssuer(ctx context.Context) (atircIssuer, error)
 	}
 	ctx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()
-	bearer, err := q.atircAuth.ServiceAuth(ctx, AtircServiceAudience, AtircMintNSID)
+	bearer, err := q.atircAuth.ServiceAuth(ctx, q.atircAudience(), AtircMintNSID)
 	if err != nil {
-		return atircIssuer{}, fmt.Errorf("service auth for %s: %w", AtircServiceAudience, err)
+		return atircIssuer{}, fmt.Errorf("service auth for %s: %w", q.atircAudience(), err)
 	}
 	label, _, _ := strings.Cut(handle, ".")
 	if len(label) > maxAtircLabel {
@@ -1062,9 +1063,9 @@ func (r *contractRunner) revokeAccount(ctx context.Context) atircRevokeAccount {
 func (r *contractRunner) accountRevokeBearer(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, atircCallTimeout)
 	defer cancel()
-	bearer, err := r.q.serviceAuth.ServiceAuth(ctx, AtircServiceAudience, AtircRevokeNSID)
+	bearer, err := r.q.serviceAuth.ServiceAuth(ctx, r.q.atircAudience(), AtircRevokeNSID)
 	if err != nil {
-		return "", fmt.Errorf("service auth for %s %s: %w", AtircServiceAudience, AtircRevokeNSID, err)
+		return "", fmt.Errorf("service auth for %s %s: %w", r.q.atircAudience(), AtircRevokeNSID, err)
 	}
 	return bearer, nil
 }
@@ -1224,7 +1225,19 @@ func (r *contractRunner) postAtirc(ctx context.Context, nsid, bearer string, in,
 }
 
 func (q *Requester) atircBase() string {
-	return strings.TrimRight(cmp.Or(strings.TrimSpace(q.cfg.AtircURL), DefaultAtircURL), "/")
+	raw := ""
+	if n := q.cfg.Spec.Network; n != nil {
+		raw = strings.TrimSpace(n.AtircURL)
+	}
+	return strings.TrimRight(cmp.Or(raw, DefaultAtircURL), "/")
+}
+
+func (q *Requester) atircAudience() string {
+	u, err := url.Parse(q.atircBase())
+	if err != nil || u.Host == "" {
+		return AtircServiceAudience
+	}
+	return "did:web:" + strings.ReplaceAll(u.Host, ":", "%3A") + "#atirc"
 }
 
 func (q *Requester) postAtirc(ctx context.Context, nsid, bearer string, in, out any) error {

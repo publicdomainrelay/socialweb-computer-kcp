@@ -3,8 +3,6 @@ package componentcore
 import (
 	"cmp"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
@@ -377,7 +375,7 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 	}
 	watchChildren, watchRepos, watchValues := eventsctl.RecordWatch(clients.client)
 	run, err := eventsctl.Register(g.Context(), mgr, eventsctl.Options{Bus: c.handlers, Dynamic: eventstream.DynamicFactory(cfg.DynamicFactory),
-		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), HTTPClient: c.networkClient(networkReadTimeout), StateDir: cfg.StateDir,
+		Resolver: &pdsclient.Resolver{Handlers: c.handlers, Timeout: pdsClientTimeout}, PLCURL: c.plcBaseURL(), HTTPClient: c.networkClient(networkReadTimeout), TLS: c.egressTLS, StateDir: cfg.StateDir,
 		RecordWatchChildren: watchChildren, RecordWatchRepos: watchRepos, RecordWatchValues: watchValues, Log: log})
 	if err != nil {
 		return fmt.Errorf("componentcore: the event controllers: %w", err)
@@ -387,13 +385,10 @@ func (c *Core) registerNetwork(mgr *ctlruntime.Manager, clients *workspaceClient
 }
 
 func (c *Core) networkClient(timeout time.Duration) *http.Client {
-	egress := component.Egress{Hosts: c.hosts, TLS: c.tls, Log: c.cfg.Log}
+	egress := component.Egress{Hosts: c.hosts, TLS: c.egressTLS, Log: c.cfg.Log}
 	if n := c.cfg.Network; n != nil {
 		if hosts := participant.NetworkHosts(*n, c.hosts); hosts != nil {
 			egress.Hosts = hosts
-		}
-		if pool, err := x509.SystemCertPool(); err == nil && pool.AppendCertsFromPEM([]byte(n.CABundle)) {
-			egress.TLS = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
 		}
 	}
 	return egress.Client(timeout)
