@@ -7,6 +7,19 @@ invocation kcp and after that kcp restarts from its state dir.
 - Plan 0034 ACC34-CLI-SSH; the long form with the scope note is
   [0001 section 9](0001-auth-modes.md#9-acc34-ssh-over-webrtc-from-the-cli-on-each-bidder)
 - One run per host: only `$HOST` bids: `-- --allow-bidder-dids <$HOST bidder DID>` (or the other two bidders suspended)
+- Last run: 2026-11-12 23:57Z-2026-11-13 00:17Z, bidders + CLI on kcp e190a3b1 (release 66f3bd4d, rollout 19) on hat-8,
+  alice by QR (consent page: client qr.fedfork.com for @aliceoa.bsky.social), no bidders list (the other two
+  MarketBidders suspended, resumed after each host): **FAIL** on the restarted-kcp ssh only. local / hat-9 / hat-7:
+  identity Ready -> guest on network 49 / 37 / 32 s, Held, ssh over WebRTC fresh 3.9 / 3.3 / 3.1 s, restarted invocation
+  64.7 / 67.6 / 66.2 s (expected 2-10 s): every core start logs 10 `the APIExport provider waits for its virtual workspace
+  to serve discovery` then 10 WARN `... starts before its virtual workspace serves discovery` after the 1 m timeout (30/30
+  per run, 3 core starts; [0001 section 9](0001-auth-modes.md), cdd93727 `awaitEndpoints` waits for an
+  `EndpointURLsReady` condition kcp v0.33 never sets). Everything else passes: `uid=0` from both invocations, exit 0,
+  `StrictHostKeyChecking=yes`, winner = the unpaused host (Running ComputeVM), plaintext 0 / 0 on all six logs, `run
+  request release` Released, hosts 0 ComputeVM / 0 firecracker, the 10 alice URIs each run logged (rfp, accept, 4
+  market.event, 2 guest.publicKey, 2 guest.signalWebRTC) RecordNotFound x3. Each release left its release `market.event`
+  and `compute.events.vm.delete` (the 0006 release-records bug; 6 deleted by hand); the run's `badgeBlueKeys` signer
+  binding (`market_requester`, stable rkey per state dir) stays by design
 - Last pass: bidders rollout 6 (2d367fe8; hat-7 iroh + webrtc only, market-https off), CLI 41319a3a on hat-8, 2026-11-10
   16:39Z hat-9 and 16:44Z hat-7, alice pdsAccount: Held in 63 / 66 s, ssh over WebRTC exit 0 fresh (5.5 / 2.8 s) and from a
   restarted invocation (4.8 / 2.3 s), plaintext 0 / 0, Released; every record of alice's the run logged (rfp, accept, 4

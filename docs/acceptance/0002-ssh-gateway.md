@@ -7,7 +7,23 @@ end revokes the token before the contract is released.
 - Gateway: Go `SshServer` + one per-user `Requester` per signed-in DID (`requester-<stamp(did)>`)
 - Port 22 on `socialweb.computer` = Go ssh gateway (legacy deno gateway disabled, kept for rollback)
 - Web half: `https://ssh.socialweb.computer` (sign-in + `/keys`)
-- Last pass: final code, gateway + ssh gateway + bidders on rollout 8 (5e6c4e3d), 2026-11-10 19:42Z: alice signed in again on the web page (headless oauth-signin.ts, `--start-api`), a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 63 s, key removed; before: gateway kcp 438ca0fa, bidders rollout 6 (2d367fe8), 2026-11-10 16:45Z: alice signed in again on the web page (headless oauth-signin.ts, `--start-api`), a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 61 s, key removed; before: kcp 69aa8b0f (bin 5b8682fd, p2p rollout 2), 2026-11-10 13:33Z: alice, web sign-in + a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 62 s (the bidder reached over its offering endpoints); earlier: rc152 2026-11-01 (owner account, atirc agent), rc154 restart check
+- Last pass: 2026-11-12 23:38-23:56Z, gateway + ssh gateway + bidders on kcp e190a3b1 (release 66f3bd4d, rollout 19), alice,
+  no bidders list (discovery: candidates=17 bidders=3). Web sign-in on ssh.socialweb.computer (headless oauth-signin.ts
+  `--start-api`; consent page: client ssh.socialweb.computer for @aliceoa.bsky.social), a temp key via `POST /keys`
+  (record at its stable rkey; `GET /keys` did not list it, only the `requester_associate` key), `ssh -F /dev/null -p 22`.
+  Transient `atirc agent run a2bot < <agent config>`: session_started 23:43:02.37Z, discovery +13 s, hat-7 won, guest ssh
+  ready 23:44:00, `requester_session_atirc_minted a2bot.aliceoa.bsky.social` 23:44:01.69Z, JOIN 23:44:33Z (91 s after the
+  session start; the guest installs Claude Code first), `a2bot: uname -m; id -un` answered `x86_64 / a2bot` in 3.5 s (guest
+  user, not root); disconnect 23:45:42.55Z, `requester_session_atirc_revoked` 23:45:42.576Z, release 23:45:42.62Z,
+  Released 23:45:43.87Z (revoke 1.3 s before), records 6/6 deleted. Held `LC_SESSION=a2held`: JOIN 23:50:25Z, answered
+  `hostname=fc-lpfuqerea3de-c0268b10 user=a2held` in 3.2 s; disconnect 23:50:45.79Z, revoked 23:50:45.805Z, then
+  (known open issue: the guest's agent keeps running) `requester_held_session_released reason=idle` 23:55:45.83Z, hat-8
+  Released 23:55:47.65Z, 6/6 deleted. A key with no claim: `Permission denied (publickey)`. Hosts 0 firecracker; no record
+  of alice's created in the window remains (full listRecords scan); temp key deleted (RecordNotFound), observer token
+  revoked. One WARN `requester_inbox_delete_failed` per contract (StateSync inbox). Not run: the side port (no staged
+  build), an unvouched DID; the atirc-side `revocations.ndjson` (no ssh to irc.fedfork.com from the kit: the gateway
+  log is the revoke evidence)
+- Previous pass: final code, gateway + ssh gateway + bidders on rollout 8 (5e6c4e3d), 2026-11-10 19:42Z: alice signed in again on the web page (headless oauth-signin.ts, `--start-api`), a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 63 s, key removed; before: gateway kcp 438ca0fa, bidders rollout 6 (2d367fe8), 2026-11-10 16:45Z: alice signed in again on the web page (headless oauth-signin.ts, `--start-api`), a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 61 s, key removed; before: kcp 69aa8b0f (bin 5b8682fd, p2p rollout 2), 2026-11-10 13:33Z: alice, web sign-in + a temp key on `/keys`, transient `ssh aliceoa.bsky.social@socialweb.computer 'uname -a; id; hostname'` -> exit 0 in 62 s (the bidder reached over its offering endpoints); earlier: rc152 2026-11-01 (owner account, atirc agent), rc154 restart check
 - The port-22 gateway is its own unit, `swc-ssh-gateway.service` (`run gateway ssh --instance sg`, state `/var/lib/socialweb-computer/socialweb/sg`): `infra/hosts/socialweb-computer.sh --apply` upgrades `bin/current` but does not restart it; restart it after (it runs `bin/current`)
 
 ```mermaid
