@@ -306,6 +306,8 @@ func (r *contractRunner) Run(ctx context.Context) {
 	for replaced := 0; err != nil && replaced < MaxAcceptReplacements && !r.released() && !r.q.stopping(); replaced++ {
 		if errors.Is(err, ErrAcceptDeclined) {
 			r.replaceDeclined(ctx, err)
+		} else if errors.Is(err, errGuestImage) {
+			r.replaceWrongImage(ctx, err)
 		} else if !r.reRFPAfterRefusals(ctx, err) {
 			break
 		}
@@ -1261,7 +1263,8 @@ func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord,
 func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, expectedImage string) error {
 	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
-	addressDeadline := time.NewTimer(DefaultVMReadyTimeout)
+	readyTimeout := r.vmReadyTimeout()
+	addressDeadline := time.NewTimer(readyTimeout)
 	defer addressDeadline.Stop()
 	hostKeysDeadline := time.NewTimer(DefaultHostKeysTimeout)
 	defer hostKeysDeadline.Stop()
@@ -1356,6 +1359,9 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	for {
 		imageSeen = imageSeen || state.GuestImageMarker != ""
 		if state.Termination != nil {
+			if state.Termination.Reason == imageRefusedReason {
+				return fmt.Errorf("%w: the bidder refused the image before boot", errGuestImage)
+			}
 			return nil
 		}
 		if state.VMAddress != "" && state.HostKeys != nil && imageSeen {
@@ -1369,10 +1375,10 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		if state.VMAddress == "" && addressLate {
 			state.Outcome = v1alpha1.ContractOutcomeNetworkTimeout
-			return fmt.Errorf("the guest did not come on network within %s", DefaultVMReadyTimeout)
+			return fmt.Errorf("the guest did not come on network within %s", readyTimeout)
 		}
 		if !imageSeen && addressLate {
-			return fmt.Errorf("%w: no guest.image event within %s", errGuestImage, DefaultVMReadyTimeout)
+			return fmt.Errorf("%w: no guest.image event within %s", errGuestImage, readyTimeout)
 		}
 		if state.VMAddress != "" && state.HostKeys == nil && !sandboxAddress(state.VMAddress) && hostKeysLate {
 			return fmt.Errorf("the guest reported no ssh host keys within %s", DefaultHostKeysTimeout)

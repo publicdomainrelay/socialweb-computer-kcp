@@ -151,6 +151,9 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err := b.checkCapacity(); err != nil {
 		return "", err
 	}
+	if refused := b.imageRefused(ctx, record); refused != "" {
+		return "", fmt.Errorf("bidder: %s: %w", refused, participant.ErrRejected)
+	}
 	if refused := b.reserve(req.rfpURI, record, AcceptReserveHold); refused != "" {
 		return "", fmt.Errorf("bidder: %s: %w: %w", refused, ErrCapacity, participant.ErrRejected)
 	}
