@@ -1,7 +1,6 @@
 package eventstream
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -9,8 +8,6 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/bluesky-social/indigo/atproto/identity"
-	"github.com/bluesky-social/indigo/atproto/syntax"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	commonv1 "github.com/johnandersen777/socialweb-computer-kcp/api/common/v1alpha1"
@@ -19,51 +16,6 @@ import (
 )
 
 const AtprotoRepoKind = "AtprotoRepo"
-
-type fallbackDirectory []identity.Directory
-
-func (d fallbackDirectory) lookup(fn func(identity.Directory) (*identity.Identity, error)) (*identity.Identity, error) {
-	var last error
-	for _, dir := range d {
-		ident, err := fn(dir)
-		if err == nil {
-			return ident, nil
-		}
-		last = err
-	}
-	if last == nil {
-		last = identity.ErrDIDNotFound
-	}
-	return nil, last
-}
-
-func (d fallbackDirectory) LookupHandle(ctx context.Context, handle syntax.Handle) (*identity.Identity, error) {
-	return d.lookup(func(dir identity.Directory) (*identity.Identity, error) {
-		return dir.LookupHandle(ctx, handle)
-	})
-}
-
-func (d fallbackDirectory) LookupDID(ctx context.Context, did syntax.DID) (*identity.Identity, error) {
-	return d.lookup(func(dir identity.Directory) (*identity.Identity, error) {
-		return dir.LookupDID(ctx, did)
-	})
-}
-
-func (d fallbackDirectory) Lookup(ctx context.Context, atid syntax.AtIdentifier) (*identity.Identity, error) {
-	return d.lookup(func(dir identity.Directory) (*identity.Identity, error) {
-		return dir.Lookup(ctx, atid)
-	})
-}
-
-func (d fallbackDirectory) Purge(ctx context.Context, atid syntax.AtIdentifier) error {
-	var last error
-	for _, dir := range d {
-		if err := dir.Purge(ctx, atid); err != nil {
-			last = err
-		}
-	}
-	return last
-}
 
 type SourcePlan struct {
 	Name string
