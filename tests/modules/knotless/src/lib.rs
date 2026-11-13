@@ -122,7 +122,8 @@ for round in 1 2 3; do
   knotless run list "$U" --commit "$C" --log > ../{r}.log
   if grep -v "^success	fill-" ../{r}.checks | grep -q "	fill-"; then cat ../{r}.log; exit 1; fi
   if grep 'declined the accept' ../{r}.log; then echo "round $round: a declined accept was replaced"; exit 0; fi
-  echo "round $round: every first pick had room"
+  echo "round $round: every first pick had room; the next once the bidders hold no reservation (90 s)"
+  sleep 90
   echo $((round + 1)) > round && git commit -q -am "round $((round + 1))" && git push -q origin main
 done
 echo "no accept was declined in 3 rounds"; exit 1
