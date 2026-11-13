@@ -1,6 +1,7 @@
 // docs/acceptance/0008-host-observer.md: a VM's timeline on its host (Running there while Held), the release, the
 // vm.terminated pinned by one getRecord at its computed key (deleted_on_request), the release's records gone, the
-// orphan check (nothing of the receipt on the host). Without the winner's kcp the host readings are skipped.
+// orphan check on every host the target reaches: CONFIRMED (identity Ready, 0 startup ERROR, 0 automatic restarts),
+// nothing of the receipt, no VM process without a Running ComputeVM. Without the winner's kcp its timeline is skipped.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
 use steps::{MIN, S, VM_TERMINATED, get_record, host, kube, out, termination_rkey};
@@ -10,7 +11,6 @@ fn run_0008(run: Run<Value>) -> Result<Handle, String> {
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
-    let cluster = s.st["cluster"].as_str().map(String::from);
     let vms = |id: &str, c: &str| kube(id, "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" }));
     let mut h = Handle::new();
     match run.event {
@@ -95,16 +95,54 @@ fn run_0008(run: Run<Value>) -> Result<Handle, String> {
                     if o["left"].as_array().is_none_or(|l| !l.is_empty()) {
                         return Ok(s.fail(format!("records left: {} {}", o["left"], o["errors"])));
                     }
-                    match cluster {
-                        Some(c) => h = h.call(vms("empty", &c)),
-                        None => return Ok(s.pass()),
+                    // every host the target reaches: CONFIRMED (identity Ready, no pending action, 0 startup ERROR,
+                    // 0 automatic restarts) and empty of this receipt, no VM process without a Running ComputeVM
+                    let reach: Vec<&Value> = bidders.iter().filter(|b| b["cluster"].is_string()).collect();
+                    s.set("hosts");
+                    s.st["fan"] = json!(reach.len() * 3);
+                    if reach.is_empty() {
+                        return Ok(s.pass());
+                    }
+                    for (j, b) in bidders.iter().enumerate().filter(|(_, b)| b["cluster"].is_string()) {
+                        let c = b["cluster"].as_str().unwrap_or_default();
+                        h = h.call(kube(&format!("mi-{j}"), "get", c, steps::sw("MarketIdentity", "bidder"))).call(vms(&format!("vm-{j}"), c)).call(host(&format!("hl-{j}"), "bidder.health", json!({ "name": b["name"] })));
                     }
                 }
-                "empty" => {
-                    if o["items"].as_array().into_iter().flatten().any(|v| v["spec"]["contract"]["receipt"]["uri"] == s.st["receipt"]) {
-                        return Ok(s.fail("the host still runs a VM of the receipt"));
+                x if s.is("hosts") && x.len() > 3 && ["mi-", "vm-", "hl-"].contains(&&x[..3]) => {
+                    let j: usize = x[3..].parse().unwrap_or(0);
+                    let name = bidders[j]["name"].as_str().unwrap_or_default().to_string();
+                    match &x[..2] {
+                        "mi" => {
+                            if o["status"]["phase"] != "Ready" || !o["status"]["pendingAction"].is_null() {
+                                return Ok(s.fail(format!("{name} MarketIdentity {}", o["status"])));
+                            }
+                        }
+                        "vm" => {
+                            let items = o["items"].as_array().cloned().unwrap_or_default();
+                            if items.iter().any(|v| v["spec"]["contract"]["receipt"]["uri"] == s.st["receipt"]) {
+                                return Ok(s.fail(format!("{name} still runs a VM of the receipt")));
+                            }
+                            s.st["readings"]["hosts"][&name]["runningVMs"] = json!(items.iter().filter(|v| v["status"]["phase"] == "Running").count());
+                        }
+                        _ => {
+                            if o["error"].is_string() || o["startupErrors"] != 0 || o["restarts"] != 0 {
+                                return Ok(s.fail(format!("{name} not CONFIRMED: {o}")));
+                            }
+                            for k in ["started", "errors", "vmProcesses"] {
+                                s.st["readings"]["hosts"][&name][k] = o[k].clone();
+                            }
+                        }
                     }
-                    return Ok(s.pass());
+                    let left = s.st["fan"].as_u64().unwrap_or(1) - 1;
+                    s.st["fan"] = json!(left);
+                    if left == 0 {
+                        for (n, r) in s.st["readings"]["hosts"].as_object().cloned().unwrap_or_default() {
+                            if r["vmProcesses"].as_u64().unwrap_or(0) > r["runningVMs"].as_u64().unwrap_or(0) {
+                                return Ok(s.fail(format!("{n}: {} VM processes, {} Running ComputeVMs (orphans)", r["vmProcesses"], r["runningVMs"])));
+                            }
+                        }
+                        return Ok(s.pass());
+                    }
                 }
                 _ => {}
             }

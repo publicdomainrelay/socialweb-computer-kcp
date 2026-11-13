@@ -15,7 +15,9 @@
 		"computer.socialweb.test.request.records",
 		"com.atproto.repo.getRecord",
 		"com.fedfork.exec.kube.list",
-		"computer.socialweb.test.assert.recordsGone"
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.bidder.health",
+		"com.fedfork.exec.kube.get"
 	],
 	"hooks": [
 		{
