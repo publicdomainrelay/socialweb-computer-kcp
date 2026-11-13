@@ -136,24 +136,58 @@ fn run_0007(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-/// The new core's HostProcess supervisor line for a VM unit it found running (bootstrap.go): msg adopted, its
-/// HostProcess vm-<FirecrackerVM name>.
-fn adopted(vm: &str) -> Value {
-    json!(["\"msg\":\"adopted\"", format!("\"hostprocess\":\"vm-{vm}\"")])
+/// Log lines of the bidder's core that mean the restarted core started or stopped THIS VM's unit: a VM unit that is
+/// Active is adopted silently (hostprocess supervisor markAdopted), so any of these after the restart is a restart
+/// of the VM. [text, text...]: a line holds all of them.
+fn vm_lines(vm: &str) -> Value {
+    json!([
+        ["\"msg\":\"placed\"", vm],
+        ["\"msg\":\"stopped\"", vm],
+        ["work dir and API socket removed", vm],
+        ["\"msg\":\"shutdown\"", vm],
+        ["the process wait saw the VMM exit", vm],
+        ["bidder_vm_terminated", vm],
+        ["a released bid is marked terminated", vm],
+    ])
 }
 
-fn adopted_key(vm: &str) -> String {
-    format!("\"msg\":\"adopted\" & \"hostprocess\":\"vm-{vm}\"")
+/// The positive controls: the restarted core really started (a dev network's core logs `core holds the instance`
+/// with a new generation; an installed bidder's logs `adopted` for each of its infrastructure units, role kine-a,
+/// front, kcp-a). Index 0 and 1 of the counts.
+fn control_lines() -> Value {
+    json!(["core holds the instance", ["\"msg\":\"adopted\"", "\"role\":"]])
+}
+
+fn counts(o: &Value, texts: &Value) -> Vec<u64> {
+    texts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|t| {
+            let k = match t {
+                Value::Array(a) => a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" & "),
+                t => t.as_str().unwrap_or_default().to_string(),
+            };
+            o["counts"][k].as_u64().unwrap_or(0)
+        })
+        .collect()
 }
 
 fn fcvm(id: &str, cluster: &str, name: &str) -> abi::Call {
     kube(id, "get", cluster, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "FirecrackerVM", "name": name }))
 }
 
+fn cvms(id: &str, cluster: &str) -> abi::Call {
+    kube(id, "list", cluster, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" }))
+}
+
 /// restart (staging): the winner's core restarted in place (`dev restart <network> <bidder>/core`, the upgrade path, not a
-/// drain) under this run's Held VM: the new core adopts the VM's unit (its log), the VMM pid and invocation unchanged,
-/// ssh still answers with the same boot id, the VM Running with no lostReason, no vm.terminated, the contract Held
-/// throughout; then the release leaves no record.
+/// drain) under this run's Held VM. The VM's own unit is identified by its FirecrackerVM runtime (pid, invocationID,
+/// startTicks, unit) before and after and must be unchanged; its ComputeVM is read every 2 s from before the restart
+/// to 30 s after it and is Running every time (never Lost or Releasing); the guest's boot id is unchanged and ssh
+/// answers; the new core's log has none of vm_lines() for it (it adopts an Active unit silently); no vm.terminated; the
+/// contract never leaves Held. The restart itself must show (control_lines: a new core generation, or the infra
+/// units adopted). Then the release leaves no record.
 fn run_restart(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
@@ -165,6 +199,11 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
     let cluster = s.st["cluster"].as_str().unwrap_or_default().to_string();
     let vm = s.st["vm"].as_str().unwrap_or_default().to_string();
     let boot = |id: &str| host(id, "request.ssh", json!({ "name": name, "exec": "echo BOOT $(cat /proc/sys/kernel/random/boot_id)" }));
+    let logs = |id: &str, s: &S| {
+        let mut texts = control_lines().as_array().cloned().unwrap_or_default();
+        texts.extend(vm_lines(&vm).as_array().cloned().unwrap_or_default());
+        host(id, "bidder.logCount", json!({ "name": s.st["bidder"], "texts": texts }))
+    };
     let mut h = Handle::new();
     match run.event {
         Event::Start => {
@@ -175,8 +214,12 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold"] }))).timer("deadline", 30 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 30 min (phase {})", s.phase()))),
-        Event::Timer { id } if id == "poll" => h = h.call(fcvm("fc1", &cluster, &vm)),
-        Event::Timer { id } if id == "adopt" => h = h.call(host("log1", "bidder.logCount", json!({ "name": s.st["bidder"], "texts": [adopted(&vm)] }))),
+        // the watch: the ComputeVM every 2 s, from before the restart to 30 s after it returns
+        Event::Timer { id } if id == "watch" => {
+            if s.is("restarting") || s.is("watching") {
+                h = h.call(cvms("w", &cluster)).timer("watch", 2_000);
+            }
+        }
         Event::Message { data, .. } => {
             if s.st["receipt"].is_null() && data["receipt"].is_string() {
                 s.st["receipt"] = data["receipt"].clone();
@@ -202,7 +245,7 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                 s.st["cluster"] = json!(c);
                 s.st["bidder"] = b["name"].clone();
                 s.set("before");
-                h = h.call(boot("boot0")).call(kube("vms", "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" })));
+                h = h.call(boot("boot0")).call(cvms("vms", c));
             }
         }
         Event::Result { id, result, .. } => {
@@ -212,6 +255,31 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                     return Ok(s.fail(format!("vm.terminated after the restart: {}", o["value"])));
                 }
                 s.flag("noTerm");
+            } else if id == "w" && !(s.is("restarting") || s.is("watching")) {
+                // a list that came back after the watch ended (the release has begun): not read
+            } else if id == "w" {
+                // an unreadable list during the restart is a reading, not a verdict; a VM that is not Running is
+                let Ok(o) = r else {
+                    s.st["unreadable"] = json!(s.st["unreadable"].as_u64().unwrap_or(0) + 1);
+                    return Ok(s.keep(h));
+                };
+                let mine = o["items"].as_array().into_iter().flatten().find(|v| v["spec"]["contract"]["receipt"]["uri"] == s.st["receipt"]);
+                s.st["watched"] = json!(s.st["watched"].as_u64().unwrap_or(0) + 1);
+                match mine {
+                    Some(v) if v["status"]["phase"] == "Running" && v["metadata"]["deletionTimestamp"].is_null() && !v["status"]["lostReason"].is_string() => {}
+                    other => {
+                        return Ok(s.fail(format!("the ComputeVM left Running during the restart: {}", other.map(|v| json!({ "phase": v["status"]["phase"], "lostReason": v["status"]["lostReason"], "deleting": v["metadata"]["deletionTimestamp"] })).unwrap_or(json!("gone")))));
+                    }
+                }
+                if s.is("watching") && s.since("restarted") > 30.0 {
+                    s.set("verify");
+                    s.reading("watched", s.st["watched"].clone());
+                    s.reading("watchUnreadable", s.st["unreadable"].clone());
+                    h = h.call(fcvm("fc1", &cluster, &vm)).call(boot("boot1")).call(logs("log1", &s));
+                    let rcpt = s.st["receipt"].as_str().unwrap_or_default().to_string();
+                    let wd = rcpt.trim_start_matches("at://").split('/').next().unwrap_or_default().to_string();
+                    h = h.call(get_record("term", &format!("at://{wd}/{VM_TERMINATED}/{}", termination_rkey(&rcpt))));
+                }
             } else {
                 let o = match out(&s, &id, r) {
                     Ok(o) => o,
@@ -234,37 +302,16 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                     }
                     "fc0" | "fc1" => {
                         let rt = &o["status"]["runtime"];
+                        if rt["pid"].as_i64().unwrap_or(0) == 0 || rt["invocationID"].as_str().unwrap_or_default().is_empty() {
+                            return Ok(s.fail(format!("the FirecrackerVM has no runtime pid and invocationID ({id}): {}", o["status"])));
+                        }
                         let k = if id == "fc0" { "rt0" } else { "rt1" };
-                        if rt["pid"].as_i64().unwrap_or(0) == 0 {
-                            if id == "fc0" {
-                                return Ok(s.fail(format!("the FirecrackerVM has no runtime pid: {}", o["status"])));
-                            }
-                            if s.since("restart") > 120.0 {
-                                return Ok(s.fail(format!("no runtime pid 2 min after the restart: {}", o["status"])));
-                            }
-                            return Ok(s.keep(h.timer("poll", 5_000)));
-                        }
-                        s.st[k] = json!({ "pid": rt["pid"], "invocationID": rt["invocationID"], "unit": rt["unit"], "phase": o["status"]["phase"], "lostReason": o["status"]["lostReason"] });
-                    }
-                    "log0" => s.st["adopt0"] = o["counts"][adopted_key(&vm)].clone(),
-                    // the new core adopts the VM's unit once its supervisor runs: wait for that, 3 min at most
-                    "log1" => {
-                        let n = o["counts"][adopted_key(&vm)].as_u64().unwrap_or(0);
-                        if n <= s.st["adopt0"].as_u64().unwrap_or(0) {
-                            if s.since("restart") > 180.0 {
-                                return Ok(s.fail(format!("the restarted core did not adopt the VM's unit vm-{vm} in 3 min")));
-                            }
-                            return Ok(s.keep(h.timer("adopt", 5_000)));
-                        }
-                        s.st["adopt1"] = json!(n);
-                        s.reading("adopted_s", s.since("restart"));
-                        h = h.call(fcvm("fc1", &cluster, &vm));
+                        s.st[k] = json!({ "pid": rt["pid"], "invocationID": rt["invocationID"], "unit": rt["unit"], "startTicks": rt["startTicks"], "startTime": rt["startTime"], "phase": o["status"]["phase"], "lostReason": o["status"]["lostReason"] });
                     }
                     "restart" => {
                         s.reading("restart_s", o["seconds"].clone());
-                        s.set("after");
-                        s.mark("restart");
-                        h = h.call(host("log1", "bidder.logCount", json!({ "name": s.st["bidder"], "texts": [adopted(&vm)] })));
+                        s.set("watching");
+                        s.mark("restarted");
                     }
                     "release" => {
                         s.reading("release_s", o["seconds"].clone());
@@ -282,30 +329,34 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                     }
                     _ => {}
                 }
+                if id == "log0" || id == "log1" {
+                    let mut texts = control_lines().as_array().cloned().unwrap_or_default();
+                    texts.extend(vm_lines(&vm).as_array().cloned().unwrap_or_default());
+                    s.st[if id == "log0" { "c0" } else { "c1" }] = json!(counts(&o, &json!(texts)));
+                }
             }
-            // before: the boot id, the runtime and the adoption count, then the restart
-            if s.is("before") && s.st["boot0"].is_string() && s.st["rt0"].is_object() && s.st["adopt0"].is_null() && !s.has("logAsked") {
+            // before: the guest's boot id, the VM's runtime and the log counts, then the restart with the watch
+            if s.is("before") && s.st["boot0"].is_string() && s.st["rt0"].is_object() && !s.has("logAsked") {
                 s.flag("logAsked");
-                h = h.call(host("log0", "bidder.logCount", json!({ "name": s.st["bidder"], "texts": [adopted(&vm)] })));
-            } else if s.is("before") && s.st["adopt0"].is_u64() {
+                h = h.call(logs("log0", &s));
+            } else if s.is("before") && s.st["c0"].is_array() {
                 s.reading("before", s.st["rt0"].clone());
                 s.set("restarting");
-                h = h.call(host("restart", "bidder.restart", json!({ "name": s.st["bidder"] })));
+                s.mark("restarted");
+                h = h.call(host("restart", "bidder.restart", json!({ "name": s.st["bidder"] }))).call(cvms("w", &cluster)).timer("watch", 2_000);
             }
-            // after: the same runtime, the same guest, its adoption logged, no vm.terminated, then the release
-            if s.is("after") && s.st["rt1"].is_object() && !s.has("afterAsked") {
-                s.flag("afterAsked");
-                let rcpt = s.st["receipt"].as_str().unwrap_or_default().to_string();
-                let w = rcpt.trim_start_matches("at://").split('/').next().unwrap_or_default().to_string();
-                h = h
-                    .call(boot("boot1"))
-                    .call(get_record("term", &format!("at://{w}/{VM_TERMINATED}/{}", termination_rkey(&rcpt))));
-            }
-            if s.is("after") && s.st["boot1"].is_string() && s.st["adopt1"].is_u64() && s.has("noTerm") {
-                let (a, b) = (&s.st["rt0"], &s.st["rt1"]);
+            // verify: the three answers in, then the verdict, then the release
+            if s.is("verify") && ["fc1", "boot1", "log1"].iter().all(|k| !s.st[match *k { "fc1" => "rt1", "boot1" => "boot1", _ => "c1" }].is_null()) && s.has("noTerm") {
+                let (a, b) = (s.st["rt0"].clone(), s.st["rt1"].clone());
+                let (c0, c1): (Vec<u64>, Vec<u64>) = (
+                    s.st["c0"].as_array().into_iter().flatten().map(|v| v.as_u64().unwrap_or(0)).collect(),
+                    s.st["c1"].as_array().into_iter().flatten().map(|v| v.as_u64().unwrap_or(0)).collect(),
+                );
                 let mut p = vec![];
-                if a["pid"] != b["pid"] || a["invocationID"] != b["invocationID"] {
-                    p.push(format!("the VMM changed: {a} -> {b}"));
+                for k in ["pid", "invocationID", "unit", "startTicks", "startTime"] {
+                    if a[k] != b[k] {
+                        p.push(format!("the VM's unit changed: {k} {} -> {}", a[k], b[k]));
+                    }
                 }
                 if b["phase"] != "Running" || b["lostReason"].is_string() {
                     p.push(format!("the VM is {} ({}) after the restart", b["phase"], b["lostReason"]));
@@ -313,7 +364,27 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                 if s.st["boot0"] != s.st["boot1"] {
                     p.push(format!("the guest rebooted: {} -> {}", s.st["boot0"], s.st["boot1"]));
                 }
-                s.reading("after", b.clone());
+                // the restart really happened: a new core generation, or the infra units adopted (>= 3 role lines)
+                let gen = c1.first().copied().unwrap_or(0).saturating_sub(c0.first().copied().unwrap_or(0));
+                let infra = c1.get(1).copied().unwrap_or(0).saturating_sub(c0.get(1).copied().unwrap_or(0));
+                s.reading("controls", json!({ "newCoreGenerations": gen, "infraAdopted": infra }));
+                if gen == 0 && infra < 3 {
+                    p.push("the bidder's log shows no restart (no new `core holds the instance`, fewer than 3 adopted infra units)".to_string());
+                }
+                // the VM's own lines: none
+                let names = vm_lines(&vm);
+                let mut touched = vec![];
+                for (i, t) in names.as_array().into_iter().flatten().enumerate() {
+                    let n = c1.get(i + 2).copied().unwrap_or(0).saturating_sub(c0.get(i + 2).copied().unwrap_or(0));
+                    if n > 0 {
+                        touched.push(format!("{t} x{n}"));
+                    }
+                }
+                s.reading("vmLinesAfterRestart", json!(touched));
+                if !touched.is_empty() {
+                    p.push(format!("the restarted core touched the VM's unit: {}", touched.join(", ")));
+                }
+                s.reading("after", b);
                 if !p.is_empty() {
                     return Ok(s.fail(p.join("; ")));
                 }
@@ -329,4 +400,3 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
 }
 
 entries! { run => run_0007, restart => run_restart }
-
