@@ -134,28 +134,50 @@ async fn run_dir_cmd(cmd: &str, args: &[String]) -> Result<bool> {
             Ok(errors.is_empty())
         }
         "replay" => {
+            // every tick again from ticks.ndjson.zst, the whole composition in seq order; --to <seq> stops there and
+            // prints every run's state; --modules <dir>: the wasm of another build (tests/modules by default)
             let meta: Value =
                 serde_json::from_slice(&std::fs::read(dir.join("run.json")).context("run.json")?)?;
-            let modules = testkit::repo().join("tests/modules");
-            let key = meta["rootModule"].as_str().context("run.json rootModule")?;
-            let bytes = std::fs::read(wasm_path(&modules, key))?;
-            let runner = Arc::new(Bound {
-                wasm: Wasm::new(5000),
-                bytes: Arc::new(bytes),
-                sha256: None,
-            });
-            let upto = flag(args, "--upto").and_then(|s| s.parse().ok());
-            let r = atlibs_host::freeze::replay(
-                runner,
-                meta["entry"].as_str().unwrap_or("run"),
-                &dir.join("events.ndjson"),
-                upto,
-                1 << 20,
-            )
-            .await
-            .map_err(|e| anyhow!(e))?;
+            let manifest: Value = serde_json::from_slice(&std::fs::read(
+                PathBuf::from(
+                    meta["composition"]
+                        .as_str()
+                        .context("run.json composition")?,
+                )
+                .join("composition.json"),
+            )?)?;
+            let modules = flag(args, "--modules")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| testkit::repo().join("tests/modules"));
+            let wasm = Wasm::new(5000);
+            let mut runners: HashMap<String, Arc<dyn atlibs_host::run::Runner>> = HashMap::new();
+            for inst in manifest["instances"].as_array().into_iter().flatten() {
+                let (name, key) = (
+                    inst["name"].as_str().unwrap_or_default(),
+                    inst["module"].as_str().unwrap_or_default(),
+                );
+                let bytes = std::fs::read(wasm_path(&modules, key))
+                    .with_context(|| format!("{key}: the wasm (cargo wasm)"))?;
+                runners.insert(
+                    name.to_string(),
+                    Arc::new(Bound {
+                        wasm: wasm.clone(),
+                        bytes: Arc::new(bytes),
+                        sha256: None,
+                    }),
+                );
+            }
+            let records = atlibs_host::ticks::read(&dir).map_err(|e| anyhow!(e))?;
+            let to = flag(args, "--to").and_then(|s| s.parse().ok());
+            let mut r =
+                atlibs_host::ticks::replay(&records, to, |i| runners.get(i).cloned(), 1 << 20)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+            if let Some(seq) = to {
+                r["statesAt"] = Value::Object(atlibs_host::ticks::states_at(&records, seq));
+            }
             println!("{}", serde_json::to_string_pretty(&r)?);
-            Ok(r["differ"].as_array().is_some_and(|d| d.is_empty()))
+            Ok(r["firstDiverge"].is_null())
         }
         _ => unreachable!(),
     }
@@ -310,7 +332,9 @@ async fn main_() -> Result<bool> {
     let wasm = Wasm::new(5000);
 
     // freeze: the gate, the recorder, SIGUSR1, the control socket (MCP) with this host's tools
-    let freezer = Freezer::new(&dir, breaks);
+    // every tick of every instance (ticks.ndjson.zst), a full state each 50 ticks of a run
+    let ticks = atlibs_host::ticks::Ticks::new(&dir, 50);
+    let freezer = Freezer::new(&dir, breaks, Some(ticks.clone()));
     let signal = Signal::new();
     {
         let f = freezer.clone();
@@ -446,14 +470,26 @@ async fn main_() -> Result<bool> {
         ),
         provides: Some(provides),
         gate: Some(freezer.gate()),
+        tick_for: Some(ticks.tick_for()),
         on_event: Some(freezer.on_event()),
         http: {
             // com.fedfork.exec.http.fetch: the target's own origins only
             let mut allow = serde_json::Map::new();
-            for o in [target.atirc.clone(), Some(target.gateway.url.clone()), Some(target.plc.clone()), Some(format!("https://ssh.{}", target.gateway.ssh))].into_iter().flatten() {
+            for o in [
+                target.atirc.clone(),
+                Some(target.gateway.url.clone()),
+                Some(target.plc.clone()),
+                Some(format!("https://ssh.{}", target.gateway.ssh)),
+            ]
+            .into_iter()
+            .flatten()
+            {
                 allow.insert(o.trim_end_matches('/').to_string(), json!({}));
             }
-            Some(Arc::new(atlibs_host::run::Http::from_json(fetch.clone(), &Value::Object(allow)).map_err(|e| anyhow!(e))?))
+            Some(Arc::new(
+                atlibs_host::run::Http::from_json(fetch.clone(), &Value::Object(allow))
+                    .map_err(|e| anyhow!(e))?,
+            ))
         },
         ..Default::default()
     };
@@ -497,6 +533,7 @@ async fn main_() -> Result<bool> {
         Err(e) => json!({ "pass": false, "error": e }),
     };
     let failed = result["pass"] != true;
+    ticks.flush();
     swc.write_resources().await;
     if failed && freeze_on_fail && signal.reason().is_none() {
         freezer.set_failure(

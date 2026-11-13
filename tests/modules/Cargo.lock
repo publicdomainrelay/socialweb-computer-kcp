@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "abi"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21#52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=0d1b9b6ec3d2bf8a8912ab246200c9f675a6a8ed#0d1b9b6ec3d2bf8a8912ab246200c9f675a6a8ed"
 dependencies = [
  "atproto-record",
  "serde",

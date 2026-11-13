@@ -649,6 +649,29 @@ cargo run -p testkit --bin last-pass -- readings/*.json                       # 
 cargo test -p swc-vmm-tests -- --nocapture                                   # VMM wrapper, KVM host: tests/vmm/README.md
 ```
 
+Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.json`, `failure.json`,
+`resources.json`, `run.json`; no secret in any of them):
+
+```sh
+# 1. the failed check's run dir: TODO `dev.knotless.getArtifact` (knotless workflow artifacts), until then on the runner:
+ls ~/.tmp/swc-system-tests/runs/
+R=~/.tmp/swc-system-tests/runs/<runbook>-composition-<ms>
+jq . "$R/failure.json"
+# 2. replay it offline: the first diverging tick, then the states there
+cd tests && SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- replay "$R"
+cargo run -q -p swc-test-host -- replay "$R" --to <seq> | jq .statesAt
+# 3. a frozen run: attach (MCP on stdio; the CI route over the check's iroh ticket: TODO with the CI freeze), then the
+#    tools state, ticks, state_at, resources, kube_get, ssh_exec, run_assert, and continue or cleanup
+cargo run -q -p swc-test-host -- attach "$R"
+# 4. a local repro: freeze at the step before the failure
+SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- compositions/<runbook> --on-fail freeze --freeze-at <step>
+# 5. leave nothing behind
+SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- cleanup "$R"
+```
+
+Never paste creds anywhere; dumps and ticks hold none (secret-named keys are redacted, kubeconfigs and tokens stay in
+the host).
+
 Pipeline, in order; cut the rc only when both suites are green:
 
 1. Build the release of the commit (`scripts/build-socialweb-computer.sh`), `deploy/check.sh --fast`.

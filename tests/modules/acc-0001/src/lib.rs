@@ -106,7 +106,7 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                             let t = s.since("create");
                             s.reading("cluster_ready_s", t);
                             s.set("kubeconfig");
-                            h = h.call(xrpc("kc", "getKubeconfig", json!({ "name": cl, "ttlSeconds": 28800 })));
+                            h = h.call(host("kc", "gateway.kubeconfig", json!({ "name": cl, "ttlSeconds": 28800, "as": cl })));
                         }
                         ("create", _) if s.since("create") > 300.0 => return Ok(s.fail("the cluster is not Ready 5 min after createCluster")),
                         ("gone", None) => {
@@ -118,8 +118,8 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                         _ => return Ok(poll(&s, h)),
                     }
                 }
-                "kc" => h = h.call(host("add", "kube.addCluster", json!({ "name": cl, "kubeconfig": o["kubeconfig"] }))),
-                "add" => h = h.call(kube("readyz", "raw", &tenant, json!({ "path": "/readyz" }))),
+                // the host keeps the kubeconfig (no secret reaches the module or its ticks)
+                "kc" => h = h.call(kube("readyz", "raw", &tenant, json!({ "path": "/readyz" }))),
                 "readyz" => {
                     if o["text"].as_str().map(str::trim) != Some("ok") {
                         return Ok(s.fail(format!("/readyz through the /clusters/... path: {o}")));
@@ -128,10 +128,9 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                 }
                 "ns" => {
                     s.reading("namespaces", names(&o).len());
-                    h = h.call(xrpc("kcne", "getKubeconfig", json!({ "name": cl, "ttlSeconds": 0 })));
+                    h = h.call(host("kcne", "gateway.kubeconfig", json!({ "name": cl, "ttlSeconds": 0, "as": format!("{cl}-ne") })));
                 }
-                "kcne" => h = h.call(host("addne", "kube.addCluster", json!({ "name": format!("{cl}-ne"), "kubeconfig": o["kubeconfig"] }))),
-                "addne" => h = h.call(kube("nsne", "list", &format!("{tenant}-ne"), ns())),
+                "kcne" => h = h.call(kube("nsne", "list", &format!("{tenant}-ne"), ns())),
                 "nsne" => h = h.call(query("lk", "listKubeconfigs", json!({ "name": cl }))),
                 "lk" | "pks" => {
                     let body = if id == "pks" { &o["body"] } else { &o };
@@ -163,14 +162,8 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                     s.set("page");
                     h = h.call(host("ps", "page.signin", json!({ "url": format!("{gw}/"), "done": "Signed in as" })));
                 }
-                "ps" => h = h.call(page("pk", "/api/clusters/kubeconfig", json!({ "name": cl, "ttlSeconds": 0 }))),
-                "pk" => {
-                    if o["status"] != 200 {
-                        return Ok(s.fail(format!("the page's /api/clusters/kubeconfig: {o}")));
-                    }
-                    h = h.call(host("addpg", "kube.addCluster", json!({ "name": format!("{cl}-pg"), "kubeconfig": o["body"]["kubeconfig"] })));
-                }
-                "addpg" => h = h.call(kube("nspg", "list", &format!("{tenant}-pg"), ns())),
+                "ps" => h = h.call(host("pk", "page.kubeconfig", json!({ "name": cl, "ttlSeconds": 0, "as": format!("{cl}-pg") }))),
+                "pk" => h = h.call(kube("nspg", "list", &format!("{tenant}-pg"), ns())),
                 "nspg" => h = h.call(page("pks", "/api/clusters/kubeconfigs", json!({ "name": cl }))),
                 "ns3" => {
                     s.set("deploy");

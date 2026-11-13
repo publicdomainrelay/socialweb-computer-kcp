@@ -17,11 +17,11 @@ testkit = { path = "testkit" }
 anyhow = "1"
 # atlibs-host v0.5.1 (the rev atlibs-iroh pins: one copy): app-password sessions saved in a state dir (no
 # createSession per run), service auth, PDS/PLC reads.
-atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21" }
+atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "0d1b9b6ec3d2bf8a8912ab246200c9f675a6a8ed" }
 # iroh tickets of offering / onNetwork addresses; its raw `dumbpipe connect` is the iroh stream
-atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "82afc70af108b5aac8cac9270f111162365468fa" }
-atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "75983c6f04b286f35116a1aeeac3a192ff08c91e" }
-atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "345c7d3f574d94184d6dfbe85f1e944588a84cb3" }
+atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "5bcd8e33c1fd98691985114ef52bf43ad7f3316e" }
+atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "25c34ee8bcc2da52c01582fa74db422de87df7ca" }
+atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "770cec43d6c1b6640c24f47000b06f1eeb05f337" }
 # ident.link walks over verified sync.getRecord, the market's computed rkeys
 identlink = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-identlink", rev = "aa7cacc3b355b217d7087cb3a95eb61ab16c8ad7", features = ["native"] }
 futures = "0.3"

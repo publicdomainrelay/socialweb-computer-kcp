@@ -493,13 +493,77 @@ impl Swc {
                 let r = write_private(&path, input["kubeconfig"].as_str().unwrap_or_default());
                 // viaRoot: a kcp front on a staging VM's loopback, through an ssh forward to that VM
                 let via = match (input["viaRoot"] == true, self.target.root_hosts.first()) {
-                    (true, Some(h)) if self.target.name != "prod" => atlibs_kube::Via::Ssh { host: h.clone() },
+                    (true, Some(h)) if self.target.name != "prod" => {
+                        atlibs_kube::Via::Ssh { host: h.clone() }
+                    }
                     _ => Default::default(),
                 };
                 r.map(|_| {
-                    self.kube.add_cluster(&format!("tenant:{name}"), Cluster { kubeconfig: path.display().to_string(), workspace: None, via });
+                    self.kube.add_cluster(
+                        &format!("tenant:{name}"),
+                        Cluster {
+                            kubeconfig: path.display().to_string(),
+                            workspace: None,
+                            via,
+                        },
+                    );
                     json!({ "cluster": format!("tenant:{name}") })
                 })
+            }
+            // a tenant kubeconfig minted and kept by the host (the module never holds it): over xrpc with the
+            // account's service auth, or on the signed-in k8s page; registered as cluster tenant:<as>
+            "gateway.kubeconfig" | "page.kubeconfig" => {
+                let (Ok(name), Ok(alias)) = (str_of(input, "name"), str_of(input, "as")) else {
+                    return Some(Err("name and as are required".into()));
+                };
+                let ttl = input["ttlSeconds"].as_u64().unwrap_or(3600);
+                async {
+                    let g = &self.target.gateway;
+                    let kc = if what == "gateway.kubeconfig" {
+                        let at = testkit::Atproto::new(&self.target);
+                        let sess = at.session(self.acct()?).await.map_err(|e| e.to_string())?;
+                        let v = at
+                            .service_call(
+                                &sess,
+                                &g.url,
+                                &g.aud,
+                                "com.publicdomainrelay.temp.cluster.getKubeconfig",
+                                Some(&json!({ "name": name, "ttlSeconds": ttl })),
+                                &[],
+                            )
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        v["kubeconfig"].as_str().map(String::from)
+                    } else {
+                        let v = self
+                            .page_fetch(
+                                &format!("{}/api/clusters/kubeconfig", g.url.trim_end_matches('/')),
+                                "POST",
+                                Some(&json!({ "name": name, "ttlSeconds": ttl })),
+                            )
+                            .await?;
+                        if v["status"] != 200 {
+                            return Err(format!(
+                                "the page's /api/clusters/kubeconfig: HTTP {}",
+                                v["status"]
+                            ));
+                        }
+                        v["body"]["kubeconfig"].as_str().map(String::from)
+                    }
+                    .ok_or("no kubeconfig in the answer")?;
+                    let path = self.dir.join(format!("tenant-{alias}.kubeconfig"));
+                    write_private(&path, &kc)?;
+                    self.kube.add_cluster(
+                        &format!("tenant:{alias}"),
+                        Cluster {
+                            kubeconfig: path.display().to_string(),
+                            workspace: None,
+                            via: Default::default(),
+                        },
+                    );
+                    Ok(json!({ "cluster": format!("tenant:{alias}") }))
+                }
+                .await
             }
             "page.signin" => self.page_signin(input).await,
             // an OAuth sign-in with no page session of ours (a QR session transfer): the account's consent, Authorize
@@ -510,7 +574,9 @@ impl Swc {
                         extra.extend(["--done", d]);
                     }
                     let r = match self.acct() {
-                        Ok(a) => oauth_signin_with(a, url, &extra).await.map_err(|e| e.to_string()),
+                        Ok(a) => oauth_signin_with(a, url, &extra)
+                            .await
+                            .map_err(|e| e.to_string()),
                         Err(e) => Err(e),
                     };
                     Ok(json!({ "ok": r.is_ok(), "note": r.err() }))
@@ -645,24 +711,39 @@ impl Swc {
                 }
                 .await
             }
-            "example" => match input["name"].as_str().filter(|n| !n.contains('/') && n.ends_with(".yaml")) {
-                Some(n) => std::fs::read_to_string(testkit::repo().join("examples/infra").join(n)).map(|t| json!({ "text": t })).map_err(|e| format!("{n}: {e}")),
+            "example" => match input["name"]
+                .as_str()
+                .filter(|n| !n.contains('/') && n.ends_with(".yaml"))
+            {
+                Some(n) => std::fs::read_to_string(testkit::repo().join("examples/infra").join(n))
+                    .map(|t| json!({ "text": t }))
+                    .map_err(|e| format!("{n}: {e}")),
                 None => Err("name is an examples/infra file".into()),
             },
             "request.r2" => {
-                let (Ok(name), Ok(r2)) = (str_of(input, "name"), str_of(input, "r2Name")) else { return Some(Err("name and r2Name are required".into())) };
+                let (Ok(name), Ok(r2)) = (str_of(input, "name"), str_of(input, "r2Name")) else {
+                    return Some(Err("name and r2Name are required".into()));
+                };
                 let mut extra = vec!["--r2-name", r2, "--hold"];
                 if input["agent"] == true {
                     extra.push("--agent");
                 }
                 let args = self.sub_args("r2", name, &extra);
-                self.cli(&args).await.and_then(|(ok, out)| if ok { Ok(json!({})) } else { Err(format!("run request r2: {}", tail(&out))) })
+                self.cli(&args).await.and_then(|(ok, out)| {
+                    if ok {
+                        Ok(json!({}))
+                    } else {
+                        Err(format!("run request r2: {}", tail(&out)))
+                    }
+                })
             }
             "request.checkLogs" => match (str_of(input, "name"), self.password()) {
                 (Ok(name), Ok(pw)) => {
                     let mut problems = vec![];
                     for p in self.request_logs(name) {
-                        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+                        let Ok(text) = std::fs::read_to_string(&p) else {
+                            continue;
+                        };
                         if text.contains(&pw) {
                             problems.push(format!("{}: the app password", p.display()));
                         }

@@ -142,22 +142,25 @@ run. A freeze ends at `continue` / `cleanup` or its TTL (`--freeze-ttl`, default
 
 | file in the run dir | what |
 | --- | --- |
-| `events.ndjson` | every handler input and output by step (replay's input), freezes and thaws |
-| `state.json`, `failure.json` | the module's state; the failure with the last events |
+| `ticks.ndjson.zst` | every tick of every instance (atlibs-host `ticks`): seq, times, what woke it (a call's NSID and latency), the event, the output, the state's hash and diff, full snapshots; secret-named keys redacted; zstd, rotated past 64 MiB |
+| `state.json`, `failure.json`, `freeze.ndjson` | the root's state; the failure with the last ticks; freezes and thaws |
 | `resources.json` | requesters (state dir, pid, cluster), invocations (receipt, winner, logs, ssh command), kube objects, clusters (kubeconfig paths), temporary keys, observer nicks: paths only, no secret |
 | `run.json`, `control.sock` | what ran; the control socket (MCP, 0600) while the run lives |
 
 ```sh
-swc-test-host attach <run dir>     # stdio MCP: state, events, failure, freeze, step, continue, inject_event,
+swc-test-host attach <run dir>     # stdio MCP: state, ticks, state_at, failure, freeze, step, continue, inject_event,
                                    # resources, kube_get, kube_list, kube_logs, ssh_exec, requester_ssh,
-                                   # record_get, run_assert, cleanup, thaw, abort
-swc-test-host replay <run dir> [--upto <step>]   # {steps, same, differ}: the module's decisions again, no network
+                                   # record_get, run_assert, cleanup, thaw, abort (ends with stdin)
+swc-test-host replay <run dir> [--to <seq>] [--modules <dir>]   # the whole composition again from its ticks, no network:
+                                   # {ticks, same, firstDiverge}; --to prints every run's state there; --modules: other wasm
 swc-test-host cleanup <run dir>    # from resources.json, when the host died
 ```
 
-Checked 2026-11-13 (signed out, the 0004 composition's `assert` instance): a breakpoint before step 2 froze it, attach
-listed the tools and `state`, `events`, `resources` answered, `continue` finished it, replay 7/7 same, cleanup
-clean; a failure froze it with `failure.json`, the `cleanup` tool ended it.
+Checked 2026-11-13 (signed out): the 0004 composition's `assert` instance, 7 ticks, replayed 7/7, `--to 3` gave its
+state, a changed `assert` (one more result field) diverged at seq 7 (the tick of its result), attach answered `ticks`
+and `state_at` while frozen at step 2 and ended with its stdin; the 0011 gates composition, 5 ticks, replayed 5/5.
+Size: 1.4 KB for the 7-tick run, 27 KB for 0011's (HTTP bodies); a 0004 run (some 500 ticks: the invocation's log
+events, mesh lines, calls) about 0.5 MB, estimated.
 
 The host passes the guard: a test deletes only VMs of its own receipts, patches a bidder root only to have it restored.
 Budgets: calls, events and wall time unlimited per run (each module bounds itself with a deadline timer).

@@ -53,6 +53,8 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.root.exec",
     "computer.socialweb.test.root.putBinary",
     "computer.socialweb.test.example",
+    "computer.socialweb.test.gateway.kubeconfig",
+    "computer.socialweb.test.page.kubeconfig",
     "computer.socialweb.test.oauth.signin",
     "computer.socialweb.test.request.r2",
     "computer.socialweb.test.request.checkLogs",
@@ -296,7 +298,10 @@ impl Swc {
         let logs = self.request_logs(&name);
         let f = std::fs::File::create(&logs[0]).map_err(|e| e.to_string())?;
         // compat: the unchanged client (SWC_COMPAT_REQUESTER: release:<tag>, sha:..., path:...) against new servers
-        let bin = match (input["compat"] == true, std::env::var("SWC_COMPAT_REQUESTER")) {
+        let bin = match (
+            input["compat"] == true,
+            std::env::var("SWC_COMPAT_REQUESTER"),
+        ) {
             (true, Ok(spec)) => Binary::resolve(&spec).await.map_err(|e| e.to_string())?,
             _ => self.bin.clone(),
         };

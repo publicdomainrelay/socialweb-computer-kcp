@@ -16,7 +16,6 @@
 	"calls": [
 		"com.publicdomainrelay.temp.cluster.createCluster",
 		"com.publicdomainrelay.temp.cluster.listClusters",
-		"com.publicdomainrelay.temp.cluster.getKubeconfig",
 		"com.publicdomainrelay.temp.cluster.listKubeconfigs",
 		"com.publicdomainrelay.temp.cluster.revokeKubeconfig",
 		"com.publicdomainrelay.temp.cluster.deleteCluster",
@@ -33,7 +32,9 @@
 		"computer.socialweb.test.root.putBinary",
 		"computer.socialweb.test.oauth.signin",
 		"com.fedfork.exec.kube.get",
-		"com.atproto.repo.deleteRecord"
+		"com.atproto.repo.deleteRecord",
+		"computer.socialweb.test.gateway.kubeconfig",
+		"computer.socialweb.test.page.kubeconfig"
 	],
 	"hooks": [
 		{
