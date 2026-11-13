@@ -61,6 +61,21 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
         Event::Timer { id } if id == "deadline" => {
             return Ok(fail(&st, format!("not done in 45 min (phase {phase})")));
         }
+        // the agent's "online" line is the model's choice: prompt 60 s after the owner node subscribed without it, and
+        // again every 30 s until it answers (5 min)
+        Event::Timer { id } if (id == "first" && phase == "online") || (id == "reprompt" && phase == "answer") => {
+            if id == "first" {
+                st["readings"]["online_after_agent_start_s"] = json!("not seen: prompted 60 s after the owner node subscribed");
+                st["t_prompt1"] = json!(now);
+                set(&mut st, "answer");
+            } else if now - st["t_prompt1"].as_f64().unwrap_or(now) > 300.0 {
+                return Ok(fail(&st, "no answer 5 min after the first prompt".into()));
+            }
+            st["readings"]["prompts"] = json!(st["readings"]["prompts"].as_u64().unwrap_or(0) + 1);
+            st["t_prompt"] = json!(now);
+            let nick = st["identity"].as_str().unwrap_or_default().split('.').next().unwrap_or_default().to_string();
+            h = h.call(call("prompt", "atirc.meshPub", json!({ "cluster": "requester:owner", "node": "st-owner", "text": format!("{nick}: uname -m") }))).timer("reprompt", 30_000);
+        }
         Event::Result { id, result, .. } => {
             let out = match result.output() {
                 Ok(o) => o.clone(),
@@ -106,7 +121,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     set(&mut st, "online");
                     h = h.call(
                         steps::host_sub("mesh", "atirc.meshSub", json!({ "cluster": "requester:owner", "node": "st-owner" })),
-                    );
+                    ).timer("first", 60_000);
                 }
                 "prompt" => {}
                 "summary" => {
@@ -237,7 +252,10 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 st["readings"]["online_after_agent_start_s"] =
                     json!(now - st["t_start"].as_f64().unwrap_or(now));
                 st["t_prompt"] = json!(now);
+                st["t_prompt1"] = json!(now);
+                st["readings"]["prompts"] = json!(1);
                 set(&mut st, "answer");
+                h = h.cancel("first").timer("reprompt", 30_000);
                 let nick = st["identity"]
                     .as_str()
                     .unwrap_or_default()
@@ -254,7 +272,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 set(&mut st, "release");
                 // the summary is written when the --hold process ends: release first, read it after
                 st["t_rel"] = json!(now);
-                h = h.cancel("mesh").call(call("release", "request.release", json!({ "name": name })));
+                h = h.cancel("mesh").cancel("reprompt").call(call("release", "request.release", json!({ "name": name })));
             }
         }
         Event::Closed { id, error } if id == "req" || (id == "mesh" && phase != "release") => {
