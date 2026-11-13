@@ -18,10 +18,10 @@ target=$(realpath "${1:?usage: gate.sh <target.json> [--account <name>[,<name>..
 accounts=${GATE_ACCOUNTS:-bob}
 if [ "${1:-}" = --account ]; then accounts=$2; shift 2; fi
 all="0001:run 0001:s2 0002:run 0003:run 0004:run 0005:run 0005:b 0005:r2fail 0006:run 0006:compat 0007:run 0008:run
-  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b"
+  0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b 0016:run 0016:badsha"
 ids=${*:-$all}
 # VMs an entry holds at its peak (the rest hold one; host checks none)
-declare -A WEIGHT=([0003:run]=3 [0012:run]=3 [0013:run]=2 [0013:c]=2 [0013:b]=2 [0006:run]=0 [0008:run]=0 [0011:token]=0)
+declare -A WEIGHT=([0003:run]=3 [0012:run]=3 [0013:run]=2 [0013:c]=2 [0013:b]=2 [0006:run]=0 [0008:run]=0 [0011:token]=0 [0016:badsha]=0)
 # runs alone: k8s nodes one per host and its tenant scale-downs (0001)
 EXCLUSIVE=" ${GATE_EXCLUSIVE:-0001:run 0001:s2} "
 cd "$(dirname "$0")"
@@ -40,7 +40,7 @@ skip_of() {
 }
 # one entry as <account> on slot <n>: its RESULT line, and <out>/<runbook>-<entry>.tsv for the summary
 run_one() {
-  local id=$1 account=$2 slot=$3 r e why t0 res note rc doc s mem
+  local id=$1 account=$2 slot=$3 r e why t0 res note rc doc s mem input
   r=${id%%:*}; e=${id#*:}; [ "$e" = "$id" ] && e=run
   why=$(skip_of "$r:$e")
   t0=$(date +%s)
@@ -49,8 +49,10 @@ run_one() {
   elif [ ! -f "compositions/$r/composition.json" ]; then
     res=SKIP note="no composition"
   else
+    input=()
+    case $r in 0016) input=(--input "$(jq -c '{image: {url, sha256}, marker}' ../deploy/vm-images/ci-toolchain.json)") ;; esac
     SWC_IROH_KEY=$out/iroh-$slot "$host" "compositions/$r" --account "$account" --entry "$e" --on-fail freeze \
-      --freeze-ttl "${GATE_FREEZE_TTL:-900}" > "$out/$r-$e.json" 2> "$out/$r-$e.log" < /dev/null
+      --freeze-ttl "${GATE_FREEZE_TTL:-900}" "${input[@]}" > "$out/$r-$e.json" 2> "$out/$r-$e.log" < /dev/null
     rc=$?
     doc=$(cat "$out/$r-$e.json")
     if [ $rc = 0 ] && jq -e '.readings.skipped' <<<"$doc" > /dev/null 2>&1; then
