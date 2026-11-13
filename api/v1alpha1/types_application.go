@@ -27,6 +27,8 @@ type MarketNetworkValue struct {
 	Ingress *IngressConfig `json:"ingress,omitempty"`
 
 	DiscoveryRelays []string `json:"discoveryRelays,omitempty" apigen:"userEndpoint"`
+
+	AtircURL string `json:"atircUrl,omitempty" apigen:"userEndpoint"`
 }
 
 type NetworkHost struct {
