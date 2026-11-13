@@ -656,6 +656,11 @@ cargo run -p testkit --bin last-pass -- readings/*.json                       # 
 cargo test -p swc-vmm-tests -- --nocapture                                   # VMM wrapper, KVM host: tests/vmm/README.md
 ```
 
+Before pushing a `tests/` change (commit it first): `tests/publish-test-host.sh`. It builds the static swc-test-host and
+the module wasm of HEAD's `tests/` tree on hat-8 and publishes them to the bucket at `tests/<git rev-parse HEAD:tests>/`
+(SHA256SUMS last); knotless CI's test.yml downloads and checks them, and builds on its VM only when they are not there
+(its log says `fallback: building test host`).
+
 Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.json`, `failure.json`,
 `resources.json`, `run.json`, and on a failure `logs/`, read before the freeze or the cleanup: per invocation
 `<name>/local/` (the request log and its requester's dev logs) and `<name>/vm/` (over request.ssh: the VM's journal and

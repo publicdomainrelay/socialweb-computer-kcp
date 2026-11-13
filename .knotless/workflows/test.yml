@@ -19,14 +19,27 @@ attach: runuser -u r2 -- /usr/local/bin/swc-test-host attach /work/runs
 env:
   SWC_RUNS: /work/runs
 steps:
-  - name: toolchain
-    run: bash scripts/knotless-ci-toolchain.sh --wasm
   - name: swc-test-host
     timeout: 60
     run: |
-      . /opt/ci/env
-      (cd tests/modules && cargo wasm)
-      (cd tests && cargo build --release -p swc-test-host)
+      # the static swc-test-host and module wasm of this tests/ tree, built on hat-8 and in the bucket (tests/publish-test-host.sh)
+      command -v curl >/dev/null && command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq curl jq >/dev/null; }
+      u=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/tests/$(git rev-parse HEAD:tests)
+      d=$(mktemp -d)
+      if curl -sfo "$d/SHA256SUMS" "$u/SHA256SUMS"; then
+        echo "tests: $u"
+        for f in swc-test-host test-modules.tar.gz; do curl -sfo "$d/$f" "$u/$f"; done
+        (cd "$d" && sha256sum -c --quiet SHA256SUMS)
+        tar -C tests -xzf "$d/test-modules.tar.gz"
+        install -D -m 0755 "$d/swc-test-host" tests/target/release/swc-test-host
+      else
+        # FALLBACK: no published build of this tests/ tree (run tests/publish-test-host.sh before pushing)
+        echo "fallback: building test host ($u: none)"
+        bash scripts/knotless-ci-toolchain.sh --wasm
+        . /opt/ci/env
+        (cd tests/modules && cargo wasm)
+        (cd tests && cargo build --release -p swc-test-host)
+      fi
       install -m 0755 tests/target/release/swc-test-host /usr/local/bin/swc-test-host
   - name: staging
     timeout: 110
@@ -41,5 +54,5 @@ steps:
       test -n "$c" && echo "requester sha:$c"
       jq --arg b "sha:$c" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
-      cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs CI=1 \
+      cd tests && runuser -u r2 -- env HOME=/home/r2 SWC_TARGET=/home/r2/target-ci.json SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" CI=1 \
         target/release/swc-test-host compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false}'
