@@ -28,7 +28,7 @@ needs the argument behind it. Do not read it end to end.
 | What a host must provide | `socialweb-computer check-host -role gateway`, `-role bidder` or `-role requester`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
-| What CI runs on a push, and its runners | `.github/workflows/ci.yml`: the gate, the guest image (fetched from `guest-images/<target>/<pinned image.json sha256>` in the bucket when it is there, built otherwise) and the Spaces publish on GitHub-hosted runners; the pin check (`pins`) and the release builds (`binaries`) on the self-hosted runner of `scripts/gh-runner-install.sh` (account socialweb-ci) |
+| What CI runs on a push, and its runners | `.knotless/workflows/` (knotless only; GitHub CI is gone): `atlibs-pins`, `pins` (kcp-small 4/8), `gate` and `release` (kcp-build 12/16; release publishes to the bucket, its key a sealed secret of main and v* pushes) on pushes to main, knotless-ci and v* tags; `test` (the staging run as R2) on knotless-ci and when asked. See Release pipeline |
 | What the system does, end to end, and its tests | `docs/acceptance/` (the runbooks), `tests/system` (one test file per runbook), `tests/testkit/README.md` |
 
 ## Layout
@@ -58,7 +58,7 @@ There is no deno workspace, no lockfile and no vendored TypeScript repository he
 ## The TypeScript that is left
 
 - `scripts/*.ts` are one-off operator scripts, run with `deno run -A`. No Go code runs them; the
-  `publish` job of `.github/workflows/ci.yml` runs `scripts/publish-spaces.ts`.
+  knotless `release` workflow and `tests/publish-test-host.sh` run `scripts/publish-spaces.ts`.
 - The policy actions under `internal/policyengine/bundled-actions/tangy/<action>/` are gha-lite assets
   that the policy engine embeds: `action.yml`, `index.ts` and its built `dist/index.js`. Edit them as
   such assets, with the workflows beside them in `internal/policyengine/bundled-actions/workflows/`.
@@ -728,6 +728,19 @@ A new repo's refs run only once the runner watches it (it acts on nothing alread
 list it (`$KNOTLESS_APPVIEW/xrpc/dev.knotless.listRepos?runner=$KNOTLESS_IDENTIFIER`) and a `--sweep` (10 s) before
 pushing.
 
+Release pipeline. kcp CI is the knotless workflows only (`.knotless/workflows/`, the fork's runner; GitHub CI is gone, its
+`SPACES_*` secrets unused). The knotless `release` workflow publishes `main/<sha>/` and `main/latest/` (a v* tag:
+`releases/<tag>/`), `downloads/` and `guest-images/` as GitHub CI did. Until it has passed on main, builds are hat-8
+release builds (never `--dev`), published by hand to `local/<sha>/binaries/` (testkit's `local:<sha>`), and the test host
+and module wasm to `tests/<tree>/` (`tests/publish-test-host.sh`):
+
+```sh
+C=$(git rev-parse HEAD)   # on hat-8, a clean checkout at C
+scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit $C
+(. ~/.spaces_swc_kcp_source && deno run -A --no-lock scripts/publish-spaces.ts \
+  --dir ~/.tmp/socialweb-computer-build/release/$C --prefix local/$C/binaries)
+```
+
 Pipeline, in order; cut the rc only when both suites are green:
 
 1. Build the release of the commit (`scripts/build-socialweb-computer.sh`), `deploy/check.sh --fast`.
@@ -852,8 +865,8 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 - While iterating, build only what you touched: `go build ./internal/<pkg>/... ./cmd/socialweb-computer`.
   Do not run the full gate per change.
 - The full gate runs ONCE, right before "ready": `go build ./...`, `go vet ./...` and
-  `deploy/check.sh --fast`. GitHub CI runs the same three on every push to `main` and `task/**`
-  (`.github/workflows/ci.yml`); read the branch's run on GitHub.
+  `deploy/check.sh --fast`. The knotless `gate` workflow runs the same three on every push to `main` and `knotless-ci`;
+  read its check (`knotless run list knotless://johnandersen777.bsky.social/socialweb-computer-kcp --commit <sha>`).
   - `deploy/check.sh --fast`, in order: `gofmt -l` of `api`, `internal`, `cmd`, `hack` and `lexicons`;
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);

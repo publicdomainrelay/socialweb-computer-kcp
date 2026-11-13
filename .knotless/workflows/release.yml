@@ -1,5 +1,5 @@
 # knotless CI: the release binaries (linux/amd64, linux/arm64), the node downloads by sha256 and the pinned guest
-# image, published to the bucket as GitHub CI did: main/<sha>/ and main/latest/ (a tag: releases/<tag>/),
+# image, published to the bucket (the paths GitHub CI used): main/<sha>/ and main/latest/ (a tag: releases/<tag>/),
 # downloads/<sha256>/, guest-images/<target>/<pin>/. After gate and pins pass at the same commit. The bucket key is a
 # sealed secret given only to pushes to main and v* tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a
 # pull) the publish steps are skipped. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).

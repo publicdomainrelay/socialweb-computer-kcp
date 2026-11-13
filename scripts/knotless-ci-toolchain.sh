@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# The toolchain of a knotless CI job on a fresh rented VM (root, Debian): what .github/actions/toolchain and
-# .github/actions/containers set up there. Go of go.mod and rust of rust/rust-toolchain.toml (each download checked
-# against its published sha256), docker for the swc-userns-stage build, jq/zstd. Writes /opt/ci/env to source in
-# later steps.
+# The toolchain of a knotless CI job on a fresh rented VM (root, Debian). Go of go.mod and rust of
+# rust/rust-toolchain.toml (each download checked against its published sha256), docker for the swc-userns-stage build,
+# jq, zstd. Writes /opt/ci/env to source in later steps.
 #   scripts/knotless-ci-toolchain.sh [--wasm] [--deno]    --wasm: also the wasm32 target (tests/modules); --deno: the
 #   pinned deno of internal/versions/versions.json (the policy engine tests, scripts/*.ts)
 set -euo pipefail

@@ -5,7 +5,7 @@ one-time host items. Short path in [CONTRIBUTING](../CONTRIBUTING.md#deploy-the-
 
 ```mermaid
 flowchart TD
-  tag["git tag v*"] --> gh["GitHub CI<br/>gate, pins, binaries, guest image"]
+  tag["git tag v*"] --> gh["knotless CI<br/>gate, pins, release (binaries, guest image)"]
   main["push to main"] --> gh
   gh -->|"publish"| bucket["Spaces bucket<br/>releases/tag, main/commit"]
   bucket --> deploy["scripts/deploy.sh"]
@@ -24,7 +24,7 @@ Three deploy shapes, and they differ:
 The policy is still "nothing is guaranteed": a change may deliberately wipe state, and there is no migration or backward compatibility to plan for. Losing sessions, VMs, clusters, claims or receipts is acceptable; what exists, this table says.
 
 ```bash
-# 1. confirm the commit's run is green on GitHub (.github/workflows/ci.yml)
+# 1. confirm the commit's knotless checks are green (gate, pins, release: .knotless/workflows/)
 # 2. build the release
 C=$(git rev-parse HEAD)
 scripts/build-socialweb-computer.sh --platform linux/amd64 --commit $C
