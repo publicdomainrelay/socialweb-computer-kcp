@@ -762,9 +762,8 @@ runs on macOS natively; the bidder role does not (it needs the launchd backend a
 Virtualization.framework runtime, plan 0012). On a release platform, `scripts/build-socialweb-computer.sh
 --dev` stages every pinned asset and the binary resolves them itself. This section is for the hosts
 where that cannot run: macOS (not a release platform in `internal/versions/versions.json`), and a
-Linux host whose asset staging fails on an unrelated pinned asset (the PGDG deb by-hash the pin
-names has since been withdrawn, or its rustc is not rustup-managed). Give the four executables by
-path instead.
+Linux host whose asset staging fails on an unrelated pinned asset (its rustc is not rustup-managed).
+Give the four executables by path instead.
 
 ### The four executables
 
@@ -832,9 +831,9 @@ built or fetched once into `~/.tmp/swc-mac/bin`.
 
 On a release platform, `scripts/build-socialweb-computer.sh --dev --publish /var/tmp/<work>` stages
 every pinned asset once and the binary resolves them itself, so `run request` then takes no path
-options. When that staging fails on an asset the requester never uses (the PGDG deb the postgres pin
-names has been withdrawn upstream; a rustc that is not rustup-managed stops the meshd downloads), use
-the explicit-path recipe above, with `GOTOOLCHAIN` and `GOEXPERIMENT=jsonv2` as on Windows.
+options. When that staging fails on an asset the requester never uses (a rustc that is not
+rustup-managed stops the meshd downloads), use the explicit-path recipe above, with `GOTOOLCHAIN` and
+`GOEXPERIMENT=jsonv2` as on Windows.
 
 ### Windows
 

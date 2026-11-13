@@ -302,84 +302,25 @@ stage_cargosrc() {
 
 deb_arch() { case "$1" in linux/amd64) echo amd64 ;; linux/arm64) echo arm64 ;; *) die "no deb arch for $1" ;; esac; }
 
-fetch_index() {
-  local dir="$1" name="$2" sum="$3" pf
-  if [ -f "$cache/$sum" ] && [ "$(sha_of "$cache/$sum")" = "$sum" ]; then
-    say "index $name: cached by sha256 $sum"
-    echo "$cache/$sum"
-    return
-  fi
-  say "index $name: fetching by-hash ${dir}by-hash/SHA256/$sum"
-  if pf="$(fetch_pinned "${dir}by-hash/SHA256/$sum" "$sum")"; then
-    echo "$pf"
-    return
-  fi
-  say "index $name: by-hash path unavailable, fetching ${dir}$name"
-  fetch_pinned "${dir}$name" "$sum"
-}
-
-repo_index() {
-  local asset="$1" repo="$2" plat="$3" x="$4" arch base comp fpr ring suite idx
-  arch="$(deb_arch "$plat")"
-  base="$(jq -r --arg a "$asset" --arg r "$repo" --arg p "$plat" '.assets[$a].repos[$r].base[$p]' "$versions")"
-  comp="$(jq -r --arg a "$asset" --arg r "$repo" '.assets[$a].repos[$r].component' "$versions")"
-  fpr="$(jq -r --arg a "$asset" --arg r "$repo" '.assets[$a].repos[$r].fingerprint' "$versions")"
-  ring="$(key_ring "$(jq -r --arg a "$asset" --arg r "$repo" '.assets[$a].repos[$r].key' "$versions")" "$fpr")"
-  : >"$x/$repo.packages"
-  for suite in $(jq -r --arg a "$asset" --arg r "$repo" '.assets[$a].repos[$r].suites[]' "$versions"); do
-    local found="" attempt pf="" sum
-    for attempt in 1 2 3 4 5 6; do
-      fetch_fresh "${base}dists/$suite/InRelease" "$x/$suite.InRelease"
-      gpg_verify "$ring" "$fpr" "$x/$suite.InRelease" "" "$x/$suite.Release"
-      for ext in xz gz; do
-        idx="$comp/binary-$arch/Packages.$ext"
-        sum="$(awk -v f="$idx" '/^SHA256:/{s=1;next} /^[^ ]/{s=0} s && $3==f {print $1}' "$x/$suite.Release" | awk 'NR==1')"
-        [ -n "$sum" ] || continue
-        if pf="$(fetch_index "${base}dists/$suite/$comp/binary-$arch/" "${idx##*/}" "$sum")"; then
-          case "$ext" in xz) xz -dc "$pf" >>"$x/$repo.packages" ;; gz) gzip -dc "$pf" >>"$x/$repo.packages" ;; esac
-          echo >>"$x/$repo.packages"
-          found=1
-        fi
-        break
-      done
-      [ -z "$found" ] || break
-      say "$suite index does not match its signed InRelease (the mirror is syncing); retry $attempt of 6 in 20 s"
-      sleep 20
-    done
-    [ -n "$found" ] || die "$suite: no Packages index matching its signed InRelease after 6 tries, or InRelease names no $comp/binary-$arch/Packages index"
-  done
-  echo "$base"
-}
-
+# Each deb by its pinned sha256 from its repo's durable file URL (`files`: {pool} and {file} filled in), never a
+# moving index: Launchpad keeps every file Ubuntu published, apt-archive.postgresql.org every pgdg version.
 stage_debs() {
-  local asset="$1" spec="$2" tree="$3" x="$4" plat="$5" arch repo base n i pkg ver pool want fname deb
+  local asset="$1" spec="$2" tree="$3" x="$4" plat="$5" arch n i pkg ver repo pool want files deb suffix url
   arch="$(deb_arch "$plat")"
   mkdir -p "$x/root"
-  declare -A bases=()
-  for repo in $(jq -r --arg a "$asset" '.assets[$a].repos | keys[]' "$versions"); do
-    bases[$repo]="$(repo_index "$asset" "$repo" "$plat" "$x")"
-  done
   n="$(jq -r --arg a "$asset" '.assets[$a].debs | length' "$versions")"
   for ((i = 0; i < n; i++)); do
     read -r pkg ver repo pool want < <(jq -r --arg a "$asset" --arg p "$plat" --argjson i "$i" \
       '.assets[$a].debs[$i] | "\(.package) \(.version) \(.repo) \(.pool) \(.sha256[$p])"' "$versions")
-    fname="$(awk -v RS= -v p="$pkg" -v v="$ver" '
-      { pk=""; vv=""; fn=""; sh="";
-        n=split($0, L, "\n");
-        for (j=1;j<=n;j++) { split(L[j], kv, ": ");
-          if (kv[1]=="Package") pk=kv[2]; else if (kv[1]=="Version") vv=kv[2];
-          else if (kv[1]=="Filename") fn=kv[2]; else if (kv[1]=="SHA256") sh=kv[2] }
-        if (pk==p && vv==v) { print fn " " sh; exit } }' "$x/$repo.packages")"
-    if [ -n "$fname" ]; then
-      [ "${fname#* }" = "$want" ] || die "$pkg $ver: the signed $repo index names sha256 ${fname#* }, pinned $want"
-      deb="$(fetch_pinned "${bases[$repo]}${fname% *}" "$want")"
-    else
-      say "warn: $pkg $ver is no longer in the signed $repo index for $arch (superseded); verified by its pinned sha256 alone"
-      local nover="${ver#*:}"
-      deb="$(fetch_pinned "${bases[$repo]}$pool${pkg}_${nover}_$arch.deb" "$want" 2>/dev/null)" \
-        || deb="$(fetch_pinned "${bases[$repo]}$pool${pkg}_${nover}_all.deb" "$want" 2>/dev/null)" \
-        || die "$pkg $ver ($arch) is gone from ${bases[$repo]}$pool (tried ${pkg}_${nover}_$arch.deb and _all.deb): repin it in $versions to a version the signed $repo index names"
-    fi
+    files="$(jq -r --arg a "$asset" --arg r "$repo" '.assets[$a].repos[$r].files' "$versions")"
+    deb=""
+    for suffix in "$arch" all; do
+      url="${files//\{pool\}/$pool}"
+      url="${url//\{file\}/${pkg}_${ver#*:}_$suffix.deb}"
+      deb="$(fetch_pinned "$url" "$want" 2>/dev/null)" && break
+      deb=""
+    done
+    [ -n "$deb" ] || die "$pkg $ver ($arch): no file with the pinned sha256 $want at $files (tried _$arch.deb and _all.deb)"
     rm -rf "$x/deb" && mkdir -p "$x/deb"
     (cd "$x/deb" && ar x "$deb")
     tar -xf "$x"/deb/data.tar.* -C "$x/root"
@@ -399,19 +340,6 @@ stage_debs() {
       done
       find "$tree" -type l | while read -r l; do
         case "$(readlink "$l")" in /*) die "absolute symlink $l -> $(readlink "$l") in the postgres tree" ;; esac
-      done
-      ;;
-    lib-tree)
-      local triplet
-      case "$arch" in amd64) triplet=x86_64-linux-gnu ;; arm64) triplet=aarch64-linux-gnu ;; esac
-      copy_members "$x/root" "$tree" "$(echo "$spec" | jq -c .members)"
-      mkdir -p "$tree/usr/lib/sys"
-      for d in "$x/root/lib/$triplet" "$x/root/usr/lib/$triplet"; do
-        [ -d "$d" ] || continue
-        find "$d" -maxdepth 1 -name '*.so*' \( -type f -o -type l \) -exec cp -a {} "$tree/usr/lib/sys/" \;
-      done
-      find "$tree" -type l | while read -r l; do
-        case "$(readlink "$l")" in /*) die "absolute symlink $l -> $(readlink "$l") in the $asset tree" ;; esac
       done
       ;;
     *) die "unknown deb layout" ;;
