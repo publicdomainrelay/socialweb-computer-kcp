@@ -7,6 +7,7 @@ import (
 	"fmt"
 	peatproto "github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -141,7 +142,7 @@ func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*cor
 		InboundXRPC:         s.inboundXRPC(),
 		ScopePolicy:         s.spec.Policy,
 		GuestTLSPort:        portOf(s.spec.Network.GuestTLSURL()),
-		GuestServices:       s.spec.Network.GuestServiceURLs(),
+		GuestServices:       networkGuestServices(s.spec.Network),
 		GuestCABundle:       networkCABundle(s.spec.Network),
 		GuestLocalAddress:   func() string { return s.inputs.Address(guestLocalExposure) },
 		GuestDownloads:      s.guestDownloads(),
@@ -482,6 +483,20 @@ func (s *Service) crawl() participant.Crawl {
 		Period: participant.CrawlPeriod,
 		Log:    s.log,
 	}
+}
+
+func networkGuestServices(n *v1alpha1.MarketNetworkValue) []string {
+	if n == nil {
+		return nil
+	}
+	var out []string
+	for _, h := range n.Hosts {
+		_, port, err := net.SplitHostPort(h.Address)
+		if strings.HasSuffix(h.Name, ".localhost") && err == nil && port != "" && port != "0" {
+			out = append(out, "http://"+h.Name+":"+port)
+		}
+	}
+	return out
 }
 
 func networkCABundle(n *v1alpha1.MarketNetworkValue) string {
