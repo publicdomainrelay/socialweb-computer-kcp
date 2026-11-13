@@ -182,8 +182,9 @@ fn agent_chain_handler(run: Run<Value>) -> Result<Handle, String> {
             );
             need(
                 v("grant2")["agent"] == agent
-                    && v("grant2")["contract"] == v("grant")["contract"]
-                    && v("grant2")["expiresAt"] == v("grant")["expiresAt"],
+                    && v("grant2")["contract"]["uri"] == v("grant")["contract"]["uri"]
+                    // the same instant (R2 writes .27Z where the renter writes .270Z)
+                    && steps::secs(v("grant2")["expiresAt"].as_str().unwrap_or("x")) == steps::secs(v("grant")["expiresAt"].as_str().unwrap_or("y")),
                 format!("R2 grant {}", g["grant2"]),
             );
             need(
