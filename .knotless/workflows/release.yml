@@ -22,6 +22,7 @@ steps:
     timeout: 110
     run: |
       . /opt/ci/env
+      (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
       root=/root/release-build
       bash scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" --build-root "$root"
       rel="$root/release/$KNOTLESS_RUN_SHA"
