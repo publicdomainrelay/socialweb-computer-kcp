@@ -10,7 +10,24 @@ use atlibs_host::registry::Net;
 use atlibs_host::store::Store;
 use serde_json::{Value, json};
 
-use crate::target::{Account, Target};
+use crate::target::{Account, Target, expand};
+
+/// `*.localhost` to the network's TLS front (its port: the URL names none); any other name as the system resolves it.
+struct LocalhostFront(std::net::SocketAddr);
+
+impl reqwest::dns::Resolve for LocalhostFront {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let (front, host) = (self.0, name.as_str().to_string());
+        Box::pin(async move {
+            let addrs: Vec<std::net::SocketAddr> = if host == "localhost" || host.ends_with(".localhost") {
+                vec![front]
+            } else {
+                tokio::net::lookup_host((host.as_str(), 0)).await?.collect()
+            };
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
 
 pub struct Atproto {
     pub net: Net,
@@ -37,10 +54,21 @@ pub fn home_tmp(sub: &str) -> std::path::PathBuf {
 impl Atproto {
     pub fn new(t: &Target) -> Self {
         atlibs_host::tls();
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .unwrap();
+        let mut b = reqwest::Client::builder().timeout(Duration::from_secs(30));
+        // a staging network's https hosts (`*.localhost`) are its TLS front under its own CA
+        if let Some(n) = &t.network
+            && let (Some(front), Some(ca)) = (&n.tls, &n.ca_bundle)
+        {
+            if let Ok(addr) = front.parse() {
+                b = b.dns_resolver(Arc::new(LocalhostFront(addr)));
+            }
+            if let Ok(pem) = std::fs::read(expand(ca)) {
+                for c in reqwest::Certificate::from_pem_bundle(&pem).unwrap_or_default() {
+                    b = b.add_root_certificate(c);
+                }
+            }
+        }
+        let http = b.build().unwrap();
         let mut net = Net::new(Arc::new(http.clone()) as Arc<dyn Fetch>);
         net.plc = t.plc.clone();
         // staging lives on private overlay addresses

@@ -166,6 +166,12 @@ pub struct NetworkRef {
     pub instance: String,
     /// the instance's --state-dir; a request's state lives under it too (`run request --network` reads its record there)
     pub state_dir: String,
+    /// the network's TLS front (`dispatcher-tls`, host:port): every `*.localhost` https host (a bidder's PDS
+    /// `did-key-*.relay.localhost`) is served there, under the network's CA (`ca_bundle`, a PEM file)
+    #[serde(default)]
+    pub tls: Option<String>,
+    #[serde(default)]
+    pub ca_bundle: Option<String>,
 }
 
 pub fn expand(path: &str) -> PathBuf {

@@ -12,6 +12,8 @@ eval "$($S dev env "${N[@]}" 2>/dev/null)"
 pds=$(jq -r '.network.status.bidderPdsUrl' <<<"$st")
 host() { jq -r --arg n "$1" '.network.status.network.hosts[] | select(.name == $n) | .address' <<<"$st"; }
 plc=$(jq -r '.network.status.network.plcDirectoryUrl' <<<"$st")
+# the network's CA (its https hosts, the TLS front): a PEM file beside the state, for the test host's reads
+(umask 022 && jq -r '.network.status.network.caBundle' <<<"$st" > "$ST/ca-$I.pem")
 accounts='{}'
 for a in alice bob; do
   h="$a-${run: -4}$(date +%s | tail -c 5).bob.test" pw=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9) c=$C/creds-$a
@@ -26,8 +28,9 @@ bidders=$(jq -c '[.network.status.apps[] | select(.kind == "MarketBidder") | {na
   jq -c --arg op "$op" --arg kc "$KUBECONFIG" --arg ws "root:$n" '. + {operator: $op, kcp: {kubeconfig: $kc, workspace: $ws, via: {kind: "direct"}}}' <<<"$b"
 done | jq -sc .)
 jq -n --arg plc "$plc" --arg pds "$pds" --arg relay "http://$(host relay.default.relay.svc.kcp.local)" \
-  --argjson accounts "$accounts" --argjson bidders "$bidders" --arg s "$S" --arg i "$I" --arg st "$ST" '{
+  --argjson accounts "$accounts" --argjson bidders "$bidders" --arg s "$S" --arg i "$I" --arg st "$ST" \
+  --arg tls "$(host dispatcher-tls.default.relay.svc.kcp.local)" --arg ca "$ST/ca-$I.pem" '{
   name: "staging", restartSshMaxS: 20, plc: $plc, pds: $pds, relay: $relay, requester: ("path:" + $s),
-  network: {instance: $i, stateDir: $st}, accounts: $accounts, bidders: $bidders,
+  network: {instance: $i, stateDir: $st, tls: $tls, caBundle: $ca}, accounts: $accounts, bidders: $bidders,
   gateway: {url: "https://gateway.staging.invalid", aud: "did:web:gateway.staging.invalid", ssh: "gateway.staging.invalid"}
 }'

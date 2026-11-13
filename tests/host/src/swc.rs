@@ -463,16 +463,29 @@ impl Swc {
                 ))
                 .env("ATPROTO_PASSWORD", self.password()?);
         }
-        // the RFP's compute.vm role (e.g. the staging layer the watch page shows)
+        // the RFP's compute.vm role (e.g. the staging layer the watch page shows), and the bidders it may (bidderDids)
+        // or may not (denyBidderDids) go to: contract options, after the `--`
+        let mut pass: Vec<String> = vec![];
         if let Some(v) = input["vmName"].as_str() {
             if v.is_empty() || !v.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
                 return Err(format!("vmName {v:?}: lowercase letters, digits and dashes"));
             }
-            if self.acct()?.guest_requester {
-                cmd.arg("--");
-            }
-            cmd.args(["--vm-name", v]);
+            pass.extend(["--vm-name".to_string(), v.to_string()]);
         }
+        for (k, flag) in [("bidderDids", "--allow-bidder-dids"), ("denyBidderDids", "--deny-bidder-dids")] {
+            let Some(dids) = input[k].as_array() else { continue };
+            let dids: Vec<&str> = dids.iter().filter_map(Value::as_str).collect();
+            if dids.iter().any(|d| !d.starts_with("did:") || d.contains(',')) {
+                return Err(format!("{k}: DIDs"));
+            }
+            if !dids.is_empty() {
+                pass.extend([flag.to_string(), dids.join(",")]);
+            }
+        }
+        if !pass.is_empty() && self.acct()?.guest_requester {
+            cmd.arg("--");
+        }
+        cmd.args(&pass);
         let mut child = cmd
             .stdout(f.try_clone().map_err(|e| e.to_string())?)
             .stderr(f)
