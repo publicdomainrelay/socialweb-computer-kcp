@@ -6,6 +6,9 @@
 //             `knotless run artifacts --out` downloads it
 //   executor  two workflows on two bindings (executor: small | big): each VM has its binding's vCPUs
 //   pull      a sealed secret: the push to main sees it, a pull's run gets none
+//   fallback  one workflow per network bidder, each VM sized so a bidder holds one (its offering's maxCpus / 2 + 1):
+//             all succeed, and in one of up to 3 rounds a bidder declined an accept (409 CapacityExceeded) and the
+//             rent took the next bid (the atlibs requester module's accept fallback; acceptance 0014's atlibs path)
 //   terminated a step powers off its own VM: its bidder's vm.terminated reaches the cicd workload as a market event
 //             and the step fails at once with the reason (not after the read retries)
 // Result {pass, error?, phase (the step), readings (seconds per step)}. The host deletes the repo and the seeded
@@ -68,6 +71,64 @@ fn checks(r: &str, of: &str, workflows: &[&str]) -> String {
     )
 }
 
+/// The `fill` binding (the bidders' tightest maxCpus / 2 + 1 vCPUs, 1 GiB) beside the seeded ones, then one workflow
+/// per bidder on it (`fill-<n>`), pushed; the bidders are the account's vouched DIDs with a compute offering.
+fn fill_script(r: &str) -> String {
+    format!(
+        r##"S=$(jq -n --arg i "$KNOTLESS_IDENTIFIER" --arg p "$KNOTLESS_PASSWORD" '{{identifier: $i, password: $p}}' | curl -sf -H 'content-type: application/json' -d @- "$KNOTLESS_PDS/xrpc/com.atproto.server.createSession")
+J=$(printf %s "$S" | jq -r .accessJwt); D=$(printf %s "$S" | jq -r .did)
+: > {r}.max
+for b in $(curl -sf "$KNOTLESS_PDS/xrpc/com.atproto.repo.listRecords?repo=$D&collection=sh.tangled.graph.vouch&limit=100" | jq -r '.records[].value.subject' | sort -u); do
+  p=$(curl -sf "$KNOTLESS_PLC_URL/$b" | jq -r '.service[] | select(.id == "#atproto_pds") | .serviceEndpoint') || continue
+  m=$(curl -sf "$p/xrpc/com.atproto.repo.getRecord?repo=$b&collection=com.publicdomainrelay.temp.market.offering&rkey=self" | jq -r '.value.maxCpus // empty') || continue
+  [ -n "$m" ] && echo "$b $m" | tee -a {r}.max
+done
+n=$(wc -l < {r}.max); test "$n" -ge 2
+cpus=$(( $(sort -n -k2 {r}.max | head -1 | cut -d' ' -f2) / 2 + 1 ))
+echo "$n bidders, $cpus vCPUs a VM: one VM fills a bidder"
+comp=$(curl -sf "$KNOTLESS_PDS/xrpc/com.atproto.repo.getRecord?repo=$D&collection=com.fedfork.exec.binding&rkey=self" | jq -c .value.composition)
+jq -n --arg d "$D" --argjson c "$comp" --argjson cpus "$cpus" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"   '{{repo: $d, collection: "com.fedfork.exec.binding", rkey: "fill", record: {{"$type": "com.fedfork.exec.binding", composition: $c, inputs: {{cpus: $cpus, mem: 1}}, createdAt: $at}}}}' |
+  curl -sf -H "authorization: Bearer $J" -H 'content-type: application/json' -d @- "$KNOTLESS_PDS/xrpc/com.atproto.repo.putRecord" > /dev/null
+U=knotless://$KNOTLESS_IDENTIFIER/{r}
+rm -rf {r} && mkdir -p {r}/.knotless/workflows && cd {r}
+git init -q -b main
+for i in $(seq "$n"); do printf 'on:
+  push:
+    refs: [refs/heads/main]
+executor: fill
+steps:
+  - name: size
+    run: nproc
+' > .knotless/workflows/fill-$i.yml; done
+echo 1 > round
+git add . && git commit -q -m 'swc-test knotless fallback'
+git remote add origin "$U"
+git push -q -u origin main
+"##
+    )
+}
+
+/// Up to 3 rounds: every fill-* check of the round's commit succeeds; a round whose logs show a declined accept
+/// (the rent's notes) ends it, else the next round is a new commit.
+fn rounds_script(r: &str) -> String {
+    format!(
+        r#"U=knotless://$KNOTLESS_IDENTIFIER/{r}
+cd {r}
+for round in 1 2 3; do
+  C=$(git rev-parse HEAD)
+  knotless run list "$U" --commit "$C" --wait 1500 > ../{r}.checks
+  cat ../{r}.checks
+  knotless run list "$U" --commit "$C" --log > ../{r}.log
+  if grep -v "^success	fill-" ../{r}.checks | grep -q "	fill-"; then cat ../{r}.log; exit 1; fi
+  if grep 'declined the accept' ../{r}.log; then echo "round $round: a declined accept was replaced"; exit 0; fi
+  echo "round $round: every first pick had room"
+  echo $((round + 1)) > round && git commit -q -am "round $((round + 1))" && git push -q origin main
+done
+echo "no accept was declined in 3 rounds"; exit 1
+"#
+    )
+}
+
 fn plan(entry: &str, r: &str) -> (Value, Vec<Step>) {
     let one = json!({ "cpus": 1, "mem": 1 });
     match entry {
@@ -108,6 +169,23 @@ fn plan(entry: &str, r: &str) -> (Value, Vec<Step>) {
                 Step {
                     id: "checks",
                     script: checks(r, "push", &["small", "big"]),
+                },
+            ],
+        ),
+        "fallback" => (
+            json!({ "self": one }),
+            vec![
+                Step {
+                    id: "create",
+                    script: create(r),
+                },
+                Step {
+                    id: "fill",
+                    script: fill_script(r),
+                },
+                Step {
+                    id: "rounds",
+                    script: rounds_script(r),
                 },
             ],
         ),
@@ -215,9 +293,12 @@ fn run_entry(entry: &'static str, run: Run<Value>) -> Result<Handle, String> {
         Event::Start => {
             s.set("seed");
             s.mark("step");
-            let cleanup = format!(
+            let mut cleanup = format!(
                 "knotless repo delete knotless://$KNOTLESS_IDENTIFIER/{repo} --yes || true"
             );
+            if entry == "fallback" {
+                cleanup.push_str("\nS=$(jq -n --arg i \"$KNOTLESS_IDENTIFIER\" --arg p \"$KNOTLESS_PASSWORD\" '{identifier: $i, password: $p}' | curl -sf -H 'content-type: application/json' -d @- \"$KNOTLESS_PDS/xrpc/com.atproto.server.createSession\") && jq -n --arg d \"$(printf %s \"$S\" | jq -r .did)\" '{repo: $d, collection: \"com.fedfork.exec.binding\", rkey: \"fill\"}' | curl -sf -H \"authorization: Bearer $(printf %s \"$S\" | jq -r .accessJwt)\" -H 'content-type: application/json' -d @- \"$KNOTLESS_PDS/xrpc/com.atproto.repo.deleteRecord\" > /dev/null || true");
+            }
             h = h
                 .call(host(
                     "cleanup",
@@ -291,8 +372,12 @@ fn pull_entry(r: Run<Value>) -> Result<Handle, String> {
     run_entry("pull", r)
 }
 
+fn fallback_entry(r: Run<Value>) -> Result<Handle, String> {
+    run_entry("fallback", r)
+}
+
 fn terminated_entry(r: Run<Value>) -> Result<Handle, String> {
     run_entry("terminated", r)
 }
 
-entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry, terminated => terminated_entry }
+entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry, fallback => fallback_entry, terminated => terminated_entry }

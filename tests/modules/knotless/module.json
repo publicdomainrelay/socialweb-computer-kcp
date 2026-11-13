@@ -6,6 +6,7 @@
 		{ "entry": "after", "label": "After", "description": "build keeps an artifact; test (after: [build]) reads it in its VM with $KNOTLESS_ARTIFACTS_URL and $KNOTLESS_ARTIFACTS_TOKEN; knotless run artifacts --out downloads it." },
 		{ "entry": "executor", "label": "Executor", "description": "Two workflows on two bindings (executor: small, big): each VM has its binding's vCPUs." },
 		{ "entry": "pull", "label": "Pull", "description": "A sealed secret: the push to main sees it, a pull's run gets none." },
+		{ "entry": "fallback", "label": "Fallback", "description": "One workflow per network bidder, each VM filling a bidder: all succeed, and in one of up to 3 rounds a bidder declined an accept and the rent took the next bid." },
 		{ "entry": "terminated", "label": "Terminated", "description": "A step powers off its own VM: its bidder's vm.terminated reaches the cicd workload as a market event and the step fails at once with the reason." }
 	],
 	"calls": [

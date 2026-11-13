@@ -11,6 +11,7 @@ published `socialweb-computer-cicd` composition (`knotless.source`) once, its mo
 | `after` | `build` keeps an artifact; `test` (`after: [build]`) reads it in its VM with `$KNOTLESS_ARTIFACTS_URL` and `$KNOTLESS_ARTIFACTS_TOKEN`; `knotless run artifacts --out` downloads it |
 | `executor` | two workflows on two bindings (`executor: small`, `executor: big`): each VM has its binding's vCPUs |
 | `pull` | a sealed secret: the push to main sees it, a pull's run gets none |
+| `fallback` | one workflow per network bidder (the account's vouched DIDs with an offering), each on a `fill` binding of the tightest `maxCpus / 2 + 1` vCPUs so a bidder holds one: every check succeeds, and in one of up to 3 rounds the log shows `==> the rent noted: <bidder> declined the accept: ... CapacityExceeded` (the atlibs requester module's fallback; [0014](../../../docs/acceptance/0014-accept-fallback.md)'s atlibs path) |
 | `terminated` | a step powers off its own VM (sysrq o, 20 s in): the bidder's `vm.terminated` reaches the cicd workload (`com.fedfork.market.watch` on the requester that rented it) and the step fails in under 5 min with `the VM was terminated by its bidder: <reason>` |
 
 ## Run
