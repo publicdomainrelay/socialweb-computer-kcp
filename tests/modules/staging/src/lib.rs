@@ -492,6 +492,8 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                         "0" => {
                             s.st["readings"]["requestS"] = json!(s.since("request"));
                             s.st["readings"]["request"] = json!(log.lines().filter(|l| l.starts_with("RENTED")).collect::<Vec<_>>());
+                            // the staging requesters' DIDs (an isolation check greps prod bidders' journals for them)
+                            s.st["readings"]["requesterDids"] = json!(log.lines().filter_map(|l| l.strip_prefix("REQUESTER")).filter_map(|l| l.rfind("did:plc:").map(|i| &l[i..])).collect::<Vec<_>>());
                             return Ok(down(&mut s, h, json!({ "pass": true })));
                         }
                         rc => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{step} exit {rc}: {log}") }))),
@@ -540,7 +542,7 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                         s.set("request");
                         let one = |n: &str| swc(&format!("run request --network stg --state-dir /home/stg/stg/s --name {n} --exec hostname -- --policy open"));
                         let both = format!(
-                            "(sh -c \"{} > /home/stg/p1.out\" & {} > /home/stg/p2.out; rc=$?; wait $! || rc=1; grep -h -o winnerDid.* /home/stg/p1.out /home/stg/p2.out | sed s/^/RENTED/; exit $rc)",
+                            "(sh -c \"{} > /home/stg/p1.out\" & {} > /home/stg/p2.out; rc=$?; wait $! || rc=1; grep -h -o winnerDid.* /home/stg/p1.out /home/stg/p2.out | sed s/^/RENTED/; grep -h -o -E ..did.{{4}}did:plc:[a-z0-9]+ /home/stg/p1.out /home/stg/p2.out | sed s/^/REQUESTER/; exit $rc)",
                             one("p1"), one("p2")
                         );
                         let cmd = bg("request", both);
