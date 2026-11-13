@@ -8,8 +8,10 @@ use steps::{MIN, S, host};
 
 const BUCKET: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com";
 const BIN: &str = "socialweb-computer-linux-amd64";
-/// dev up's market network on the VM: 3 bidders (nested VMs), the gateway, vm and deno compute
-const DEV_UP: &str = "dev up --instance stg --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc --network-timeout 20m";
+/// the instance on the VM (a short state dir: tenant socket paths must fit in 107 bytes)
+const INST: &str = "--instance stg --state-dir ~/stg/s";
+/// dev up's market network: 3 bidders (nested VMs), the gateway, vm and deno compute
+const DEV_UP: &str = "--profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m";
 
 /// The bucket prefix of a binary spec: releases/<tag> or main/<commit>.
 fn prefix(spec: &str) -> Result<String, String> {
@@ -39,7 +41,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
     let down = |s: &mut S, h: Handle, result: Value| {
         s.st["result"] = result;
         s.set("down");
-        s.keep(h.call(ssh("down", swc("dev down --instance stg"))))
+        s.keep(h.call(ssh("down", swc(&format!("dev down {INST}")))))
     };
     match run.event {
         Event::Start => {
@@ -78,13 +80,13 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                     s.st["readings"]["version"] = json!(text.lines().last());
                     s.mark("installed");
                     s.set("up");
-                    h = h.call(ssh("up", swc(DEV_UP)));
+                    h = h.call(ssh("up", format!("mkdir -p ~/stg/s && {}", swc(&format!("dev up {INST} {DEV_UP}")))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
                 "up" if o["ok"] == true => {
                     s.mark("up");
                     s.set("status");
-                    h = h.call(ssh("status", swc("dev status --instance stg")));
+                    h = h.call(ssh("status", swc(&format!("dev status {INST}"))));
                 }
                 "up" => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("dev up: {text}") }))),
                 "status" => {

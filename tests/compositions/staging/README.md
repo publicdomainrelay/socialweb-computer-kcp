@@ -11,7 +11,7 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
 1. `run request --hold --nested-virt --cpus 8 --mem 16G --expires-in 2h` as the target's account.
 2. Install the binary under test on the VM: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
    checked against `SHA256SUMS`.
-3. `dev up --instance stg --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
+3. `dev up --instance stg --state-dir ~/stg/s --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
 4. `dev status --instance stg`.
 5. Always: `dev down --instance stg`; the host releases the VM.
 
