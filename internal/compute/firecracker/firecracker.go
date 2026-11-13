@@ -266,6 +266,7 @@ func (p *Provider) live(ctx context.Context, unit string) (bool, error) {
 
 func (p *Provider) placer(vm *v1alpha1.FirecrackerVM) vmruntime.Placer {
 	return func(ctx context.Context, slot int, spec hostsvc.UnitSpec) error {
+		handed := time.Now()
 		if err := p.placement.Place(ctx, vm, slot, spec); err != nil {
 			return err
 		}
@@ -273,7 +274,8 @@ func (p *Provider) placer(vm *v1alpha1.FirecrackerVM) vmruntime.Placer {
 		pctx, cancel := context.WithTimeout(ctx, PlaceTimeout)
 		defer cancel()
 		if _, err := hostsvc.Await(pctx, p.m, spec.Name, func(st hostsvc.UnitStatus) bool {
-			return st.State != hostsvc.NotFound && st.State != ""
+			ranSinceHandOff := !st.ActiveSince.IsZero() && st.ActiveSince.After(handed)
+			return st.State == hostsvc.Active || st.State == hostsvc.Activating || st.State == hostsvc.Failed || ranSinceHandOff
 		}); err != nil {
 			return fmt.Errorf("firecracker: %s was not placed within %s: %w", spec.Name, PlaceTimeout, err)
 		}
