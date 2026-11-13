@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0001 s3-s6",
+	"description": "Tenant cluster, kubeconfigs and their revoke (xrpc, page), 1-2-3-2-1-0 one replica per node (docs/acceptance/0001-auth-modes.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0001"
+		}
+	]
+}
+

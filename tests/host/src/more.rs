@@ -632,6 +632,37 @@ impl Swc {
                 }
                 .await
             }
+            "example" => match input["name"].as_str().filter(|n| !n.contains('/') && n.ends_with(".yaml")) {
+                Some(n) => std::fs::read_to_string(testkit::repo().join("examples/infra").join(n)).map(|t| json!({ "text": t })).map_err(|e| format!("{n}: {e}")),
+                None => Err("name is an examples/infra file".into()),
+            },
+            "request.r2" => {
+                let (Ok(name), Ok(r2)) = (str_of(input, "name"), str_of(input, "r2Name")) else { return Some(Err("name and r2Name are required".into())) };
+                let mut extra = vec!["--r2-name", r2, "--hold"];
+                if input["agent"] == true {
+                    extra.push("--agent");
+                }
+                let args = self.sub_args("r2", name, &extra);
+                self.cli(&args).await.and_then(|(ok, out)| if ok { Ok(json!({})) } else { Err(format!("run request r2: {}", tail(&out))) })
+            }
+            "request.checkLogs" => match (str_of(input, "name"), self.password()) {
+                (Ok(name), Ok(pw)) => {
+                    let mut problems = vec![];
+                    for p in self.request_logs(name) {
+                        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+                        if text.contains(&pw) {
+                            problems.push(format!("{}: the app password", p.display()));
+                        }
+                        for bad in ["a=candidate", "AGE-SECRET-KEY"] {
+                            if text.contains(bad) {
+                                problems.push(format!("{}: plaintext {bad}", p.display()));
+                            }
+                        }
+                    }
+                    Ok(json!({ "ok": problems.is_empty(), "problems": problems }))
+                }
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
             "root.exec" => {
                 let Some(host) = (self.target.name != "prod")
                     .then(|| self.target.root_hosts.first().cloned())

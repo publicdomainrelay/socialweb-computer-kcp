@@ -447,15 +447,32 @@ async fn main_() -> Result<bool> {
         provides: Some(provides),
         gate: Some(freezer.gate()),
         on_event: Some(freezer.on_event()),
+        http: {
+            // com.fedfork.exec.http.fetch: the target's own origins only
+            let mut allow = serde_json::Map::new();
+            for o in [target.atirc.clone(), Some(target.gateway.url.clone()), Some(target.plc.clone()), Some(format!("https://ssh.{}", target.gateway.ssh))].into_iter().flatten() {
+                allow.insert(o.trim_end_matches('/').to_string(), json!({}));
+            }
+            Some(Arc::new(atlibs_host::run::Http::from_json(fetch.clone(), &Value::Object(allow)).map_err(|e| anyhow!(e))?))
+        },
         ..Default::default()
     };
     let started = atlibs_host::iso_now();
     let name = format!("st-{runbook}-{}", atlibs_host::now_ms() / 1000);
-    let mut input: serde_json::Map<String, Value> =
-        json!({ "did": acc.did, "handle": acc.handle, "name": name })
-            .as_object()
-            .unwrap()
-            .clone();
+    // what a test module knows of the target: no credential, no path
+    let bidders: Vec<Value> = target
+        .bidders
+        .iter()
+        .map(|b| json!({ "name": b.name, "did": b.did, "operator": b.operator, "cluster": b.kcp.as_ref().map(|_| format!("bidder:{}", b.name)) }))
+        .collect();
+    let mut input: serde_json::Map<String, Value> = json!({
+        "did": acc.did, "handle": acc.handle, "name": name, "target": target.name, "bidders": bidders,
+        "gateway": { "url": target.gateway.url, "aud": target.gateway.aud, "ssh": target.gateway.ssh, "requesterDid": target.gateway.requester_did, "cluster": target.gateway.kcp.as_ref().map(|_| "gateway") },
+        "atirc": target.atirc, "plc": target.plc, "perHost": args.iter().any(|a| a == "--per-host"),
+    })
+    .as_object()
+    .unwrap()
+    .clone();
     if let Some(i) = flag(&args, "--input") {
         input = serde_json::from_str(&i)?;
     }

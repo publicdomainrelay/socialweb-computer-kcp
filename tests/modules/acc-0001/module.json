@@ -1,0 +1,27 @@
+{
+	"name": "acc-0001",
+	"description": "Acceptance 0001 sections 3-6: tenant cluster, readyz, no-expiry kubeconfig and revoke (xrpc and page), one replica per node 1-2-3-2-1-0, per-step orphan and vm.terminated checks.",
+	"actions": [{ "entry": "run", "label": "Run 0001 s3-s6", "description": "The sections end to end; the result says pass, the phase and the readings." }],
+	"calls": [
+		"com.publicdomainrelay.temp.cluster.createCluster",
+		"com.publicdomainrelay.temp.cluster.listClusters",
+		"com.publicdomainrelay.temp.cluster.getKubeconfig",
+		"com.publicdomainrelay.temp.cluster.listKubeconfigs",
+		"com.publicdomainrelay.temp.cluster.revokeKubeconfig",
+		"com.publicdomainrelay.temp.cluster.deleteCluster",
+		"com.atproto.repo.getRecord",
+		"computer.socialweb.test.kube.addCluster",
+		"computer.socialweb.test.page.signin",
+		"computer.socialweb.test.page.fetch",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.raw",
+		"com.fedfork.exec.kube.apply",
+		"com.fedfork.exec.kube.patch",
+		"com.fedfork.exec.kube.delete"
+	],
+	"hooks": [
+		{ "nsid": "computer.socialweb.test.kube.addCluster", "required": true, "entries": ["run"], "reason": "the tenant kubeconfigs as host clusters" },
+		{ "nsid": "computer.socialweb.test.page.signin", "required": true, "entries": ["run"], "reason": "the k8s page signed in (headless Chrome)" },
+		{ "nsid": "com.fedfork.exec.kube.raw", "required": true, "entries": ["run"], "reason": "/readyz through the kubeconfig's path" }
+	]
+}

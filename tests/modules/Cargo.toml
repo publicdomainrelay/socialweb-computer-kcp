@@ -2,7 +2,7 @@
 # Each member is one module: its module.json beside its Cargo.toml.
 [workspace]
 resolver = "3"
-members = ["assert", "acc-0004"]
+members = ["steps", "assert", "acc-0004", "acc-0001"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 abi = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "52542c7d5a8edc8f0bb7fab5f0c9683ac2a69a21" }
 serde_json = "1"
+steps = { path = "steps" }
 
 [profile.release]
 opt-level = "z"

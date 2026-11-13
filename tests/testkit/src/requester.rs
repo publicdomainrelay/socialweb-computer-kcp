@@ -42,10 +42,12 @@ fn newest_tag() -> Result<String> {
         "git ls-remote origin: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // v0.0.0-rcN[-preM]: N, then a final rc after its pre-releases
     let key = |t: &str| {
-        t.rsplit_once("-rc")
-            .and_then(|(_, n)| n.parse::<u64>().ok())
-            .unwrap_or(0)
+        let rest = t.rsplit_once("-rc").map(|(_, r)| r).unwrap_or_default();
+        let n: u64 = rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap_or(0);
+        let pre: u64 = rest.rsplit_once("-pre").and_then(|(_, p)| p.parse().ok()).unwrap_or(u64::MAX);
+        (n, pre)
     };
     String::from_utf8(out.stdout)?
         .lines()
