@@ -247,7 +247,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /xrpc/com.atproto.sync.getBlob", s.handleGetBlob)
 	s.mux.HandleFunc("GET /xrpc/com.atproto.sync.subscribeRepos", s.handleSubscribeRepos)
 
-	s.mux.HandleFunc("/xrpc/", s.handleMethodNotFound)
+	s.mux.HandleFunc("/xrpc/", s.handleMethodNotImplemented)
 }
 
 var readOnlyBlocked = map[string]bool{
@@ -359,8 +359,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	httpjson.Write(w, http.StatusOK, map[string]string{"version": version})
 }
 
-func (s *Server) handleMethodNotFound(w http.ResponseWriter, _ *http.Request) {
-	writeXRPCError(w, http.StatusNotFound, "MethodNotFound", "unknown xrpc method")
+func (s *Server) handleMethodNotImplemented(w http.ResponseWriter, _ *http.Request) {
+	writeXRPCError(w, http.StatusNotImplemented, "MethodNotImplemented", "Method Not Implemented")
 }
 
 type xrpcErrorBody struct {

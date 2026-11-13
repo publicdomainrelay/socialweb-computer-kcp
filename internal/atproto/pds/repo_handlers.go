@@ -18,6 +18,8 @@ import (
 
 var errForbidden = errors.New("pds: forbidden")
 
+const maxCursorBytes = 1024
+
 type recordView struct {
 	URI   string         `json:"uri"`
 	CID   string         `json:"cid"`
@@ -181,14 +183,12 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	var cursor syntax.RecordKey
-	if rawCursor := query.Get("cursor"); rawCursor != "" {
-		cursor, err = syntax.ParseRecordKey(rawCursor)
-		if err != nil {
-			writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid cursor")
-			return
-		}
+	rawCursor := query.Get("cursor")
+	if len(rawCursor) > maxCursorBytes {
+		writeXRPCError(w, http.StatusBadRequest, "InvalidRequest", "invalid cursor")
+		return
 	}
+	cursor := syntax.RecordKey(rawCursor)
 	reverse := false
 	if rawReverse := query.Get("reverse"); rawReverse != "" {
 		reverse, err = strconv.ParseBool(rawReverse)
@@ -200,9 +200,9 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	var records []repo.Record
 	var next *syntax.RecordKey
 	if reverse {
-		records, next, err = s.listRecordsReverse(ctx, did, collection, cursor, limit)
-	} else {
 		records, next, err = s.repos.ListRecords(ctx, did, collection, cursor, limit)
+	} else {
+		records, next, err = s.listRecordsNewestFirst(ctx, did, collection, cursor, limit)
 	}
 	if err != nil {
 		s.repoError(w, err)
@@ -222,7 +222,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, out)
 }
 
-func (s *Server) listRecordsReverse(ctx context.Context, did syntax.DID, collection syntax.NSID, cursor syntax.RecordKey, limit int) ([]repo.Record, *syntax.RecordKey, error) {
+func (s *Server) listRecordsNewestFirst(ctx context.Context, did syntax.DID, collection syntax.NSID, cursor syntax.RecordKey, limit int) ([]repo.Record, *syntax.RecordKey, error) {
 	var pageCursor syntax.RecordKey
 	all := make([]repo.Record, 0, limit)
 	for {

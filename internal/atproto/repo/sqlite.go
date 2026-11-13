@@ -699,14 +699,7 @@ func (s *SQLiteStore) ListRecords(ctx context.Context, did syntax.DID, collectio
 		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
 	limit = min(opt.Positive(limit, DefaultList), MaxList)
-	cursorRaw := ""
-	if cursor != "" {
-		rk, err := syntax.ParseRecordKey(string(cursor))
-		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-		}
-		cursorRaw = rk.String()
-	}
+	cursorRaw := string(cursor)
 	root, _, err := s.headRoot(ctx, d)
 	if err != nil {
 		return nil, nil, err
