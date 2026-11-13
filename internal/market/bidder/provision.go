@@ -140,6 +140,9 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err := b.checkCapacity(); err != nil {
 		return "", err
 	}
+	if refused := b.sizeRefused(record); refused != "" {
+		return "", fmt.Errorf("bidder: %s: %w", refused, participant.ErrRejected)
+	}
 	name, err := vmNameForAccept(req.requesterDID, acceptKey)
 	if err != nil {
 		return "", err
@@ -314,9 +317,7 @@ func (b *Bidder) checkCapacity() error {
 	if limit <= 0 {
 		return nil
 	}
-	live := len(b.vms.Filter(func(vm v1alpha1.ComputeVM) bool {
-		return vm.DeletionTimestamp == nil && vm.Spec.Owner.Handle == b.cfg.ProviderHandle && !b.guests.Ended(&vm) && !b.guests.Releasing(&vm)
-	}))
+	live := len(b.vms.Filter(b.liveGuest))
 	if int32(live) >= limit {
 		return fmt.Errorf("bidder: the %d guest quota is full", limit)
 	}
