@@ -563,10 +563,44 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		if r.Via == "" || len(r.Via) > MaxGuestSecretsVia || !printableASCII(r.Via) || r.Count < 0 {
 			return "", fmt.Errorf("%w: via is printable ASCII of 1 to %d bytes and count is not negative", ErrReportRefused, MaxGuestSecretsVia)
 		}
+	case market.ComputeEventsGuestMemoryPressureNSID:
+		r, err := market.ParseComputeEventsGuestMemoryPressure(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if err := checkObserved(r.CreatedAt, r.ObservedAt); err != nil {
+			return "", err
+		}
+		pct := func(v int64) bool { return v >= 0 && v <= 10000 }
+		if (r.Kind != market.GuestMemoryKindPSI && r.Kind != market.GuestMemoryKindSwap) || !pct(r.Threshold) || !pct(r.PsiSomeAvg10) || !pct(r.PsiFullAvg10) ||
+			r.SwapUsed < 0 || r.SwapTotal < r.SwapUsed {
+			return "", fmt.Errorf("%w: kind is psi or swap, threshold and the avg10s are 0 to 10000, swapUsed is 0 to swapTotal", ErrReportRefused)
+		}
+	case market.ComputeEventsGuestOOMKillNSID:
+		r, err := market.ParseComputeEventsGuestOomKill(record)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrReportRefused, err)
+		}
+		if err := checkObserved(r.CreatedAt, r.ObservedAt); err != nil {
+			return "", err
+		}
+		if r.Kills < 1 || r.Total < r.Kills {
+			return "", fmt.Errorf("%w: kills is at least 1 and total at least kills", ErrReportRefused)
+		}
 	default:
 		return "", fmt.Errorf("%w: %q is not a guest event", ErrReportRefused, nsid)
 	}
 	return nsid, nil
+}
+
+func checkObserved(createdAt, observedAt string) error {
+	if _, err := syntax.ParseDatetime(createdAt); err != nil {
+		return fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
+	}
+	if _, err := syntax.ParseDatetime(observedAt); err != nil {
+		return fmt.Errorf("%w: observedAt is not an atproto datetime", ErrReportRefused)
+	}
+	return nil
 }
 
 func checkGuestEventFields(tag, kind string, maxKind int, createdAt string) error {

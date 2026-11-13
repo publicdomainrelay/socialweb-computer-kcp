@@ -61,6 +61,8 @@
 | `compute/events/guest/r2Start.json` | [compute.events.guest.r2Start](#computeeventsguestr2start) | x |
 | `compute/events/guest/r2Release.json` | [compute.events.guest.r2Release](#computeeventsguestr2release) | x |
 | `compute/events/guest/r2Released.json` | [compute.events.guest.r2Released](#computeeventsguestr2released) | x |
+| `compute/events/guest/memoryPressure.json` | [compute.events.guest.memoryPressure](#computeeventsguestmemorypressure) | x |
+| `compute/events/guest/oomKill.json` | [compute.events.guest.oomKill](#computeeventsguestoomkill) | x |
 | `compute/guest/subscribeEvents.json` | [compute.guest.subscribeEvents](#computeguestsubscribeevents) | x |
 | `ingress/webRTC.json` | [ingress.webRTC](#ingresswebrtc) | x |
 | no file (`SecretsNSID`) | [compute.secrets.getSecrets](#computesecretsgetsecrets) | x |
@@ -579,6 +581,28 @@
 | written by | bidder for the guest agent |
 | read by | requester: `status.contract.r2Release`, condition GuestRequesterReleased |
 | step | [S9](README.md#step-s9) |
+
+## compute.events.guest.memoryPressure
+
+| item | value |
+|---|---|
+| file | `compute/events/guest/memoryPressure.json` |
+| type | record, key any |
+| key fields | `kind`* psi / swap, `threshold`*, `psiSomeAvg10`, `psiFullAvg10`, `swapUsed`*, `swapTotal`*, `observedAt`*, `createdAt`* (percentages in hundredths) |
+| rkey | bidder `EventRKeys("guest:...")` |
+| written by | bidder for the guest agent (`internal/guestagent/memory.go`), capped by `memoryEventCapped` |
+| read by | requester (logged), swc-test-host (a warning in run.json), the watch page |
+
+## compute.events.guest.oomKill
+
+| item | value |
+|---|---|
+| file | `compute/events/guest/oomKill.json` |
+| type | record, key any |
+| key fields | `kills`*, `total`*, `observedAt`*, `createdAt`* |
+| rkey | bidder `EventRKeys("guest:...")` |
+| written by | bidder for the guest agent (`internal/guestagent/memory.go`), capped by `memoryEventCapped` |
+| read by | requester (logged), swc-test-host (fails the run), the watch page |
 
 ## compute.guest.subscribeEvents
 

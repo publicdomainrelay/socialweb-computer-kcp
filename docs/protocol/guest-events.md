@@ -34,9 +34,10 @@
 | `guest.r2Start` | requester only | requester repo | guest: starts `socialweb-r2.service` | `internal/guestagent/association.go` |
 | `guest.r2Release` | requester only | requester repo | guest: runs `socialweb-r2-release.service` | same |
 | `guest.r2Released` | guest only | bidder repo | requester: `status.contract.r2Release` | `internal/market/requester/guestrequester.go` |
+| `guest.memoryPressure`, `guest.oomKill` | guest only | bidder repo | requester: logged (`requester_guest_memory_event`); swc-test-host: warning / failure | `internal/guestagent/memory.go`; cap `memoryEventCapped` in `internal/market/bidder/guestevents.go` |
 | `vm.started`, `vm.registerIdentity` | defined, no Go writer | none | none | `internal/atproto/market/nsid.go` constants only |
 
-- guest-originated set: `market.IsGuestOriginatedEventNSID` (publicKey, signalWebRTC, secretsApplied, secretsRequested, requesterDid, r2Released). the guest control plane refuses any other kind (`guestEvent` in `internal/guestidentity/service.go`)
+- guest-originated set: `market.IsGuestOriginatedEventNSID` (publicKey, signalWebRTC, secretsApplied, secretsRequested, requesterDid, r2Released, memoryPressure, oomKill). the guest control plane refuses any other kind (`guestEvent` in `internal/guestidentity/service.go`)
 - requester-originated set: `market.IsRequesterGuestEventNSID` (publicKey, signalWebRTC, secrets, agentStart, secretsUpdated, r2Start, r2Release). the bidder refuses any other kind from a requester (`applyGuestEvent`)
 - kinds the requester's submitEvent takes: `isGuestEventNSID` in `internal/market/requester/events.go`
 - direction of `publicKey` and `signalWebRTC` comes from the author: requester-authored ones go to the guest, bidder-authored ones carry what the guest said
@@ -127,6 +128,8 @@ sequenceDiagram
 | `guest.r2Start` | `name` (DNS label), `agent`, `hold` | needs `spec.association.fromGuest` |
 | `guest.r2Release` | none | |
 | `guest.r2Released` | `ok`, `message` | |
+| `guest.memoryPressure` | `kind` psi / swap, `threshold`, `psiSomeAvg10`, `psiFullAvg10`, `swapUsed`, `swapTotal`, `observedAt` | every VM whose bidder serves the guest agent (`memory.json`); edge-triggered: PSI some avg10 >= 10.00% or swap >= 10% in use, re-armed after 5 min under half; one per kind per 10 min, ten memory events per contract (agent and bidder) |
+| `guest.oomKill` | `kills` (since the last one), `total` (oom_kill since boot), `observedAt` | one per /proc/vmstat oom_kill rise, same caps |
 
 ## Boot: hostKeys And onNetwork
 

@@ -35,6 +35,8 @@ const (
 	CollectionGuestR2Start          = "com.publicdomainrelay.temp.compute.events.guest.r2Start"
 	CollectionGuestR2Release        = "com.publicdomainrelay.temp.compute.events.guest.r2Release"
 	CollectionGuestR2Released       = "com.publicdomainrelay.temp.compute.events.guest.r2Released"
+	CollectionGuestMemoryPressure   = "com.publicdomainrelay.temp.compute.events.guest.memoryPressure"
+	CollectionGuestOOMKill          = "com.publicdomainrelay.temp.compute.events.guest.oomKill"
 	CollectionBadgeBlueKeys         = "com.publicdomainrelay.temp.badgeBlueKeys"
 	CollectionHeartbeat             = "com.publicdomainrelay.temp.market.heartbeat"
 	CollectionFedproxyRBAC          = "com.fedproxy.rbac"
@@ -101,6 +103,7 @@ var (
 			CollectionVMDelete, CollectionVMOnNetwork, CollectionVMTerminated, CollectionVMHostKeys,
 			CollectionGuestPublicKey, CollectionGuestSignalWebRTC, CollectionGuestSecretsApplied,
 			CollectionGuestSecretsRequested, CollectionGuestRequesterDID, CollectionGuestR2Released,
+			CollectionGuestMemoryPressure, CollectionGuestOOMKill,
 			CollectionFedproxyRBAC, CollectionPolicyGhaLite, CollectionPolicyTypeScript),
 		[]string{collectionScope(CollectionOffering, "create", "update")},
 		[]string{RepoIngressListenWrite, RepoIngressAnswerWrite},

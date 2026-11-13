@@ -539,12 +539,22 @@ again; user_data installs `atirc-agent.service`
 - Guest events live under `com.publicdomainrelay.temp.compute.events.guest.*` in the market.event
   envelope. The guest holds no repo key: it POSTs `{acceptUri, acceptCid, record}` to GuestControlPlane
   `POST /v1/events` (vm.onNetwork, guest.publicKey, guest.signalWebRTC, guest.secretsRequested,
-  guest.secretsApplied, guest.requesterDid; never guest.secrets, guest.agentStart or
+  guest.secretsApplied, guest.requesterDid, guest.memoryPressure, guest.oomKill; never guest.secrets, guest.agentStart or
   guest.secretsUpdated) and the bidder signs and publishes them; requester events to the guest
   (guest.publicKey, guest.signalWebRTC, guest.secrets, guest.agentStart, guest.secretsUpdated) reach it through the bidder's per-ComputeVM queue
   and the XRPC subscription `com.publicdomainrelay.temp.compute.guest.subscribeEvents` (WebSocket,
   `cursor`, JSON text frames, an empty binary keepalive every 25 s). The guest bearer is the
   `Authorization` header only. The bidder routes by NSID prefix and never opens a sealed body.
+- Guest memory. The guest image swaps to zram by default (zstd, half the guest's RAM: the generator
+  `/etc/systemd/system-generators/socialweb-zram-swap` and `/usr/local/sbin/socialweb-zram-swap`; kernel PSI on).
+  Every VM whose bidder serves socialweb-guest-agent gets `/etc/socialweb-guest-agent/memory.json`
+  (`guestseed.ProvisionOptions.Memory`), so the agent runs its memory watch (`internal/guestagent/memory.go`,
+  state in `/run/socialweb-guest-agent/memory-state.json`): edge-triggered guest.memoryPressure (PSI some avg10
+  >= 10% or swap >= 10% in use; re-armed after 5 min under half the threshold) and guest.oomKill per oom_kill
+  rise; one per kind per 10 min and ten per contract, enforced again by the bidder from its StateSyncs
+  (`memoryEventCapped`; a capped event is answered 200 and dropped). swc-test-host fails a run on an
+  oom kill of one of its contracts (guest.oomKill, vm.oomKilled, vm.terminated reason oom) and lists pressure
+  in run.json `memory`.
 - Signaling is sealed. Each side publishes a `guest.publicKey` (kind `age-x25519`) per tag; an offer
   is age ciphertext sealed to the guest's latest key, with plaintext `{sdp, replyTo}`; the answer is
   sealed to `replyTo`. A signal names no recipient: a reader trial-opens every signal for its tag.

@@ -57,6 +57,8 @@ const (
 	ComputeEventsGuestR2StartNSID          = GuestEventNSIDPrefix + "r2Start"
 	ComputeEventsGuestR2ReleaseNSID        = GuestEventNSIDPrefix + "r2Release"
 	ComputeEventsGuestR2ReleasedNSID       = GuestEventNSIDPrefix + "r2Released"
+	ComputeEventsGuestMemoryPressureNSID   = GuestEventNSIDPrefix + "memoryPressure"
+	ComputeEventsGuestOOMKillNSID          = GuestEventNSIDPrefix + "oomKill"
 	ComputeGuestSubscribeEventsNSID        = "com.publicdomainrelay.temp.compute.guest.subscribeEvents"
 
 	IngressWebRTCNSID = "com.publicdomainrelay.temp.ingress.webRTC"

@@ -47,6 +47,13 @@ const (
 
 	GuestSecretsViaGetSecrets = "getSecrets"
 	GuestSecretsViaSealed     = "sealed"
+
+	GuestMemoryKindPSI  = "psi"
+	GuestMemoryKindSwap = "swap"
+
+	GuestMemoryEventEvery = 10 * time.Minute
+
+	GuestMemoryEventsPerContract = 10
 )
 
 func OnNetworkKind(r ComputeEventsVMOnNetwork) string {
@@ -77,10 +84,15 @@ func IsRequesterGuestEventNSID(nsid string) bool {
 func IsGuestOriginatedEventNSID(nsid string) bool {
 	switch nsid {
 	case ComputeEventsGuestPublicKeyNSID, ComputeEventsGuestSignalWebRTCNSID, ComputeEventsGuestSecretsAppliedNSID,
-		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID, ComputeEventsGuestR2ReleasedNSID:
+		ComputeEventsGuestSecretsRequestedNSID, ComputeEventsGuestRequesterDIDNSID, ComputeEventsGuestR2ReleasedNSID,
+		ComputeEventsGuestMemoryPressureNSID, ComputeEventsGuestOOMKillNSID:
 		return true
 	}
 	return false
+}
+
+func IsGuestMemoryEventNSID(nsid string) bool {
+	return nsid == ComputeEventsGuestMemoryPressureNSID || nsid == ComputeEventsGuestOOMKillNSID
 }
 
 func ValidGuestRequesterDID(did, authority string) error {

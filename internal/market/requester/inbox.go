@@ -470,6 +470,12 @@ func (q *Requester) processPendingEvents(ctx context.Context, name string) error
 			continue
 		}
 		receiptURI := strings.TrimSpace(entry.ReceiptURI)
+		if nsid := market.NSIDFromURI(event.Payload.URI); market.IsGuestMemoryEventNSID(nsid) {
+			q.log.Warn("requester_guest_memory_event", "contract", contract.Name, "event", entry.URI, "collection", nsid, "kind", stringOf(event.Payload.Value["kind"]),
+				"threshold", event.Payload.Value["threshold"], "psiSomeAvg10", event.Payload.Value["psiSomeAvg10"], "swapUsed", event.Payload.Value["swapUsed"],
+				"kills", event.Payload.Value["kills"])
+			continue
+		}
 		parsed, err := q.parseGuestEvent(ctx, event, receiptURI)
 		if err != nil {
 			q.log.Warn("requester_event_refused", "contract", contract.Name, "event", entry.URI, "err", err)

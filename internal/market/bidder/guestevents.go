@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/guestcp"
 )
@@ -31,6 +34,12 @@ func (b *Bidder) PublishGuestEvent(ctx context.Context, event guestcp.GuestEvent
 	if kind, _ := record["$type"].(string); kind != event.Collection {
 		return fmt.Errorf("bidder: the guest event record $type %q is not %s", kind, event.Collection)
 	}
+	if market.IsGuestMemoryEventNSID(event.Collection) {
+		if why := b.memoryEventCapped(vm, event.Collection, event.Tag, event.Kind); why != "" {
+			b.log.Warn("a guest memory event is dropped", "computevm", vm.Name, "collection", event.Collection, "kind", event.Kind, "why", why)
+			return nil
+		}
+	}
 	name, err := b.ensureGuestEventSync(ctx, vm, event.Collection, event.Tag, event.Kind, record)
 	if err != nil {
 		return err
@@ -38,6 +47,31 @@ func (b *Bidder) PublishGuestEvent(ctx context.Context, event guestcp.GuestEvent
 	b.log.Info("a guest event is published to the requester", "computevm", vm.Name, "collection", event.Collection,
 		"tag", event.Tag, "kind", event.Kind, "stateSync", name)
 	return nil
+}
+
+func (b *Bidder) memoryEventCapped(vm *v1alpha1.ComputeVM, collection, tag, kind string) string {
+	total, last := 0, time.Time{}
+	stream := guestEventStream(collection, tag, kind)
+	for _, sync := range b.syncs.List() {
+		if b.guests.SyncVM(&sync) != vm.Name {
+			continue
+		}
+		key := sync.Spec.IdempotencyKey
+		if strings.HasPrefix(key, guestEventSyncKeyPrefix+market.ComputeEventsGuestMemoryPressureNSID+":") ||
+			strings.HasPrefix(key, guestEventSyncKeyPrefix+market.ComputeEventsGuestOOMKillNSID+":") {
+			total++
+		}
+		if strings.HasPrefix(key, stream) && sync.CreationTimestamp.After(last) {
+			last = sync.CreationTimestamp.Time
+		}
+	}
+	switch {
+	case total >= market.GuestMemoryEventsPerContract:
+		return fmt.Sprintf("the contract had its %d memory events", market.GuestMemoryEventsPerContract)
+	case time.Since(last) < market.GuestMemoryEventEvery:
+		return fmt.Sprintf("one of this kind went out less than %s ago", market.GuestMemoryEventEvery)
+	}
+	return ""
 }
 
 func (b *Bidder) applyGuestEvent(ctx context.Context, uri, cid string, record map[string]any, event *market.Event, issuer string) error {

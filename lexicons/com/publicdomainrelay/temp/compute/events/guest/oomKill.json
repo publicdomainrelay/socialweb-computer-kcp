@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.oomKill",
+  "description": "The guest kernel's OOM killer killed a process (/proc/vmstat oom_kill rose); sent as the payload of a market.event. One record per rise, at most one per 10 min (a later one carries every kill since) and ten memory events per contract. Guest-originated only. It carries no secret.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kills", "total", "observedAt", "createdAt"],
+        "properties": {
+          "kills": { "type": "integer", "minimum": 1, "description": "The kills since the last oomKill of this guest." },
+          "total": { "type": "integer", "minimum": 1, "description": "The guest's oom_kill count since boot." },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

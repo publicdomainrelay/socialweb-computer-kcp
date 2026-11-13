@@ -42,6 +42,8 @@ oauthScopes:
       - repo:com.publicdomainrelay.temp.compute.events.guest.secretsRequested?action=create
       - repo:com.publicdomainrelay.temp.compute.events.guest.requesterDid?action=create
       - repo:com.publicdomainrelay.temp.compute.events.guest.r2Released?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.memoryPressure?action=create
+      - repo:com.publicdomainrelay.temp.compute.events.guest.oomKill?action=create
       - repo:com.fedproxy.rbac?action=create
       - repo:computer.socialweb.temp.policy.ghalite?action=create
       - repo:computer.socialweb.temp.policy.typescript?action=create

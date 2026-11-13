@@ -1,0 +1,31 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.guest.memoryPressure",
+  "description": "The guest crossed a memory threshold (edge-triggered: one record per crossing, re-armed only after the value stayed under half the threshold for 5 min; at most one per kind per 10 min and ten memory events per contract); sent as the payload of a market.event. Guest-originated only. It carries no secret. The host-side counterpart is compute.events.vm.memoryPressure.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kind", "threshold", "swapUsed", "swapTotal", "observedAt", "createdAt"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "knownValues": ["psi", "swap"],
+            "maxLength": 16,
+            "description": "What crossed: psi, /proc/pressure/memory some avg10; swap, the share of the guest's swap in use."
+          },
+          "threshold": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "The crossed threshold, in hundredths of a percent (psi: of some avg10; swap: of swapTotal)." },
+          "psiSomeAvg10": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "/proc/pressure/memory some avg10, in hundredths of a percent; absent without PSI." },
+          "psiFullAvg10": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "/proc/pressure/memory full avg10, in hundredths of a percent; absent without PSI." },
+          "swapUsed": { "type": "integer", "minimum": 0, "description": "Swap in use, in bytes." },
+          "swapTotal": { "type": "integer", "minimum": 0, "description": "The guest's swap, in bytes." },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}
