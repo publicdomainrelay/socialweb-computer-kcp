@@ -40,6 +40,7 @@ const (
 var (
 	labelRE   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	handleRE  = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	peerDIDRE = regexp.MustCompile(`^did:(plc:[a-z2-7]{24}|web:([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?)$`)
 	channelRE = regexp.MustCompile(`^#[^\s,\x00]{1,63}$`)
 )
 
@@ -117,7 +118,8 @@ func validate(o *v1alpha1.AtircNode) error {
 		}
 	}
 	for _, p := range s.Peers {
-		if !handleRE.MatchString(strings.ToLower(strings.TrimSpace(p))) {
+		handle, did, withDID := strings.Cut(strings.ToLower(strings.TrimSpace(p)), "@")
+		if !handleRE.MatchString(handle) || withDID && !peerDIDRE.MatchString(did) {
 			return fmt.Errorf("spec.peers: %q is not a mesh identity", p)
 		}
 	}
