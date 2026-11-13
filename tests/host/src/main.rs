@@ -376,6 +376,7 @@ async fn main_() -> Result<bool> {
             signal.clone(),
         );
         let fz = freezer.clone();
+        let pv2 = provides.clone();
         let kget = k.clone();
         let klist = k.clone();
         let klogs = k.clone();
@@ -419,10 +420,10 @@ async fn main_() -> Result<bool> {
                 })
             }),
             tool("run_assert", "Run an entry of the composition's assert instance: {entry, input}.", json!({ "type": "object", "properties": { "entry": {}, "input": {} }, "required": ["entry"] }), move |a| {
-                let (cf, comp, w) = (cf.clone(), comp2.clone(), w2.clone());
+                let (cf, comp, w, pv) = (cf.clone(), comp2.clone(), w2.clone(), pv2.clone());
                 Box::pin(async move {
                     let input = a["input"].as_object().cloned().unwrap_or_default();
-                    compose::run_compose(comp, w, None, "assert", a["entry"].as_str().unwrap_or_default(), input, cf, HashMap::new(), None, Options::default()).await
+                    compose::run_compose(comp, w, None, "assert", a["entry"].as_str().unwrap_or_default(), input, cf, HashMap::new(), None, Options { provides: Some(pv), ..Default::default() }).await
                 })
             }),
             tool("cleanup", "End the run now: abort it if it runs, release and delete everything, stop serving.", json!({ "type": "object", "properties": {} }), move |_| {

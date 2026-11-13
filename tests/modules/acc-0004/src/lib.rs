@@ -62,6 +62,9 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 .call(call("owner", "requester.start", json!({ "name": "owner" })))
                 .timer("deadline", 45 * MIN);
         }
+        Event::Timer { id } if id == "chain-again" => {
+            h = h.call(call("chain", "assert.agentChain", json!({ "renter": renter, "r2": st["r2"], "agent": st["agent"], "identity": st["identity"] })));
+        }
         Event::Timer { id } if id == "deadline" => {
             return Ok(fail(&st, format!("not done in 45 min (phase {phase})")));
         }
@@ -96,10 +99,19 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     h = h.call(call("agent", "request.agent", json!({ "name": name })));
                 }
                 "agent" => {}
+                // R2 writes its side (the agent's grant, endorsement, peer record) seconds after it reports: ask again
+                // for up to 3 min before it counts
                 "chain" => {
                     if out["ok"] != true {
-                        return Ok(fail(&st, format!("chain: {}", out["problems"])));
+                        if now - st["t_chain"].as_f64().unwrap_or(now) < 180.0 {
+                            if st["t_chain"].is_null() {
+                                st["t_chain"] = json!(now);
+                            }
+                            return Ok(h.timer("chain-again", 10_000).state(st));
+                        }
+                        return Ok(fail(&st, format!("chain (after 3 min): {}", out["problems"])));
                     }
+                    st["readings"]["chain_after_association_s"] = json!(now - st["t_chain"].as_f64().unwrap_or(now));
                     h = h.call(call("envfile", "account.envFile", json!({})));
                 }
                 "envfile" => {
