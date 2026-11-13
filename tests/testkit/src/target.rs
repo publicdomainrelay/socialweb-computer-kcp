@@ -30,6 +30,9 @@ pub struct Target {
     /// hosts a test may administer as root (staging VMs only: `install requester`, a temporary bidder); ssh destinations
     #[serde(default)]
     pub root_hosts: Vec<String>,
+    /// staging inside one VM: the `dev up --profile market-network` instance every `run request` joins (`--network`)
+    #[serde(default)]
+    pub network: Option<NetworkRef>,
     /// a checkout of the requester page repo (atlibs-socialweb-computer-requester): scripts/page-round.mjs (0009)
     #[serde(default)]
     pub page_repo: Option<String>,
@@ -114,6 +117,14 @@ pub struct Account {
     /// staging throwaway account: tombstoned at teardown
     #[serde(default)]
     pub throwaway: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkRef {
+    pub instance: String,
+    /// the instance's --state-dir; a request's state lives under it too (`run request --network` reads its record there)
+    pub state_dir: String,
 }
 
 pub fn expand(path: &str) -> PathBuf {

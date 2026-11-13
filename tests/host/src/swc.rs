@@ -172,7 +172,10 @@ impl Swc {
     }
 
     fn request_state(&self) -> PathBuf {
-        self.dir.join("requests")
+        match &self.target.network {
+            Some(n) => expand(&n.state_dir),
+            None => self.dir.join("requests"),
+        }
     }
 
     fn request_logs(&self, name: &str) -> Vec<PathBuf> {
@@ -354,7 +357,10 @@ impl Swc {
     /// `run request --name <name> <args> -- <identity>`, its log events as messages until the subscription closes.
     async fn request_start(&self, input: &Value) -> Result<Sub, String> {
         let name = str_of(input, "name")?.to_string();
-        let args = self.request_args(input)?;
+        let mut args = self.request_args(input)?;
+        if let Some(n) = &self.target.network {
+            args.extend(["--network".to_string(), n.instance.clone()]);
+        }
         let state = self.request_state();
         std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;
         std::fs::set_permissions(&state, std::os::unix::fs::PermissionsExt::from_mode(0o700))
