@@ -7,7 +7,7 @@ import (
 )
 
 func gateOf(cl *v1alpha1.Cluster) ClusterGate {
-	return ClusterGate{Account: cl.Spec.Account,
+	return ClusterGate{Account: cl.Spec.Account, Deleted: cl.DeletionTimestamp != nil,
 		Serving: cl.Status.Phase == v1alpha1.ClusterReady && cl.DeletionTimestamp == nil}
 }
 

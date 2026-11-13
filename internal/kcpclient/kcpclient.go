@@ -818,6 +818,7 @@ func (c *Client) readIdentity(ctx context.Context, logicalCluster, name string) 
 type ClusterGate struct {
 	Account string
 	Serving bool
+	Deleted bool
 }
 
 func (c *Client) ClusterGate(ctx context.Context, home, name string) (ClusterGate, error) {

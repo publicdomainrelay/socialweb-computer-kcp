@@ -61,6 +61,7 @@ const (
 	readHeaderLimit     = 10 * time.Second
 	shutdownTimeout     = 5 * time.Second
 	upstreamDialWait    = 5 * time.Second
+	upstreamHeaderWait  = time.Minute
 	lifetimeSlack       = 5 * time.Minute
 )
 
@@ -451,6 +452,8 @@ func (s *server) admitGate(ctx context.Context, account, home, cluster string) (
 		return "", http.StatusServiceUnavailable, "cluster state: " + err.Error()
 	case g.Account == "" || clusterhome.AccountHash(g.Account) != account:
 		return "", http.StatusNotFound, "no such cluster in this account"
+	case g.Deleted:
+		return g.Account, http.StatusGone, "the cluster is deleted"
 	case !g.Serving:
 		return g.Account, http.StatusServiceUnavailable, "the cluster is not serving"
 	}
@@ -735,13 +738,15 @@ func loadTrust(dir string) (*trust, error) {
 		return nil, err
 	}
 	return &trust{clientCA: clientCA, front: st.Address, transport: &http.Transport{
-		TLSClientConfig:   &tls.Config{RootCAs: serverCA, Certificates: []tls.Certificate{proxy}, MinVersion: tls.VersionTLS12},
-		ForceAttemptHTTP2: false,
-		DialContext:       (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
+		TLSClientConfig:       &tls.Config{RootCAs: serverCA, Certificates: []tls.Certificate{proxy}, MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2:     false,
+		DialContext:           (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
+		ResponseHeaderTimeout: upstreamHeaderWait,
 	}, bearer: &http.Transport{
-		TLSClientConfig:   &tls.Config{RootCAs: serverCA, MinVersion: tls.VersionTLS12},
-		ForceAttemptHTTP2: false,
-		DialContext:       (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
+		TLSClientConfig:       &tls.Config{RootCAs: serverCA, MinVersion: tls.VersionTLS12},
+		ForceAttemptHTTP2:     false,
+		DialContext:           (&net.Dialer{Timeout: upstreamDialWait}).DialContext,
+		ResponseHeaderTimeout: upstreamHeaderWait,
 	}}, nil
 }
 
