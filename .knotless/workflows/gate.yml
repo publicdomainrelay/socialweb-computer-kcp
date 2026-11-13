@@ -9,7 +9,12 @@ runners: [aliceoa.bsky.social]
 executor: kcp-build
 steps:
   - name: toolchain
-    run: bash scripts/knotless-ci-toolchain.sh --deno
+    run: |
+      if [ -f /etc/swc-image ] && grep -q ci-toolchain /etc/swc-image && [ -f /opt/ci/env ]; then
+        echo "toolchain: baked into this image ($(cat /etc/swc-image)), not installed"
+      else
+        bash scripts/knotless-ci-toolchain.sh --deno
+      fi
   - name: gate
     timeout: 75
     run: |
