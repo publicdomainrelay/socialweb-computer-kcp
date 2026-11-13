@@ -357,8 +357,26 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     return Ok(s.keep(h.timer("poll-infra:gone", 10_000)));
                 }
                 s.st["readings"]["infraGoneS"] = json!(s.since("deleted"));
+                if let Some(u) = s.st["readings"]["infraRecord"].as_str().map(String::from) {
+                    if !s.has("recordEnded") {
+                        s.flag("recordEnded");
+                        return Ok(s.keep(h.call(steps::get_record("infra:record-ended", &u))));
+                    }
+                }
                 let r = s.st["result"].clone();
                 return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
+            }
+            // the ephemeralInfra record's per-contract status (what the watch page draws): at Deployed and after the end
+            if id == "infra:record-deployed" || id == "infra:record-ended" {
+                let c: Vec<Value> = o["value"]["status"]["contracts"].as_array().into_iter().flatten()
+                    .map(|c| json!(format!("{} {} {} {}", c["name"].as_str().unwrap_or("-"), c["phase"].as_str().unwrap_or("-"), c["winner"].as_str().map(|w| &w[w.len().saturating_sub(6)..]).unwrap_or("-"), if c["receiptUri"].is_string() { "receipt" } else { "-" })))
+                    .collect();
+                s.st["readings"][&id[6..]] = json!({ "phase": o["value"]["status"]["phase"], "contracts": c });
+                if id == "infra:record-ended" {
+                    let r = s.st["result"].clone();
+                    return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
+                }
+                return Ok(s.keep(h));
             }
             let (v, step) = id.split_once(':').unwrap_or(("", id.as_str()));
             let (v, step) = (v.to_string(), step.to_string());
@@ -395,6 +413,9 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                         return Ok(s.keep(h.timer("poll-infra:get", 10_000)));
                     }
                     s.st["readings"]["infraRecord"] = st["record"]["uri"].clone();
+                    if let Some(u) = st["record"]["uri"].as_str() {
+                        h = h.call(steps::get_record("infra:record-deployed", u));
+                    }
                     for (n, ..) in VMS {
                         s.flag(&format!("install:{n}"));
                         s.st["readings"]["heldS"][n] = json!(s.since("apply"));

@@ -78,7 +78,8 @@
 		"computer.socialweb.test.requester.ssh",
 		"com.fedfork.exec.kube.get",
 		"com.fedfork.exec.kube.apply",
-		"com.fedfork.exec.kube.delete"
+		"com.fedfork.exec.kube.delete",
+		"com.atproto.repo.getRecord"
 	],
 	"hooks": []
 }
