@@ -28,7 +28,7 @@ needs the argument behind it. Do not read it end to end.
 | What a host must provide | `socialweb-computer check-host -role gateway`, `-role bidder` or `-role requester`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
-| What CI runs on a push, and its runners | `.knotless/workflows/` (knotless only; GitHub CI is gone): `atlibs-pins`, `pins` (kcp-small 4/8), `gate` and `release` (kcp-build 12/16; release publishes to the bucket, its key a sealed secret of main and v* pushes) on pushes to main, knotless-ci and v* tags; `test` (the staging run as R2) on knotless-ci and when asked. See Release pipeline |
+| What CI runs on a push, and its runners | `.knotless/workflows/` (knotless only; GitHub CI is gone): `gate` and `release` (kcp-build 12/16; release after gate, publishing to the bucket, its key a sealed secret of main and v* pushes) on pushes to main, knotless-ci and v* tags; `pins` (kcp-small 4/8) only when asked; `test` (the staging run as R2) on knotless-ci and when asked. See Release pipeline |
 | What the system does, end to end, and its tests | `docs/acceptance/` (the runbooks), `tests/system` (one test file per runbook), `tests/testkit/README.md` |
 
 ## Layout
@@ -645,7 +645,8 @@ again; user_data installs `atirc-agent.service`
   `cleanup`; `swc-test-host replay <run dir>` reruns the module's decisions offline. Never leave a frozen run past its TTL by hand.
 - atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh and identlink follow one tested
   set, atlibs `pins.json`, as the knotless runner does (fork branch `runner-atlibs-composition`, deployed by
-  knotless-fork-infra `versions.env`). CI's `atlibs-pins` job fails when either is behind; catch up (rewrites the revs,
+  knotless-fork-infra `versions.env`; each of atlibs and knotless-fork-infra checks its own pins on push in its
+  `pins` workflow). `pins.sh check` here fails when tests/ is behind; catch up (rewrites the revs,
   `cargo update --workspace`, `cargo check`), then commit:
   `curl -sSf https://knotless.dev/johnandersen777.bsky.social/atlibs/raw/main/pins.sh | sh -s -- sync`.
   A host older than its modules refuses them before they run: `this host lacks <nsid>; update atlibs-host (pins
@@ -878,9 +879,11 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 - While iterating, build only what you touched: `go build ./internal/<pkg>/... ./cmd/socialweb-computer`.
   Do not run the full gate per change.
-- The full gate runs ONCE, right before "ready": `go build ./...`, `go vet ./...` and
-  `deploy/check.sh --fast`. The knotless `gate` workflow runs the same three on every push to `main` and `knotless-ci`;
-  read its check (`knotless run list knotless://johnandersen777.bsky.social/socialweb-computer-kcp --commit <sha>`).
+- The CI gate is THE gate: the knotless `gate` workflow runs `deploy/check.sh --fast` (go build and go vet included)
+  on every push to `main` and `knotless-ci`; read its check
+  (`knotless run list knotless://johnandersen777.bsky.social/socialweb-computer-kcp --commit <sha>`). Do not run it on
+  hat-8 as well. A local `deploy/check.sh` on hat-8 (under `scripts/swc-heavy.sh`) is only for what CI does not run:
+  a VMM change (its tests are local only), a pins change (`make check-pins`), a guest image change.
   - `deploy/check.sh --fast`, in order: `gofmt -l` of `api`, `internal`, `cmd`, `hack` and `lexicons`;
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
@@ -937,7 +940,16 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 
 - Work in a plain git worktree or branch of this repository. Do not put a worktree inside another
   worktree.
-- Commit small logical commits and push as you go.
+- Commit small logical commits and push them to a branch of your own (`git push knotless HEAD:<item>`): a push to a
+  branch runs no workflow. Only the lead pushes `main`, landing the ready branches as ONE batch push (main's gate and
+  release run per push and a newer push cancels an older commit's gate, so many pushes waste every gate but the
+  last). knotless's merge queue would do this landing itself, but knotless-run refuses `--queue` with the
+  composition executor ("--queue lands code anyone can open a pull with: it takes --executor docker"; the queue's
+  batches are on no remote a rented VM can check out), so the single lander is the rule until the fork has it.
+- Heavy jobs on hat-8 (VMM tests, a local gate or `make check-pins`, release or guest image builds, staging stand-up
+  and its suites) run one at a time under `scripts/swc-heavy.sh <command...>` (an exclusive `flock` on
+  `/var/tmp/swc-heavy.lock`; `SWC_HEAVY_WAIT=<secs>` gives up after that long). `tests/gate.sh` takes it itself. A dev
+  network for an item still takes a live slot (`live-slot.ts`) for its whole life, not this lock.
 - Before you mark a goal complete cut a release candidate
   - Babysit CI every time you tag a release candidate. You are only allowed to
     tag rc's, never full releases.

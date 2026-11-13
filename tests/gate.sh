@@ -8,6 +8,7 @@
 # SWC_COMPAT_REQUESTER (the previous rc's CLI, e.g. release:v0.0.0-rc165) runs 0006:compat; unset, it is skipped.
 # GATE_SKIP="<runbook>:<entry>=<reason>;..." skips more (no ";" in a reason), with the reason in its RESULT line.
 set -uo pipefail
+[ -n "${SWC_HEAVY_HELD:-}" ] || exec "$(dirname "$0")/../scripts/swc-heavy.sh" "$0" "$@"
 target=$(realpath "${1:?usage: gate.sh <target.json> [--account <name>] [<runbook>[:<entry>] ...]}"); shift
 account=bob
 if [ "${1:-}" = --account ]; then account=$2; shift 2; fi
