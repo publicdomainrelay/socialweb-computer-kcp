@@ -29,9 +29,12 @@ func GuestRequesterReleaseEventName(contract string) string {
 func (r *contractRunner) releaseGuestRequester(ctx context.Context, state *v1alpha1.NodeClaimContract) {
 	q := r.q
 	contract := r.snapshot()
-	if !fromGuest(contract) || state == nil || state.GuestRequester == nil ||
-		(state.GuestRequester.State != v1alpha1.ContractGuestRequesterVerified && state.GuestRequester.State != v1alpha1.ContractGuestRequesterPending) ||
-		q.deps.ContractEvents == nil || contract.UID == "" {
+	if !fromGuest(contract) || state == nil || q.deps.ContractEvents == nil || contract.UID == "" {
+		return
+	}
+	reported := state.GuestRequester != nil &&
+		(state.GuestRequester.State == v1alpha1.ContractGuestRequesterVerified || state.GuestRequester.State == v1alpha1.ContractGuestRequesterPending)
+	if !reported && (state.VMAddress == "" || state.Termination != nil) {
 		return
 	}
 	if state.R2Release != nil && state.R2Release.Phase != v1alpha1.ContractR2ReleaseRequested {

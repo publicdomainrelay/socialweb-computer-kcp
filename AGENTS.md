@@ -494,7 +494,7 @@ again; user_data installs `atirc-agent.service`
     `atirc sub` of its own). The atirc agent run script enables linger for the agent user and runs the agent
     with its `XDG_RUNTIME_DIR`, so a dev requester can run as that user. With no command in the guest,
     `run request r2 <name> [--r2-name r2] [--agent] [--hold]` publishes guest.r2Start and the guest agent
-    starts `socialweb-r2.service` as the user `r2`; releasing the parent publishes guest.r2Release first
+    starts `socialweb-r2.service` as the user `r2`; releasing the parent publishes guest.r2Release first (also when no guest requester DID was reported, once the guest is on the network: a guest requester that failed before its hand-off still retires, so its did:plc is tombstoned with its own PDS rotation key and an OAuth renter with no renter key leaves no orphan)
     and waits for guest.r2Released after `socialweb-r2-release.service` released the guest requester's
     contracts. The bounds nest, from the constants in `internal/atproto/cloudinit`: each guest
     `run request release` gets RequestReleaseWait + RequestRevokeWait + 2 min, the release unit 1 min
@@ -503,7 +503,7 @@ again; user_data installs `atirc-agent.service`
     for the contract) rents nothing: the guest agent sends SIGTERM to the unit's main process only (the run
     script execs `socialweb-computer`; a plain `systemctl stop` signals the whole cgroup, its kcp too, and the
     kcp runs the retire), waits for it to exit (it retires its accounts on stop, bounded to 1 min, and its
-    summary says Released), skips the release unit and answers guest.r2Released, all within
+    summary says Released), then runs the release unit as for a renting one (it releases, and so retires, any invocation a crashed guest requester left) and answers guest.r2Released, all within
     GuestRequesterStopTimeout (2 min), and the parent waits for that answer GuestRequesterIdentityReleaseTimeout
     (the stop plus 1 min) before it goes on; the outcome is
     `status.contract.r2Release` and the GuestRequesterReleased condition. A bidder releases a VM whose

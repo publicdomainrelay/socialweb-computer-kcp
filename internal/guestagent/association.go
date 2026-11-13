@@ -354,13 +354,13 @@ func (a *Agent) releaseGuestRequester(seq int64) {
 		a.log.Warn("guest_r2_release", "seq", seq, "step", "stop "+RequesterUnit, "err", err.Error(), "output", tail(string(out), 256))
 	}
 	record := r2ReleasedRecord{Type: R2ReleasedNSID, Ok: true, CreatedAt: createdAt()}
-	if identity {
+	if identity && err != nil {
+		record.Ok, record.Message = false, tail("stopping the identity-only guest requester: "+err.Error()+": "+string(out), 500)
+	}
+	if out, err := exec.CommandContext(a.ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
+		record.Ok, record.Message = false, tail("releasing the guest requester's invocations: "+err.Error()+": "+string(out), 500)
+	} else if identity && record.Ok {
 		record.Message = "the identity-only guest requester rents nothing; it retired its accounts (records deleted, DIDs tombstoned) as it stopped"
-		if err != nil {
-			record.Ok, record.Message = false, tail("stopping the identity-only guest requester: "+err.Error()+": "+string(out), 500)
-		}
-	} else if out, err := exec.CommandContext(a.ctx, "systemctl", "start", RequesterReleaseUnit).CombinedOutput(); err != nil {
-		record.Ok, record.Message = false, tail("releasing the guest requester's contracts: "+err.Error()+": "+string(out), 500)
 	}
 	a.log.Info("guest_r2_release", "seq", seq, "ok", record.Ok, "message", record.Message)
 	if err := a.poster.Post(a.ctx, record.Type, "", record); err != nil {
