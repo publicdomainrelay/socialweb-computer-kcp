@@ -4,6 +4,8 @@
 	"actions": [{ "entry": "run", "label": "Stand up staging", "description": "Rent, install, dev up, dev status, dev down; the result says pass, the phase and the readings." }],
 	"config": [
 		{ "key": "name", "label": "name", "type": "string", "description": "the run; the VM's invocation is <name>-vm" },
+		{ "key": "cpus", "label": "cpus", "type": "integer", "description": "the VM's vCPUs (default 16)" },
+		{ "key": "mem", "label": "mem", "type": "string", "description": "the VM's memory (default 32G)" },
 		{ "key": "requester", "label": "requester", "type": "string", "description": "the binary installed on the VM: release:<tag> or sha:<commit> (the target's requester)" }
 	],
 	"calls": [

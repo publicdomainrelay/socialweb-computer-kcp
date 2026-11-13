@@ -1,6 +1,7 @@
 # Staging
 
-A self-contained socialweb.computer on one rented VM, for one run of the suite, then torn down.
+A self-contained socialweb.computer on one rented VM, for one run of the suite, then torn down. The smallest step of
+the staging plan (CI VM, associated requester R2 renting staging VMs, `dev up --parent` onto them, one meshd overlay).
 
 The VM runs `socialweb-computer dev up --profile market-network`: its own PLC, relay, PDSes (`alice.test`,
 `bob.test`), 3 bidders (nested VMs), the gateway, vouches between them, a per-network CA in `network.caBundle`.
@@ -8,7 +9,7 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
 
 ## Run
 
-1. `run request --hold --nested-virt --cpus 8 --mem 16G --expires-in 2h` as the target's account.
+1. `run request --hold --nested-virt --cpus 16 --mem 32G --expires-in 2h` as the target's account (input `cpus`, `mem`).
 2. Install the binary under test on the VM: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
    checked against `SHA256SUMS`.
 3. `dev up --instance stg --state-dir ~/stg/s --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.

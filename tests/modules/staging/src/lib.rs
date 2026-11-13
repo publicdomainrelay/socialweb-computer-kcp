@@ -1,6 +1,7 @@
 // tests/compositions/staging/README.md as a state machine: rent one nested-virt VM, install the socialweb-computer
 // under test on it, `dev up --profile market-network` there (own PLC, relay, PDSes, bidders, gateway), read `dev
-// status`, `dev down`. Input {name (the run), requester (the target's binary spec: release:<tag> | sha:<commit>)}.
+// status`, `dev down`. Input {name (the run), requester (the target's binary spec: release:<tag> | sha:<commit>),
+// cpus?, mem? (default 16, 32G)}.
 // Result {pass, error?, phase, readings}. The host releases the VM however it ends.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
@@ -51,7 +52,10 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             };
             s.st["prefix"] = json!(p);
             s.set("held");
-            let a = json!(["--hold", "--nested-virt", "--cpus", "8", "--mem", "16G", "--expires-in", "2h", "--exec", "true"]);
+            // the CI VM's size (owner: 16 vCPU / 32 GB; a bidder refuses more than its host has)
+            let cpus = args["cpus"].as_u64().unwrap_or(16).to_string();
+            let mem = args["mem"].as_str().unwrap_or("32G");
+            let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", "2h", "--exec", "true"]);
             h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => {
