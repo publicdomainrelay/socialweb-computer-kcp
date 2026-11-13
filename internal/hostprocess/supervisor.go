@@ -234,6 +234,8 @@ func (s *Supervisor) markAdopted(o v1alpha1.HostProcess, obs Observed) {
 	}
 	if obs.Unit.State == hostsvc.Active || obs.Unit.State == hostsvc.Activating {
 		s.setPlaced(o.Spec.Unit, true)
+		s.c.log().Info("hostprocess_unit_adopted", "hostprocess", o.Name, "unit", o.Spec.Unit, "pid", obs.Unit.MainPID,
+			"invocation", obs.Unit.InvocationID, "activeSince", obs.Unit.ActiveSince.UTC().Format(time.RFC3339Nano), "state", string(obs.Unit.State))
 	}
 }
 
