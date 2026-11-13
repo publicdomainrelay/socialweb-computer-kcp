@@ -260,7 +260,9 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
     // provision infra: one EphemeralInfra of the run requester `stg` holds the four contracts (else one run request each)
     let infra = args["provision"] == "infra";
     let ei = format!("stg-{tag}");
-    let cc = |v: &str| format!("einfra-{ei}-{v}");
+    // a layer's current contract (a retry renames it: <layer>-r<n>)
+    let cnames = s.st["cname"].clone();
+    let cc = |v: &str| format!("einfra-{ei}-{}", cnames[v].as_str().unwrap_or(v));
     let ssh = |v: &str, id: &str, exec: String| match infra {
         true => host(id, "requester.ssh", json!({ "name": RQ, "contract": cc(v), "exec": exec })),
         false => host(id, "request.ssh", json!({ "name": format!("{base}-{v}"), "exec": exec })),
@@ -385,18 +387,11 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
             }
             match step.as_str() {
                 "start" if v == "infra" && result.output().is_ok() => {
-                    let key = o["sshKey"].as_str().unwrap_or_default();
-                    let ttl = args["deadlineMin"].as_u64().unwrap_or(120) * 60;
-                    let contracts: Vec<Value> = VMS.iter().map(|(n, cpus, mem, nested)| json!({ "name": n, "state": "Requested", "vmName": format!("stg-{n}"),
-                        "cpus": cpus, "mem": mem, "nestedVirt": nested, "sshAuthorizedKeys": [key] })).collect();
-                    let mut spec = json!({ "description": format!("staging {base}: atproto, bidder-1, bidder-2, gateway on one meshd overlay"),
-                        "ttlSeconds": ttl, "endWhen": "Complete", "contracts": contracts });
-                    if let Some(d) = o["did"].as_str() {
-                        spec["record"] = json!({ "repoRef": { "kind": "AtprotoRepo", "name": repo_name(d) } });
-                    }
-                    let doc = json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "EphemeralInfra", "metadata": { "name": ei }, "spec": spec });
+                    s.st["key"] = o["sshKey"].clone();
+                    s.st["did"] = o["did"].clone();
+                    s.st["ttl"] = json!(args["deadlineMin"].as_u64().unwrap_or(120) * 60);
                     s.mark("apply");
-                    h = h.call(kube("infra:apply", "apply", &format!("requester:{RQ}"), json!({ "yaml": doc.to_string() })));
+                    h = h.call(kube("infra:apply", "apply", &format!("requester:{RQ}"), json!({ "yaml": infra_doc(&s.st, &base, &ei) })));
                 }
                 "apply" if v == "infra" && result.output().is_ok() => {
                     s.flag("infra");
@@ -405,9 +400,28 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 "get" if v == "infra" => {
                     let st = &o["status"];
                     s.st["readings"]["infraPhase"] = st["phase"].clone();
-                    let failed: Vec<String> = st["contracts"].as_array().into_iter().flatten().filter(|c| c["phase"] == "Failed").map(|c| format!("{}: {}", c["name"], c["message"])).collect();
-                    if !failed.is_empty() {
-                        return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("EphemeralInfra {ei}: {}", failed.join("; ")) })));
+                    let failed: Vec<Value> = st["contracts"].as_array().into_iter().flatten().filter(|c| c["phase"] == "Failed").cloned().collect();
+                    let mut retried = false;
+                    for c in &failed {
+                        let name = c["name"].as_str().unwrap_or_default();
+                        let Some((layer, ..)) = VMS.iter().find(|(n, ..)| s.st["cname"][*n].as_str().unwrap_or(n) == name) else { continue };
+                        let n = s.st["retries"][layer].as_u64().unwrap_or(0);
+                        if n >= INFRA_RETRIES {
+                            return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("EphemeralInfra {ei}: {name} failed {} times: {}", n + 1, c["message"]) })));
+                        }
+                        // again under a new name, away from the bidder that failed it
+                        s.st["retries"][layer] = json!(n + 1);
+                        s.st["cname"][layer] = json!(format!("{layer}-r{}", n + 1));
+                        if let Some(w) = c["winner"].as_str() {
+                            let mut deny = s.st["deny"][layer].as_array().cloned().unwrap_or_default();
+                            deny.push(json!(w));
+                            s.st["deny"][layer] = json!(deny);
+                        }
+                        s.st["readings"]["retried"][layer] = json!(format!("{name}: {}", c["message"]));
+                        retried = true;
+                    }
+                    if retried {
+                        return Ok(s.keep(h.call(kube("infra:apply", "apply", &format!("requester:{RQ}"), json!({ "yaml": infra_doc(&s.st, &base, &ei) })))));
                     }
                     if st["phase"] != "Deployed" {
                         return Ok(s.keep(h.timer("poll-infra:get", 10_000)));
@@ -540,6 +554,28 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
         _ => {}
     }
     Ok(s.keep(h))
+}
+
+/// How many times provision infra re-requests a layer whose contract failed (a refused accept, a guest off network).
+const INFRA_RETRIES: u64 = 2;
+
+/// The EphemeralInfra: one contract per layer (its current name, the bidders it avoids), ttl the deadline, its record in
+/// the requester's repo.
+fn infra_doc(st: &Value, base: &str, ei: &str) -> String {
+    let contracts: Vec<Value> = VMS.iter().map(|(n, cpus, mem, nested)| {
+        let mut c = json!({ "name": st["cname"][*n].as_str().unwrap_or(n), "state": "Requested", "vmName": format!("stg-{n}"),
+            "cpus": cpus, "mem": mem, "nestedVirt": nested, "sshAuthorizedKeys": [st["key"]] });
+        if st["deny"][*n].is_array() {
+            c["denyBidderDids"] = st["deny"][*n].clone();
+        }
+        c
+    }).collect();
+    let mut spec = json!({ "description": format!("staging {base}: atproto, bidder-1, bidder-2, gateway on one meshd overlay"),
+        "ttlSeconds": st["ttl"], "endWhen": "Complete", "contracts": contracts });
+    if let Some(d) = st["did"].as_str() {
+        spec["record"] = json!({ "repoRef": { "kind": "AtprotoRepo", "name": repo_name(d) } });
+    }
+    json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "EphemeralInfra", "metadata": { "name": ei }, "spec": spec }).to_string()
 }
 
 /// The run requester of the infra provisioning.
