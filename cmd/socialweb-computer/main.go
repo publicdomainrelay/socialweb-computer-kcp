@@ -113,6 +113,7 @@ func builtVerbs() map[string]builtVerb {
 		"internal association":     {nil, runInternalAssociation},
 		"identity agent-of add":    {identityAgentOfOptions, runIdentityAgentOf(true)},
 		"identity agent-of remove": {identityAgentOfOptions, runIdentityAgentOf(false)},
+		"identity tombstone":       {identityTombstoneOptions, runIdentityTombstone},
 		"internal ingress-relay":   {ingressRelayOptions, runIngressRelay},
 		"internal atproto-relay":   {atprotoRelayOptions, runAtprotoRelay},
 		"internal devsup":          {[]string{"state", "socket", "die-with", "instance"}, runDevsup},

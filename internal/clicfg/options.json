@@ -615,7 +615,11 @@
     },
     "pds-state-dir": {
       "type": "string",
-      "description": "identity agent-of add|remove: the state dir of the local PDS whose plc-rotation.key signs the PLC operation"
+      "description": "identity agent-of add|remove, identity tombstone: the state dir of the local PDS whose plc-rotation.key signs the PLC operation"
+    },
+    "rotation-key": {
+      "type": "string",
+      "description": "identity tombstone: the PLC rotation key file that signs the tombstone (a requester's components/Requester-requester/plc-rotation.key, say); else --pds-state-dir's plc-rotation.key"
     },
     "did": {
       "type": "string",
@@ -624,7 +628,7 @@
     "plc-url": {
       "type": "string",
       "default": "https://plc.directory",
-      "description": "identity agent-of add|remove: the PLC directory the operation is submitted to and read back from"
+      "description": "identity agent-of add|remove, identity tombstone: the PLC directory the operation is submitted to and read back from"
     },
     "drop-borrowed-handle": {
       "type": "boolean",
