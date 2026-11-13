@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"cmp"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -56,11 +57,6 @@ func NewWatches(cfg WatchesConfig) *Watches {
 }
 
 func directoryAt(httpClient *http.Client, plcURL string) identity.Directory {
-	public := &identity.BaseDirectory{PLCURL: identity.DefaultPLCURL, HTTPClient: *httpClient, PLCClient: httpClient, SkipHandleVerification: true}
-	plcURL = strings.TrimSpace(plcURL)
-	if plcURL == "" {
-		return fallbackDirectory{public}
-	}
-	local := &identity.BaseDirectory{PLCURL: plcURL, HTTPClient: *httpClient, PLCClient: httpClient, SkipHandleVerification: true}
-	return fallbackDirectory{local, public}
+	plcURL = cmp.Or(strings.TrimSpace(plcURL), identity.DefaultPLCURL)
+	return &identity.BaseDirectory{PLCURL: plcURL, HTTPClient: *httpClient, PLCClient: httpClient, SkipHandleVerification: true}
 }
