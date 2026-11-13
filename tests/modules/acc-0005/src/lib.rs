@@ -173,6 +173,17 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
+/// The --hold process exits when its ssh session drops (rc165: 255 some 55 s after R2 came up): then nothing of the
+/// renter runs to settle the out-of-band loss, and a release (its kcp started again from the state dir) does.
+fn settle(s: &mut S, name: &str) -> Option<Call> {
+    if !(s.is("lost") && s.has("deleted") && s.has("exited") && !s.has("renterTombstoned") && !s.has("settling")) {
+        return None;
+    }
+    s.flag("settling");
+    s.reading("settled_by", "run request release: the --hold process exited when its ssh dropped");
+    Some(host("release", "request.release", json!({ "name": name })))
+}
+
 fn run_b(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
@@ -236,7 +247,8 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                 s.set("start-r2");
                 // the runbook's start, exactly: never `install -d /run/socialweb-r2` (it resets the mode the guest agent set,
                 // and R2 cannot write requester-did)
-                let cmd = "printf 'R2_NAME=r2\\nR2_HOLD=1\\nR2_COLOCATED=mesh1\\n' > /run/socialweb-r2/r2-start.env && chown root:socialweb-r2 /run/socialweb-r2/r2-start.env && chmod 0640 /run/socialweb-r2/r2-start.env && systemctl start --no-block socialweb-r2.service";
+                // and the guest agent makes the dir once the bundle is in, seconds after Held: wait for it
+                let cmd = "for i in $(seq 120); do [ -d /run/socialweb-r2 ] && break; sleep 1; done; printf 'R2_NAME=r2\\nR2_HOLD=1\\nR2_COLOCATED=mesh1\\n' > /run/socialweb-r2/r2-start.env && chown root:socialweb-r2 /run/socialweb-r2/r2-start.env && chmod 0640 /run/socialweb-r2/r2-start.env && systemctl start --no-block socialweb-r2.service";
                 h = h.call(host("r2", "request.ssh", json!({ "name": name, "exec": cmd })));
             }
             if s.is("assoc") && s.st["r2"].is_string() {
@@ -247,6 +259,8 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
             if s.is("lost") && s.has("renterTombstoned") && s.has("recordsDeleted") {
                 s.set("tomb");
                 h = h.call(host("tomb", "assert.tombstoned", json!({ "dids": [s.st["r2"], s.st["mesh1"]] })));
+            } else if let Some(h2) = settle(&mut s, &name) {
+                h = h.call(h2);
             }
         }
         Event::Result { id, result, .. } => {
@@ -259,6 +273,9 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
             let r2 = s.st["r2"].as_str().unwrap_or_default().to_string();
             match id.as_str() {
                 "r2" => {
+                    if o["ok"] != true {
+                        return Ok(s.fail(format!("starting R2: {}", o["output"].as_str().unwrap_or_default().lines().rev().take(3).collect::<Vec<_>>().join(" | "))));
+                    }
                     s.set("assoc");
                     if s.st["r2"].is_string() {
                         s.set("mesh1");
@@ -321,6 +338,12 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                     let Some(vm) = vm else { return Ok(s.fail("the outer ComputeVM of this run's receipt is not on its bidder")) };
                     let c = s.st["cluster"].as_str().unwrap_or_default().to_string();
                     h = h.call(kube("delvm", "delete", &c, steps::sw("ComputeVM", &vm)));
+                }
+                "delvm" => {
+                    s.flag("deleted");
+                    if let Some(c) = settle(&mut s, &name) {
+                        h = h.call(c);
+                    }
                 }
                 "release" => {
                     s.set("tomb");
