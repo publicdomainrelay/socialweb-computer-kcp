@@ -78,6 +78,8 @@ type Deps struct {
 	Sandbox sandbox.Runner
 
 	NestedVirt bool
+
+	ImageTarget string
 }
 
 type Service struct {

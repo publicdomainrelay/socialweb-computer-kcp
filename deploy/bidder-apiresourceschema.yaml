@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v1alpha1-29.bidders.socialweb.computer
+  name: v1alpha1-30.bidders.socialweb.computer
 spec:
   group: socialweb.computer
   names:
@@ -521,6 +521,8 @@ spec:
                 items:
                   type: string
                 x-kubernetes-list-type: set
+              requesterImages:
+                type: boolean
           status:
             type: object
             properties:

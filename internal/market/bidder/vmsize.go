@@ -22,6 +22,8 @@ type vmLimits struct {
 	memMiB int
 
 	nestedVirt bool
+
+	images bool
 }
 
 func (l vmLimits) mem() string {
@@ -35,7 +37,7 @@ func (b *Bidder) vmLimits() vmLimits {
 	if !b.servesKind(string(v1alpha1.ComputeKindVM)) {
 		return vmLimits{}
 	}
-	return vmLimits{cpus: int64(runtime.NumCPU()), memMiB: hostMemMiB(), nestedVirt: b.cfg.NestedVirt}
+	return vmLimits{cpus: int64(runtime.NumCPU()), memMiB: hostMemMiB(), nestedVirt: b.cfg.NestedVirt, images: b.cfg.ImageTarget != ""}
 }
 
 func hostMemMiB() int { return meminfoMiB("MemTotal:") }
@@ -76,6 +78,14 @@ func (b *Bidder) staticRefused(record vmRecord) (vmLimits, int, string) {
 	limits := b.vmLimits()
 	if record.NestedVirt && !limits.nestedVirt {
 		return limits, 0, "the RFP asks for nestedVirt; this bidder's offering does not set it (its VMM is not QEMU or its host has KVM nested virtualization off)"
+	}
+	if record.Image != nil && !limits.images {
+		return limits, 0, "the RFP asks for a requester image; this bidder's offering does not set images"
+	}
+	if record.Image != nil {
+		if disk, err := memsize.ParseMiB(record.Disk); err != nil || disk <= 0 {
+			return limits, 0, fmt.Sprintf("the RFP asks for a requester image and its disk %q is not a size such as 50G", record.Disk)
+		}
 	}
 	if limits.cpus > 0 && int64(record.CPUs) > limits.cpus {
 		return limits, 0, fmt.Sprintf("the RFP asks for %d vCPUs; this bidder offers at most %d (its offering's maxCpus)", record.CPUs, limits.cpus)

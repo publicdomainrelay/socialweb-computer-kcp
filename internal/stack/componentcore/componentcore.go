@@ -305,8 +305,12 @@ func (c *Core) register() error {
 			return gatewayapi.New(spec, gatewayapi.Deps{Instance: in, KCP: kcp, TLS: tlsConfig, NodeClaimAgent: c.cfg.NodeClaimAgent, NodeClaims: c.nodeClaims, Logins: c.logins})
 		})},
 		{bidder.Kind, component.Typed(func(ctx context.Context, in component.Instance, spec v1alpha1.BidderSpec) (*bidder.Service, error) {
-			return bidder.New(ctx, spec, bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks, Sandbox: newSandbox(),
-				NestedVirt: c.cfg.Compute != nil && c.cfg.Compute.Runtime != nil && c.cfg.Compute.Runtime.Capabilities().NestedVirt})
+			deps := bidder.Deps{Instance: in, Egress: egress(in), OAuthCallbacks: c.oauthCallbacks, Sandbox: newSandbox()}
+			if c.cfg.Compute != nil && c.cfg.Compute.Runtime != nil {
+				caps := c.cfg.Compute.Runtime.Capabilities()
+				deps.NestedVirt, deps.ImageTarget = caps.NestedVirt, caps.ImageTarget
+			}
+			return bidder.New(ctx, spec, deps)
 		})},
 		{guestcontrolplane.Kind, component.Typed(func(_ context.Context, in component.Instance, spec v1alpha1.GuestControlPlaneSpec) (*guestcontrolplane.Service, error) {
 			return guestcontrolplane.New(spec, guestcontrolplane.Deps{Instance: in, Hosts: hosts})

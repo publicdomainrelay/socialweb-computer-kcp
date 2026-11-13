@@ -102,6 +102,7 @@ type Capabilities struct {
 	EnforcesLimits bool            `json:"enforcesLimits"`
 	GracefulStop   bool            `json:"gracefulStop"`
 	NestedVirt     bool            `json:"nestedVirt,omitempty"`
+	ImageTarget    string          `json:"imageTarget,omitempty"`
 }
 
 type VMSpec struct {
@@ -120,6 +121,8 @@ type VMSpec struct {
 	HostUDP bool `json:"hostUDP,omitempty"`
 
 	WebRTCUDPPort int `json:"webrtcUDPPort,omitempty"`
+
+	Image *guestimage.Requested `json:"image,omitempty"`
 }
 
 type Prepared struct {
@@ -223,6 +226,14 @@ func ValidateSpec(s VMSpec) error {
 	if s.WebRTCUDPPort != 0 {
 		if err := guestnet.ValidWebRTCUDPPort(s.WebRTCUDPPort); err != nil {
 			return fmt.Errorf("vmruntime: VM %s: %w", s.Name, err)
+		}
+	}
+	if s.Image != nil {
+		if err := s.Image.Valid(); err != nil {
+			return fmt.Errorf("vmruntime: VM %s: %w", s.Name, err)
+		}
+		if s.Vcpu <= 0 || s.MemMiB <= 0 || s.DiskMiB <= 0 {
+			return fmt.Errorf("vmruntime: VM %s boots a requester image and names no vcpu, mem or disk: %w", s.Name, guestimage.ErrRequestedRefused)
 		}
 	}
 	return nil
