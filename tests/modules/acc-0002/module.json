@@ -1,0 +1,17 @@
+{
+	"name": "acc-0002",
+	"description": "Acceptance 0002 ssh gateway: a transient command as the user, atirc agent run with its config on stdin (transient and held LC_SESSION) answering an observer.",
+	"actions": [{ "entry": "run", "label": "Run 0002", "description": "The ssh gateway end to end." }],
+	"calls": [
+		"computer.socialweb.test.page.signin",
+		"computer.socialweb.test.ssh.tempKey",
+		"computer.socialweb.test.atirc.observer",
+		"computer.socialweb.test.atirc.observerPub",
+		"com.fedfork.exec.ssh.exec",
+		"com.fedfork.exec.ssh.session"
+	],
+	"hooks": [
+		{ "nsid": "com.fedfork.exec.ssh.session", "required": true, "entries": ["run"], "reason": "ssh to the gateway (atlibs-ssh)" },
+		{ "nsid": "computer.socialweb.test.atirc.observer", "required": true, "entries": ["run"], "reason": "an atirc token minted the normal way, its stream" }
+	]
+}

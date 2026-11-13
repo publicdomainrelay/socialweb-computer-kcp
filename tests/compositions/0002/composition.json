@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0002",
+	"description": "ssh gateway as the user: a transient command; atirc agent run, transient and held, answering an observer (docs/acceptance/0002-ssh-gateway.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0002"
+		}
+	]
+}
+
