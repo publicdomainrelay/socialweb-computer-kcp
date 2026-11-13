@@ -72,15 +72,16 @@ fn checks(r: &str, of: &str, workflows: &[&str]) -> String {
 }
 
 /// The `fill` binding (the bidders' tightest maxCpus / 2 + 1 vCPUs, 1 GiB) beside the seeded ones, then one workflow
-/// per bidder on it (`fill-<n>`), pushed; the bidders are the account's vouched DIDs with a compute offering.
+/// per bidder on it (`fill-<n>`), pushed; the bidders are the network relay's repos with a compute offering.
 fn fill_script(r: &str) -> String {
     format!(
         r##"S=$(jq -n --arg i "$KNOTLESS_IDENTIFIER" --arg p "$KNOTLESS_PASSWORD" '{{identifier: $i, password: $p}}' | curl -sf -H 'content-type: application/json' -d @- "$KNOTLESS_PDS/xrpc/com.atproto.server.createSession")
 J=$(printf %s "$S" | jq -r .accessJwt); D=$(printf %s "$S" | jq -r .did)
 : > {r}.max
-for b in $(curl -sf "$KNOTLESS_PDS/xrpc/com.atproto.repo.listRecords?repo=$D&collection=sh.tangled.graph.vouch&limit=100" | jq -r '.records[].value.subject' | sort -u); do
+O=com.publicdomainrelay.temp.market.offering
+for b in $(curl -sf --cacert "$KNOTLESS_CA_CERTS" "$KNOTLESS_RELAY/xrpc/com.atproto.sync.listReposByCollection?collection=$O" | jq -r '.repos[].did' | sort -u); do
   p=$(curl -sf "$KNOTLESS_PLC_URL/$b" | jq -r '.service[] | select(.id == "#atproto_pds") | .serviceEndpoint') || continue
-  m=$(curl -sf "$p/xrpc/com.atproto.repo.getRecord?repo=$b&collection=com.publicdomainrelay.temp.market.offering&rkey=self" | jq -r '.value.maxCpus // empty') || continue
+  m=$(curl -sf --cacert "$KNOTLESS_CA_CERTS" "$p/xrpc/com.atproto.repo.getRecord?repo=$b&collection=$O&rkey=self" | jq -r '.value.maxCpus // empty') || continue
   [ -n "$m" ] && echo "$b $m" | tee -a {r}.max
 done
 n=$(wc -l < {r}.max); test "$n" -ge 2
