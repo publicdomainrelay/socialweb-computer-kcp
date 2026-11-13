@@ -28,7 +28,7 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
         s.set("held");
         s.st["f"] = json!({});
         let a = json!(["--hold", "--tunnel", "ssh:22:webrtc", "--transport", "webrtc", "--exec", "uname -a; id"]);
-        h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe())
+        h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a })))
     };
     match run.event {
         Event::Start => {

@@ -56,7 +56,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             let cpus = args["cpus"].as_u64().unwrap_or(16).to_string();
             let mem = args["mem"].as_str().unwrap_or("32G");
             let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", "2h", "--exec", "true"]);
-            h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 60 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => {
             let e = format!("not up in 60 min (phase {})", s.phase());

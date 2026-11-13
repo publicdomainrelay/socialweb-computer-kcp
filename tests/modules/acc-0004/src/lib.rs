@@ -80,12 +80,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                         "--agent=/etc/atirc/atirc.env"
                     ]);
                     h = h.call(
-                        call(
-                            "req",
-                            "request.start",
-                            json!({ "name": name, "args": args }),
-                        )
-                        .subscribe(),
+                        Call::new("req", format!("{T}request.start")).params(json!({ "name": name, "args": args })).subscribe(),
                     );
                 }
                 "unit" => {
@@ -118,12 +113,7 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 "node" => {
                     set(&mut st, "online");
                     h = h.call(
-                        call(
-                            "mesh",
-                            "atirc.meshSub",
-                            json!({ "cluster": "requester:owner", "node": "st-owner" }),
-                        )
-                        .subscribe(),
+                        Call::new("mesh", format!("{T}atirc.meshSub")).params(json!({ "cluster": "requester:owner", "node": "st-owner" })).subscribe(),
                     );
                 }
                 "prompt" => {}

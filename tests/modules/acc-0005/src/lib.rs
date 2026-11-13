@@ -25,7 +25,7 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
         Event::Start => {
             s.set("held");
             let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest", "--agent"]);
-            h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 60 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
         Event::Timer { id } if id == "poll" => {
@@ -163,7 +163,7 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
         Event::Start => {
             s.set("held");
             let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
-            h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 60 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
         Event::Timer { id } if id == "poll" => {
@@ -315,7 +315,7 @@ fn run_r2fail(run: Run<Value>) -> Result<Handle, String> {
         Event::Start => {
             s.set("held");
             let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
-            h = h.call(host("req", "request.start", json!({ "name": name, "args": a })).subscribe()).timer("deadline", 40 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 40 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 40 min (phase {})", s.phase()))),
         Event::Timer { id } if id == "poll" => h = h.call(host("tomb", "assert.tombstoned", json!({ "dids": [s.st["r2"]] }))),

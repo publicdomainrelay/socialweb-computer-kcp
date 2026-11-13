@@ -16,7 +16,7 @@ fn run_0007(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            h = h.call(host("req", "request.start", json!({ "name": name, "args": ["--hold", "--exec", "id"] })).subscribe()).timer("deadline", 30 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold", "--exec", "id"] }))).timer("deadline", 30 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 30 min (phase {})", s.phase()))),
         Event::Timer { id } if id == "poll" => {

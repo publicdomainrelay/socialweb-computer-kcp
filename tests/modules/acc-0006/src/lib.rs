@@ -69,7 +69,7 @@ fn compat_handler(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            h = h.call(host("req", "request.start", json!({ "name": name, "compat": true, "args": ["--hold", "--exec", "id"] })).subscribe()).timer("deadline", 20 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "compat": true, "args": ["--hold", "--exec", "id"] }))).timer("deadline", 20 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 20 min (phase {})", s.phase()))),
         Event::Message { id, data, .. } if id == "req" => {

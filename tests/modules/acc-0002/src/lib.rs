@@ -64,7 +64,7 @@ fn run_0002(run: Run<Value>) -> Result<Handle, String> {
                     s.reading("ssh_s", t);
                     s.set("transient");
                     s.mark("session");
-                    h = h.call(host("obs", "atirc.observer", json!({ "nick": obs })).subscribe()).call(
+                    h = h.call(steps::host_sub("obs", "atirc.observer", json!({ "nick": obs }))).call(
                         abi::Call::new("agent-transient", "com.fedfork.exec.ssh.session").input(json!({ "dest": "gateway", "command": format!("atirc agent run {}", agent(false)), "stdinFile": "agentConfig" })).subscribe(),
                     );
                 }

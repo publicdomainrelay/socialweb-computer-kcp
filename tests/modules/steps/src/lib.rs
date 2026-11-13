@@ -31,6 +31,12 @@ pub fn host(id: &str, what: &str, input: Value) -> Call {
     Call::new(id, format!("{T}{what}")).input(input)
 }
 
+/// A subscription of the test host (its log events, an observer): atlibs takes a non-exec subscription's arguments as
+/// params, never input.
+pub fn host_sub(id: &str, what: &str, params: Value) -> Call {
+    Call::new(id, format!("{T}{what}")).params(params).subscribe()
+}
+
 /// A kube call: com.fedfork.exec.kube.<verb> on `cluster`.
 pub fn kube(id: &str, verb: &str, cluster: &str, mut input: Value) -> Call {
     input["cluster"] = json!(cluster);

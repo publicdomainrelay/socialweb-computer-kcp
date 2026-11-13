@@ -106,7 +106,7 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                     }
                     s.reading("identity_mode", o["identityMode"].clone());
                     s.st["key"] = o["sshKey"].clone();
-                    h = h.call(host("ev", "requester.events", json!({ "name": "mp" })).subscribe()).call(kube("mr", "get", rq, sw("MarketRequester", "app")));
+                    h = h.call(steps::host_sub("ev", "requester.events", json!({ "name": "mp" }))).call(kube("mr", "get", rq, sw("MarketRequester", "app")));
                 }
                 "mr" => {
                     if o["status"]["phase"] != "Ready" || o["status"]["did"] != did.as_str() {
@@ -196,7 +196,7 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 }
                 "node" => {
                     s.set("online");
-                    h = h.call(host("mesh", "atirc.meshSub", json!({ "cluster": rq, "node": "st-owner" })).subscribe());
+                    h = h.call(steps::host_sub("mesh", "atirc.meshSub", json!({ "cluster": rq, "node": "st-owner" })));
                 }
                 "restart" => {
                     if o["did"] != did.as_str() {

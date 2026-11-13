@@ -55,7 +55,7 @@ fn token_handler(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("sub");
-            h = h.call(host("obs", "atirc.observer", json!({ "nick": nick })).subscribe()).call(host("pub", "atirc.observerPub", json!({ "nick": nick, "text": text }))).timer("deadline", 120_000);
+            h = h.call(steps::host_sub("obs", "atirc.observer", json!({ "nick": nick }))).call(host("pub", "atirc.observerPub", json!({ "nick": nick, "text": text }))).timer("deadline", 120_000);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 2 min (phase {})", s.phase()))),
         Event::Message { id, data, .. } if id == "obs" && data["text"] == text.as_str() && s.is("sub") => {
