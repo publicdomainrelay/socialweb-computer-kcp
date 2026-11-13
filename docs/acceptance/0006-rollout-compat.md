@@ -135,6 +135,7 @@ Compat smoke (unchanged clients vs new servers):
 | MarketIdentity | `Ready`, `SignedIn=True`, `pendingAction` absent |
 | policy | `bidder-tangled-vouch` (never `open`) |
 | startup | 0 `"level":"ERROR"`, 0 `unsupported type: source.TypedFunc` since restart |
+| guest image | `bidder_guest_image_ready` in the bidder's log since its start (it verified its pinned guest image against versions.json; until then it withdraws its offering, sends no heartbeat and refuses VM RFPs, logging `bidder_guest_image_unready`); reading `guestImageUnready`, the count of failed checks before it |
 | host | 0 computevms / 0 firecrackervms / 0 firecracker procs / `vms/` empty (sudo), or only owner-held VMs |
 | gateway | `Gateway gateway phase=Ready comps=5/5`, `SshGateway app phase=Ready comps=4/4`, `SshServer ssh-server phase=Ready`; the SshGateway Ready message carries no `signed-in account requesters are not ready` (per-user requesters do not gate it, 554bb104) |
 | ssh gateway users | every `owner-<hash>` MarketIdentity `Ready ready=SignedIn`; an owner who must sign in again is `SessionExpired` with one WARN `a MarketIdentity needs its owner to sign in again`, never a Reconciler ERROR (3b65b44e); a new optional scope never expires a session (07c5d797) |
