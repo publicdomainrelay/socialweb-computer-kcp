@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const OutputLimit = 64 << 10
+
 type Program struct {
 	Source string
 
@@ -27,6 +29,8 @@ type Result struct {
 	Stdout string
 
 	Stderr string
+
+	StdoutTruncated bool
 }
 
 type Runner interface {

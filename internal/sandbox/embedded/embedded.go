@@ -18,7 +18,7 @@ const (
 
 	DefaultTimeout = 2 * time.Minute
 
-	OutputLimit = 64 << 10
+	OutputLimit = sandbox.OutputLimit
 
 	Grace = 5 * time.Second
 )
@@ -113,7 +113,7 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	if err != nil || hung {
 		return sandbox.Result{ExitCode: -1, TimedOut: hung}, err
 	}
-	return sandbox.Result{ExitCode: answer.ExitCode, TimedOut: answer.TimedOut, Stdout: capped(answer.Stdout), Stderr: capped(answer.Stderr)}, nil
+	return sandbox.Result{ExitCode: answer.ExitCode, TimedOut: answer.TimedOut, Stdout: capped(answer.Stdout), Stderr: capped(answer.Stderr), StdoutTruncated: len(answer.Stdout) > OutputLimit}, nil
 }
 
 func (r *Runner) run(ctx context.Context, p sandbox.Program) (Answer, bool, error) {

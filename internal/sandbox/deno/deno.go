@@ -24,7 +24,7 @@ const (
 
 	DefaultWait = 2 * time.Minute
 
-	OutputLimit = 65536
+	OutputLimit = sandbox.OutputLimit
 )
 
 var (
@@ -178,6 +178,7 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	}
 	result.Stdout = out.String()
 	result.Stderr = errb.String()
+	result.StdoutTruncated = out.truncated
 	return result, nil
 }
 
@@ -231,19 +232,19 @@ func envSlice(env map[string]string) []string {
 }
 
 type capped struct {
-	limit int
-	to    strings.Builder
+	limit     int
+	to        strings.Builder
+	truncated bool
 }
 
 func (c *capped) Write(p []byte) (int, error) {
-	if left := c.limit - c.to.Len(); left > 0 {
-		if len(p) > left {
-			c.to.Write(p[:left])
-		} else {
-			c.to.Write(p)
-		}
+	n := len(p)
+	if left := max(c.limit-c.to.Len(), 0); n > left {
+		c.truncated = true
+		p = p[:left]
 	}
-	return len(p), nil
+	c.to.Write(p)
+	return n, nil
 }
 
 func (c *capped) String() string { return c.to.String() }

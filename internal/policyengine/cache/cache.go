@@ -47,14 +47,18 @@ func (s *Store) Seed(value models.Cache) {
 	}
 }
 
-func (s *Store) Snapshot() models.Cache {
+func (s *Store) Snapshot(keep func(key string) bool) models.Cache {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(models.Cache, len(s.entries))
+	s.dropExpiredLocked()
+	out := make(models.Cache)
 	for key, entry := range s.entries {
+		if keep != nil && !keep(key) {
+			continue
+		}
 		copied := make(models.CacheEntry, len(entry))
 		maps.Copy(copied, entry)
 		out[key] = copied
@@ -151,7 +155,17 @@ func (s *Store) touchLocked(key string) {
 	}
 }
 
+func (s *Store) dropExpiredLocked() {
+	now := time.Now()
+	for key, entry := range s.entries {
+		if Expired(entry, now) {
+			s.deleteLocked(key)
+		}
+	}
+}
+
 func (s *Store) evictLocked() {
+	s.dropExpiredLocked()
 	for {
 		if s.maxEntries > 0 && len(s.entries) > s.maxEntries {
 			s.deleteLocked(s.order[0])
@@ -269,20 +283,27 @@ func ReadVerdict(store *Store, key string) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	if meta, ok := entry[PolicyMetaFile]; ok {
-		var value PolicyMeta
-		if err := json.Unmarshal([]byte(meta.Data), &value); err == nil {
-			if time.Now().UnixMilli()-value.CachedAt > value.TTLMs {
-				store.Delete(key)
-				return nil, false
-			}
-		}
+	if Expired(entry, time.Now()) {
+		store.Delete(key)
+		return nil, false
 	}
 	file, ok := entry[PolicyResultFile]
 	if !ok {
 		return nil, false
 	}
 	return []byte(file.Data), true
+}
+
+func Expired(entry models.CacheEntry, now time.Time) bool {
+	file, ok := entry[PolicyMetaFile]
+	if !ok {
+		return false
+	}
+	var meta PolicyMeta
+	if err := json.Unmarshal([]byte(file.Data), &meta); err != nil {
+		return false
+	}
+	return now.UnixMilli()-meta.CachedAt > meta.TTLMs
 }
 
 func WriteVerdict(store *Store, key string, data []byte, ttl time.Duration) {

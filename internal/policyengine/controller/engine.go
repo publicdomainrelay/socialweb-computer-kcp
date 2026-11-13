@@ -17,6 +17,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/contract/sandbox"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/opt"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/supervise"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/atproto"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/cache"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/executor"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/models"
@@ -26,6 +27,8 @@ import (
 )
 
 type PolicyEngineRequest = models.Request
+
+const DefaultMaxCacheBytes = sandbox.OutputLimit / 2
 
 type Limits struct {
 	MaxConcurrentRuns int
@@ -96,9 +99,7 @@ func NewEngine(config Config) *Engine {
 	config.Limits.MaxConcurrentRuns = opt.Positive(config.Limits.MaxConcurrentRuns, 4)
 	config.Limits.QueueDepth = opt.Positive(config.Limits.QueueDepth, 64)
 	config.Limits.MaxCacheEntries = opt.Positive(config.Limits.MaxCacheEntries, 512)
-	if config.Limits.MaxCacheBytes < 0 {
-		config.Limits.MaxCacheBytes = 0
-	}
+	config.Limits.MaxCacheBytes = max(config.Limits.MaxCacheBytes, 0)
 	resolver := config.ResolveAction
 	if config.DisableActions {
 		resolver = func(uses string) (*workflow.Action, error) {
@@ -114,7 +115,7 @@ func NewEngine(config Config) *Engine {
 	return &Engine{
 		config:        config,
 		resolver:      resolver,
-		cacheStore:    cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
+		cacheStore:    cache.NewStore(config.Limits.MaxCacheEntries, opt.Positive(config.Limits.MaxCacheBytes, DefaultMaxCacheBytes)),
 		scopeVerdicts: cache.NewStore(config.Limits.MaxCacheEntries, config.Limits.MaxCacheBytes),
 		log:           log,
 		sem:           make(chan struct{}, config.Limits.MaxConcurrentRuns),
@@ -392,15 +393,31 @@ func (e *Engine) seedRequest(request *PolicyEngineRequest, seed models.Cache) *P
 	copyRequest := *request
 	context := make(map[string]any, len(request.Context)+1)
 	maps.Copy(context, request.Context)
-	merged := e.cacheStore.Snapshot()
+	merged := e.cacheStore.Snapshot(runCacheKeys(request.Inputs))
 	if existing, ok := cacheFromAny(context["cache"]); ok {
 		maps.Copy(merged, existing)
 	}
 	maps.Copy(merged, seed)
+	now := time.Now()
+	maps.DeleteFunc(merged, func(_ string, entry models.CacheEntry) bool { return cache.Expired(entry, now) })
 	context["cache"] = merged
 	copyRequest.Context = context
 	e.cacheStore.Merge(withoutTrust(merged))
 	return &copyRequest
+}
+
+func runCacheKeys(inputs map[string]any) func(string) bool {
+	keys := map[string]bool{}
+	if key := stringInput(inputs, CacheKeyInput); key != "" {
+		keys[key] = true
+	}
+	for _, name := range []string{"rfp", "bid", "accept"} {
+		var ref atproto.StrongRef
+		if json.Unmarshal([]byte(stringInput(inputs, name)), &ref) == nil && ref.URI != "" {
+			keys[cache.RecordKey(ref)] = true
+		}
+	}
+	return func(key string) bool { return keys[key] }
 }
 
 func (e *Engine) acquire(ctx context.Context) error {

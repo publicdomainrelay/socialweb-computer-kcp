@@ -307,6 +307,9 @@ func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[stri
 	if result.TimedOut {
 		return result.Stdout, result.Stderr, fmt.Errorf("the policy sandbox outlived its deadline")
 	}
+	if result.StdoutTruncated {
+		return result.Stdout, result.Stderr, fmt.Errorf("policy action output exceeded %d bytes", sandbox.OutputLimit)
+	}
 	if result.ExitCode != 0 {
 		return result.Stdout, result.Stderr, fmt.Errorf("policy code exited with %d", result.ExitCode)
 	}
