@@ -70,6 +70,11 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                 _ => h,
             };
         }
+        Event::Timer { id } if id == "relist" => {
+            s.st["fan"] = json!(bidders.len());
+            s.st["vms"] = json!([]);
+            h = list_vms(h);
+        }
         // the bidder pins vm.terminated seconds after its VM is gone: read it again every 3 s for up to 2 min
         Event::Timer { id } if id.starts_with("term-") => {
             let uri = s.st["term"][&id[5..]].as_str().unwrap_or_default().to_string();
@@ -205,7 +210,11 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                     if s.is("orphans") {
                         let n = STEPS[i];
                         if !gw_did.is_empty() && now.len() != n {
-                            return Ok(s.fail(format!("step {n}: {} gateway VMs on the bidders, want {n}", now.len())));
+                            // a node leaves the cluster seconds before its VM is released: ask again for up to 2 min
+                            if s.since("orphans") < 120.0 {
+                                return Ok(s.keep(h.timer("relist", 5_000)));
+                            }
+                            return Ok(s.fail(format!("step {n}: {} gateway VMs on the bidders, want {n} (2 min after the step)", now.len())));
                         }
                         let gone: Vec<Value> = before.iter().filter(|v| !now.contains(v)).cloned().collect();
                         s.st["prev"] = json!(now);
@@ -251,6 +260,7 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                         }
                         s.st["readings"]["steps"].as_array_mut().unwrap().push(json!({ "replicas": n, "seconds": t, "nodes": nodes }));
                         s.set("orphans");
+                        s.mark("orphans");
                         s.st["fan"] = json!(bidders.len());
                         s.st["vms"] = json!([]);
                         if bidders.is_empty() {

@@ -114,7 +114,7 @@ client a published module would have; without one the host refuses those calls.
 
 | composition | entries (`--entry`) | live (prod rc165, bob, `gate.sh` 2026-11-13) |
 | --- | --- | --- |
-| 0001 | `run` (sections 3-6), `s2` (staging: a temporary oauthQr bidder) | `run`: module pass; cleanup fails until atlibs-kube `delete-drops-ledger` is in the pin set |
+| 0001 | `run` (sections 3-6), `s2` (staging: a temporary oauthQr bidder) | `run`: pass (atlibs-kube 8a71567) |
 | 0002 | `run` | pass |
 | 0003 (0001 section 9) | `run` (`--per-host`: each host in turn) | pass (discovery) |
 | 0004 | `run` | pass |
