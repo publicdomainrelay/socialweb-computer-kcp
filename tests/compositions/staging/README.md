@@ -54,8 +54,15 @@ cd compositions/staging && deno run -A --no-lock compose.ts > composition.json &
 SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/staging --dry-run
 ```
 
+## Threat model
+
+- A VM's meshd secret is in its `userData`: the bidder operator can read it and join that run's overlay until teardown.
+  Accepted (owner, 2026-11-12): the overlay lives one run, holds only throwaway accounts.
+- The orchestrator rents as the trigger; throwaway accounts live only on the staging PDS and PLC.
+
 ## Open
 
-- kcp components (gateway, ssh gateway, ingress proxy) run as host processes only, so they sit on a VM, not in `stg`.
+- kcp components (gateway, ssh gateway, ingress proxy) run as host processes only: on the gateway VM by `install
+  gateway`, as prod runs them (owner-approved).
 - The NAT test (requester and bidder on Firehose comms, inbound closed) runs against this target: a suite test, not
   the stand-up.
