@@ -5,6 +5,8 @@ import "encoding/json"
 const (
 	GuestAgentSecretsPath = GuestAgentConfigDir + "/secrets.json"
 
+	GuestAgentMemoryPath = GuestAgentConfigDir + "/memory.json"
+
 	GuestAgentStateDir = "/run/socialweb-guest-agent"
 
 	GuestSecretsReadyPath = GuestAgentStateDir + "/secrets.ready"

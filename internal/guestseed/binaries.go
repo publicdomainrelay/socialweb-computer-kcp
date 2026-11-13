@@ -169,7 +169,7 @@ func GuestBinariesNeeded(userData string) GuestBinaryNeeds {
 		case p == cloudinit.GuestAgentTunnelsPath:
 			out.Agent = true
 			out.WebRTC = true
-		case p == cloudinit.GuestAgentServicesPath:
+		case p == cloudinit.GuestAgentServicesPath, p == cloudinit.GuestAgentMemoryPath:
 			out.Agent = true
 		case p == cloudinit.GuestAgentSecretsPath:
 			out.Agent = true
@@ -376,7 +376,7 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *W
 	}
 	unit := strings.Join([]string{
 		"[Unit]",
-		"Description=socialweb guest agent: the webrtc tunnels, the shell service, the sealed secrets fallback, the agent start and the requester association of the guest",
+		"Description=socialweb guest agent: the webrtc tunnels, the shell service, the sealed secrets fallback, the agent start, the requester association and the memory events of the guest",
 		"After=network-online.target " + GuestBinariesUnit,
 		"Wants=network-online.target",
 		"Requires=" + GuestBinariesUnit,
@@ -385,6 +385,7 @@ func GuestAgentModule(base, audience, acceptPath string, secrets bool, webrtc *W
 		"ConditionPathExists=|" + cloudinit.GuestAgentSecretsPath,
 		"ConditionPathExists=|" + cloudinit.GuestAgentAgentPath,
 		"ConditionPathExists=|" + cloudinit.GuestAgentAssociationPath,
+		"ConditionPathExists=|" + cloudinit.GuestAgentMemoryPath,
 		"StartLimitIntervalSec=0",
 		"",
 		"[Service]",

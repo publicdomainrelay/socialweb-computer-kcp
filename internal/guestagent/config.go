@@ -32,6 +32,8 @@ const (
 
 	AssociationFile = "association.json"
 
+	MemoryFile = "memory.json"
+
 	RequesterDIDFile = "requester-did"
 
 	AssociationRequestFile = "association-request.json"
@@ -130,6 +132,8 @@ type Config struct {
 
 	Association *Association
 
+	Memory bool
+
 	Bidder Bidder
 
 	Accept AcceptRef
@@ -221,9 +225,12 @@ func LoadConfig(configDir, stateDir, loginHelper string) (Config, error) {
 		seen[t.Tag] = true
 		cfg.Tunnels = append(cfg.Tunnels, t)
 	}
-	if len(cfg.Tunnels) == 0 && cfg.Shell == "" && cfg.Secrets == nil && cfg.AgentUnit == "" && cfg.Association == nil {
-		return cfg, fmt.Errorf("%w: %s names no tunnel, %s no service, %s asks for no sealed secrets fallback, %s names no unit and %s names no ref file", ErrConfig,
-			TunnelsFile, ServicesFile, SecretsFile, AgentFile, AssociationFile)
+	if _, err := os.Stat(filepath.Join(configDir, MemoryFile)); err == nil {
+		cfg.Memory = true
+	}
+	if len(cfg.Tunnels) == 0 && cfg.Shell == "" && cfg.Secrets == nil && cfg.AgentUnit == "" && cfg.Association == nil && !cfg.Memory {
+		return cfg, fmt.Errorf("%w: %s names no tunnel, %s no service, %s asks for no sealed secrets fallback, %s names no unit, %s names no ref file and there is no %s", ErrConfig,
+			TunnelsFile, ServicesFile, SecretsFile, AgentFile, AssociationFile, MemoryFile)
 	}
 	if err := readJSON(filepath.Join(configDir, BidderFile), &cfg.Bidder); err != nil {
 		return cfg, err

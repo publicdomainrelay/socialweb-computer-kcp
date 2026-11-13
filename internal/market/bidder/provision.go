@@ -194,6 +194,7 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 		HostURL:        hostURL,
 		Downloads:      b.cfg.GuestDownloads,
 		WebRTC:         webrtc,
+		Memory:         true,
 	})
 	if err != nil {
 		return "", err

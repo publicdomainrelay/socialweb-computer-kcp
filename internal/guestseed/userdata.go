@@ -98,6 +98,8 @@ type ProvisionOptions struct {
 	Downloads map[string]string
 
 	WebRTC *WebRTCOptions
+
+	Memory bool
 }
 
 func GuestLoginModule(opts GuestLoginOptions) (cloudinit.UserDataModule, error) {
@@ -427,6 +429,16 @@ func WithOnNetworkBaseURL(userData, fallbackURL string) (string, error) {
 }
 
 func Provision(opts ProvisionOptions) (string, error) {
+	if _, served := GuestBinaryPins(opts.Downloads, []string{GuestBinaryAgent}); opts.Memory && served == nil && strings.TrimSpace(opts.HostURL) != "" {
+		memory := func(cloudinit.Context) (cloudinit.UserDataPatch, error) {
+			return cloudinit.UserDataPatch{WriteFiles: []cloudinit.WriteFileEntry{{Path: cloudinit.GuestAgentMemoryPath, Owner: "root:root", Permissions: "0644", Content: "{}\n"}}}, nil
+		}
+		withMemory, err := cloudinit.BuildUserData(cloudinit.BuildOptions{Base: opts.UserData, Modules: []any{cloudinit.UserDataModule(memory)}})
+		if err != nil {
+			return "", err
+		}
+		opts.UserData = withMemory
+	}
 	acceptPath := opts.AcceptPath
 	acceptPath = cmp.Or(acceptPath, AcceptPathVM)
 	modules := []any{}

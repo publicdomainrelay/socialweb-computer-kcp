@@ -27,6 +27,10 @@ const (
 
 	R2ReleasedNSID = nsidPrefix + "events.guest.r2Released"
 
+	MemoryPressureNSID = nsidPrefix + "events.guest.memoryPressure"
+
+	OOMKillNSID = nsidPrefix + "events.guest.oomKill"
+
 	secretsViaGetSecrets = "getSecrets"
 
 	secretsViaSealed = "sealed"

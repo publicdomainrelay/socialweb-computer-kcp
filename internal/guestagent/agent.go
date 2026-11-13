@@ -152,7 +152,7 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	for _, t := range a.cfg.Tunnels {
 		tags = append(tags, t.Tag)
 	}
-	a.log.Info("the guest agent starts", "tags", tags, "shell", a.cfg.Shell, "sealedSecrets", a.cfg.Secrets != nil, "agentUnit", a.cfg.AgentUnit, "association", a.cfg.Association != nil, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
+	a.log.Info("the guest agent starts", "tags", tags, "shell", a.cfg.Shell, "sealedSecrets", a.cfg.Secrets != nil, "agentUnit", a.cfg.AgentUnit, "association", a.cfg.Association != nil, "memory", a.cfg.Memory, "base", a.cfg.Bidder.Base, "fingerprint", a.fingerprint, "cursor", a.cursor,
 		"forwardedUDPPort", a.mux != nil)
 	for _, t := range a.cfg.Tunnels {
 		a.wg.Go(func() { a.announce(ctx, t.Tag) })
@@ -165,6 +165,9 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	}
 	if a.cfg.Association != nil {
 		a.wg.Go(func() { a.runAssociation(ctx) })
+	}
+	if a.cfg.Memory {
+		a.wg.Go(func() { a.runMemory(ctx) })
 	}
 	if ready != nil {
 		ready()
