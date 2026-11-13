@@ -109,6 +109,7 @@ fn str_of<'a>(v: &'a Value, k: &str) -> Result<&'a str, String> {
 }
 
 impl Swc {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         target: Target,
         account: &str,
