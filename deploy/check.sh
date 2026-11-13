@@ -81,6 +81,7 @@ for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .m
   echo "check.sh: ok go build and go vet of the asset module $module"
 done
 
+releasetargets="$(jq -r '.platforms | to_entries[] | select(.value.status == "release") | .key' internal/versions/versions.json)"
 crossfailed=""
 for target in darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64; do
   goos="${target%/*}"
@@ -93,7 +94,8 @@ for target in darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64;
     crossfailed="$crossfailed vet:$target"
     continue
   fi
-  if ! GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -tags release -o /dev/null ./cmd/socialweb-computer; then
+  if ! printf '%s\n' $releasetargets | grep -qx "$target" &&
+    ! GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -tags release -o /dev/null ./cmd/socialweb-computer; then
     crossfailed="$crossfailed release-build:$target"
     continue
   fi
@@ -112,7 +114,7 @@ if [ -n "$crossfailed" ]; then
 fi
 
 releasedir="$(mktemp -d)"
-for target in $(jq -r '.platforms | to_entries[] | select(.value.status == "release") | .key' internal/versions/versions.json); do
+for target in $releasetargets; do
   goos="${target%/*}"
   goarch="${target#*/}"
   if ! GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -tags release -trimpath -o "$releasedir/$goos-$goarch" ./cmd/socialweb-computer; then

@@ -1,5 +1,5 @@
-# knotless CI: the gate (AGENTS.md: How to verify): go build, go vet, deploy/check.sh --fast (the release builds
-# included), and a clean tree after. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
+# knotless CI: the gate (AGENTS.md: How to verify): deploy/check.sh --fast (go build, go vet, the cross-OS and release
+# builds included), and a clean tree after. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
@@ -18,7 +18,5 @@ steps:
       (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
       trap "kill $! 2>/dev/null" EXIT
       go mod download
-      go build ./...
-      go vet ./...
       deploy/check.sh --fast
       test -z "$(git status --porcelain)"
