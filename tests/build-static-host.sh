@@ -12,6 +12,6 @@ printf '#!/bin/sh\nfor a do shift; case "$a" in --target=*) ;; *) set -- "$@" "$
 printf '#!/bin/sh\nexec %s ar "$@"\n' "$zig" > "$w/ar"
 chmod +x "$w/cc" "$w/ar"
 rustup target add "$t" >/dev/null
-CC_x86_64_unknown_linux_musl="$w/cc" AR_x86_64_unknown_linux_musl="$w/ar" CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$w/cc" \
+CC_x86_64_unknown_linux_musl="$w/cc" AR_x86_64_unknown_linux_musl="$w/ar" \
   cargo build -q --release --target "$t" -p swc-test-host >&2
 echo "${CARGO_TARGET_DIR:-$PWD/target}/$t/release/swc-test-host"
