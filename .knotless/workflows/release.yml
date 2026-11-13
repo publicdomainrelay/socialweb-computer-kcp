@@ -1,0 +1,125 @@
+# knotless CI: the release binaries (linux/amd64, linux/arm64), the node downloads by sha256 and the pinned guest
+# image, published to the bucket as GitHub CI did: main/<sha>/ and main/latest/ (a tag: releases/<tag>/),
+# downloads/<sha256>/, guest-images/<target>/<pin>/. After gate and pins pass at the same commit. The bucket key is a
+# sealed secret given only to pushes to main and v* tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a
+# pull) the publish steps are skipped. 16 vCPU / 32 GB (binding kcp-build).
+on:
+  push:
+    refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
+runners: [aliceoa.bsky.social]
+executor: kcp-build
+after: [gate, pins]
+secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
+env:
+  SPACES_BUCKET: socialweb-computer-kcp
+  SPACES_REGION: sfo3
+  TARGET: firecracker-x86_64
+  OUT: /root/ci-out
+steps:
+  - name: toolchain
+    run: bash scripts/knotless-ci-toolchain.sh --deno
+  - name: binaries
+    timeout: 110
+    run: |
+      . /opt/ci/env
+      root=/root/release-build
+      bash scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" --build-root "$root"
+      rel="$root/release/$KNOTLESS_RUN_SHA"
+      ls -la "$rel"
+      want="$(jq -r '.assets.deno.version' internal/versions/versions.json)"
+      jq -e --arg v "$want" '(.builds | length) > 0 and all(.builds[]; .denoEmbedded.version == $v and (.denoEmbedded.zips | keys | sort) == ["linux/amd64","linux/arm64"])' "$rel/release.json"
+      rm -rf "$OUT/binaries" && mkdir -p "$OUT/binaries" && cp -a "$rel"/. "$OUT/binaries/"
+      (cd "$OUT/binaries" && sha256sum -c --quiet SHA256SUMS)
+      tree="$(mktemp -d)"
+      zstd -dc "$root/src/1/internal/assets/blobs/linux_amd64/socialweb-computer-k8s-downloads.tar.zst" | tar -x -C "$tree"
+      rm -rf /root/ci-downloads && mkdir -p /root/ci-downloads
+      for side in "$tree"/*.sha256; do
+        name="$(basename "$side" .sha256)"
+        want="$(cut -d' ' -f1 "$side")"
+        got="$(sha256sum "$tree/$name" | cut -d' ' -f1)"
+        echo "downloads/$want/$name (sha256 $got)"
+        test "$got" = "$want"
+        mkdir -p "/root/ci-downloads/$want" && cp "$tree/$name" "/root/ci-downloads/$want/$name"
+      done
+      test "$(find /root/ci-downloads -type f | wc -l)" -gt 0
+  - name: guest image
+    timeout: 120
+    run: |
+      . /opt/ci/env
+      pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
+      url="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/guest-images/$TARGET/$pin"
+      img=/root/ci-guest-image && rm -rf "$img" "$img.published"
+      published=true
+      for f in image.json vmlinux rootfs.ext4; do
+        want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].sha256' internal/versions/versions.json)"
+        got="$(curl -sSfL --retry 3 --max-time 1800 "$url/$f" | sha256sum | cut -d' ' -f1)" || got=
+        echo "$TARGET/$f sha256 ${got:-absent} (pinned $want) at $url/$f"
+        [ "$got" = "$want" ] || published=false
+      done
+      if [ "$published" = true ]; then
+        echo "guest-image: not building $TARGET: every output is published at $url and matches its pin"
+        touch "$img.published"
+        exit 0
+      fi
+      echo "guest-image: building $TARGET"
+      mkdir -p "$img" /root/guest-image-work
+      scripts/build-guest-image.sh --target "$TARGET" --work /root/guest-image-work --out "$img"
+      for f in vmlinux rootfs.ext4 image.json; do
+        want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].sha256' internal/versions/versions.json)"
+        got="$(sha256sum "$img/$TARGET/$f" | cut -d' ' -f1)"
+        echo "$TARGET/$f sha256 $got (pinned $want)"
+        test "$got" = "$want"
+      done
+  - name: publish
+    on: {refs: [refs/heads/main, refs/tags/v*]}
+    timeout: 90
+    run: |
+      . /opt/ci/env
+      test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"
+      case "$KNOTLESS_RUN_REF" in
+        refs/tags/*) prefix="releases/${KNOTLESS_RUN_REF#refs/tags/}"; also="" ;;
+        *) prefix="main/$KNOTLESS_RUN_SHA"; also="main/latest" ;;
+      esac
+      if [ ! -e /root/ci-guest-image.published ]; then
+        pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
+        deno run -A --no-lock scripts/publish-spaces.ts --dir "/root/ci-guest-image/$TARGET" --prefix "guest-images/$TARGET/$pin" --content-addressed
+      fi
+      deno run -A --no-lock scripts/publish-spaces.ts --dir /root/ci-downloads --prefix downloads --content-addressed
+      deno run -A --no-lock scripts/publish-spaces.ts --dir "$OUT" --prefix "$prefix" ${also:+--also "$also"}
+  - name: the published binaries and guest image
+    on: {refs: [refs/heads/main, refs/tags/v*]}
+    timeout: 30
+    run: |
+      . /opt/ci/env
+      base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
+      case "$KNOTLESS_RUN_REF" in
+        refs/tags/*) at="releases/${KNOTLESS_RUN_REF#refs/tags/}" ;;
+        *) at="main/$KNOTLESS_RUN_SHA" ;;
+      esac
+      d="$(mktemp -d)"
+      curl -sSf -o "$d/SHA256SUMS" "$base/$at/binaries/SHA256SUMS"
+      diff "$d/SHA256SUMS" "$OUT/binaries/SHA256SUMS"
+      while read -r sum name; do
+        curl -sSfL -o "$d/$name" "$base/$at/binaries/$name"
+        echo "$sum  $d/$name" | sha256sum -c --quiet -
+        echo "$at/binaries/$name: sha256 $sum, readable without credentials"
+      done < "$d/SHA256SUMS"
+      pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
+      for f in image.json vmlinux rootfs.ext4; do
+        want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].bytes' internal/versions/versions.json)"
+        size="$(curl -sSI --max-time 60 "$base/guest-images/$TARGET/$pin/$f" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
+        echo "guest-images/$TARGET/$pin/$f $size bytes (pinned $want)"
+        test "$size" = "$want"
+      done
+      # as an account of its own (the binary refuses root): it must resolve its guest image before the bad handle
+      id probe >/dev/null 2>&1 || useradd -m probe
+      probe=/home/probe/p && rm -rf "$probe" && mkdir -p "$probe/run"
+      install -m 0755 "$d/socialweb-computer-linux-amd64" "$probe/socialweb-computer" && chown -R probe "$probe"
+      runuser -u probe -- env HOME=/home/probe XDG_RUNTIME_DIR="$probe/run" "$probe/socialweb-computer" run bidder --handle 'NOT A HANDLE' \
+        --host-backend proc --profile dev-local --state-dir "$probe/state" > "$probe/out.txt" 2>&1 || true
+      cat "$probe/out.txt"
+      if grep -qE 'guestimagerelease|guest-image-source is required' "$probe/out.txt"; then
+        echo "the published binary cannot fetch the guest image of its own build"
+        exit 1
+      fi
+      echo "the published binary resolved its own guest image"

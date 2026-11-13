@@ -3,7 +3,8 @@
 # .github/actions/containers set up there. Go of go.mod and rust of rust/rust-toolchain.toml (each download checked
 # against its published sha256), docker for the swc-userns-stage build, jq/zstd. Writes /opt/ci/env to source in
 # later steps.
-#   scripts/knotless-ci-toolchain.sh [--wasm]    --wasm: also the wasm32 target (tests/modules)
+#   scripts/knotless-ci-toolchain.sh [--wasm] [--deno]    --wasm: also the wasm32 target (tests/modules); --deno: the
+#   pinned deno of internal/versions/versions.json (the policy engine tests, scripts/*.ts)
 set -euo pipefail
 ci=/opt/ci
 mkdir -p "$ci"
@@ -27,11 +28,21 @@ echo "$(curl -fsSL --max-time 30 https://static.rust-lang.org/rustup/dist/x86_64
 chmod 0755 "$init" && "$init" -y --quiet --no-modify-path --profile minimal --default-toolchain stable && rm -f "$init"
 export PATH="$ci/go/bin:$CARGO_HOME/bin:$PATH"
 (cd rust && rustup toolchain install)
-if [ "${1:-}" = --wasm ]; then rustup target add wasm32-unknown-unknown; fi
+case " $* " in *" --wasm "*) rustup target add wasm32-unknown-unknown ;; esac
+deno_path=
+case " $* " in *" --deno "*)
+	deno_url="$(jq -er '.assets.deno.fetch["linux/amd64"].url' internal/versions/versions.json)"
+	deno_sha="$(jq -er '.assets.deno.fetch["linux/amd64"].sha256' internal/versions/versions.json)"
+	curl -fsSL --max-time 120 -o "$ci/deno.zip" "$deno_url"
+	echo "$deno_sha  $ci/deno.zip" | sha256sum -c --quiet -
+	rm -rf "$ci/deno" && mkdir -p "$ci/deno" && unzip -q -o "$ci/deno.zip" deno -d "$ci/deno" && rm -f "$ci/deno.zip"
+	deno_path="$ci/deno:"
+	;;
+esac
 
 cat >"$ci/env" <<EOF
 export RUSTUP_HOME=$RUSTUP_HOME CARGO_HOME=$CARGO_HOME
-export PATH=$ci/go/bin:$CARGO_HOME/bin:\$PATH
+export PATH=$deno_path$ci/go/bin:$CARGO_HOME/bin:\$PATH
 export GOTOOLCHAIN=local CONTAINER=docker
 EOF
 go version && rustc --version && (cd rust && rustc --version)

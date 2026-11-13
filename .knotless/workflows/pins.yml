@@ -1,0 +1,15 @@
+# knotless CI: `make check-pins` (make pins re-stages and re-pins the owned assets; it fails when
+# internal/versions/versions.json differs from the commit). 4 vCPU / 8 GB (binding kcp-small).
+on:
+  push:
+    refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
+runners: [aliceoa.bsky.social]
+executor: kcp-small
+steps:
+  - name: toolchain
+    run: bash scripts/knotless-ci-toolchain.sh
+  - name: pins
+    timeout: 60
+    run: |
+      . /opt/ci/env
+      make check-pins BUILD_ROOT=/root/pins-build
