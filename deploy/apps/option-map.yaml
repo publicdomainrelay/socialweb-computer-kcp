@@ -157,6 +157,7 @@ apps:
       - {name: comms-event-source, to: spec.comms.eventSourceRefs}
       - {name: requester-ingress-provider, to: spec.requesterIngress.provider}
       - {name: requester-ingress-webrtc-stun, to: spec.requesterIngress.webrtc.stunUrls}
+      - {name: atirc-url, to: network.atircUrl}
       - {name: qr-origin, to: network.qrOrigin}
       - {name: network-hosts, to: network.hosts}
       - {name: ingress-provider, to: spec.ingress.provider}
