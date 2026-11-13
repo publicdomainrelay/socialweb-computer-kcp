@@ -12,7 +12,7 @@ host() { jq -r --arg n "$1" '.network.status.network.hosts[] | select(.name == $
 plc=$(jq -r '.network.status.network.plcDirectoryUrl' <<<"$st")
 accounts='{}'
 for a in alice bob; do
-  h="$a-${run: -6}.bob.test" pw=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9) c=$C/creds-$a
+  h="$a-${run: -4}$(date +%s | tail -c 5).bob.test" pw=$(head -c 24 /dev/urandom | base64 | tr -dc A-Za-z0-9) c=$C/creds-$a
   did=$(curl -fsS -H 'content-type: application/json' "$pds/xrpc/com.atproto.server.createAccount" \
     -d "$(jq -nc --arg h "$h" --arg p "$pw" '{handle: $h, password: $p, email: ($h + "@staging.invalid")}')" | jq -r .did)
   (umask 077 && echo "ATPROTO_PASSWORD=$pw" > "$c")
