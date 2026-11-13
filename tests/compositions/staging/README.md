@@ -10,11 +10,13 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
 ## Run
 
 1. `run request --hold --nested-virt --cpus 16 --mem 32G --expires-in 2h` as the target's account (input `cpus`, `mem`).
-2. Install the binary under test on the VM: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
-   checked against `SHA256SUMS`.
-3. `dev up --instance stg --state-dir ~/stg/s --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
-4. `dev status --instance stg`.
-5. Always: `dev down --instance stg`; the host releases the VM.
+2. As root on the VM: the account `stg` (group `kvm`, one subordinate id range above the image's, `uidmap`, linger), and
+   the binary under test in `/home/stg/stg`: `<bucket>/{releases/<tag>|main/<commit>}/binaries/socialweb-computer-linux-amd64`,
+   checked against `SHA256SUMS`. `dev` refuses root.
+3. As `stg`, detached from the ssh session and polled (`/home/stg/up.rc`): `dev up --instance stg --state-dir /home/stg/stg/s
+   --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
+4. `dev status --instance stg --state-dir /home/stg/stg/s`.
+5. Always: `dev down` (detached, polled); the host releases the VM.
 
 The target's `requester` picks the binary: `release:<tag>` or `sha:<commit>` (a bare `release` is refused).
 

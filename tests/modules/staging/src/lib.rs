@@ -40,6 +40,17 @@ fn swc(args: &str) -> String {
     format!("cd /home/stg && runuser -u stg -- env HOME=/home/stg XDG_RUNTIME_DIR=/run/user/$(id -u stg) /home/stg/stg/{BIN} {args} 2>&1")
 }
 
+/// A long VM command detached from the ssh session (a dropped session must not end it): `<step>.rc` when done.
+fn bg(step: &str, args: &str) -> String {
+    let f = format!("/home/stg/{step}");
+    format!("rm -f {f}.rc; (setsid nohup sh -c '{} > {f}.log 2>&1; echo $? > {f}.rc' < /dev/null > /dev/null 2>&1 &); echo started", swc(args))
+}
+
+/// `<rc>` (empty while it runs), then the log's tail.
+fn poll(step: &str) -> String {
+    format!("cat /home/stg/{step}.rc 2>/dev/null; echo; tail -c 3000 /home/stg/{step}.log")
+}
+
 fn run_staging(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let name = format!("{}-vm", args["name"].as_str().ok_or("name is required")?);
@@ -50,7 +61,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
     let down = |s: &mut S, h: Handle, result: Value| {
         s.st["result"] = result;
         s.set("down");
-        s.keep(h.call(ssh("down", swc(&format!("dev down {INST}")))))
+        s.keep(h.call(ssh("down", bg("down", &format!("dev down {INST}")))))
     };
     match run.event {
         Event::Start => {
@@ -66,6 +77,7 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             let a = json!(["--hold", "--nested-virt", "--cpus", cpus, "--mem", mem, "--expires-in", "2h", "--exec", "true"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
+        Event::Timer { id } if id.starts_with("poll-") => h = h.call(ssh(&format!("{}-poll", &id[5..]), poll(&id[5..]))),
         Event::Timer { id } if id == "deadline" => {
             let e = format!("not up in 60 min (phase {})", s.phase());
             return Ok(if s.has("installed") { down(&mut s, h, json!({ "pass": false, "error": e })) } else { s.fail(e) });
@@ -93,27 +105,37 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
                     s.mark("installed");
                     s.set("up");
-                    h = h.call(ssh("up", swc(&format!("dev up {INST} {DEV_UP}"))));
+                    h = h.call(ssh("up", bg("up", &format!("dev up {INST} {DEV_UP}"))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
-                "up" if o["ok"] == true => {
-                    s.mark("up");
-                    s.set("status");
-                    h = h.call(ssh("status", swc(&format!("dev status {INST}"))));
+                "up" | "down" if o["ok"] == true => h = h.timer(&format!("poll-{id}"), 10_000),
+                "up" | "down" => return Ok(s.fail(format!("{id}: starting it on the VM: {text}"))),
+                "up-poll" | "down-poll" => {
+                    let step = &id[..id.len() - 5];
+                    let (rc, log) = text.split_once('\n').unwrap_or((text.as_str(), ""));
+                    match rc.trim() {
+                        _ if o["ok"] != true => h = h.timer(&format!("poll-{step}"), 10_000),
+                        "" => h = h.timer(&format!("poll-{step}"), 10_000),
+                        "0" if step == "up" => {
+                            s.mark("up");
+                            s.set("status");
+                            h = h.call(ssh("status", swc(&format!("dev status {INST}"))));
+                        }
+                        "0" => return Ok(finish(&mut s)),
+                        rc if step == "up" => {
+                            return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("dev up exit {rc}: {log}") })));
+                        }
+                        rc => {
+                            s.st["result"] = json!({ "pass": false, "error": format!("dev down exit {rc}: {log}") });
+                            return Ok(finish(&mut s));
+                        }
+                    }
                 }
-                "up" => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("dev up: {text}") }))),
                 "status" => {
                     s.st["readings"]["status"] = json!(text);
                     let pass = o["ok"] == true;
                     let r = json!({ "pass": pass, "error": (!pass).then(|| format!("dev status: {text}")) });
                     return Ok(down(&mut s, h, r));
-                }
-                "down" => {
-                    let mut r = s.st["result"].clone();
-                    if o["ok"] != true && r["pass"] == true {
-                        r = json!({ "pass": false, "error": format!("dev down: {text}") });
-                    }
-                    return Ok(if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) });
                 }
                 _ => {}
             }
@@ -121,6 +143,13 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
         _ => {}
     }
     Ok(s.keep(h))
+}
+
+/// The result kept in the state (dev status's, or the first failure), now that dev down is done.
+fn finish(s: &mut S) -> Handle {
+    s.mark("down");
+    let r = s.st["result"].clone();
+    if r["pass"] == true { s.pass() } else { s.fail(r["error"].as_str().unwrap_or_default().to_string()) }
 }
 
 entries! { run => run_staging }
