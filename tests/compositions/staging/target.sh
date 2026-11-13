@@ -23,7 +23,7 @@ done
 bidders=$(jq -c '[.network.status.apps[] | select(.kind == "MarketBidder") | {name, did}]' <<<"$st" | jq -c '.[]' | while read -r b; do
   n=$(jq -r .name <<<"$b")
   op=$(curl -fsS "$plc/$(jq -r .did <<<"$b")" | jq -r '[.alsoKnownAs[] | select(startswith("https://ident.link/agent-of/"))][0] // "" | ltrimstr("https://ident.link/agent-of/")')
-  jq -c --arg op "$op" --arg kc "$KUBECONFIG" --arg ws "/clusters/root:$n" '. + {operator: $op, kcp: {kubeconfig: $kc, workspace: $ws, via: {kind: "direct"}}}' <<<"$b"
+  jq -c --arg op "$op" --arg kc "$KUBECONFIG" --arg ws "root:$n" '. + {operator: $op, kcp: {kubeconfig: $kc, workspace: $ws, via: {kind: "direct"}}}' <<<"$b"
 done | jq -sc .)
 jq -n --arg plc "$plc" --arg pds "$pds" --arg relay "http://$(host relay.default.relay.svc.kcp.local)" \
   --argjson accounts "$accounts" --argjson bidders "$bidders" --arg s "$S" --arg i "$I" --arg st "$ST" '{

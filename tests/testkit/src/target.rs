@@ -116,7 +116,7 @@ pub struct Bidder {
 #[serde(rename_all = "camelCase")]
 pub struct KcpEndpoint {
     pub kubeconfig: String,
-    /// "/clusters/<workspace>" path to put on the kubeconfig's server URL (when it names the root)
+    /// the kcp workspace (root:<app>), put on the kubeconfig's server URL as /clusters/<workspace>
     #[serde(default)]
     pub workspace: Option<String>,
     #[serde(default)]
