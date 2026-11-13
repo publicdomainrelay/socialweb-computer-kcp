@@ -909,6 +909,10 @@ impl Swc {
             // an owner that is settling a release of its own (0005 B's out-of-band loss) stops its kcp under our ask:
             // ask again once it is gone
             let mut r = self.release(n).await;
+            // a Failed invocation the run released already leaves no invocation.json: nothing is left to release
+            if r.as_ref().is_err_and(|e| e.contains(&format!("no invocation {n} under"))) {
+                r = Ok(json!({ "gone": true }));
+            }
             for _ in 0..3 {
                 if r.is_ok() {
                     break;
