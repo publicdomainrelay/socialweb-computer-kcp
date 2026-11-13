@@ -493,6 +493,7 @@ func (p *pass) suspendStatus() v1alpha1.MarketNetworkStatus {
 
 func (ctl *Controller) ensureApps(ctx context.Context, r compose.Root, o *v1alpha1.MarketNetwork, value v1alpha1.MarketNetworkValue,
 	pdsURL, aliceURL string, placedOnly bool) []v1alpha1.NetworkAppStatus {
+	value = withGatewayServices(value, o.Status.Apps)
 	var bidderDids []string
 	known := map[string]string{}
 	for _, a := range o.Status.Apps {

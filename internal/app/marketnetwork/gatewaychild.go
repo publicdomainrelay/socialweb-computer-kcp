@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/app/compose"
@@ -119,4 +123,21 @@ func GatewayChildOf(ctx context.Context, c *compose.Composer, r compose.Root, id
 		}
 	}
 	return &devinstance.GatewayChild{SpecFile: path, BootstrapCluster: GatewayChildCluster, BootstrapAccountDID: did}, nil
+}
+
+func withGatewayServices(value v1alpha1.MarketNetworkValue, apps []v1alpha1.NetworkAppStatus) v1alpha1.MarketNetworkValue {
+	value.Hosts = slices.Clone(value.Hosts)
+	for _, a := range apps {
+		if a.Kind != v1alpha1.ApplicationKindGateway {
+			continue
+		}
+		for _, l := range a.Listeners {
+			u, err := url.Parse(l.Address)
+			if l.Kind != "http" || err != nil || !strings.HasSuffix(u.Hostname(), ".localhost") || u.Port() == "" || value.HostAddress(u.Hostname()) != "" {
+				continue
+			}
+			value.Hosts = append(value.Hosts, v1alpha1.NetworkHost{Name: u.Hostname(), Address: net.JoinHostPort("127.0.0.1", u.Port())})
+		}
+	}
+	return value
 }

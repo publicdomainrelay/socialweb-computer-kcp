@@ -99,6 +99,20 @@ func (n *MarketNetworkValue) DiscoveryRelayURLs() []string {
 	return out
 }
 
+func (n *MarketNetworkValue) GuestServiceURLs() []string {
+	if n == nil {
+		return nil
+	}
+	var out []string
+	for _, h := range n.Hosts {
+		_, port, err := net.SplitHostPort(h.Address)
+		if strings.HasSuffix(h.Name, ".localhost") && err == nil && port != "" && port != "0" {
+			out = append(out, "http://"+h.Name+":"+port)
+		}
+	}
+	return out
+}
+
 func (n *MarketNetworkValue) GuestTLSURL() string {
 	_, port, err := net.SplitHostPort(n.HostAddress(NetworkDispatcherHost))
 	if err != nil || port == "" || port == "0" {

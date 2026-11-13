@@ -168,6 +168,9 @@ func (b *Bidder) provision(ctx context.Context, req provisionRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	if withBundle, err = guestseed.WithNetwork(withBundle, b.cfg.GuestServices, b.cfg.GuestCABundle); err != nil {
+		return "", err
+	}
 	webrtc, err := b.webrtcPort(name, withBundle)
 	if err != nil {
 		return "", err

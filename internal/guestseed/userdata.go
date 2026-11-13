@@ -25,6 +25,8 @@ const (
 
 	GuestCurlrcPath = "/root/.curlrc"
 
+	NetworkServicesPath = "/etc/socialweb-guest-agent/network-services"
+
 	GuestLoginScript = cloudinit.GuestLoginScriptPath
 
 	GuestLoginUnit = cloudinit.GuestLoginUnit
@@ -356,6 +358,37 @@ func PointAtHostModules(userData, gateway string, tlsPort int) (string, []cloudi
 		return cloudinit.UserDataPatch{WriteFiles: files, RuncmdPrepend: lines}, nil
 	}
 	return rewritten, []cloudinit.UserDataModule{module}, nil
+}
+
+func WithNetwork(userData string, urls []string, caPEM string) (string, error) {
+	caPEM = strings.TrimSpace(caPEM)
+	if len(urls) == 0 && caPEM == "" {
+		return userData, nil
+	}
+	module := func(cloudinit.Context) (cloudinit.UserDataPatch, error) {
+		var patch cloudinit.UserDataPatch
+		if len(urls) > 0 {
+			patch.WriteFiles = []cloudinit.WriteFileEntry{{Path: NetworkServicesPath, Owner: "root:root", Permissions: "0644", Content: strings.Join(urls, "\n") + "\n"}}
+		}
+		for _, raw := range urls {
+			u, err := url.Parse(raw)
+			if err != nil || u.Port() == "" {
+				return cloudinit.UserDataPatch{}, fmt.Errorf("guestseed: network service %q names no port", raw)
+			}
+			unit := "/etc/systemd/system/swc-network-" + u.Port()
+			patch.WriteFiles = append(patch.WriteFiles,
+				cloudinit.WriteFileEntry{Path: unit + ".socket", Owner: "root:root", Permissions: "0644",
+					Content: "[Socket]\nListenStream=127.0.0.1:" + u.Port() + "\n\n[Install]\nWantedBy=sockets.target\n"},
+				cloudinit.WriteFileEntry{Path: unit + ".service", Owner: "root:root", Permissions: "0644",
+					Content: "[Service]\nExecStart=/usr/lib/systemd/systemd-socket-proxyd " + guestnet.HostAddress + ":" + u.Port() + "\n"})
+			patch.RuncmdPrepend = append(patch.RuncmdPrepend, []any{"systemctl", "enable", "--now", "swc-network-" + u.Port() + ".socket"})
+		}
+		if caPEM != "" {
+			patch.CACertsTrusted = []string{caPEM}
+		}
+		return patch, nil
+	}
+	return cloudinit.BuildUserData(cloudinit.BuildOptions{Base: userData, Modules: []any{cloudinit.UserDataModule(module)}})
 }
 
 func InjectAcceptBundle(userData string, bundle map[string]any, acceptPath string) (string, error) {

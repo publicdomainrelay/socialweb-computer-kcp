@@ -141,6 +141,8 @@ func (s *Service) newBidder(ctx context.Context, intents contract.Intents) (*cor
 		InboundXRPC:         s.inboundXRPC(),
 		ScopePolicy:         s.spec.Policy,
 		GuestTLSPort:        portOf(s.spec.Network.GuestTLSURL()),
+		GuestServices:       s.spec.Network.GuestServiceURLs(),
+		GuestCABundle:       networkCABundle(s.spec.Network),
 		GuestLocalAddress:   func() string { return s.inputs.Address(guestLocalExposure) },
 		GuestDownloads:      s.guestDownloads(),
 		GuestVaultServer:    s.guestVaultServer,
@@ -480,4 +482,11 @@ func (s *Service) crawl() participant.Crawl {
 		Period: participant.CrawlPeriod,
 		Log:    s.log,
 	}
+}
+
+func networkCABundle(n *v1alpha1.MarketNetworkValue) string {
+	if n == nil {
+		return ""
+	}
+	return n.CABundle
 }

@@ -101,6 +101,10 @@ type Config struct {
 
 	GuestHostPorts []int
 
+	GuestServices []string
+
+	GuestCABundle string
+
 	GuestLANUDP bool
 
 	GuestHostUDP bool
