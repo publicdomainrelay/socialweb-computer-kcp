@@ -480,7 +480,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
 			Cpus: int64(cmp.Or(contract.Spec.Cpus, DefaultComputeCPUs)), Mem: cmp.Or(strings.TrimSpace(contract.Spec.Mem), DefaultComputeMem), NestedVirt: contract.Spec.NestedVirt,
-			Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
+			Image: payloadImage(contract.Spec.ComputeContractTemplate), Disk: DefaultComputeDisk, UserData: userData, Net: contract.Spec.Net, CreatedAt: q.nowISO(),
 			ExpiresAt: contractExpiresAt(contract.Labels[ContractExpiresAtLabel])})
 		if err != nil {
 			return fmt.Errorf("encode the compute.vm record: %w", err)
@@ -559,9 +559,7 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		r.log().Warn("requester_bidder_discovery_failed", "err", err)
 	}
 	discovery = discovery.Without(r.denied(spec.DenyBidderDids))
-	if spec.NestedVirt {
-		discovery = discovery.NestedVirtOnly()
-	}
+	discovery = discovery.Capable(spec.ComputeContractTemplate)
 	bidders := discovery.Bidders
 	noBidders := ""
 	if len(bidders) == 0 {
@@ -748,7 +746,18 @@ func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpU
 }
 
 func (r *contractRunner) runGuestAndHold(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, bidderDID string) error {
-	if err := r.waitGuest(ctx, state, receiptURI); err != nil {
+	expected := ""
+	if state.GuestImageMarker == "" {
+		marker, err := r.expectedImageMarker(ctx)
+		if err != nil {
+			return r.releaseWrongImage(ctx, state, bidderDID, err)
+		}
+		expected = marker
+	}
+	if err := r.waitGuest(ctx, state, receiptURI, expected); err != nil {
+		if errors.Is(err, errGuestImage) {
+			return r.releaseWrongImage(ctx, state, bidderDID, err)
+		}
 		return err
 	}
 	if r.released() {
@@ -1144,15 +1153,16 @@ func (r *contractRunner) collectBids(ctx context.Context, rfpURI string, workflo
 	defer window.Stop()
 	byURI := map[string]BidRecord{}
 	spec := r.snapshot().Spec
-	deny, nestedVirt := r.denied(spec.DenyBidderDids), spec.NestedVirt
+	deny := r.denied(spec.DenyBidderDids)
 	add := func(bids []BidRecord) {
 		for _, bid := range bids {
 			if bid.URI == "" || slices.Contains(deny, bid.DID) {
 				continue
 			}
-			if nestedVirt {
-				if bidder, ok := q.bidderForDID(ctx, bid.DID); !ok || !bidder.NestedVirt {
-					r.log().Info("requester_bid_without_nested_virt", "bidder", bid.DID, "bid", bid.URI)
+			if spec.NestedVirt || spec.Image != nil {
+				bidder, ok := q.bidderForDID(ctx, bid.DID)
+				if lacks := bidder.Lacks(spec.ComputeContractTemplate); !ok || lacks != "" {
+					r.log().Info("requester_bid_without_capability", "bidder", bid.DID, "bid", bid.URI, "lacks", cmp.Or(lacks, "no offering"))
 					continue
 				}
 			}
@@ -1248,7 +1258,7 @@ func (r *contractRunner) bestBid(ctx context.Context, bids map[string]BidRecord,
 	return best
 }
 
-func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI string) error {
+func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClaimContract, receiptURI, expectedImage string) error {
 	events, pending, closeEvents := r.q.registerEventSink(receiptURI)
 	defer closeEvents()
 	addressDeadline := time.NewTimer(DefaultVMReadyTimeout)
@@ -1256,6 +1266,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	hostKeysDeadline := time.NewTimer(DefaultHostKeysTimeout)
 	defer hostKeysDeadline.Stop()
 	addressLate, hostKeysLate := false, false
+	var imageErr error
 	seen := map[string]bool{}
 	seedGuestEventSeen(seen, state)
 	handle := func(event MarketEvent) bool {
@@ -1321,6 +1332,13 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		case market.ComputeEventsGuestRequesterDIDNSID:
 			r.onGuestRequester(ctx, state, parsed)
 			return false
+		case market.ComputeEventsGuestImageNSID:
+			if state.GuestImageMarker != "" {
+				return false
+			}
+			if imageErr = r.guestImage(state, parsed, expectedImage); imageErr != nil {
+				return true
+			}
 		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the guest reported "+payloadKind(parsed.Kind), state, r.currentBids(), r.currentChosen(), "awaitingGuestOnNetwork", 1)
 		if parsed.Kind == market.ComputeEventsGuestSecretsRequestedNSID {
@@ -1328,17 +1346,19 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		}
 		return false
 	}
+	imageSeen := expectedImage == "" || state.GuestImageMarker != ""
 	if r.released() || slices.ContainsFunc(pending, handle) {
-		return nil
+		return imageErr
 	}
 	var retry eventRetry
 	defer retry.stop()
 	retryC := retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
 	for {
+		imageSeen = imageSeen || state.GuestImageMarker != ""
 		if state.Termination != nil {
 			return nil
 		}
-		if state.VMAddress != "" && state.HostKeys != nil {
+		if state.VMAddress != "" && state.HostKeys != nil && imageSeen {
 			return nil
 		}
 		if sandboxAddress(state.VMAddress) && state.Sandbox != nil {
@@ -1350,6 +1370,9 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 		if state.VMAddress == "" && addressLate {
 			state.Outcome = v1alpha1.ContractOutcomeNetworkTimeout
 			return fmt.Errorf("the guest did not come on network within %s", DefaultVMReadyTimeout)
+		}
+		if !imageSeen && addressLate {
+			return fmt.Errorf("%w: no guest.image event within %s", errGuestImage, DefaultVMReadyTimeout)
 		}
 		if state.VMAddress != "" && state.HostKeys == nil && !sandboxAddress(state.VMAddress) && hostKeysLate {
 			return fmt.Errorf("the guest reported no ssh host keys within %s", DefaultHostKeysTimeout)
@@ -1368,7 +1391,7 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			hostKeysLate = true
 		case event := <-events:
 			if handle(event) {
-				return nil
+				return imageErr
 			}
 		case <-retryC:
 			retryC = retry.after(r.q.drainEvents(ctx, r.name, receiptURI))

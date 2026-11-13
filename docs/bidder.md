@@ -35,6 +35,11 @@ sudo scripts/host-nested-kvm.sh --apply
 - `check-host -role bidder` runs at the end of an install and before a foreground start
 - VM size: the offering advertises `maxCpus` / `maxMem` (the host's CPUs and memory); an RFP asking for more is refused
 - `nestedVirt`: the offering sets it when the VMM is QEMU and nested virtualization (above) is on; an RFP asking for it is refused otherwise
+- `images`: the offering sets it on a VM bidder with a guest image store (off with Bidder `spec.requesterImages: false`). An RFP
+  whose compute.vm names `image {url, sha256}` gets a bid only when that `image.json` fetches (https, public addresses), hashes
+  to the sha256 and fits this bidder's target and the RFP disk; the FirecrackerVM then fetches the kernel and rootfs into the
+  image store (content-addressed, so a second rent reuses them) and boots them with the image's bootArgs. A refused image
+  fails the VM before boot, lostReason ImageRefused, which the requester sees as vm.terminated `image_refused`
 
 ## Identity
 

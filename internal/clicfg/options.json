@@ -673,6 +673,10 @@
       "type": "boolean",
       "description": "run request: the rented VM runs VMs of its own (spec.nestedVirt, the RFP's compute.vm nestedVirt); only a bidder whose offering sets nestedVirt is asked or accepted"
     },
+    "image": {
+      "type": "string",
+      "description": "run request: <https base url>@<image.json sha256>, a full VM image the bidder boots instead of its own (spec.image, the RFP's compute.vm image): image.json in the guestimage manifest shape (kernel vmlinux, rootfs rootfs.ext4, bootArgs, target, hypervisor, arch, vcpu, memMiB, marker) next to the files it names; only a bidder whose offering sets images is asked or accepted; kernel plus rootfs fit the disk (50G); after the receipt the requester fetches image.json and releases the contract (Failed) when the guest's guest.image marker differs or does not arrive within the on-network deadline"
+    },
     "guest-tools": {
       "type": "string",
       "description": "run request: guest tools the bidder installs on the guest (spec.guestTools, a comma list): socialweb-computer is the bidder's own running binary (linux/amd64 bidders only; a bidder on any other platform refuses the contract at provisioning), which setup-guest-binaries.service fetches from the bidder's GuestControlPlane at /v1/downloads/<sha256>/socialweb-computer-x86_64, checks against the sha256 the bidder pinned in user_data and installs as /usr/local/bin/socialweb-computer"
