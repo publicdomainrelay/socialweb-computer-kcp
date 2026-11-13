@@ -2,6 +2,8 @@
 // records_gone {uris}: each read 3 times, {left, errors} (RecordNotFound is gone).
 // tombstoned {dids}: PLC log/last and the document (identlink.plc), {alive}.
 // agent_chain {renter, r2, agent, identity}: the ident.link pair + grant chain of an agent VM (0004), {ok, problems, walk}.
+// Each asks again every 10 s until it holds or `within` seconds (default 180) pass: the writers (a PDS, PLC, R2's
+// requester) land seconds after the event that told the test to look. `seconds` is how long it took.
 use abi::{Call, Event, Handle, Run, entries};
 use serde_json::{Value, json};
 
@@ -21,6 +23,34 @@ fn get(id: String, uri: &str) -> Option<Call> {
     )
 }
 
+const AGAIN_MS: u64 = 10_000;
+
+/// Not yet: ask again in 10 s (state reset to `fresh`, `t0` kept), or None when `within` has passed.
+fn again((now, within): (f64, f64), st: &Value, fresh: Value) -> Option<Handle> {
+    let t0 = st["t0"].as_f64().unwrap_or(now);
+    if now - t0 >= within {
+        return None;
+    }
+    let mut f = fresh;
+    f["t0"] = json!(t0);
+    Some(Handle::new().timer("again", AGAIN_MS).state(f))
+}
+
+/// Seconds since the first ask.
+fn took((now, _): (f64, f64), st: &Value) -> f64 {
+    now - st["t0"].as_f64().unwrap_or(now)
+}
+
+/// (now, within) of a run, and its state with `t0` set on the first ask.
+fn clock(run: &Run<Value>, fresh: &Value) -> ((f64, f64), Value) {
+    let now = steps::secs(run.args["now"].as_str().unwrap_or_default());
+    let mut st = if run.state.is_null() { fresh.clone() } else { run.state.clone() };
+    if st["t0"].is_null() {
+        st["t0"] = json!(now);
+    }
+    ((now, run.args["within"].as_f64().unwrap_or(180.0)), st)
+}
+
 fn gone(e: &str) -> bool {
     e.contains("RecordNotFound") || e.contains("Could not locate record")
 }
@@ -28,13 +58,10 @@ fn gone(e: &str) -> bool {
 fn records_gone_handler(run: Run<Value>) -> Result<Handle, String> {
     let uris: Vec<String> = serde_json::from_value(run.args["uris"].clone())
         .map_err(|_| "uris is a list of at:// URIs")?;
-    let mut st = if run.state.is_null() {
-        json!({ "pending": 0, "left": [], "errors": [] })
-    } else {
-        run.state
-    };
+    let fresh = json!({ "pending": 0, "left": [], "errors": [] });
+    let (c, mut st) = clock(&run, &fresh);
     Ok(match run.event {
-        Event::Start => {
+        Event::Start | Event::Timer { .. } => {
             let mut h = Handle::new();
             for (i, u) in uris.iter().enumerate() {
                 for r in 0..3 {
@@ -71,8 +98,13 @@ fn records_gone_handler(run: Run<Value>) -> Result<Handle, String> {
             }
             st["pending"] = json!(st["pending"].as_u64().unwrap_or(1) - 1);
             if st["pending"] == 0 {
+                let clean = st["left"].as_array().is_some_and(|l| l.is_empty())
+                    && st["errors"].as_array().is_some_and(|e| e.is_empty());
+                if !clean && let Some(h) = again(c, &st, fresh) {
+                    return Ok(h);
+                }
                 Handle::new()
-                    .result(json!({ "left": st["left"], "errors": st["errors"] }))
+                    .result(json!({ "left": st["left"], "errors": st["errors"], "seconds": took(c, &st) }))
                     .done()
             } else {
                 Handle::new().state(st)
@@ -85,13 +117,10 @@ fn records_gone_handler(run: Run<Value>) -> Result<Handle, String> {
 fn tombstoned_handler(run: Run<Value>) -> Result<Handle, String> {
     let dids: Vec<String> =
         serde_json::from_value(run.args["dids"].clone()).map_err(|_| "dids is a list of DIDs")?;
-    let mut st = if run.state.is_null() {
-        json!({ "pending": dids.len(), "alive": [] })
-    } else {
-        run.state
-    };
+    let fresh = json!({ "pending": dids.len(), "alive": [] });
+    let (c, mut st) = clock(&run, &fresh);
     Ok(match run.event {
-        Event::Start => dids
+        Event::Start | Event::Timer { .. } => dids
             .iter()
             .enumerate()
             .fold(Handle::new(), |h, (i, d)| {
@@ -108,7 +137,10 @@ fn tombstoned_handler(run: Run<Value>) -> Result<Handle, String> {
             }
             st["pending"] = json!(st["pending"].as_u64().unwrap_or(1) - 1);
             if st["pending"] == 0 {
-                Handle::new().result(json!({ "alive": st["alive"] })).done()
+                if st["alive"].as_array().is_some_and(|a| !a.is_empty()) && let Some(h) = again(c, &st, fresh) {
+                    return Ok(h);
+                }
+                Handle::new().result(json!({ "alive": st["alive"], "seconds": took(c, &st) })).done()
             } else {
                 Handle::new().state(st)
             }
@@ -125,11 +157,8 @@ fn agent_chain_handler(run: Run<Value>) -> Result<Handle, String> {
         a["agent"].as_str().ok_or("agent")?,
         a["identity"].as_str().ok_or("identity")?,
     );
-    let mut st = if run.state.is_null() {
-        json!({ "got": {} })
-    } else {
-        run.state
-    };
+    let fresh = json!({ "got": {} });
+    let (c, mut st) = clock(&run, &fresh);
     let reads = [
         ("grant", format!("at://{renter}/{ASSOC}/{r2}")),
         ("endorse", format!("at://{renter}/{ENDORSE}/{r2}")),
@@ -141,7 +170,7 @@ fn agent_chain_handler(run: Run<Value>) -> Result<Handle, String> {
         ),
     ];
     Ok(match run.event {
-        Event::Start => {
+        Event::Start | Event::Timer { .. } => {
             let mut h = Handle::new();
             for (id, uri) in &reads {
                 h = h.call(get(id.to_string(), uri).ok_or("bad URI")?);
@@ -228,8 +257,11 @@ fn agent_chain_handler(run: Run<Value>) -> Result<Handle, String> {
                     .is_some_and(|a| a.iter().any(|x| x["did"] == r2 && x["depth"] == 1)),
                 format!("walk ancestors {}", w["ancestors"]),
             );
+            if !problems.is_empty() && let Some(h) = again(c, &st, fresh) {
+                return Ok(h);
+            }
             Handle::new()
-                .result(json!({ "ok": problems.is_empty(), "problems": problems, "walk": w }))
+                .result(json!({ "ok": problems.is_empty(), "problems": problems, "walk": w, "seconds": took(c, &st) }))
                 .done()
         }
         _ => Handle::new().state(st),

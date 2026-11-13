@@ -16,21 +16,39 @@ fn run_0008(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold", "--exec", "id"] }))).timer("deadline", 30 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold"] }))).timer("deadline", 30 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 30 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "contract" => {
+            let w = json!(s.st["receipt"].as_str().unwrap_or_default().trim_start_matches("at://").split('/').next().unwrap_or_default());
+            s.st["winner"] = w.clone();
+            match bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) {
+                Some(c) => {
+                    s.st["cluster"] = json!(c);
+                    h = h.call(vms("running", c));
+                }
+                None => {
+                    s.reading("host", "not read: no kcp for the winner");
+                    s.mark("release");
+                    h = h.call(host("release", "request.release", json!({ "name": name })));
+                }
+            }
+        }
         Event::Timer { id } if id == "poll" => {
             h = h.call(get_record("term", &format!("at://{}/{VM_TERMINATED}/{}", s.st["winner"].as_str().unwrap_or_default(), termination_rkey(s.st["receipt"].as_str().unwrap_or_default()))));
         }
         Event::Message { id, data, .. } if id == "req" => {
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("held"),
-                "exited" => s.flag("exited"),
                 _ => {}
             }
-            if s.is("held") && s.has("held") && s.has("exited") {
+            // the --hold process stays (it settles the end): the receipt comes from its log, the winner is its author
+            if s.st["receipt"].is_null() && data["receipt"].is_string() {
+                s.st["receipt"] = data["receipt"].clone();
+            }
+            if s.is("held") && s.has("held") && s.st["receipt"].is_string() {
                 s.set("summary");
-                h = h.call(host("summary", "request.summary", json!({ "name": name })));
+                h = h.timer("contract", 1);
             }
         }
         Event::Result { id, result, .. } => {
@@ -46,22 +64,6 @@ fn run_0008(run: Run<Value>) -> Result<Handle, String> {
                 Err(f) => return Ok(f),
             };
             match id.as_str() {
-                "summary" => {
-                    let w = o["contract"]["winnerDid"].clone();
-                    s.st["winner"] = w.clone();
-                    s.st["receipt"] = o["contract"]["receiptUri"].clone();
-                    match bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) {
-                        Some(c) => {
-                            s.st["cluster"] = json!(c);
-                            h = h.call(vms("running", c));
-                        }
-                        None => {
-                            s.reading("host", "not read: no kcp for the winner");
-                            s.mark("release");
-                            h = h.call(host("release", "request.release", json!({ "name": name })));
-                        }
-                    }
-                }
                 "running" => {
                     let mine: Vec<Value> = o["items"].as_array().into_iter().flatten().filter(|v| v["spec"]["contract"]["receipt"]["uri"] == s.st["receipt"]).map(|v| json!({ "name": v["metadata"]["name"], "phase": v["status"]["phase"] })).collect();
                     if !mine.iter().any(|v| v["phase"] == "Running") {

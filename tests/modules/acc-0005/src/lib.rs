@@ -28,6 +28,18 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
+        // the chain reads, again every 10 s for up to 3 min (R2 writes its side seconds after it reports)
+        Event::Timer { id } if id == "chain" => {
+            let r2 = s.st["r2"].as_str().unwrap_or_default().to_string();
+            s.st["got"] = json!({});
+            s.st["fan"] = json!(5);
+            h = h
+                .call(get_record("grant", &format!("at://{renter}/{ASSOC}/{r2}")))
+                .call(get_record("endorse", &format!("at://{renter}/{ENDORSE}/{r2}")))
+                .call(get_record("areq", &format!("at://{r2}/com.publicdomainrelay.temp.market.associationRequest/{renter}")))
+                .call(plc("plc", &r2))
+                .call(walk("walk", &r2));
+        }
         Event::Timer { id } if id == "poll" => {
             h = h.call(host("held2", "request.ssh", json!({ "name": name, "exec": "journalctl -u socialweb-r2.service -o cat --no-pager | grep -c '\"phase\":\"Held\"' || true" })));
         }
@@ -55,7 +67,9 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
             }
         }
         Event::Result { id, result, .. } => {
-            let o = match out(&s, id, result.output()) {
+            let r = result.output();
+            let o = match out(&s, id, r.clone()) {
+                Err(_) if ["grant", "endorse", "areq", "plc", "walk"].contains(&id.as_str()) => json!({ "error": r.unwrap_err() }),
                 Ok(o) => o,
                 Err(f) => return Ok(f),
             };
@@ -75,13 +89,8 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
                         let t = s.t();
                         s.reading("r2_held_s", t);
                         s.set("chain");
-                        h = h
-                            .call(get_record("grant", &format!("at://{renter}/{ASSOC}/{r2}")))
-                            .call(get_record("endorse", &format!("at://{renter}/{ENDORSE}/{r2}")))
-                            .call(get_record("areq", &format!("at://{r2}/com.publicdomainrelay.temp.market.associationRequest/{renter}")))
-                            .call(plc("plc", &r2))
-                            .call(walk("walk", &r2));
-                        s.st["fan"] = json!(5);
+                        s.mark("chain");
+                        h = h.timer("chain", 1);
                     } else if s.since("r2") > 600.0 {
                         return Ok(s.fail("R2 not Held in 10 min"));
                     } else {
@@ -111,8 +120,12 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
                             p.push(format!("walk {}", g["walk"]));
                         }
                         if !p.is_empty() {
-                            return Ok(s.fail(p.join("; ")));
+                            if s.since("chain") < 180.0 {
+                                return Ok(s.keep(h.timer("chain", 10_000)));
+                            }
+                            return Ok(s.fail(format!("after 3 min: {}", p.join("; "))));
                         }
+                        s.reading("chain_s", s.since("chain"));
                         s.set("released");
                         h = h.call(host("release", "request.release", json!({ "name": name })));
                     }
@@ -166,11 +179,35 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "contract" => {
+            let w = json!(s.st["receipt"].as_str().unwrap_or_default().trim_start_matches("at://").split('/').next().unwrap_or_default());
+            match bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) {
+                Some(c) => {
+                    s.st["cluster"] = json!(c);
+                    s.set("lost");
+                    s.reading("out_of_band", true);
+                    h = h.call(kube("vms", "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" })));
+                }
+                None => {
+                    s.reading("out_of_band", "skipped: no kcp for the winner");
+                    s.set("lost");
+                    h = h.call(host("release", "request.release", json!({ "name": name })));
+                }
+            }
+        }
+        Event::Timer { id } if id == "m-again" => {
+            let r2 = s.st["r2"].as_str().unwrap_or_default().to_string();
+            s.st["got"] = json!({});
+            h = h.call(plc("plc-r2", &r2));
+        }
         Event::Timer { id } if id == "poll" => {
             let r2 = s.st["r2"].as_str().unwrap_or_default().to_string();
             h = h.call(Call::new("list", "com.atproto.repo.listRecords").params(json!({ "repo": r2, "collection": ENDORSE })).service(r2.clone()));
         }
         Event::Message { id, data, .. } if id == "req" => {
+            if s.st["receipt"].is_null() && data["receipt"].is_string() {
+                s.st["receipt"] = data["receipt"].clone();
+            }
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("held"),
                 "exited" => s.flag("exited"),
@@ -197,7 +234,9 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
             }
         }
         Event::Result { id, result, .. } => {
-            let o = match out(&s, &id, result.output()) {
+            let r = result.output();
+            let o = match out(&s, &id, r.clone()) {
+                Err(_) if ["peer", "g2", "plc-m", "walk"].contains(&id.as_str()) => json!({ "error": r.unwrap_err() }),
                 Ok(o) => o,
                 Err(f) => return Ok(f),
             };
@@ -221,6 +260,10 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                     None => h = h.timer("poll", 10_000),
                 },
                 "plc-r2" => {
+                    if s.st["t_m"].is_null() {
+                        s.mark("m");
+                        s.st["t_m"] = json!(true);
+                    }
                     let r2h = o["alsoKnownAs"].as_array().into_iter().flatten().find_map(|a| a.as_str()?.strip_prefix("at://").map(String::from)).unwrap_or_default();
                     let m = s.st["mesh1"].as_str().unwrap_or_default().to_string();
                     s.st["fan"] = json!(4);
@@ -247,27 +290,14 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                             p.push(format!("walk {}", g["walk"]));
                         }
                         if !p.is_empty() {
-                            return Ok(s.fail(p.join("; ")));
+                            if s.since("m") < 180.0 {
+                                return Ok(s.keep(h.timer("m-again", 10_000)));
+                            }
+                            return Ok(s.fail(format!("after 3 min: {}", p.join("; "))));
                         }
-                        h = h.call(host("summary", "request.summary", json!({ "name": name })));
-                    }
-                }
-                "summary" => {
-                    let w = o["contract"]["winnerDid"].clone();
-                    let receipt = o["contract"]["receiptUri"].clone();
-                    s.st["receipt"] = receipt.clone();
-                    match bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) {
-                        Some(c) => {
-                            s.st["cluster"] = json!(c);
-                            s.set("lost");
-                            s.reading("out_of_band", true);
-                            h = h.call(kube("vms", "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" })));
-                        }
-                        None => {
-                            s.reading("out_of_band", "skipped: no kcp for the winner");
-                            s.set("lost");
-                            h = h.call(host("release", "request.release", json!({ "name": name })));
-                        }
+                        s.reading("mesh1_chain_s", s.since("m"));
+                        // the --hold process stays: the receipt is from its log, the winner its author
+                        h = h.timer("contract", 1);
                     }
                 }
                 "vms" => {

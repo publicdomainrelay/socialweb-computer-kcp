@@ -16,9 +16,19 @@ fn run_0007(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold", "--exec", "id"] }))).timer("deadline", 30 * MIN);
+            h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": ["--hold"] }))).timer("deadline", 30 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 30 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "contract" => {
+            let w = json!(s.st["receipt"].as_str().unwrap_or_default().trim_start_matches("at://").split('/').next().unwrap_or_default());
+            s.st["winner"] = w.clone();
+            let Some(c) = bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) else {
+                return Ok(s.skip(&format!("the target names no kcp for the winner {w}")));
+            };
+            s.st["cluster"] = json!(c);
+            s.set("find");
+            h = h.call(kube("vms", "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" })));
+        }
         Event::Timer { id } if id == "poll" => {
             h = match s.phase().as_str() {
                 "gone" | "empty" => h.call(vms("q")),
@@ -29,13 +39,16 @@ fn run_0007(run: Run<Value>) -> Result<Handle, String> {
         Event::Message { id, data, .. } if id == "req" => {
             match data["msg"].as_str().unwrap_or_default() {
                 "contract" if data["phase"] == "Held" => s.flag("held"),
-                "exited" => s.flag("exited"),
                 "requester_contract_records_deleted" => s.flag("recordsDeleted"),
                 _ => {}
             }
-            if s.is("held") && s.has("held") && s.has("exited") {
+            // the --hold process stays (it settles the end): the receipt comes from its log, the winner is its author
+            if s.st["receipt"].is_null() && data["receipt"].is_string() {
+                s.st["receipt"] = data["receipt"].clone();
+            }
+            if s.is("held") && s.has("held") && s.st["receipt"].is_string() {
                 s.set("summary");
-                h = h.call(host("summary", "request.summary", json!({ "name": name })));
+                h = h.timer("contract", 1);
             }
             if s.is("records") && s.has("recordsDeleted") {
                 s.set("check");
@@ -55,17 +68,6 @@ fn run_0007(run: Run<Value>) -> Result<Handle, String> {
                 Err(f) => return Ok(f),
             };
             match id.as_str() {
-                "summary" => {
-                    let w = o["contract"]["winnerDid"].clone();
-                    s.st["winner"] = w.clone();
-                    s.st["receipt"] = o["contract"]["receiptUri"].clone();
-                    let Some(c) = bidders.iter().find(|b| b["did"] == w).and_then(|b| b["cluster"].as_str()) else {
-                        return Ok(s.skip(&format!("the target names no kcp for the winner {w}")));
-                    };
-                    s.st["cluster"] = json!(c);
-                    s.set("find");
-                    h = h.call(kube("vms", "list", c, json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM" })));
-                }
                 "vms" => {
                     let mine: Vec<String> = o["items"].as_array().into_iter().flatten().filter(|v| v["spec"]["contract"]["receipt"]["uri"] == s.st["receipt"]).filter_map(|v| v["metadata"]["name"].as_str().map(String::from)).collect();
                     if mine.len() != 1 {

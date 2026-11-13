@@ -10,10 +10,6 @@ use steps::{ASSOC, ENDORSE, MIN, S, host, kube, out, ready_pods, sw};
 
 const CC: [&str; 3] = ["vm1", "sbx1", "agent1"];
 
-fn chan(handle: &str) -> String {
-    format!("#{}", handle.replace(['.', '-'], "_"))
-}
-
 fn mixed_prod(text: &str, key: &str) -> String {
     text.lines().filter(|l| !l.contains("bidderDids:") && !l.contains("REPLACE-BIDDER-DID")).collect::<Vec<_>>().join("\n").replace("ssh-ed25519 AAAAREPLACE-WITH-YOUR-PUBLIC-KEY you@laptop", key.trim())
 }
@@ -22,7 +18,6 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
     let did = args["did"].as_str().ok_or("did")?.to_string();
-    let handle = args["handle"].as_str().ok_or("handle")?.to_string();
     let rq = "requester:mp";
     let cc = |c: &str| format!("einfra-mixedprod-{c}");
     let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
@@ -188,11 +183,6 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 "as" => {
                     let y = o["text"].as_str().unwrap_or_default().replace("quickstart-agent-agent1-start", "mixedprod-agent1-start").replace("einfra-quickstart-agent-agent1", "einfra-mixedprod-agent1");
                     h = h.call(kube("agentstart", "apply", rq, json!({ "yaml": y })));
-                }
-                "envfile" => {
-                    let node = json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": "AtircNode", "metadata": { "name": "st-owner" },
-                        "spec": { "handle": handle, "nick": "st-owner", "channels": [chan(&handle)], "peers": [s.st["peer"]], "ircPort": 0, "passwordEnvFile": o["path"] } });
-                    h = h.call(kube("node", "apply", rq, json!({ "object": node })));
                 }
                 "node" => {
                     s.set("online");

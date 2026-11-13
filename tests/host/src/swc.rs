@@ -338,9 +338,12 @@ impl Swc {
         self.requests.lock().unwrap().insert(name.clone(), state);
         let (tx, messages) = mpsc::unbounded_channel();
         let (commands, mut cmds) = mpsc::unbounded_channel::<SubCmd>();
+        let receipts = self.receipts.clone();
         tokio::spawn(async move {
             let mut offsets = vec![0usize; logs.len()];
             let mut exited = false;
+            // the run's dev core.log is copied to logs/core.log when the process ends: each line once
+            let mut seen = std::collections::HashSet::new();
             loop {
                 for (i, p) in logs.iter().enumerate() {
                     let Ok(text) = std::fs::read_to_string(p) else {
@@ -357,6 +360,16 @@ impl Swc {
                         let Ok(v) = serde_json::from_str::<Value>(line) else {
                             continue;
                         };
+                        if !seen.insert(line.to_string()) {
+                            continue;
+                        }
+                        // the receipt is known (and the run's VM ours to fault) from its first event, before any summary
+                        if let Some(r) = v["receipt"].as_str() {
+                            let mut rs = receipts.lock().unwrap();
+                            if !rs.iter().any(|x| x == r) {
+                                rs.push(r.into());
+                            }
+                        }
                         let msg = v["msg"].as_str().unwrap_or_default();
                         if (msg == "contract"
                             || msg == "ssh returned"

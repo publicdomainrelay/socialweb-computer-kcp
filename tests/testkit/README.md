@@ -130,7 +130,7 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/000
 | `com.fedfork.exec.ssh.{exec,session}` | atlibs-ssh (knotless) | the system ssh to destinations the host names (`-F /dev/null`, `SetEnv`) |
 | `computer.socialweb.test.{requester,request,account,atirc}.*` | `tests/host` (`swc-test-host`) | the requester under test as the account: `run requester` (its kcp becomes cluster `requester:<name>`), `run request` (its log events a subscription), the owner's mesh node; released and stopped after the run |
 | `com.fedfork.exec.identlink.{walk,plc}` | `tests/host` (to move into atlibs-host) | identlink's verified walk, PLC log/last and documents of the target's PLC |
-| `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain |
+| `assert` | `tests/modules/assert` | records gone (x3), tombstones, an agent VM's chain; each asks again every 10 s for up to `within` s (180) |
 | `acc-0004` | `tests/modules/acc-0004`, `tests/compositions/0004` | the runbook as a state machine |
 
 ### Freeze, inspect, replay

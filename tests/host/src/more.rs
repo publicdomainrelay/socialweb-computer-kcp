@@ -74,6 +74,8 @@ pub fn tail_sub(
     let (commands, mut cmds) = mpsc::unbounded_channel::<SubCmd>();
     tokio::spawn(async move {
         let mut offsets: HashMap<PathBuf, usize> = HashMap::new();
+        // the same line can land in two files (the run's dev core.log is copied to logs/core.log when it ends)
+        let mut seen = std::collections::HashSet::new();
         loop {
             for p in logs() {
                 let Ok(text) = std::fs::read_to_string(&p) else {
@@ -91,6 +93,9 @@ pub fn tail_sub(
                     let Ok(v) = serde_json::from_str::<Value>(line) else {
                         continue;
                     };
+                    if !seen.insert(line.to_string()) {
+                        continue;
+                    }
                     if keep(v["msg"].as_str().unwrap_or_default()) && tx.send(Ok(v)).is_err() {
                         return;
                     }

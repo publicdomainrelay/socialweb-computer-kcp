@@ -70,8 +70,16 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                 _ => h,
             };
         }
+        // the bidder pins vm.terminated seconds after its VM is gone: read it again every 3 s for up to 2 min
+        Event::Timer { id } if id.starts_with("term-") => {
+            let uri = s.st["term"][&id[5..]].as_str().unwrap_or_default().to_string();
+            h = h.call(get_record(&id, &uri));
+        }
         Event::Result { id, result, .. } => {
             let r = result.output().map(Value::clone);
+            if id.starts_with("term-") && r.is_err() && s.since("term") < 120.0 {
+                return Ok(s.keep(h.timer(&id, 3_000)));
+            }
             // refusals the run waits for: an error is the answer
             if id == "q-ne" || id == "q-pg" || id == "final" {
                 let refused = r.is_err();
@@ -204,8 +212,10 @@ fn run_0001(run: Run<Value>) -> Result<Handle, String> {
                         if !gone.is_empty() {
                             s.st["fan"] = json!(gone.len());
                             s.set("terminated");
+                            s.mark("term");
                             for (k, g) in gone.iter().enumerate() {
                                 let uri = format!("at://{}/{VM_TERMINATED}/{}", g[0].as_str().unwrap_or_default(), termination_rkey(g[1].as_str().unwrap_or_default()));
+                                s.st["term"][k.to_string()] = json!(uri);
                                 h = h.call(get_record(&format!("term-{k}"), &uri));
                             }
                             return Ok(s.keep(h));

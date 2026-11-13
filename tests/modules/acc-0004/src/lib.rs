@@ -43,10 +43,6 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
         .as_str()
         .ok_or("did is required")?
         .to_string();
-    let handle = run.args["handle"]
-        .as_str()
-        .ok_or("handle is required")?
-        .to_string();
     let mut st = if run.state.is_null() {
         json!({ "phase": "start", "t0": now, "readings": {}, "f": {} })
     } else {
@@ -61,9 +57,6 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
             h = h
                 .call(call("owner", "requester.start", json!({ "name": "owner" })))
                 .timer("deadline", 45 * MIN);
-        }
-        Event::Timer { id } if id == "chain-again" => {
-            h = h.call(call("chain", "assert.agentChain", json!({ "renter": renter, "r2": st["r2"], "agent": st["agent"], "identity": st["identity"] })));
         }
         Event::Timer { id } if id == "deadline" => {
             return Ok(fail(&st, format!("not done in 45 min (phase {phase})")));
@@ -100,32 +93,14 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     h = h.call(call("agent", "request.agent", json!({ "name": name })));
                 }
                 "agent" => {}
-                // R2 writes its side (the agent's grant, endorsement, peer record) seconds after it reports: ask again
-                // for up to 3 min before it counts
+                // the assert module asks again for up to 3 min (R2 writes its side seconds after it reports)
                 "chain" => {
                     if out["ok"] != true {
-                        if now - st["t_chain"].as_f64().unwrap_or(now) < 180.0 {
-                            if st["t_chain"].is_null() {
-                                st["t_chain"] = json!(now);
-                            }
-                            return Ok(h.timer("chain-again", 10_000).state(st));
-                        }
                         return Ok(fail(&st, format!("chain (after 3 min): {}", out["problems"])));
                     }
-                    st["readings"]["chain_after_association_s"] = json!(now - st["t_chain"].as_f64().unwrap_or(now));
+                    st["readings"]["chain_after_association_s"] = out["seconds"].clone();
                     // the owner's mesh node: `atirc mesh run --peer <identity>@<agent DID>` as the renter (the hand run's)
                     h = h.call(call("node", "atirc.meshRun", json!({ "name": "st-owner", "peer": st["peer"] })));
-                }
-                "envfile" => {
-                    let node = json!({
-                        "apiVersion": "socialweb.computer/v1alpha1", "kind": "AtircNode", "metadata": { "name": "st-owner" },
-                        "spec": { "handle": handle, "nick": "st-owner", "channels": [format!("#{}", handle.replace(['.', '-'], "_"))],
-                                  "peers": [st["peer"]], "ircPort": 0, "passwordEnvFile": out["path"] }
-                    });
-                    h = h.call(
-                        Call::new("node", "com.fedfork.exec.kube.apply")
-                            .input(json!({ "cluster": "requester:owner", "object": node })),
-                    );
                 }
                 "node" => {
                     set(&mut st, "online");
