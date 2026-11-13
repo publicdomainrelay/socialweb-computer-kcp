@@ -1169,11 +1169,32 @@ func (r *requestRun) carryOn(ctx context.Context) int {
 	hasContract := c.Status.Contract != nil && c.Status.Contract.Receipt != nil
 	if c.Status.Phase == v1alpha1.ComputeContractHeld && !r.skipSSH {
 		ec, err := r.ssh(ctx, c)
+		for attempt := 1; r.hold && err == nil && ec == 255 && attempt <= holdSSHReconnects; attempt++ {
+			current, cerr := r.kcp.AwaitContract(ctx, requestSummaryRead, func(*v1alpha1.ComputeContract) bool { return true })
+			if cerr != nil || current == nil || current.Status.Phase != v1alpha1.ComputeContractHeld || current.Spec.Release {
+				break
+			}
+			r.a.log.Warn("the ssh session dropped (exit 255) and the contract is still Held; reconnecting", "attempt", attempt)
+			if sleepErr := sleepFor(ctx, time.Duration(attempt)*2*time.Second); sleepErr != nil {
+				break
+			}
+			c = current
+			ec, err = r.ssh(ctx, c)
+		}
 		if err != nil {
 			r.a.log.Error("ssh", "err", err.Error())
 			code = exitFailed
 		} else if ec != 0 {
 			code = exitFailed
+		}
+	}
+	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld && !r.inv.GuestRequester && renterDuties(c) {
+		r.log("the contract has a guest association to finish and settle: this process keeps its kcp up while the contract is Held")
+		if fc, err := r.kcp.WaitContract(ctx, requester.ContractAssociationLifetime, func(c *v1alpha1.ComputeContract) bool {
+			return c.Status.Phase != v1alpha1.ComputeContractHeld || c.Spec.Release
+		}, r.progress); err == nil && fc != nil {
+			c = fc
+			code = exitOK
 		}
 	}
 	if r.hold && c.Status.Phase == v1alpha1.ComputeContractHeld && r.inv.GuestRequester {
@@ -1793,4 +1814,22 @@ func dropTime(groups []string, attr slog.Attr) slog.Attr {
 		return slog.Attr{}
 	}
 	return attr
+}
+
+const holdSSHReconnects = 5
+
+func renterDuties(c *v1alpha1.ComputeContract) bool {
+	a := c.Spec.Association
+	return a != nil && a.FromGuest && strings.TrimSpace(a.Subject) == ""
+}
+
+func sleepFor(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
