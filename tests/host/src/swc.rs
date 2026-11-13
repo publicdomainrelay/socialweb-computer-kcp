@@ -561,6 +561,15 @@ impl Swc {
     async fn release(&self, name: &str) -> Result<Value, String> {
         let t = Instant::now();
         let (ok, out) = self.cli(&self.sub_args("release", name, &[])).await?;
+        // what each release did and how long, in the dump (an artifact: where a slow release waited)
+        let d = self.dump.join("logs").join(name);
+        if std::fs::create_dir_all(&d).is_ok() {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(d.join("release.log")) {
+                let _ = writeln!(f, "== run request release {name}: ok {ok} in {:.0} s", t.elapsed().as_secs_f64());
+                let _ = f.write_all(redact_log(&out).as_bytes());
+            }
+        }
         if !ok {
             return Err(format!("run request release {name}: {}", tail(&out)));
         }

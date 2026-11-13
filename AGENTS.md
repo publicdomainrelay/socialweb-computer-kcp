@@ -662,12 +662,14 @@ the module wasm of HEAD's `tests/` tree on hat-8 and publishes them to the bucke
 (its log says `fallback: building test host`).
 
 Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.json`, `failure.json`,
-`resources.json`, `run.json`, and on a failure `logs/`, read before the freeze or the cleanup: per invocation
-`<name>/local/` (the request log and its requester's dev logs) and `<name>/vm/` (over request.ssh: the VM's journal and
-every `*.log` under /home and /root: core.log, dev logs, step logs; a failed staging run's `dev down` keeps its state for
-this; each its last 512 KiB, 6 MiB in all, smallest first, the rest named in `logs/skipped.txt`: an artifact reaches the
-runner through the guest agent's 16 MiB job output ring); no secret in any of them: secret-named JSON keys as in the
-dump, other text cut after a secret word's `=` or `:`, JWT-like words and PEM blocks dropped):
+`resources.json`, `run.json`; no secret in any of them). On a failure, before the freeze or the cleanup, `logs/` too: per
+invocation `<name>/local/` (the request log and its requester's dev logs) and, for a VM that was Held, `<name>/vm/` (over
+request.ssh: the VM's journal and every `*.log` under /home and /root: core.log, dev logs, step logs; a failed staging
+run's `dev down` keeps its state for this). Each its last 512 KiB, 6 MiB in all, smallest first, the rest named in
+`logs/skipped.txt` (an artifact reaches the runner through the guest agent's 16 MiB job output ring). Every run also
+writes `logs/<name>/release.log`: its cleanup's `run request release` of each invocation, with its time. Logs are
+redacted: secret-named JSON keys as in the dump, other text cut after a secret word's `=` or `:`, JWT-like words and PEM
+blocks dropped.
 
 ```sh
 # 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to
