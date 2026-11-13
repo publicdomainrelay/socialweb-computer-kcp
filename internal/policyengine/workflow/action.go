@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,6 +123,9 @@ func (e *Executor) runAction(ctx context.Context, action *Action, env map[string
 	result := parseActionResult(stdout)
 	result.Stdout = stdout
 	result.Stderr = stderr
+	if errors.Is(runErr, errOutputExceeded) {
+		result.Code, result.VFS = 1, nil
+	}
 	if runErr != nil && (result.VFS == nil || result.Code == 0) {
 		return result, fmt.Errorf("action execution failed: %w: %s", runErr, tail(stderr, 2000))
 	}

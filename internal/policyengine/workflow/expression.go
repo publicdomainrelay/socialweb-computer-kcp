@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
@@ -282,6 +283,8 @@ func isPropertyByte(value byte) bool {
 	return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || value == '_' || value == '-'
 }
 
+var errOutputExceeded = errors.New("policy action output exceeded")
+
 func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[string]string) (string, string, error) {
 	if e.opts.Sandbox == nil || !e.opts.Sandbox.Available() {
 		return "", "", fmt.Errorf("deno runtime unavailable")
@@ -308,7 +311,7 @@ func (e *Executor) runDeno(ctx context.Context, script string, extraEnv map[stri
 		return result.Stdout, result.Stderr, fmt.Errorf("the policy sandbox outlived its deadline")
 	}
 	if result.StdoutTruncated {
-		return result.Stdout, result.Stderr, fmt.Errorf("policy action output exceeded %d bytes", sandbox.OutputLimit)
+		return result.Stdout, result.Stderr, fmt.Errorf("%w %d bytes", errOutputExceeded, sandbox.OutputLimit)
 	}
 	if result.ExitCode != 0 {
 		return result.Stdout, result.Stderr, fmt.Errorf("policy code exited with %d", result.ExitCode)

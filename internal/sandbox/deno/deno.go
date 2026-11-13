@@ -157,8 +157,7 @@ func (r *Runner) Run(ctx context.Context, p sandbox.Program) (sandbox.Result, er
 	} else {
 		cmd.Env = append(os.Environ(), stateEnv...)
 	}
-	var out, errb capped
-	out.limit, errb.limit = OutputLimit, OutputLimit
+	out, errb := capped{limit: OutputLimit}, capped{limit: OutputLimit, tail: true}
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	result := sandbox.Result{}
@@ -233,18 +232,23 @@ func envSlice(env map[string]string) []string {
 
 type capped struct {
 	limit     int
-	to        strings.Builder
+	tail      bool
+	buf       []byte
 	truncated bool
 }
 
 func (c *capped) Write(p []byte) (int, error) {
-	n := len(p)
-	if left := max(c.limit-c.to.Len(), 0); n > left {
+	c.buf = append(c.buf, p...)
+	if len(c.buf) > c.limit {
 		c.truncated = true
-		p = p[:left]
+		switch {
+		case !c.tail:
+			c.buf = c.buf[:c.limit]
+		case len(c.buf) > 2*c.limit:
+			c.buf = append(c.buf[:0], c.buf[len(c.buf)-c.limit:]...)
+		}
 	}
-	c.to.Write(p)
-	return n, nil
+	return len(p), nil
 }
 
-func (c *capped) String() string { return c.to.String() }
+func (c *capped) String() string { return string(c.buf[max(len(c.buf)-c.limit, 0):]) }

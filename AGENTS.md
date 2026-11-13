@@ -791,6 +791,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   complete, or its attached policy record, its secrets bundle or its ingress url cannot be read, it
   keeps its phase and tries again (`requester_contract_waits_transient`, a bind or the backoff 2 s
   doubling to 30 s) and fails only on a deny or after `TransientResumeGiveUp` (2 min).
+- The PolicyEngine run cache (`internal/policyengine/cache`) hands a run only its own entries (its cache-key verdict, the policy/ keys of its rfp, bid and accept, their rec/ entries and the strongRefs in them, its trust snapshot), drops expired verdicts, and its `spec.limits.maxCacheBytes` unset means `sandbox.OutputLimit`/2 (32 KiB; the scope verdict store keeps the set value, unset is no byte cap). A policy action whose stdout passes `sandbox.OutputLimit` (64 KiB) fails with `policy action output exceeded 65536 bytes`.
 - Only the lead runs a prod deployment (plan 0006 M5-FRESH-DEPLOY). Task agents never touch prod.
 
 ## How to verify

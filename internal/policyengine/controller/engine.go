@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -393,31 +394,77 @@ func (e *Engine) seedRequest(request *PolicyEngineRequest, seed models.Cache) *P
 	copyRequest := *request
 	context := make(map[string]any, len(request.Context)+1)
 	maps.Copy(context, request.Context)
-	merged := e.cacheStore.Snapshot(runCacheKeys(request.Inputs))
-	if existing, ok := cacheFromAny(context["cache"]); ok {
-		maps.Copy(merged, existing)
-	}
-	maps.Copy(merged, seed)
+	keep := e.runCacheKeys(request.Inputs)
+	merged := e.cacheStore.Snapshot(keep)
 	now := time.Now()
-	maps.DeleteFunc(merged, func(_ string, entry models.CacheEntry) bool { return cache.Expired(entry, now) })
+	existing, _ := cacheFromAny(context["cache"])
+	for _, extra := range []models.Cache{existing, seed} {
+		for key, entry := range extra {
+			if keep(key) && !cache.Expired(entry, now) {
+				merged[key] = entry
+			}
+		}
+	}
 	context["cache"] = merged
 	copyRequest.Context = context
 	e.cacheStore.Merge(withoutTrust(merged))
 	return &copyRequest
 }
 
-func runCacheKeys(inputs map[string]any) func(string) bool {
+func (e *Engine) runCacheKeys(inputs map[string]any) func(string) bool {
 	keys := map[string]bool{}
 	if key := stringInput(inputs, CacheKeyInput); key != "" {
 		keys[key] = true
 	}
-	for _, name := range []string{"rfp", "bid", "accept"} {
-		var ref atproto.StrongRef
-		if json.Unmarshal([]byte(stringInput(inputs, name)), &ref) == nil && ref.URI != "" {
-			keys[cache.RecordKey(ref)] = true
+	var records cache.RecordSet
+	for name, slot := range map[string]**atproto.StrongRef{"rfp": &records.RFP, "bid": &records.Bid, "accept": &records.Accept} {
+		var input struct {
+			atproto.StrongRef
+			Value map[string]any `json:"value"`
+		}
+		if json.Unmarshal([]byte(stringInput(inputs, name)), &input) != nil || input.URI == "" {
+			continue
+		}
+		ref := input.StrongRef
+		*slot = &ref
+		keys[cache.RecordKey(ref)] = true
+		value := input.Value
+		if value == nil {
+			value, _ = cache.ReadRecord(e.cacheStore, ref)
+		}
+		// ponytail: one hop of strongRefs from the run's records (the actions resolve only payloadRef); walk the kept rec/ entries too if an action resolves deeper
+		for _, nested := range strongRefsIn(value) {
+			keys[cache.RecordKey(nested)] = true
 		}
 	}
-	return func(key string) bool { return keys[key] }
+	hasRecords := records.RFP != nil || records.Bid != nil || records.Accept != nil
+	return func(key string) bool {
+		return keys[key] || strings.HasPrefix(key, trustCachePrefix) || (hasRecords && cache.IsPolicyKeyOf(key, records))
+	}
+}
+
+func strongRefsIn(value any) []atproto.StrongRef {
+	var out []atproto.StrongRef
+	var walk func(any)
+	walk = func(node any) {
+		switch typed := node.(type) {
+		case map[string]any:
+			uri, _ := typed["uri"].(string)
+			cid, _ := typed["cid"].(string)
+			if strings.HasPrefix(uri, "at://") && cid != "" {
+				out = append(out, atproto.StrongRef{URI: uri, CID: cid})
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return out
 }
 
 func (e *Engine) acquire(ctx context.Context) error {

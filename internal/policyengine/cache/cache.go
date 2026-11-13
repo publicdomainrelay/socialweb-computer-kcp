@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,8 @@ const (
 	RecordValueFile  = "value.json"
 	PolicyResultFile = "result.json"
 	PolicyMetaFile   = "meta.json"
+
+	PolicyKeyPrefix = "policy/"
 )
 
 type Store struct {
@@ -42,9 +45,7 @@ func (s *Store) Seed(value models.Cache) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key, entry := range value {
-		s.setLocked(key, entry)
-	}
+	s.putLocked(value)
 }
 
 func (s *Store) Snapshot(keep func(key string) bool) models.Cache {
@@ -53,7 +54,7 @@ func (s *Store) Snapshot(keep func(key string) bool) models.Cache {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dropExpiredLocked()
+	s.dropExpiredLocked(time.Now())
 	out := make(models.Cache)
 	for key, entry := range s.entries {
 		if keep != nil && !keep(key) {
@@ -72,8 +73,18 @@ func (s *Store) Merge(value models.Cache) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key, entry := range value {
-		s.setLocked(key, entry)
+	s.putLocked(value)
+}
+
+func (s *Store) putLocked(value models.Cache) {
+	now := time.Now()
+	s.dropExpiredLocked(now)
+	for _, verdicts := range []bool{false, true} {
+		for key, entry := range value {
+			if strings.HasPrefix(key, PolicyKeyPrefix) == verdicts && !Expired(entry, now) {
+				s.setLocked(key, entry)
+			}
+		}
 	}
 }
 
@@ -99,7 +110,7 @@ func (s *Store) Set(key string, entry models.CacheEntry) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.setLocked(key, entry)
+	s.putLocked(models.Cache{key: entry})
 }
 
 func (s *Store) Delete(key string) {
@@ -155,8 +166,7 @@ func (s *Store) touchLocked(key string) {
 	}
 }
 
-func (s *Store) dropExpiredLocked() {
-	now := time.Now()
+func (s *Store) dropExpiredLocked(now time.Time) {
 	for key, entry := range s.entries {
 		if Expired(entry, now) {
 			s.deleteLocked(key)
@@ -165,7 +175,6 @@ func (s *Store) dropExpiredLocked() {
 }
 
 func (s *Store) evictLocked() {
-	s.dropExpiredLocked()
 	for {
 		if s.maxEntries > 0 && len(s.entries) > s.maxEntries {
 			s.deleteLocked(s.order[0])
@@ -225,19 +234,23 @@ func ReadRecordCache(seed models.Cache, ref atproto.StrongRef) (map[string]any, 
 	if !ok {
 		return nil, false
 	}
+	var value map[string]any
+	if err := decodeFile(file, &value); err != nil {
+		return nil, false
+	}
+	return value, true
+}
+
+func decodeFile(file models.CacheFile, into any) error {
 	data := []byte(file.Data)
 	if file.Encoding == models.CacheEncodingBase64 {
 		decoded, err := base64.StdEncoding.DecodeString(file.Data)
 		if err != nil {
-			return nil, false
+			return err
 		}
 		data = decoded
 	}
-	var value map[string]any
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, false
-	}
-	return value, true
+	return json.Unmarshal(data, into)
 }
 
 func WriteRecord(store *Store, ref atproto.StrongRef, value map[string]any) {
@@ -264,13 +277,21 @@ func PolicyKey(name string, records RecordSet, args map[string]any) string {
 			suffix = ":" + HashString(string(data))
 		}
 	}
-	return fmt.Sprintf("policy/%s/%s|%s|%s%s",
-		name,
-		policyRecordPart(records.RFP),
-		policyRecordPart(records.Bid),
-		policyRecordPart(records.Accept),
-		suffix,
-	)
+	return PolicyKeyPrefix + name + "/" + policyRecordsPart(records) + suffix
+}
+
+func policyRecordsPart(records RecordSet) string {
+	return policyRecordPart(records.RFP) + "|" + policyRecordPart(records.Bid) + "|" + policyRecordPart(records.Accept)
+}
+
+func IsPolicyKeyOf(key string, records RecordSet) bool {
+	rest, ok := strings.CutPrefix(key, PolicyKeyPrefix)
+	if !ok {
+		return false
+	}
+	_, tail, ok := strings.Cut(rest, "/")
+	want := policyRecordsPart(records)
+	return ok && (tail == want || strings.HasPrefix(tail, want+":"))
 }
 
 type PolicyMeta struct {
@@ -300,10 +321,11 @@ func Expired(entry models.CacheEntry, now time.Time) bool {
 		return false
 	}
 	var meta PolicyMeta
-	if err := json.Unmarshal([]byte(file.Data), &meta); err != nil {
-		return false
+	if decodeFile(file, &meta) != nil || meta.TTLMs <= 0 {
+		return true
 	}
-	return now.UnixMilli()-meta.CachedAt > meta.TTLMs
+	age := now.UnixMilli() - meta.CachedAt
+	return age < 0 || age > meta.TTLMs
 }
 
 func WriteVerdict(store *Store, key string, data []byte, ttl time.Duration) {
