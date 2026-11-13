@@ -230,12 +230,10 @@ fn json_with(text: &str, key: &str) -> Option<Value> {
     })
 }
 
-/// A file on the VM from text without a single quote (JSON, PEM in JSON).
+/// A file on the VM from any text (single quotes escaped for the shell).
 fn write_file(path: &str, text: &str) -> Result<String, String> {
-    if text.contains('\'') {
-        return Err(format!("{path}: the content carries a single quote"));
-    }
-    Ok(format!("printf %s '{text}' > {path}.part && mv {path}.part {path} && chown stg:stg {path}"))
+    let quoted = text.replace('\'', "'\\''");
+    Ok(format!("printf %s '{quoted}' > {path}.part && mv {path}.part {path} && chown stg:stg {path}"))
 }
 
 /// The joined bidder on a bidder VM: its kcp's MarketBidder `app` (curl on the admin token; no kubectl on the VM).
