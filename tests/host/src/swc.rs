@@ -182,6 +182,13 @@ impl Swc {
     }
 
     fn request_state(&self) -> PathBuf {
+        // the guest requester's `run request` holds a dev instance (its PDS, its kcp) whose sockets under
+        // requests/<name>/run/ must fit sun_path (107 bytes): a short dir of its own, ~/.swc/<run ms>
+        if self.target.network.is_none() && self.acct().is_ok_and(|a| a.guest_requester) {
+            let name = self.dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let ms = name.rsplit('-').next().unwrap_or_default().to_string();
+            return PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".swc").join(ms);
+        }
         match &self.target.network {
             Some(n) => expand(&n.state_dir),
             None => self.dir.join("requests"),
