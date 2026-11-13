@@ -127,7 +127,7 @@ flowchart LR
   Q -->|no| DENY["deny"]
 ```
 
-- snapshot: `trust.BuildSnapshotWith` (`internal/policyengine/trust/trust.go`); depth 1, no transitive walk
+- snapshot: `trust.BuildSnapshotWith` (`internal/policyengine/trust/trust.go`): vouches between self + its walk ancestors and the counterparty + its walk ancestors (≤256 pairs, nearest first)
 - operator resolution (identlink walk): [identity.md](identity.md#walk)
 - who writes vouches: market networks declare operator vouches both ways (`internal/app/marketnetwork/vouches.go`, compose `ApplyOperatorVouch`); people write them from any client. the requester OAuth scope offers vouch write as an optional scope
 - requester discovery lists the vouches of its trusted DIDs (`internal/market/requester/discovery.go` `vouchedBy`, a listRecords that skips `denounce` and takes rkeys starting `did:`)
