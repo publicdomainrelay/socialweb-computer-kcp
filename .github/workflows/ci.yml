@@ -49,14 +49,19 @@ jobs:
           set -euo pipefail
           timeout -k 10 2580 make check-pins BUILD_ROOT="$CI_STATE/pins-$GITHUB_RUN_ID-$GITHUB_JOB"
 
-  # tests/Cargo.toml's atlibs crates on the atlibs pin set (atlibs pins.json); behind, it names the sync command
+  # tests/Cargo.toml's atlibs crates, and the knotless runner the compositions run on (knotless-fork-infra
+  # versions.env's commit), on the atlibs pin set (atlibs pins.json); behind, it names the sync command
   atlibs-pins:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - name: atlibs pins
-        run: curl -sSf https://knotless.dev/johnandersen777.bsky.social/atlibs/raw/main/pins.sh | sh -s -- check
+        run: |
+          curl -sSf https://knotless.dev/johnandersen777.bsky.social/atlibs/raw/main/pins.sh > "$RUNNER_TEMP/pins.sh"
+          sh "$RUNNER_TEMP/pins.sh" check
+          git clone -q --depth 1 https://knotless.dev/johnandersen777.bsky.social/knotless-fork-infra "$RUNNER_TEMP/infra"
+          cd "$RUNNER_TEMP/infra" && sh "$RUNNER_TEMP/pins.sh" check
 
   binaries:
     needs: pins
