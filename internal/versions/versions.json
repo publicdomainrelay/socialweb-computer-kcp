@@ -418,16 +418,16 @@
       }
     },
     "atirc": {
-      "version": "0.1.0-e962ee8",
-      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit e962ee81a50acbbd83dfff66acaafc635976f9ea (2026-11-12, agent run takes its agent config on stdin or --config, so the ssh gateway path runs; agent run spawns the harness and removes its workdir on exit; on 9e83813: owner graph on the ident.link pair + grant walk of atlibs-identlink aa7cacc, ATIRC_DID, --peer <handle>@<did>), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
+      "version": "0.1.0-de9e74a",
+      "source": "tangled.org/johnandersen777.bsky.social/atirc main at commit de9e74a211ab91782cfa964d90f8c3c9e3b29614 (2026-11-13, --plc-directory-url / ATIRC_PLC_DIRECTORY_URL; on e962ee8: agent run takes its agent config on stdin or --config, so the ssh gateway path runs; agent run spawns the harness and removes its workdir on exit; on 9e83813: owner graph on the ident.link pair + grant walk of atlibs-identlink aa7cacc, ATIRC_DID, --peer <handle>@<did>), unpatched, built here by scripts/stage-assets.sh (fetch kind cargosrc, scripts/build-cargosrc.sh): the knot's source archive of that commit, cargo build --release --locked of cli/Cargo.toml for <arch>-unknown-linux-musl with the pinned rustc, zig cc and rust-lld, static; crates from crates.io and their git sources, verified by the archive's Cargo.lock. The host's atirc (AtircNode runs atirc mesh run as a HostProcess of this asset) and the guests' atirc-x86_64 of socialweb-guest-downloads are this build",
       "verify": "the source archive's sha256 is pinned here and its top directory must name the pinned commit; the build runs in a private mount namespace with remapped paths, so the unpacked tree must equal the treeSha256 pin (make pins writes it; a cargosrc change re-pins it)",
       "executables": {
         "atirc": "atirc"
       },
       "cargosrc": {
-        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/e962ee81a50acbbd83dfff66acaafc635976f9ea",
-        "sha256": "140a09eec7827f50c26024195f9e0d74009728f4015fd14dd1f89c06ef9f0477",
-        "commit": "e962ee81a50acbbd83dfff66acaafc635976f9ea",
+        "url": "https://tangled.org/johnandersen777.bsky.social/atirc/archive/de9e74a211ab91782cfa964d90f8c3c9e3b29614",
+        "sha256": "49df845d6586e186865c7cc13e9c04522cd86ad9d816c5307ed86e1407901cf2",
+        "commit": "de9e74a211ab91782cfa964d90f8c3c9e3b29614",
         "toolchain": "1.97.0",
         "manifest": "cli/Cargo.toml",
         "package": "atirc",
