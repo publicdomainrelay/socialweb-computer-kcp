@@ -121,6 +121,8 @@ func reportSyncKey(collection, tag, receiptURI string) string {
 		return "onNetwork:" + receiptURI
 	case collection == market.ComputeEventsVMHostKeysNSID:
 		return "hostKeys:" + receiptURI
+	case tag != "":
+		return collection + ":" + tag + ":" + receiptURI
 	default:
 		return collection + ":" + receiptURI
 	}

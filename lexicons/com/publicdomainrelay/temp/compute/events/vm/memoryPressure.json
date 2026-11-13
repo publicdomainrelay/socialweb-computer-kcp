@@ -1,0 +1,23 @@
+{
+  "lexicon": 1,
+  "id": "com.publicdomainrelay.temp.compute.events.vm.memoryPressure",
+  "description": "The bidder reports that the VM's host cgroup crossed a memory threshold (memory.events high or max increased); sent as the payload of a market.event, edge-triggered and capped per contract.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["kind", "threshold", "observed", "observedAt", "createdAt"],
+        "properties": {
+          "kind": { "type": "string", "knownValues": ["high", "max"], "description": "The cgroup threshold crossed: high (reclaim pressure) or max (the hard limit)." },
+          "threshold": { "type": "integer", "description": "The threshold in bytes (memory.high or memory.max)." },
+          "observed": { "type": "integer", "description": "memory.current in bytes when the crossing was seen." },
+          "observedAt": { "type": "string", "format": "datetime" },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "signatures": { "type": "ref", "ref": "network.attested.signature#signatures" }
+        }
+      }
+    }
+  }
+}

@@ -1167,6 +1167,51 @@ func (v *ComputeEventsVMHostKeys) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+type ComputeEventsVMMemoryPressure struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Kind       string                     `json:"kind"`
+	Observed   int64                      `json:"observed"`
+	ObservedAt string                     `json:"observedAt"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Threshold  int64                      `json:"threshold"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsVMMemoryPressure) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.vm.memoryPressure"
+}
+
+func ParseComputeEventsVMMemoryPressure(value map[string]any) (*ComputeEventsVMMemoryPressure, error) {
+	var out ComputeEventsVMMemoryPressure
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.vm.memoryPressure", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsVMMemoryPressure) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsVMMemoryPressure
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.vm.memoryPressure"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsVMMemoryPressure) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsVMMemoryPressure
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsVMMemoryPressure(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
 type ComputeEventsVMOnNetwork struct {
 	Type       string                     `json:"$type"`
 	Address    string                     `json:"address,omitempty"`
@@ -1206,6 +1251,51 @@ func (v *ComputeEventsVMOnNetwork) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*v = ComputeEventsVMOnNetwork(p)
+	v.Extra = extra
+	v.absent = absent
+	return nil
+}
+
+type ComputeEventsVMOomKilled struct {
+	Type       string                     `json:"$type"`
+	CreatedAt  string                     `json:"createdAt"`
+	Kills      int64                      `json:"kills"`
+	Limit      int64                      `json:"limit"`
+	ObservedAt string                     `json:"observedAt"`
+	Signatures Signatures                 `json:"signatures,omitempty"`
+	Total      int64                      `json:"total"`
+	Extra      map[string]json.RawMessage `json:"-"`
+	absent     map[string]json.RawMessage
+}
+
+func (ComputeEventsVMOomKilled) NSID() string {
+	return "com.publicdomainrelay.temp.compute.events.vm.oomKilled"
+}
+
+func ParseComputeEventsVMOomKilled(value map[string]any) (*ComputeEventsVMOomKilled, error) {
+	var out ComputeEventsVMOomKilled
+	if err := decodeRecord(value, "com.publicdomainrelay.temp.compute.events.vm.oomKilled", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (v ComputeEventsVMOomKilled) MarshalJSON() ([]byte, error) {
+	type plain ComputeEventsVMOomKilled
+	if v.Type == "" {
+		v.Type = "com.publicdomainrelay.temp.compute.events.vm.oomKilled"
+	}
+	return marshalOpen(plain(v), v.Extra, v.absent)
+}
+
+func (v *ComputeEventsVMOomKilled) UnmarshalJSON(b []byte) error {
+	type plain ComputeEventsVMOomKilled
+	var p plain
+	extra, absent, err := unmarshalOpen(b, &p)
+	if err != nil {
+		return err
+	}
+	*v = ComputeEventsVMOomKilled(p)
 	v.Extra = extra
 	v.absent = absent
 	return nil
