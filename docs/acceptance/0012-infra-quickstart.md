@@ -6,7 +6,25 @@ resource, release, dev down. The atirc join of the agent VM is a prod step ([001
 
 - Paths: kubectl against a market network (`dev up --profile market-network`); the browser page applies the same
   `mixed.yaml` from its terminal ([0009](0009-browser-page.md))
-- Last pass: local market network `qs1` on hat-8, main 12ff7b53 dev build, 2026-11-01 03:24-03:50Z: VM, k8s, Deno pass with
+- Last pass: 2026-11-13 02:56-03:10Z, own network `a12r` on hat-8 as `test-0001`, rollout 20 release binary
+  (v0.0.0-rc165-pre1 038bd32e, 24a8b530; it embeds every asset and has `dev up`, so no `--dev` build), examples from
+  038bd32e, live slot held; requester by `run requester --name qs --network a12r`. 1 `dev up` exit 0 in 45 s, Ready,
+  `spec.computeKinds` `["vm","deno"]`; 2 ready 11.7 s, `root-qs.requester.local`, `localRepo`; 3
+  `operator-vouch-requester-<stamp>` and `network-vouch-bidder-1` Applied, bidder `bidder-tangled-vouch`, every example
+  (10 files, k8s-cluster.yaml to the tenant) passes the server dry run; 4 Deployed 19.8 s, ssh over iroh
+  `quickstart-vm-ok` `x86_64` 0.76 s; 5 node `*-tenant-node1` Ready and `quickstart-k8s-ok`, but pod Ready 4 m 40 s after
+  the apply (02:58:18 -> 03:02:58; was 46-79 s): the cluster OpenBao logged 22 x `write auth/jwt-<hash>/config -> HTTP 400
+  error checking oidc discovery URL` (the bidder's guest OIDC issuer `https://did-key-<..>.relay.localhost/v1/identity/oidc`
+  did not answer yet; the bidder logs `the guest OIDC keys are published after a token exchange`), then `nodemarket: the
+  node can log in to the cluster OpenBao with its workload token` 03:02:39; 6 Held 4 s, `spec.backendRef.kind`
+  `DenoSandbox`, `quickstart-deno-ok sum=10 on linux/x86_64` exit 0; 7 `requester_agent_bundle_placeholder` (0600),
+  `requester_contract_refused`, Failed with the `--atproto-handle` message, no RFP; 8 Ctrl-C removes the ready file,
+  `a12r-qs` NotFound 8 s later, restart `restarted: true` ready 2.7 s, VM and Deno Held, ssh again 0.95 s; 9 VM Released
+  1.5 s after the patch, Deno 3 s (both `requester_contract_records_deleted` 6/6), agent `infra_released`, node, Infra and
+  ComputeVMs gone 03:06:49; the requester repo holds only `sh.tangled.graph.vouch` (0 market.event / vm.delete / rfp /
+  accept / compute.vm, fix 13); `dev down` exit 0 in 123 s, `remaining` `[]`, no `vmsLeft`, no process or unit of the
+  instance left
+- Previous pass: local market network `qs1` on hat-8, main 12ff7b53 dev build, 2026-11-01 03:24-03:50Z: VM, k8s, Deno pass with
   the default policy; agent VM passes up to the mint (join is the prod step below). Since main 2ea66d62 (plan 0039 D) the
   local agent contract is refused before its RFP (step 7); read 2026-11-01 08:38Z on own network `mxp`, main 6497fe61.
   2026-11-01 09:22-09:42Z, own network `acc12`, main ec97f78e (rc158 + docs) dev build, requester by `run requester

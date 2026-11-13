@@ -9,7 +9,25 @@ sections 2, 5 and 7).
 - Paths: A `run requester` in the foreground (OAuth QR); B `install requester` (systemd user unit of its own account);
   C the gateway in the requester kcp (`run requester --with-gateway`, a tenant cluster)
 - Plan: [0039](../plans/0039-long-lived-requester.yaml) items F-MIXED-PROD (this runbook) and ACC39-MIXED-PROD (its live pass)
-- Last pass C: 2026-11-12 21:12-21:19Z, kcp e190a3b1 (rollout 19, rc165 candidate): 0 ERROR, the infra `self` and
+- Last pass A, B, C: 2026-11-13 03:11-04:44Z on prod rollout 20 (v0.0.0-rc165-pre1 038bd32e, binary 24a8b530 for the
+  CLI and `install requester`), bob, no pin (the kit's `mixed-prod-nopin.yaml`; winner hat-8 every time); consent pages
+  qr.fedfork.com for @bobvmbuilder.bsky.social (screenshots read). A: ready 42 s after start, `oauthQr`; Deployed 31 s
+  (vm1, sbx1, agent1 Held); sbx1 `mixedprod-deno-ok sum=10`; agent1 (bundle by A4b) association +32 s after agentStart,
+  `online and listening` +141 s, `uname -m` answered `x86_64` in 3.6 s; Ctrl-C and restart: ready 12 s, same DID, all
+  Held, `hostname` answered 3 s; delete 10.8 s, R2 released first, `requester_association_deleted`, records 6/6, 10/10,
+  14/14, the 14 requester-repo URIs RecordNotFound x3 (the bidder's own `market.receipt` stays), 0 market.event /
+  vm.delete / rfp / accept left (fix 13), R2 and agent DIDs `plc_tombstone`, vouches kept, hat-8 empty. A6 re-checked on a
+  vm1-only EphemeralInfra (the first apply carried an old key from the kit file: `Permission denied (publickey)`, a
+  harness fault): iroh 4.4 s, webrtc 1.4 s, `mixedprod-vm-ok x86_64`, release 10/10, RecordNotFound x3. The restart logged
+  10 x `Reconciler error the OpenBaoServer requester reports no address yet (phase Starting)` at one instant (first start
+  0 ERROR). B (swc-requester, vm1 + sbx1): install exit 0 after the sign-in; ssh iroh 3.8 s, webrtc 1.3 s; `systemctl
+  --user restart`: kcp, kine, front and bao units keep their InvocationID, same DID, ssh 0.98 s; delete 3 s, 8/8
+  RecordNotFound x3; `uninstall --purge`: no account, state, linger or install record (the installed requester's
+  `logs/` stayed empty and the journal had none of its lines, so B's ERROR count was not read). C: ready with the gateway
+  44 s after start, cluster c1 + kubeconfig 17 s, pod Ready 50 s after the apply (node `*-c1-node1` on hat-8),
+  `quickstart-k8s-ok`; delete Deployment: nodes 0 in 156 s, node records 6/6, `self` and `nodes-<hex>` mirrors gone, 0
+  ERROR
+- Previous pass C: 2026-11-12 21:12-21:19Z, kcp e190a3b1 (rollout 19, rc165 candidate): 0 ERROR, the infra `self` and
   `nodes-<hex>` mirror gone 20 s after nodes 0 (8e849b42). Before: 2026-11-12 20:02-20:10Z, kcp ac51b91e (rollout 18): node Ready, `quickstart-k8s-ok`, the requester logs 0
   ERROR (no ComponentLink errors: fixed in 363dd814); nodes 0 in 156 s; but the emptied
   `computer.socialweb.infra/nodes-<hex>` mirror stayed in the repo (`infra_record_replaced` with 0 nodes; deleted by
