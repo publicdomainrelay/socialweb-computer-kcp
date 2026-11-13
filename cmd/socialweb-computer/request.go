@@ -1262,7 +1262,10 @@ func runRequest(ctx context.Context, a *app, vals clicfg.Values, rest []string) 
 		if network != "" {
 			return a.fail(exitRefused, "run request: --guest-requester is for a standalone invocation")
 		}
-		r.guestRequester, r.skipSSH = true, true
+		// no ssh of its own by default; an explicit --skip-ssh=false keeps its key in the VM it rents, for
+		// `run request ssh` (a test host driving the guest requester's own VM)
+		given := vals.Source("skip-ssh") != "" && vals.Source("skip-ssh") != clicfg.SourceDefault
+		r.guestRequester, r.skipSSH = true, !given || vals.Bool("skip-ssh")
 		colocated := []string{}
 		var irohs []v1alpha1.ColocatedIroh
 		for _, entry := range strings.Split(vals.String("colocated"), ",") {

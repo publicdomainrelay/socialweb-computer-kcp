@@ -197,6 +197,16 @@ impl Secret {
 }
 
 impl Account {
+    /// Its DID: the guest requester's, once its first `run request` wrote it, from `/run/socialweb-r2/requester-did`.
+    pub fn did_now(&self) -> String {
+        match self.guest_requester {
+            true => std::fs::read_to_string("/run/socialweb-r2/requester-did")
+                .map(|d| d.trim().to_string())
+                .unwrap_or_default(),
+            false => self.did.clone(),
+        }
+    }
+
     /// The app password: the first variable ending in ATPROTO_PASSWORD. The file must be owner-only.
     pub fn password(&self) -> Result<Secret> {
         let path = expand(&self.creds);

@@ -397,7 +397,8 @@ impl Swc {
             .args(&args);
         // R2 rents as the renter's agent: its identity is the association, no password
         if self.acct()?.guest_requester {
-            cmd.arg("--guest-requester");
+            // its own key in the VM it rents, for request.ssh
+            cmd.args(["--guest-requester", "--skip-ssh=false"]);
         } else {
             cmd.arg("--")
                 .args(identity_args(
@@ -628,7 +629,7 @@ impl Swc {
             "request.release" => self.release(str_of(&input, "name")?).await,
             "request.records" => {
                 let name = str_of(&input, "name")?;
-                let did = self.acct()?.did.clone();
+                let did = self.acct()?.did_now();
                 let mut uris: Vec<String> = uris_in(&self.request_logs(name), &did)
                     .into_iter()
                     .filter(|u| !kept_by_rule(u))
