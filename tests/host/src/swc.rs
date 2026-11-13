@@ -782,7 +782,14 @@ impl Swc {
                 let to = o.join("local").join(f.strip_prefix(&state).unwrap_or(&f));
                 copy_redacted(&f, &to, &mut room, &mut skipped);
             }
-            match self.vm_logs(&name).await {
+            // only a VM the invocation held answers ssh (an invocation still renting would make it wait)
+            let held = std::fs::read_to_string(state.join(format!("{name}-request.log")))
+                .is_ok_and(|l| l.contains(r#""phase":"Held""#));
+            let vm = match held {
+                true => self.vm_logs(&name).await,
+                false => Err(format!("{name}: its VM was never Held: no VM logs")),
+            };
+            match vm {
                 Ok(tree) => {
                     let mut files = vec![];
                     walk(&tree, &mut files);
