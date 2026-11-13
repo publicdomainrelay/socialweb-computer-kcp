@@ -57,12 +57,28 @@ recovery the runbooks describe (0007, 0006, 0001 section 7).
 | `direct` | the kubeconfig's server URL |
 | `overlay` | the same port on a meshd overlay name (its DNS), TLS name kept |
 | `ssh` | an `ssh -L` forward through `host` (an ssh alias) to the kubeconfig's host:port: a bidder's front on its loopback |
-| `iroh` | a `dumbpipe connect-tcp` forward of the kcp front's ticket, TLS name kept |
+| `iroh` | atlibs-iroh: its ticket check, then its raw form `dumbpipe connect <ticket>` as the stream, one per TCP connection (`kcp::stdio_bridge`), TLS name kept |
 | `webRtc` | `proxy`: a command piping stdin/stdout through a datachannel, one run per TCP connection (`kcp::stdio_bridge`); `Requester::webrtc_proxy(contract, tag)` builds it from the orchestrator's `run requester proxy` (the Go requester's WebRTC offerer, signalled through its kcp) for a kcp a guest tunnels as `tag` |
 
-atlibs-webrtc's Rust crate is the answerer (`webrtc-peer`) only; its offerer is JavaScript (pages). The Go
-requester's offerer is the one a native test drives; a Rust offerer (str0m) replaces it when the harness must
-dial without a requester.
+## What it reuses
+
+| piece | from | for |
+| --- | --- | --- |
+| app-password sessions, service auth, PDS / PLC reads | atlibs-host v0.5.1 (`6e113df`, the rev atlibs-iroh pins: one copy) | `atproto.rs`, `gateway.rs` |
+| iroh tickets, the raw `dumbpipe connect` stream | atlibs-iroh `e1cdf12` | `via iroh` |
+| ident.link walks (verified `sync.getRecord`), the market's computed rkeys (`termination_rkey`, `release_rkey`) | identlink (atlibs-identlink `aa7cacc`, `native`) | `ctx.walk`, vm.terminated pins, the release's vm.delete |
+| WebRTC offerer | the Go requester (`run requester proxy`) | `via webRtc` |
+| the requester, its kcp, AtircNode, OpenBao | the release under test | the orchestrator |
+
+Gaps, to close in atlibs rather than here:
+
+- atlibs-iroh has no in-process QUIC: it shells out to dumbpipe (as js/index.js does). An in-process stream needs the
+  `iroh` crate's endpoint dialing the dumbpipe ALPN in atlibs-iroh, returning an `AsyncRead + AsyncWrite`; kube-rs then
+  takes it as a connector.
+- atlibs-webrtc's Rust side is the answerer (`webrtc-peer`, str0m); the offerer is JavaScript (`WebrtcHost`,
+  `recordSignals`). A native offerer needs, in that crate: str0m as offerer, the sealed offer record at
+  `computer.socialweb.ingress.offer/<DID>.<tid>` and the answer read at its computed key (`recordSignals`), and a
+  datachannel as `AsyncRead + AsyncWrite`.
 
 Prod bidder kcps (`targets/prod.json`): owner-only copies of each bidder's admin kubeconfig under
 `~/.config/swc-system-tests/kcp/<bidder>.kubeconfig` on the runner (refused unless 0600). Fault injection on prod

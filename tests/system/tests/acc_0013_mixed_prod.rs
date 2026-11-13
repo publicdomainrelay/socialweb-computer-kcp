@@ -2,6 +2,7 @@
 //! requester kcp (C). Discovery: the bidderDids pins are taken out. B (`install requester`) needs root on the requester
 //! host: not ported.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use testkit::atirc::OwnerNode;
@@ -301,6 +302,49 @@ async fn c_gateway_in_requester_kcp() {
         .await?;
         ctx.reading("records_checked", ctx.records_gone(&r.logs(), &did).await?);
         ctx.check_logs(&r.logs())?;
+        Ok(())
+    })
+    .await;
+}
+
+/// 0013 B (needs staging: root on a staging VM): `install requester` (app password on stdin by `run requester
+/// password`), Ready, a unit restart keeps the DID, `uninstall --purge`. Contracts as the account are A's.
+#[tokio::test(flavor = "multi_thread")]
+async fn b_install_requester() {
+    run("0013", "B", &[ACCOUNT], |ctx| async move {
+        let Some(host) = ctx.root_host() else { return ctx.skip("needs staging (root on a staging VM)") };
+        let a = ctx.account(ACCOUNT)?;
+        let bin = Binary::resolve(&ctx.target.requester).await?;
+        let remote = "/root/swc-st-socialweb-computer";
+        let ok = tokio::process::Command::new("scp").args(["-q", "-o", "BatchMode=yes"]).arg(&bin.path).arg(format!("{host}:{remote}")).status().await?.success();
+        ensure!(ok, "scp of the requester binary to {host}");
+        let st = "/var/lib/socialweb-computer/swc-requester";
+        let ident = format!("--atproto-identity-mode pdsAccount --atproto-handle {} --atproto-pds-url {}", a.handle, ctx.target.pds);
+        {
+            let (ctx2, h) = (ctx.clone(), host.clone());
+            ctx.defer("uninstall requester", async move {
+                ctx2.root(&h, &format!("{remote} uninstall requester --account swc-requester --purge"), None).await.map(|_| ())
+            });
+        }
+        ctx.root(&host, &format!("{remote} install requester --name mp --dry-run -- {ident}"), None).await?;
+        ctx.root(&host, &format!("{remote} install requester --name mp -- {ident}"), None).await?;
+        ctx.root(&host, &format!("runuser -u swc-requester -- {st}/bin/current/socialweb-computer run requester password mp --state-dir {st}"), Some(a.password()?.expose()))
+            .await?;
+        let ready = |ctx: Arc<Ctx>, h: String| async move {
+            eventually("the installed requester's ready file", 10 * MIN, Duration::from_secs(5), || async {
+                let text = ctx.root(&h, &format!("cat {st}/requesters/mp/ready.json 2>/dev/null || true"), None).await?;
+                Ok((!text.trim().is_empty()).then_some(()))
+            })
+            .await?;
+            let r: Value = serde_json::from_str(&ctx.root(&h, &format!("cat {st}/requesters/mp/ready.json"), None).await?)?;
+            anyhow::Ok(r)
+        };
+        let r1 = ready(ctx.clone(), host.clone()).await?;
+        ensure!(r1["did"] == a.did.as_str() && r1["identityMode"] == "pdsAccount", "ready {r1}");
+        ctx.root(&host, "systemctl --user -M swc-requester@ restart socialweb-computer-requester@mp.service", None).await?;
+        let r2 = ready(ctx.clone(), host.clone()).await?;
+        ensure!(r2["did"] == r1["did"], "the DID changed across the unit restart");
+        ctx.reading("ready", json!({ "did": r2["did"], "identityMode": r2["identityMode"] }));
         Ok(())
     })
     .await;

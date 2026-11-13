@@ -44,8 +44,13 @@ fn plural(kind: &str) -> String {
 
 /// socialweb.computer/v1alpha1 `kind`.
 pub fn resource(kind: &str) -> ApiResource {
+    resource_in(GROUP, kind)
+}
+
+/// `kind` of another group of ours (events.socialweb.computer, exposure.socialweb.computer), v1alpha1.
+pub fn resource_in(group: &str, kind: &str) -> ApiResource {
     ApiResource::from_gvk_with_plural(
-        &GroupVersionKind::gvk(GROUP, "v1alpha1", kind),
+        &GroupVersionKind::gvk(group, "v1alpha1", kind),
         &plural(kind),
     )
 }
@@ -156,16 +161,14 @@ impl Kcp {
                 forward = Some(forward_child(c, local, "ssh").await?);
                 format!("127.0.0.1:{local}")
             }
+            // atlibs-iroh's raw form: its ticket check, then `dumbpipe connect <ticket>` as the stream (one per
+            // connection). ponytail: a child per connection; in-process QUIC belongs in atlibs-iroh (see README)
             Via::Iroh { ticket } => {
-                let local = free_port().await?;
-                let mut c = tokio::process::Command::new("dumbpipe");
-                c.args([
-                    "connect-tcp",
-                    "--addr",
-                    &format!("127.0.0.1:{local}"),
-                    ticket,
-                ]);
-                forward = Some(forward_child(c, local, "dumbpipe").await?);
+                let ticket = atlibs_iroh::ticket(Some(&Value::String(ticket.clone())))
+                    .map_err(|e| anyhow!(e))?;
+                let (local, f) =
+                    stdio_bridge(vec!["dumbpipe".into(), "connect".into(), ticket]).await?;
+                forward = Some(f);
                 format!("127.0.0.1:{local}")
             }
             Via::WebRtc { proxy } => {
@@ -197,6 +200,18 @@ impl Kcp {
         Api::all_with(self.client.clone(), &resource(kind))
     }
 
+    pub fn api_in(&self, group: &str, kind: &str) -> Api<DynamicObject> {
+        Api::all_with(self.client.clone(), &resource_in(group, kind))
+    }
+
+    /// The api of an object by its apiVersion (`<group>/v1alpha1`).
+    fn api_of(&self, v: &Value, kind: &str) -> Api<DynamicObject> {
+        match v["apiVersion"].as_str().and_then(|a| a.split_once('/')) {
+            Some((group, _)) if group != GROUP => self.api_in(group, kind),
+            _ => self.api(kind),
+        }
+    }
+
     pub async fn get(&self, kind: &str, name: &str) -> Result<Option<Value>> {
         Ok(self
             .api(kind)
@@ -223,7 +238,7 @@ impl Kcp {
             .as_str()
             .context("object without metadata.name")?;
         let out = self
-            .api(kind)
+            .api_of(obj, kind)
             .patch(
                 name,
                 &PatchParams::apply(MANAGER).force(),

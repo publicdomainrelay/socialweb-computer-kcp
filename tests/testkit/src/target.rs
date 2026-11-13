@@ -27,6 +27,9 @@ pub struct Target {
     #[serde(default)]
     pub bidders: Vec<Bidder>,
     pub accounts: BTreeMap<String, Account>,
+    /// hosts a test may administer as root (staging VMs only: `install requester`, a temporary bidder); ssh destinations
+    #[serde(default)]
+    pub root_hosts: Vec<String>,
     /// a checkout of the requester page repo (atlibs-socialweb-computer-requester): scripts/page-round.mjs (0009)
     #[serde(default)]
     pub page_repo: Option<String>,
@@ -50,6 +53,9 @@ pub struct Gateway {
     pub ssh: String,
     #[serde(default)]
     pub ssh_port: Option<u16>,
+    /// the gateway's requester DID (its tenant nodes' VMs on the bidders: 0001 section 6 orphan checks)
+    #[serde(default)]
+    pub requester_did: Option<String>,
     /// the gateway's own kcp (fault injection, NodeClaim winners); absent on prod unless the lead grants it
     #[serde(default)]
     pub kcp: Option<KcpEndpoint>,

@@ -37,6 +37,7 @@ async fn vm_timeline_pin_orphan_check() {
         let term = eventually("vm.terminated pinned", 2 * MIN, Duration::from_secs(3), || async { ctx.at.record_of(&winner, VM_TERMINATED, &termination_rkey(&receipt)).await }).await?;
         ctx.reading("terminated", json!({ "reason": term["reason"], "request": term["request"]["uri"], "createdAt": term["createdAt"] }));
         ensure!(term["reason"] == "deleted_on_request", "vm.terminated {term}");
+        ctx.release_record_gone(&ctx.account("alice")?.did, &receipt).await?;
         match bk {
             Some(bk) => {
                 eventually("the host empty of the receipt", 2 * MIN, Duration::from_secs(3), || async { Ok(bk.vms_of(&rk).await?.is_empty().then_some(())) }).await?;

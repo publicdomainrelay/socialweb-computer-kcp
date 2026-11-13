@@ -68,6 +68,7 @@ async fn one(ctx: &std::sync::Arc<Ctx>, label: &str) -> Result<Value> {
     ctx.check_logs(&rr.logs())?;
     let did = ctx.account("alice")?.did.clone();
     let n = ctx.records_gone(&rr.logs(), &did).await?;
+    ctx.release_record_gone(&did, &receipt).await?;
     Ok(json!({
         "winner": winner, "held_s": held, "ssh_fresh_s": first["seconds"], "release_s": rel, "records_checked": n,
         "host_empty": ctx.host_empty(&winner, receipt.rsplit('/').next().unwrap_or("-")).await?,

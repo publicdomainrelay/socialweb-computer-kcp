@@ -83,9 +83,15 @@ async fn compat_cli() {
             std::fs::read_to_string(&rr.log)?.contains("uid="),
             "no `id` output"
         );
+        let receipt = rr.summary()?["contract"]["receiptUri"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         ctx.reading("release_s", rr.release().await?);
         let did = ctx.account("alice")?.did.clone();
         ctx.reading("records_checked", ctx.records_gone(&rr.logs(), &did).await?);
+        // 0006 rollout 19: a CLI release left its vm.delete
+        ctx.release_record_gone(&did, &receipt).await?;
         ctx.check_logs(&rr.logs())?;
         Ok(())
     })

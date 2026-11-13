@@ -118,6 +118,37 @@ impl Ctx {
         Ok(())
     }
 
+    /// A root host of a staging target (None on prod: root steps run only on staging VMs).
+    pub fn root_host(&self) -> Option<String> {
+        (self.target.name != "prod")
+            .then(|| self.target.root_hosts.first().cloned())
+            .flatten()
+    }
+
+    /// Run `cmd` as root on `host` (ssh); stdout. `stdin` is written to its stdin (a password, never an argument).
+    pub async fn root(&self, host: &str, cmd: &str, stdin: Option<&str>) -> Result<String> {
+        use tokio::io::AsyncWriteExt;
+        let mut c = tokio::process::Command::new("ssh");
+        c.args(["-o", "BatchMode=yes", host, cmd])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = c.spawn()?;
+        let mut sin = child.stdin.take().unwrap();
+        if let Some(s) = stdin {
+            sin.write_all(s.as_bytes()).await?;
+        }
+        drop(sin);
+        let out = child.wait_with_output().await?;
+        ensure!(
+            out.status.success(),
+            "{host}: `{cmd}` exited {}: {}",
+            out.status,
+            requester::tail(&String::from_utf8_lossy(&out.stderr))
+        );
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
     /// The target's bidders whose kcp it names, connected.
     pub async fn bidder_kcps(&self) -> Result<Vec<bidder::BidderKcp>> {
         let mut out = vec![];
@@ -143,6 +174,27 @@ impl Ctx {
         Ok(uris.len())
     }
 
+    /// The renter's release record (`vm.delete` at release_rkey(receipt)) is gone once the release finished (0006: a
+    /// CLI release left it).
+    pub async fn release_record_gone(&self, did: &str, receipt: &str) -> Result<()> {
+        let uri = format!("at://{did}/{VM_DELETE}/{}", release_rkey(receipt));
+        let left = self.at.still_present(std::slice::from_ref(&uri)).await?;
+        ensure!(
+            left.is_empty(),
+            "the release's vm.delete is still in the repo: {uri}"
+        );
+        Ok(())
+    }
+
+    /// The ident.link walk of `agent` (identlink, verified sync.getRecord) against the target's PLC.
+    pub async fn walk(&self, agent: &str) -> identlink::Walk {
+        let io = identlink::HttpIo {
+            plc: self.target.plc.trim_end_matches('/').into(),
+            ..Default::default()
+        };
+        identlink::walk(&io, agent, Default::default()).await
+    }
+
     /// The winner's host holds no VM object naming `needle` (0008 orphan check). None: the target names no
     /// kcp for that bidder, so it is not read.
     pub async fn host_empty(&self, winner: &str, needle: &str) -> Result<Option<bool>> {
@@ -156,20 +208,11 @@ impl Ctx {
     }
 }
 
-/// The rkey of a receipt's vm.terminated record: termination-payload-<first 32 hex of sha256("terminated:<receipt>")>
-/// (market.EventRKeys(market.TerminationKey)), read with one getRecord on the bidder's repo (0008).
-pub fn termination_rkey(receipt: &str) -> String {
-    use sha2::Digest;
-    format!(
-        "termination-payload-{}",
-        &format!(
-            "{:x}",
-            sha2::Sha256::digest(format!("terminated:{receipt}"))
-        )[..32]
-    )
-}
-
-pub const VM_TERMINATED: &str = "com.publicdomainrelay.temp.compute.events.vm.terminated";
+/// The market's computed rkeys (identlink): a receipt's vm.terminated (bidder repo) and vm.delete (renter repo).
+pub use identlink::market::{
+    VM_DELETE_NSID as VM_DELETE, VM_TERMINATED_NSID as VM_TERMINATED, release_rkey,
+    termination_rkey,
+};
 
 /// Wait for `f` to answer Some, polling every `every`.
 pub async fn eventually<T, F: Future<Output = Result<Option<T>>>>(

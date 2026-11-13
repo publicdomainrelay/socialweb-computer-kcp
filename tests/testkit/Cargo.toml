@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 atlibs-host.workspace = true
+atlibs-iroh.workspace = true
+identlink.workspace = true
 futures.workspace = true
 http = "1"
 k8s-openapi.workspace = true

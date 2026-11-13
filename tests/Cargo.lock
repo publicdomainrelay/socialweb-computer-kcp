@@ -119,7 +119,7 @@ dependencies = [
 [[package]]
 name = "atlibs-host"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=9adbae84c59fa7c30916489b6f110f9f36bc2bb0#9adbae84c59fa7c30916489b6f110f9f36bc2bb0"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=6e113df320bc705ec93da7b299ef14093f5fdb6d#6e113df320bc705ec93da7b299ef14093f5fdb6d"
 dependencies = [
  "aes-gcm",
  "atproto-identity",
@@ -130,7 +130,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "identlink",
  "k256 0.13.4",
  "p256 0.13.2",
  "rand_core 0.6.4",
@@ -145,6 +144,19 @@ dependencies = [
  "url",
  "wasmtime",
  "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "atlibs-iroh"
+version = "0.2.0"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh?rev=e1cdf12970f6f0a14c1b8c3a04e362af07904743#e1cdf12970f6f0a14c1b8c3a04e362af07904743"
+dependencies = [
+ "atlibs-host",
+ "base64 0.22.1",
+ "percent-encoding",
+ "rand_core 0.6.4",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1613,6 +1625,7 @@ dependencies = [
  "k256 0.13.4",
  "multibase",
  "p256 0.13.2",
+ "reqwest 0.12.28",
  "serde",
  "serde_bytes",
  "serde_ipld_dagcbor",
@@ -3390,6 +3403,7 @@ name = "system"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "k8s-openapi",
  "kube",
  "serde_json",
@@ -3439,8 +3453,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "atlibs-host",
+ "atlibs-iroh",
  "futures",
  "http",
+ "identlink",
  "k8s-openapi",
  "kube",
  "reqwest 0.12.28",

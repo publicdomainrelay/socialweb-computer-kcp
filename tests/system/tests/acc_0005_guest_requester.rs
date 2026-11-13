@@ -55,11 +55,13 @@ async fn a_r2_nested_vm_cascade() {
         let req = ctx.at.record_of(&r2, "com.publicdomainrelay.temp.market.associationRequest", &renter).await?.context("R2 associationRequest")?;
         ensure!(req["principal"] == renter.as_str() && req["contract"] == grant["contract"], "associationRequest {req}");
         ensure!(ctx.at.also_known_as(&r2).await?.contains(&format!("https://ident.link/agent-of/{renter}")));
-        let (ok, walk) = rr.bin.run(&["internal", "association", &r2]).await?;
-        ensure!(ok && walk.contains(&renter), "internal association {r2}: {walk}");
+        let walk = ctx.walk(&r2).await;
+        ensure!(walk.errors.is_empty() && walk.roots == [renter.clone()], "walk of R2 {walk:?}");
 
         let secs = rr.release().await?;
         ctx.reading("release_s", secs);
+        // the outer-only release cascades: R2 released first (r2Released), the guest tombstones its DIDs
+        rr.wait_log("requester_guest_requester_released", MIN).await?;
         rr.wait_log("requester_association_deleted", 2 * MIN).await?;
         let left = ctx.at.still_present(&[format!("at://{renter}/{ENDORSE}/{r2}"), format!("at://{renter}/{ASSOC}/{r2}")]).await?;
         ensure!(left.is_empty(), "left: {left:?}");
@@ -101,8 +103,11 @@ async fn b_colocated_and_out_of_band_loss() {
         ensure!(peer["iroh"].is_string() && peer.get("lease").is_none(), "mesh1 peer {peer}");
         ensure!(ctx.at.record_of(&r2, ASSOC, &mesh1).await?.is_some(), "R2's grant of mesh1");
         ensure!(ctx.at.also_known_as(&mesh1).await?.contains(&format!("https://ident.link/agent-of/{r2}")));
-        let (ok, walk) = rr.bin.run(&["internal", "association", &mesh1]).await?;
-        ensure!(ok && walk.contains(&renter), "internal association mesh1: {walk}");
+        let walk = ctx.walk(&mesh1).await;
+        ensure!(
+            walk.errors.is_empty() && walk.roots == [renter.clone()] && walk.ancestors.iter().any(|a| a.did == r2 && a.depth == 1),
+            "walk of mesh1 {walk:?}"
+        );
 
         // step 5: out-of-band loss on the winner's kcp; else an ordinary release (step 4)
         let s = rr.summary()?;

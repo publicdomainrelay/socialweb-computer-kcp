@@ -61,6 +61,7 @@ async fn operator_delete_ends_the_vm() {
         rr.wait_log("requester_contract_records_deleted", 3 * MIN)
             .await?;
         ctx.reading("records_checked", ctx.records_gone(&rr.logs(), &did).await?);
+        ctx.release_record_gone(&did, &receipt).await?;
         ensure!(
             bk.vms_of(receipt.rsplit('/').next().unwrap())
                 .await?

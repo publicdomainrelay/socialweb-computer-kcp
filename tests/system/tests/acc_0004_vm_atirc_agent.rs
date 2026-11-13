@@ -68,10 +68,13 @@ async fn agent_vm_chain_answer_release() {
             let keys = ctx.at.rotation_keys(d).await?;
             ensure!(keys.len() == 2, "{d} rotationKeys {keys:?}: want [renter key, VM localPDS key]");
         }
-        let (ok, walk) = rr.bin.run(&["internal", "association", agent]).await?;
-        ensure!(ok, "internal association {agent}: {walk}");
-        let walk: Value = serde_json::from_str(walk.lines().find(|l| l.starts_with('{')).unwrap_or("{}"))?;
-        ensure!(walk["roots"] == json!([renter]) && walk["expiresAt"] == grant["expiresAt"], "walk {walk}");
+        // the walk (identlink, verified getRecord): agent -> R2 (depth 1) -> renter (the root), the grants' expiresAt
+        let walk = ctx.walk(agent).await;
+        let grant_exp = chrono::DateTime::parse_from_rfc3339(grant["expiresAt"].as_str().unwrap_or_default())?;
+        ensure!(
+            walk.errors.is_empty() && walk.roots == [renter.clone()] && walk.ancestors.iter().any(|a| a.did == r2 && a.depth == 1) && walk.expires_at.map(|e| e.timestamp()) == Some(grant_exp.timestamp()),
+            "walk {walk:?}"
+        );
 
         // the owner node reaches the agent; it answers a prompt on the mesh
         let node = OwnerNode::start(&ctx, &owner, "alice", "st-owner", std::slice::from_ref(&peer)).await?;
@@ -86,13 +89,18 @@ async fn agent_vm_chain_answer_release() {
         ctx.reading("winner", &winner);
         let secs = rr.release().await?;
         ctx.reading("release_s", secs);
-        ensure!(secs < 120.0, "release took {secs} s (fast release: seconds, not the 3 min timeout)");
+        // fast release: r2Released ~9 s after the release, the CLI stops ~5 s after Released; the guest tombstones
+        ensure!(secs < 60.0, "release took {secs} s (fast release: ~15 s, not the 3 min timeout)");
+        rr.wait_log("requester_guest_requester_released", MIN).await?;
+        rr.wait_log("requester_guest_dids_tombstoned", MIN).await?;
+        ensure!(rr.logs().iter().all(|p| requester::log_lines(p, "requester_guest_requester_release_timeout").is_empty()), "the release waited for the guest's timeout");
         let left = ctx.at.still_present(&[format!("at://{renter}/{ENDORSE}/{r2}"), format!("at://{renter}/{ASSOC}/{r2}")]).await?;
         ensure!(left.is_empty(), "left after release: {left:?}");
         for d in [r2.as_str(), agent] {
             eventually(&format!("{d} tombstoned"), 3 * MIN, Duration::from_secs(5), || async { Ok(ctx.at.tombstoned(d).await?.then_some(())) }).await?;
         }
         ctx.reading("records_checked", ctx.records_gone(&rr.logs(), &renter).await?);
+        ctx.release_record_gone(&renter, &receipt).await?;
         ctx.reading("host_empty", ctx.host_empty(&winner, receipt.rsplit('/').next().unwrap_or("-")).await?);
         ctx.check_logs(&rr.logs())?;
         for p in rr.logs() {
