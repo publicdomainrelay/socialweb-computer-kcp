@@ -316,7 +316,8 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
         }
         Event::Result { id, result, .. } => {
             let o = result.output().cloned().unwrap_or_else(|e| json!({ "ok": false, "output": e.to_string() }));
-            let ok = o["ok"] == true && result.output().is_ok();
+            // request.put answers {remote, bytes}; request.ssh {ok, output}
+            let ok = result.output().is_ok() && (o["ok"] == true || o["bytes"].is_number());
             let text = o["output"].as_str().unwrap_or_default().to_string();
             if id == "down" || id == "atproto:down-poll" {
                 let rc = text.split_once('\n').map(|(rc, _)| rc.trim()).unwrap_or(text.trim());
