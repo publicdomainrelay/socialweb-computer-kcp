@@ -306,12 +306,6 @@ impl Swc {
     }
 
     async fn requester_start(&self, input: &Value) -> Result<Value, String> {
-        if self.acct()?.guest_requester {
-            return Err(
-                "the guest requester runs `run request` only, not a long-lived `run requester`"
-                    .into(),
-            );
-        }
         let name = str_of(input, "name")?.to_string();
         let state = self.dir.join(format!("requester-{name}"));
         std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;
