@@ -8,6 +8,10 @@
 # Run it from a checkout before pushing a tests/ or rust/ change:  tests/publish-test-host.sh   (BUILD_HOST: hat-8)
 set -eu
 host="${BUILD_HOST:-hat-8}"
+# the build half runs in place when BUILD_HOST is local or names this host (the build host itself, no ssh to itself)
+local=false
+case "$host" in local) local=true ;; *) [ "$host" = "$(hostname -s)" ] && local=true ;; esac
+on() { if $local; then sh -c "cd && $1"; else ssh "$host" "$1"; fi; }
 base=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
 if [ "${1:-}" != --on-build-host ]; then
 	cd "$(dirname "$0")/.."
@@ -17,12 +21,13 @@ if [ "${1:-}" != --on-build-host ]; then
 		exit 0
 	fi
 	dir=".tmp/swc-tests/$tree"
-	ssh "$host" "rm -rf $dir && mkdir -p $dir"
-	git archive HEAD tests rust scripts/publish-spaces.ts | ssh "$host" "tar -C $dir -xf -"
-	exec ssh "$host" "sh $dir/tests/publish-test-host.sh --on-build-host $tree $rtree $dir"
+	on "rm -rf $dir && mkdir -p $dir"
+	git archive HEAD tests rust scripts/publish-spaces.ts | on "tar -C $dir -xf -"
+	on "sh $dir/tests/publish-test-host.sh --on-build-host $tree $rtree $dir"
+	exit
 fi
 tree="$2" rtree="$3" dir="$HOME/$4"
-[ "$(hostname -s)" = "$host" ] || { echo "publish-test-host: not on $host" >&2; exit 1; }
+$local || { echo "publish-test-host: not on $host" >&2; exit 1; }
 . "$HOME/.spaces_swc_kcp_source"
 publish() { deno run -A --no-lock "$dir/scripts/publish-spaces.ts" --dir "$1" --prefix "$2" --content-addressed; }
 if ! curl -sfo /dev/null "$base/tests/$tree/SHA256SUMS"; then
