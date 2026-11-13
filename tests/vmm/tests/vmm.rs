@@ -163,6 +163,9 @@ fn webrtc_forward(guest: &Guest, port: u16) {
 
 fn nested(guest: &Guest) {
     assert_eq!(guest.sh("test -c /dev/kvm && echo yes"), "yes", "no /dev/kvm in a QEMU guest");
+    let flag = guest.sh("grep -m1 -o -w 'vmx\\|svm' /proc/cpuinfo || true");
+    assert!(flag == "vmx" || flag == "svm", "the QEMU guest's CPU has neither vmx nor svm (-cpu host)");
+    eprintln!("qemu nested: guest cpu flag {flag}");
     let exe = PathBuf::from(need("SOCIALWEB_QEMU_PATH"));
     let root = exe.parent().unwrap().parent().unwrap().parent().unwrap();
     let tar = Command::new("tar").arg("-C").arg(root).args(["-cf", "-", "usr"]).output().unwrap();
