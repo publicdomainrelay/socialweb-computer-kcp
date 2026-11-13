@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 
@@ -92,11 +91,11 @@ func borrowedHandles(ctx context.Context, plcURL string, did syntax.DID) ([]stri
 			continue
 		}
 		owner, err := dir.ResolveHandle(ctx, handle)
-		switch {
-		case errors.Is(err, identity.ErrHandleNotFound), err == nil && owner != did:
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil || owner != did {
 			out = append(out, entry)
-		case err != nil:
-			return nil, err
 		}
 	}
 	return out, nil
