@@ -633,7 +633,7 @@ again; user_data installs `atirc-agent.service`
   module's decisions offline. Never leave a frozen run past its TTL by hand.
 - atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh and identlink follow one tested
   set, atlibs `pins.json`, as the knotless runner does (fork branch `runner-atlibs-composition`, deployed by
-  knotless-fork-infra `versions.env`). CI's `atlibs-pins` job fails when they are behind; catch up (rewrites the revs,
+  knotless-fork-infra `versions.env`). CI's `atlibs-pins` job fails when either is behind; catch up (rewrites the revs,
   `cargo update --workspace`, `cargo check`), then commit:
   `curl -sSf https://knotless.dev/johnandersen777.bsky.social/atlibs/raw/main/pins.sh | sh -s -- sync`.
   A host older than its modules refuses them before they run: `this host lacks <nsid>; update atlibs-host (pins
