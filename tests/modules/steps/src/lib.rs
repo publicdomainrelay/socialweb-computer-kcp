@@ -48,6 +48,29 @@ pub fn sw(kind: &str, name: &str) -> Value {
     json!({ "apiVersion": "socialweb.computer/v1alpha1", "kind": kind, "name": name })
 }
 
+/// Before an apply: every ssh public key in a templated spec is THIS run's (from the host), and there is one. A key
+/// baked into a file (an earlier run's) or a placeholder left in is refused: the guest would refuse our ssh.
+pub fn keys_are(spec: &str, key: &str) -> Result<(), String> {
+    let key = key.trim();
+    if key.is_empty() || !key.starts_with("ssh-") {
+        return Err("the run has no ssh public key from the host".into());
+    }
+    let mut n = 0;
+    for l in spec.lines() {
+        let t = l.trim().trim_start_matches("- ").trim().trim_matches(|c| c == '"' || c == '\'');
+        if ["ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-", "sk-ssh-"].iter().any(|p| t.starts_with(p)) {
+            if t != key {
+                return Err(format!("the spec carries an ssh key that is not this run's: {}", t.chars().take(40).collect::<String>()));
+            }
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return Err("the spec carries no ssh key".into());
+    }
+    Ok(())
+}
+
 pub struct S {
     pub st: Value,
     pub now: f64,

@@ -51,7 +51,9 @@ async fn examples_vm_deno_restart_release() {
             });
         }
         let t = ctx.t();
-        kcp.apply_yaml(&fill(example("vm.yaml"))).await?;
+        let vm = fill(example("vm.yaml"));
+        ensure_keys(&vm, &key)?;
+        kcp.apply_yaml(&vm).await?;
         kcp.apply_yaml(&example("deno-sandbox.yaml")).await?;
         kcp.wait_phase("Infra", "quickstart-vm", "Deployed", 10 * MIN)
             .await?;

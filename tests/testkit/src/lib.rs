@@ -214,6 +214,23 @@ pub use identlink::market::{
     termination_rkey,
 };
 
+/// Before an apply: every ssh public key in a templated spec is this run's `key`, and there is one (a key baked into
+/// a file, or a placeholder left in, would make the guest refuse our ssh).
+pub fn ensure_keys(spec: &str, key: &str) -> Result<()> {
+    let key = key.trim();
+    ensure!(key.starts_with("ssh-"), "the run has no ssh public key");
+    let mut n = 0;
+    for l in spec.lines() {
+        let t = l.trim().trim_start_matches("- ").trim().trim_matches(|c| c == '"' || c == '\'');
+        if ["ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-", "sk-ssh-"].iter().any(|p| t.starts_with(p)) {
+            ensure!(t == key, "the spec carries an ssh key that is not this run's: {}", t.chars().take(40).collect::<String>());
+            n += 1;
+        }
+    }
+    ensure!(n > 0, "the spec carries no ssh key");
+    Ok(())
+}
+
 /// Wait for `f` to answer Some, polling every `every`.
 pub async fn eventually<T, F: Future<Output = Result<Option<T>>>>(
     what: &str,

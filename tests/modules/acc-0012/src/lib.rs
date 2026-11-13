@@ -44,6 +44,11 @@ fn run_0012(run: Run<Value>) -> Result<Handle, String> {
                 e if e.starts_with("ex-") => {
                     let j: usize = e[3..].parse().unwrap_or(0);
                     let text = o["text"].as_str().unwrap_or_default().replace(KEY, key.trim());
+                    if text.contains("sshAuthorizedKeys")
+                        && let Err(e) = steps::keys_are(&text, &key)
+                    {
+                        return Ok(s.fail(format!("{} before the apply: {e}", EXAMPLES[j])));
+                    }
                     s.st["ex"][EXAMPLES[j]] = json!(text);
                     h = h.call(kube(&format!("dry-{j}"), "apply", rq, json!({ "yaml": text, "dryRun": true })));
                 }

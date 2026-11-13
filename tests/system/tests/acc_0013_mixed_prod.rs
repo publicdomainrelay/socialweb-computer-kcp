@@ -133,7 +133,9 @@ async fn a_run_requester_mixed_prod() {
                 k.wait_gone("EphemeralInfra", "mixedprod", 5 * MIN).await
             });
         }
-        kcp.apply_yaml(&mixed_prod(&key)).await?;
+        let spec = mixed_prod(&key);
+        ensure_keys(&spec, &key)?;
+        kcp.apply_yaml(&spec).await?;
         kcp.wait_phase("EphemeralInfra", "mixedprod", "Deployed", 10 * MIN).await?;
         ctx.reading("deployed_s", ctx.t() - t_apply);
         let mut winners = json!({});

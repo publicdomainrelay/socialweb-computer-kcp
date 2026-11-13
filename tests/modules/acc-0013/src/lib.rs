@@ -122,9 +122,14 @@ fn a_handler(run: Run<Value>) -> Result<Handle, String> {
                 v if v.starts_with("vouch-") => {}
                 "bundle" => h = h.call(host("ex", "example", json!({ "name": "mixed-prod.yaml" }))),
                 "ex" => {
+                    let key = s.st["key"].as_str().unwrap_or_default().to_string();
+                    let spec = mixed_prod(o["text"].as_str().unwrap_or_default(), &key);
+                    if let Err(e) = steps::keys_are(&spec, &key) {
+                        return Ok(s.fail(format!("mixed-prod.yaml before the apply: {e}")));
+                    }
                     s.set("deployed");
                     s.mark("apply");
-                    h = h.call(kube("apply", "apply", rq, json!({ "yaml": mixed_prod(o["text"].as_str().unwrap_or_default(), s.st["key"].as_str().unwrap_or_default()) })));
+                    h = h.call(kube("apply", "apply", rq, json!({ "yaml": spec })));
                 }
                 "apply" => return Ok(s.keep(h.timer("poll", 5_000))),
                 "ei" => {
