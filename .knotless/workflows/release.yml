@@ -2,7 +2,8 @@
 # image, published to the bucket (the paths GitHub CI used): main/<sha>/ and main/latest/ (a tag: releases/<tag>/),
 # downloads/<sha256>/, guest-images/<target>/<pin>/. After gate and pins pass at the same commit. The bucket key is a
 # sealed secret given only to pushes to main and v* tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a
-# pull) the publish steps are skipped. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
+# pull) the publish steps are skipped. A newer push to the ref cancels an older commit's release (each workflow's runs:
+# knotless's superseded: cancel) until its publish starts. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
@@ -83,6 +84,8 @@ steps:
       scripts/asset-cache-upload.sh /root/release-build/cache/blobs
   - name: publish
     on: {refs: [refs/heads/main, refs/tags/v*]}
+    # a newer push cancels a release before it publishes, never once it has started (main/latest half written)
+    finish: true
     timeout: 90
     run: |
       . /opt/ci/env
