@@ -751,8 +751,12 @@ impl Swc {
     /// A failed run's logs into `out` (the dump's logs/), before the freeze or the cleanup, each redacted: per
     /// invocation `<name>/local/` (this host's request log, its requester's dev logs) and `<name>/vm/` (over
     /// request.ssh: the VM's journal and every *.log under /home and /root: core.log, dev logs, step logs), and per
-    /// requester its log. What could not be read goes into `<name>/errors.txt`.
+    /// requester its log. What could not be read goes into `<name>/errors.txt`. Each the last 512 KiB, 6 MiB in all,
+    /// smallest first (an artifact reaches the runner through the guest agent's 16 MiB job output ring), the rest
+    /// named in `skipped.txt`.
     pub async fn collect_logs(&self, out: &Path) {
+        let mut room = LOGS_MAX;
+        let mut skipped = vec![];
         let requests: Vec<(String, PathBuf)> = self
             .requests
             .lock()
@@ -764,15 +768,17 @@ impl Swc {
             let o = out.join(&name);
             let mut files = vec![state.join(format!("{name}-request.log"))];
             walk(&state.join("requests").join(&name), &mut files);
-            for f in &files {
-                copy_redacted(f, &o.join("local").join(f.strip_prefix(&state).unwrap_or(f)));
+            for f in by_size(files) {
+                let to = o.join("local").join(f.strip_prefix(&state).unwrap_or(&f));
+                copy_redacted(&f, &to, &mut room, &mut skipped);
             }
             match self.vm_logs(&name).await {
                 Ok(tree) => {
                     let mut files = vec![];
                     walk(&tree, &mut files);
-                    for f in &files {
-                        copy_redacted(f, &o.join("vm").join(f.strip_prefix(&tree).unwrap_or(f)));
+                    for f in by_size(files) {
+                        let to = o.join("vm").join(f.strip_prefix(&tree).unwrap_or(&f));
+                        copy_redacted(&f, &to, &mut room, &mut skipped);
                     }
                     let _ = std::fs::remove_dir_all(&tree);
                 }
@@ -784,7 +790,11 @@ impl Swc {
         }
         for (name, (state, _)) in self.requesters.lock().await.iter() {
             let f = state.join(format!("{name}.log"));
-            copy_redacted(&f, &out.join(format!("requester-{name}")).join(format!("{name}.log")));
+            let to = out.join(format!("requester-{name}")).join(format!("{name}.log"));
+            copy_redacted(&f, &to, &mut room, &mut skipped);
+        }
+        if !skipped.is_empty() {
+            let _ = std::fs::write(out.join("skipped.txt"), skipped.join("\n") + "\n");
         }
     }
 
@@ -947,12 +957,27 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The last 8 MiB of a log, redacted, at `to` (0600).
-fn copy_redacted(from: &Path, to: &Path) {
+/// A failed run's logs/ in all, and each log's last bytes kept.
+const LOGS_MAX: u64 = 6 << 20;
+const LOG_MAX: usize = 512 << 10;
+
+fn by_size(mut files: Vec<PathBuf>) -> Vec<PathBuf> {
+    files.sort_by_key(|f| f.metadata().map(|m| m.len()).unwrap_or(0));
+    files
+}
+
+/// The last LOG_MAX bytes of a log, redacted, at `to` (0600), while `room` lasts; else `to` goes into `skipped`.
+fn copy_redacted(from: &Path, to: &Path, room: &mut u64, skipped: &mut Vec<String>) {
     let Ok(bytes) = std::fs::read(from) else {
         return;
     };
-    let text = String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(8 << 20)..]);
+    let tail = &bytes[bytes.len().saturating_sub(LOG_MAX)..];
+    if tail.len() as u64 > *room {
+        skipped.push(to.display().to_string());
+        return;
+    }
+    *room -= tail.len() as u64;
+    let text = String::from_utf8_lossy(tail);
     if let Some(d) = to.parent() {
         let _ = std::fs::create_dir_all(d);
     }

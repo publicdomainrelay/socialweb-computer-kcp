@@ -628,9 +628,9 @@ again; user_data installs `atirc-agent.service`
 - Tests are atlibs compositions: step-loop modules (`tests/modules`, `tests/compositions/<runbook>`), host handlers
   in Rust (atlibs-kube, atlibs-ssh, `tests/host`); `tests/testkit/README.md`. A runbook's Rust test stays until its
   composition passes on staging and prod.
-- A failed composition run freezes (outside CI): attach with `swc-test-host attach <run dir>` (MCP), read `failure`,
-  `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then `cleanup`; `swc-test-host replay <run dir>` reruns the
-  module's decisions offline. Never leave a frozen run past its TTL by hand.
+- A failed composition run freezes (the default outside CI; knotless CI's test.yml freezes too): attach with
+  `swc-test-host attach <run dir>` (MCP), read `failure`, `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then
+  `cleanup`; `swc-test-host replay <run dir>` reruns the module's decisions offline. Never leave a frozen run past its TTL by hand.
 - atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh and identlink follow one tested
   set, atlibs `pins.json`, as the knotless runner does (fork branch `runner-atlibs-composition`, deployed by
   knotless-fork-infra `versions.env`). CI's `atlibs-pins` job fails when either is behind; catch up (rewrites the revs,
@@ -660,8 +660,9 @@ Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.js
 `resources.json`, `run.json`, and on a failure `logs/`, read before the freeze or the cleanup: per invocation
 `<name>/local/` (the request log and its requester's dev logs) and `<name>/vm/` (over request.ssh: the VM's journal and
 every `*.log` under /home and /root: core.log, dev logs, step logs; a failed staging run's `dev down` keeps its state for
-this); no secret in any of them: secret-named JSON keys as in the dump, other text cut after a secret word's `=` or `:`,
-JWT-like words and PEM blocks dropped):
+this; each its last 512 KiB, 6 MiB in all, smallest first, the rest named in `logs/skipped.txt`: an artifact reaches the
+runner through the guest agent's 16 MiB job output ring); no secret in any of them: secret-named JSON keys as in the
+dump, other text cut after a secret word's `=` or `:`, JWT-like words and PEM blocks dropped):
 
 ```sh
 # 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to
@@ -677,9 +678,16 @@ jq . "$R/failure.json"
 #    the same name): the first diverging tick, then the states there
 cd tests && SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- replay "$R"
 cargo run -q -p swc-test-host -- replay "$R" --to <seq> | jq .statesAt
-# 3. a frozen run: attach (MCP on stdio; the CI route over the check's iroh ticket: TODO with the CI freeze), then the
-#    tools state, ticks, state_at, resources, kube_get, ssh_exec, run_assert, and continue or cleanup
+# 3. a frozen run: attach (MCP on stdio), then the tools state, ticks, state_at, failure, resources, kube_get, ssh_exec,
+#    run_assert, and continue or cleanup
 cargo run -q -p swc-test-host -- attach "$R"
+#    a frozen CI run (test.yml freezes a failure for its --freeze-ttl, then cleans up; its `attach` is what a given key
+#    runs on the CI VM): the owner or a collaborator gets a handle from the runner (dev.knotless.getAttach, service auth;
+#    the CI VM's iroh ticket and host keys, never in the check record; the key goes with the VM), then attach or end it
+ssh-keygen -q -t ed25519 -N '' -f ~/.tmp/ci-attach/attach_key
+knotless run attach knotless://<owner>/<repo> --workflow <wf> --commit <sha> --key ~/.tmp/ci-attach/attach_key.pub > attach.json
+cargo run -q -p swc-test-host -- attach --ci attach.json --key ~/.tmp/ci-attach/attach_key    # needs dumbpipe on PATH
+cargo run -q -p swc-test-host -- cleanup --ci attach.json --key ~/.tmp/ci-attach/attach_key   # cleanup: the step ends, VMs released
 # 4. a local repro: freeze at the step before the failure
 SWC_TARGET=$PWD/targets/prod.json cargo run -q -p swc-test-host -- compositions/<runbook> --on-fail freeze --freeze-at <step>
 # 5. leave nothing behind
