@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"cmp"
 	"net"
 	"slices"
 	"strings"
@@ -199,6 +200,27 @@ var (
 		PublicJetstreamWestURL,
 	}
 )
+
+func (n *MarketNetworkValue) MergeComms(c *MarketComms) *MarketComms {
+	if n == nil || n.Comms == nil {
+		return c
+	}
+	if c == nil {
+		return n.Comms
+	}
+	out := *c
+	out.Mode = cmp.Or(out.Mode, n.Comms.Mode)
+	if out.EventSourceRefs == nil {
+		out.EventSourceRefs = n.Comms.EventSourceRefs
+	}
+	if out.RelayURLs == nil {
+		out.RelayURLs = n.Comms.RelayURLs
+	}
+	if out.JetstreamURLs == nil {
+		out.JetstreamURLs = n.Comms.JetstreamURLs
+	}
+	return &out
+}
 
 func (c *MarketComms) FirehoseRelays(network *MarketNetworkValue) []string {
 	if c != nil && c.RelayURLs != nil {

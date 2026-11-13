@@ -400,7 +400,7 @@ func (p *pass) desired(plan compose.AccountPlan, ident *v1alpha1.ComponentIdenti
 		MarketExposureRef:    requesterExposureRef(marketrequester.RequesterComponent),
 		BidderDIDs:           append([]string(nil), o.Spec.BidderDids...),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
-		Comms:                o.Spec.Comms,
+		Comms:                o.Spec.Network.MergeComms(o.Spec.Comms),
 		Ingress:              o.Spec.RequesterIngress,
 		SuspendParticipation: o.Spec.Suspend,
 	}}
@@ -768,7 +768,7 @@ func (p *pass) reconcile(ctx context.Context) (ctlruntime.Result, error) {
 	if err := p.ensure(ctx, desired); err != nil {
 		return p.retry("", err)
 	}
-	comms, force := compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms), compose.OAuthReceiveOnly(plan.Mode)
+	comms, force := compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Network.MergeComms(o.Spec.Comms)), compose.OAuthReceiveOnly(plan.Mode)
 	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole, Comms: comms,
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: force,
 		Public: compose.RequesterPublicSources(comms, o.Spec.Network, compose.RequesterCommsMode(comms, force))})

@@ -483,7 +483,7 @@ func (p *pass) desired(ctx context.Context, plan compose.AccountPlan, id *v1alph
 		GuestSSHKeysFile:     guestSSHKeysFile,
 		BidderDIDs:           slices.Clone(o.Spec.BidderDids),
 		AcceptCopies:         int32(compose.OptionInt(o.Spec.Options, "accept-copies")),
-		Comms:                o.Spec.Comms,
+		Comms:                o.Spec.Network.MergeComms(o.Spec.Comms),
 		Ingress:              o.Spec.RequesterIngress,
 		SuspendParticipation: o.Spec.Suspend,
 	}
@@ -692,7 +692,7 @@ func (p *pass) run(ctx context.Context, plan compose.AccountPlan, id *v1alpha1.M
 	if err := p.c.EnsureLinked(ctx, p.r, all, desired); err != nil {
 		return p.retry("", err)
 	}
-	comms, force := compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Comms), compose.OAuthReceiveOnly(plan.Mode)
+	comms, force := compose.OverrideComms(o.Spec.Components, compose.ComponentKindRequester, marketrequester.RequesterComponent, o.Spec.Network.MergeComms(o.Spec.Comms)), compose.OAuthReceiveOnly(plan.Mode)
 	streams, err := c.ApplyMarketStreams(ctx, r, compose.Streams{Role: compose.RequesterStreamRole, Workspace: ws, Comms: comms,
 		Sources: compose.SourceInput{Network: o.Spec.Network}, ForceFirehose: force,
 		Public: compose.RequesterPublicSources(comms, o.Spec.Network, compose.RequesterCommsMode(comms, force))})
