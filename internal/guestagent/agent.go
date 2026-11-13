@@ -169,6 +169,7 @@ func (a *Agent) Run(ctx context.Context, ready func()) error {
 	if a.cfg.Memory {
 		a.wg.Go(func() { a.runMemory(ctx) })
 	}
+	a.wg.Go(func() { a.reportImage(ctx) })
 	if ready != nil {
 		ready()
 	}
