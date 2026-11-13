@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/atproto/atcrypto"
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -179,24 +180,36 @@ func (r *requestRun) guestHandshake(ctx context.Context, obj *v1alpha1.MarketIde
 func (r *requestRun) reportAndAwaitRef(ctx context.Context, watcher *fsnotify.Watcher, root v1alpha1.MarketRequesterSpec, did, principal string) {
 	defer watcher.Close()
 	want := "at://" + did + "/" + market.AssociationRequestNSID + "/" + principal
-	if _, err := r.kcp.AwaitRecord(ctx, compose.AssociationRequestRecordName, r.networkTimeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
-		if rec.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && rec.Status.ObservedGeneration == rec.Generation {
-			return false, fmt.Errorf("the association request record failed: %s", rec.Status.Message)
+	handOff := func() error {
+		if _, err := r.kcp.AwaitRecord(ctx, compose.AssociationRequestRecordName, r.networkTimeout, func(rec *v1alpha1.AtprotoRecord) (bool, error) {
+			if rec.Status.Phase == v1alpha1.AtprotoRecordPhaseFailed && rec.Status.ObservedGeneration == rec.Generation {
+				return false, fmt.Errorf("the association request record failed: %s", rec.Status.Message)
+			}
+			return rec.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied && rec.Status.URI == want && rec.Status.Cid != "", nil
+		}); err != nil {
+			return fmt.Errorf("the association request record is not in this requester's repo: %w", err)
 		}
-		return rec.Status.Phase == v1alpha1.AtprotoRecordPhaseApplied && rec.Status.URI == want && rec.Status.Cid != "", nil
-	}); err != nil {
-		r.a.log.Error("the association request record is not in this requester's repo; the DID is not reported", "err", err.Error())
-		return
+		didFile := guestPaths().did
+		part := didFile + ".part"
+		if err := os.WriteFile(part, []byte(did+"\n"), 0o600); err != nil {
+			return fmt.Errorf("handing the requester DID to the guest agent: %w", err)
+		}
+		return os.Rename(part, didFile)
 	}
-	didFile := guestPaths().did
-	part := didFile + ".part"
-	if err := os.WriteFile(part, []byte(did+"\n"), 0o600); err != nil {
-		r.a.log.Error("handing the requester DID to the guest agent", "err", err.Error())
-		return
-	}
-	if err := os.Rename(part, didFile); err != nil {
-		r.a.log.Error("handing the requester DID to the guest agent", "err", err.Error())
-		return
+	for backoff := time.Second; ; backoff = min(backoff*2, 30*time.Second) {
+		err := handOff()
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		r.a.log.Warn("the requester DID is not handed to the guest agent yet; retrying", "retryIn", backoff.String(), "err", err.Error())
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
 	}
 	r.log("the requester DID is handed to the guest agent; waiting for the association ref", "did", did, "request", want, "refFile", r.awaitRefFile)
 	try := func() bool {
