@@ -69,6 +69,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.knotless.sh",
     "computer.socialweb.test.bidder.health",
     "computer.socialweb.test.bidder.logCount",
+    "computer.socialweb.test.bidder.logLines",
     "computer.socialweb.test.bidder.restart",
     "computer.socialweb.test.gateway.log",
     "com.fedfork.exec.identlink.walk",

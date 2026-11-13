@@ -25,7 +25,8 @@
 		"computer.socialweb.test.request.release",
 		"com.fedfork.exec.kube.get",
 		"computer.socialweb.test.bidder.logCount",
-		"computer.socialweb.test.bidder.restart"
+		"computer.socialweb.test.bidder.restart",
+		"computer.socialweb.test.bidder.logLines"
 	],
 	"hooks": [
 		{

@@ -275,7 +275,11 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                     s.set("verify");
                     s.reading("watched", s.st["watched"].clone());
                     s.reading("watchUnreadable", s.st["unreadable"].clone());
-                    h = h.call(fcvm("fc1", &cluster, &vm)).call(boot("boot1")).call(logs("log1", &s));
+                    h = h.call(fcvm("fc1", &cluster, &vm)).call(boot("boot1")).call(logs("log1", &s)).call(host(
+                        "adopt",
+                        "bidder.logLines",
+                        json!({ "name": s.st["bidder"], "texts": [["hostprocess_unit_adopted", format!("vm-{vm}")]], "keys": ["hostprocess", "unit", "pid", "invocation", "activeSince", "state"] }),
+                    ));
                     let rcpt = s.st["receipt"].as_str().unwrap_or_default().to_string();
                     let wd = rcpt.trim_start_matches("at://").split('/').next().unwrap_or_default().to_string();
                     h = h.call(get_record("term", &format!("at://{wd}/{VM_TERMINATED}/{}", termination_rkey(&rcpt))));
@@ -313,6 +317,7 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                         s.set("watching");
                         s.mark("restarted");
                     }
+                    "adopt" => s.st["adopt"] = o["lines"].clone(),
                     "release" => {
                         s.reading("release_s", o["seconds"].clone());
                         h = h.call(host("records", "request.records", json!({ "name": name })));
@@ -346,7 +351,7 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                 h = h.call(host("restart", "bidder.restart", json!({ "name": s.st["bidder"] }))).call(cvms("w", &cluster)).timer("watch", 2_000);
             }
             // verify: the three answers in, then the verdict, then the release
-            if s.is("verify") && ["fc1", "boot1", "log1"].iter().all(|k| !s.st[match *k { "fc1" => "rt1", "boot1" => "boot1", _ => "c1" }].is_null()) && s.has("noTerm") {
+            if s.is("verify") && ["rt1", "boot1", "c1", "adopt"].iter().all(|k| !s.st[*k].is_null()) && s.has("noTerm") {
                 let (a, b) = (s.st["rt0"].clone(), s.st["rt1"].clone());
                 let (c0, c1): (Vec<u64>, Vec<u64>) = (
                     s.st["c0"].as_array().into_iter().flatten().map(|v| v.as_u64().unwrap_or(0)).collect(),
@@ -365,11 +370,30 @@ fn run_restart(run: Run<Value>) -> Result<Handle, String> {
                     p.push(format!("the guest rebooted: {} -> {}", s.st["boot0"], s.st["boot1"]));
                 }
                 // the restart really happened: a new core generation, or the infra units adopted (>= 3 role lines)
-                let gen = c1.first().copied().unwrap_or(0).saturating_sub(c0.first().copied().unwrap_or(0));
+                let newgen = c1.first().copied().unwrap_or(0).saturating_sub(c0.first().copied().unwrap_or(0));
                 let infra = c1.get(1).copied().unwrap_or(0).saturating_sub(c0.get(1).copied().unwrap_or(0));
-                s.reading("controls", json!({ "newCoreGenerations": gen, "infraAdopted": infra }));
-                if gen == 0 && infra < 3 {
+                s.reading("controls", json!({ "newCoreGenerations": newgen, "infraAdopted": infra }));
+                if newgen == 0 && infra < 3 {
                     p.push("the bidder's log shows no restart (no new `core holds the instance`, fewer than 3 adopted infra units)".to_string());
+                }
+                // the new core's supervisor adopted exactly this VM's unit (hostprocess_unit_adopted: pid, invocation and
+                // activeSince of the unit as the supervisor read it), the one the FirecrackerVM named before
+                let ad = s.st["adopt"].as_array().cloned().unwrap_or_default();
+                s.reading("adopted", json!(ad));
+                match ad.as_slice() {
+                    [l] => {
+                        if l["pid"].as_i64() != a["pid"].as_i64() || l["invocation"] != a["invocationID"] {
+                            p.push(format!("the adopted unit is not the VM's: pid {} invocation {} (before: {} {})", l["pid"], l["invocation"], a["pid"], a["invocationID"]));
+                        }
+                        // activeSince is the unit's ActiveEnterTimestamp: it names the unit's start, as runtime.startTime does
+                        if l["activeSince"].as_str().zip(a["startTime"].as_str()).is_some_and(|(x, y)| (steps::secs(x) - steps::secs(y)).abs() > 5.0) {
+                            p.push(format!("activeSince {} is not the VM's start {}", l["activeSince"], a["startTime"]));
+                        }
+                        if !l["state"].as_str().unwrap_or_default().eq_ignore_ascii_case("active") {
+                            p.push(format!("the adopted unit's state: {}", l["state"]));
+                        }
+                    }
+                    _ => p.push(format!("{} hostprocess_unit_adopted lines for vm-{vm}, one expected", ad.len())),
                 }
                 // the VM's own lines: none
                 let names = vm_lines(&vm);

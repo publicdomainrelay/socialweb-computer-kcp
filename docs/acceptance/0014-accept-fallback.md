@@ -62,6 +62,10 @@ bidder reported vm.terminated before the guest came up". The entry rents, waits 
 each pinned to the bidder; a rental that ends before Held is recorded and the run goes on. It needs the bidder's VMs
 placed by a service manager (`--vm-host-backend systemd-user`, as prod): with the proc backend the race does not show.
 
+Inputs: `count` (6), `cpus` (1), `mem` ("1G"), `overlap` (false: with true the next VM is requested the moment the
+previous one is Held, while its release runs, so the next unit is placed as the last is reset). The race is rare (about one
+boot in a hundred on prod), so a pass proves little: run with `--input '{"count":12,"overlap":true}'`.
+
 Pass: every VM Held (none Released or Failed before it, `onNetwork` in the readings for the ones that ended), the
 bidder's log gains no "before its VMM answered" line over the run (`bidder.logCount`: the network bidder's core.log, an
 installed bidder's journal), every record gone.

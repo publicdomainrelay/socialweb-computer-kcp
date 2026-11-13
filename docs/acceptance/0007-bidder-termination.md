@@ -61,6 +61,26 @@ sequenceDiagram
   K->>K: drop finalizer, ComputeVM gone
 ```
 
+## Core restart under a Held VM (`0007:restart`, staging)
+
+A bidder core restarted in place (`dev restart <network> <bidder>/core`, or `upgrade` on an installed bidder: no drain) must
+leave its Held VM alone. The hostprocess supervisor of the new core adopts the VM's unit when it is Active, logging one
+`hostprocess_unit_adopted` line (`hostprocess` `vm-<ComputeVM name>`, `unit`, `pid`, `invocation`, `activeSince`, `state`);
+the `adopted` lines with a `role` (kine-a, front, kcp-a) are the core's own infrastructure units.
+
+Test: `tests/compositions/0007` entry `restart`; staging only (SKIP on prod, whose rollout is the same restart). It holds
+a VM, reads its FirecrackerVM `status.runtime` (pid, invocationID, unit, startTicks, startTime) and the guest's boot id,
+restarts the winner's core, then asserts:
+
+- the ComputeVM is `Running` every 2 s from before the restart to 30 s after it (never `Lost`, `Releasing`, deleted)
+- the VM's runtime (pid, invocationID, unit, startTicks, startTime) is unchanged, the guest's boot id is unchanged and ssh answers
+- the new core's log has exactly one `hostprocess_unit_adopted` line for `vm-<name>` whose pid and invocation are the
+  VM's, state active, activeSince within 5 s of its start time
+- none of the VM's `placed`, `stopped`, `shutdown`, `work dir and API socket removed`, `the process wait saw the VMM exit`,
+  `a released bid is marked terminated` lines after the restart
+- the restart happened: a new `core holds the instance` line (a dev network's core), or at least 3 new `adopted` infra lines
+- no `vm.terminated` for the receipt; the contract never leaves Held; the release leaves no record
+
 ## Preconditions
 
 - Authority: the owner asked for it, or the VM is matched to a contract you are ending (stray test / orphan). Never an owner-held VM unless the owner says so

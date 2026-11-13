@@ -498,7 +498,7 @@ fn exhausted_0014(r: Run<Value>) -> Result<Handle, String> {
 const EARLY_KILL: &str = "before its VMM answered";
 
 /// backtoback: `count` (6) small VMs one after another on ONE bidder (the target's first), each pinned to it: rent,
-/// Held, release, the next; a unit of the same slot was just reset each time. Every one Held, none ended before it
+/// Held, release, the next (input overlap: the next is requested while the release runs); a unit of the same slot was just reset each time. Every one Held, none ended before it
 /// came on network, the bidder's log gains no EARLY_KILL line. A rental that ends before Held is recorded and the run
 /// goes on, so the readings count them all.
 fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
@@ -509,6 +509,7 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
     }
     let name = args["name"].as_str().ok_or("name")?.to_string();
     let count = args["count"].as_u64().unwrap_or(6);
+    let overlap = args["overlap"] == true;
     let mut h = Handle::new();
     let i = s.st["i"].as_u64().unwrap_or(0);
     let rental = |i: u64| format!("{name}-b{i}");
@@ -563,6 +564,10 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
                 s.st["receipt"] = Value::Null;
                 s.set("release");
                 h = h.cancel(&format!("req:{i}")).call(host(&format!("rel:{i}"), "request.release", json!({ "name": rental(i) })));
+                // overlap: the next VM is requested while this one's release runs (its unit is reset as the next is placed)
+                if overlap && i + 1 < count {
+                    h = next(&mut s, h, i + 1);
+                }
             }
         }
         Event::Result { id, result, .. } => {
@@ -602,7 +607,14 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
                     {
                         return Ok(s.fail(format!("{id}: {e}")));
                     }
-                    if i + 1 < count {
+                    if overlap {
+                        let n = s.st["rels"].as_u64().unwrap_or(0) + 1;
+                        s.st["rels"] = json!(n);
+                        if n == count {
+                            s.set("log");
+                            h = h.call(host("log1", "bidder.logCount", json!({ "name": s.st["bidder"]["name"], "texts": [EARLY_KILL] })));
+                        }
+                    } else if i + 1 < count {
                         h = next(&mut s, h, i + 1);
                     } else {
                         s.set("log");
