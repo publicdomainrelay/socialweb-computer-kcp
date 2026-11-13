@@ -516,6 +516,15 @@ func (p *pass) suspended(ctx context.Context, plan compose.AccountPlan, pdsHandl
 	if id != nil {
 		p.st.Did = id.Status.Did
 	}
+	if did := strings.TrimSpace(p.st.Did); did != "" {
+		local := ""
+		if plan.Local {
+			local = did
+		}
+		if err := p.streams(ctx, plan, local); err != nil {
+			return p.retry("its market streams (releases of its running VMs still come in while it is suspended)", err)
+		}
+	}
 	if o.Spec.Kcp != nil {
 		p.st.Components = append(p.st.Components, p.guestComponents(ctx)...)
 	}
