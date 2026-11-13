@@ -27,6 +27,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.staging.meshKeys",
     "computer.socialweb.test.staging.meshJoin",
     "computer.socialweb.test.staging.probe",
+    "computer.socialweb.test.staging.apply",
     "computer.socialweb.test.request.start",
     "computer.socialweb.test.request.ssh",
     "computer.socialweb.test.request.agent",
@@ -313,7 +314,7 @@ impl Swc {
             .flatten()
         {
             if let Some(ud) = c["userData"].as_str() {
-                c["userData"] = json!(self.with_mesh_keys(ud)?);
+                c["userData"] = json!(self.fill(ud, &input["vars"])?);
             }
         }
         let kcp = testkit::kcp::Kcp::kubeconfig(&kubeconfig)
@@ -322,6 +323,88 @@ impl Swc {
         (self.infras.lock().unwrap()).push((name.into(), kind, iname.clone()));
         kcp.apply(&obj).await.map_err(|e| e.to_string())?;
         Ok(json!({ "name": iname }))
+    }
+
+    /// `{{secret:NAME}}`: the run's secret NAME (32 random bytes, hex, made 0600 on first use); `{{key}}`: `vars[key]`;
+    /// then `@meshKey:<peer>`. Secrets stay on the host: the module passes names, never values.
+    fn fill(&self, text: &str, vars: &Value) -> Result<String, String> {
+        let (mut out, mut rest) = (String::new(), text);
+        while let Some(i) = rest.find("{{") {
+            out.push_str(&rest[..i]);
+            let j = i + rest[i..].find("}}").ok_or("unclosed {{")?;
+            let key = &rest[i + 2..j];
+            let v = match key.strip_prefix("secret:") {
+                Some(name) => self.secret(name)?,
+                None => match &vars[key] {
+                    Value::String(v) => v.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return Err(format!("{{{{{key}}}}}: no value")),
+                },
+            };
+            out.push_str(&v);
+            rest = &rest[j + 2..];
+        }
+        out.push_str(rest);
+        self.with_mesh_keys(&out)
+    }
+
+    fn secret(&self, name: &str) -> Result<String, String> {
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(format!("{name}: not a secret name"));
+        }
+        let dir = self.dir.join("secrets");
+        let path = dir.join(name);
+        if let Ok(v) = std::fs::read_to_string(&path) {
+            return Ok(v);
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut b = [0u8; 32];
+        getrandom::fill(&mut b).map_err(|e| e.to_string())?;
+        let v: String = b.iter().map(|x| format!("{x:02x}")).collect();
+        std::fs::write(&path, &v).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+        Ok(v)
+    }
+
+    /// Applies `tests/compositions/staging/<file>` (a JSON array of objects) to kube `cluster`, filled host-side
+    /// (`fill`): atlibs-kube's apply, so its cleanup deletes them. Only the applied names come back.
+    async fn staging_apply(&self, input: &Value) -> Result<Value, String> {
+        let (cluster, file) = (str_of(input, "cluster")?, str_of(input, "file")?);
+        if file.contains('/') || !file.ends_with(".json") {
+            return Err(format!(
+                "{file}: a .json file in tests/compositions/staging"
+            ));
+        }
+        let path = testkit::repo()
+            .join("tests/compositions/staging")
+            .join(file);
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let objects: Vec<Value> = serde_json::from_str(&self.fill(&text, &input["vars"])?)
+            .map_err(|e| format!("{file}: {e}"))?;
+        let mut applied = vec![];
+        for o in objects {
+            let what = format!(
+                "{}/{}",
+                o["kind"].as_str().unwrap_or("?"),
+                o["metadata"]["name"].as_str().unwrap_or("?")
+            );
+            let req = Request {
+                input: Some(json!({ "cluster": cluster, "object": o })),
+                ..Default::default()
+            };
+            self.kube
+                .call("com.fedfork.exec.kube.apply".into(), req)
+                .await
+                .map_err(|e| format!("{what}: {e}"))?;
+            applied.push(what);
+        }
+        Ok(json!({ "applied": applied }))
     }
 
     fn with_mesh_keys(&self, text: &str) -> Result<String, String> {
@@ -743,6 +826,7 @@ impl Swc {
             "staging.meshKeys" => self.mesh_keys(&input),
             "staging.meshJoin" => self.mesh_join(&input).await,
             "staging.probe" => self.probe(&input).await,
+            "staging.apply" => self.staging_apply(&input).await,
             "request.ssh" => {
                 let name = str_of(&input, "name")?;
                 let exec = input["exec"].as_str().ok_or("exec is required")?;

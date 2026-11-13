@@ -14,6 +14,9 @@
 		"computer.socialweb.test.staging.meshJoin",
 		"computer.socialweb.test.staging.probe",
 		"com.fedfork.exec.kube.get",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.patch",
+		"computer.socialweb.test.staging.apply",
 		"com.atproto.repo.putRecord"
 	],
 	"hooks": [
@@ -23,6 +26,9 @@
 		{ "nsid": "computer.socialweb.test.staging.meshKeys", "required": true, "entries": ["run"], "reason": "meshd secrets kept by the host" },
 		{ "nsid": "computer.socialweb.test.staging.meshJoin", "required": true, "entries": ["run"], "reason": "the orchestrator on the overlay" },
 		{ "nsid": "computer.socialweb.test.staging.probe", "required": true, "entries": ["run"], "reason": "names resolve on the overlay" },
-		{ "nsid": "com.fedfork.exec.kube.get", "required": true, "entries": ["run"], "reason": "contracts Held" }
+		{ "nsid": "com.fedfork.exec.kube.get", "required": true, "entries": ["run"], "reason": "contracts Held, the services node" },
+		{ "nsid": "com.fedfork.exec.kube.list", "required": true, "entries": ["run"], "reason": "the services pods Ready" },
+		{ "nsid": "com.fedfork.exec.kube.patch", "required": true, "entries": ["run"], "reason": "the services node follows the roster" },
+		{ "nsid": "computer.socialweb.test.staging.apply", "required": true, "entries": ["run"], "reason": "services.json on stg, secrets filled by the host" }
 	]
 }
