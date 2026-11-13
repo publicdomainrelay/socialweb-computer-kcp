@@ -44,15 +44,6 @@
 			"reason": "R2 (and mesh1) tombstoned"
 		},
 		{
-			"nsid": "computer.socialweb.test.request.start",
-			"required": true,
-			"entries": [
-				"run",
-				"b"
-			],
-			"reason": "run request --associate guest"
-		},
-		{
 			"nsid": "com.fedfork.exec.identlink.walk",
 			"required": true,
 			"entries": [

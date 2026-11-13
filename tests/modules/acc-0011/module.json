@@ -19,16 +19,7 @@
 		"computer.socialweb.test.atirc.observerPub",
 		"computer.socialweb.test.atirc.observerRevoke"
 	],
-	"hooks": [
-		{
-			"nsid": "computer.socialweb.test.atirc.observer",
-			"required": true,
-			"entries": [
-				"token"
-			],
-			"reason": "an atirc token minted the normal way"
-		}
-	],
+	"hooks": [],
 	"http": [
 		"*"
 	]

@@ -33,7 +33,8 @@ fn arch() -> &'static str {
 const ORIGIN: &str = "https://github.com/publicdomainrelay/socialweb-computer-kcp";
 
 /// The newest v* tag on GitHub (v0.0.0-rcN sorts by N).
-fn newest_tag() -> Result<String> {
+/// Release tags, newest first.
+fn tags() -> Result<Vec<String>> {
     let out = std::process::Command::new("git")
         .args(["ls-remote", "--tags", "--refs", ORIGIN, "v*"])
         .output()?;
@@ -57,11 +58,21 @@ fn newest_tag() -> Result<String> {
             .unwrap_or(u64::MAX);
         (n, pre)
     };
-    String::from_utf8(out.stdout)?
-        .lines()
-        .filter_map(|l| l.split_once("refs/tags/").map(|(_, t)| t.to_string()))
-        .max_by_key(|t| key(t))
-        .context("origin has no v* tag")
+    let mut tags: Vec<String> = String::from_utf8(out.stdout)?.lines().filter_map(|l| l.split_once("refs/tags/").map(|(_, t)| t.to_string())).collect();
+    tags.sort_by_key(|t| std::cmp::Reverse(key(t)));
+    Ok(tags)
+}
+
+/// The newest tag whose binaries are published (a fresh tag's CI may still be building them).
+async fn newest_tag() -> Result<String> {
+    let http = reqwest::Client::new();
+    for t in tags()? {
+        let url = format!("{BUCKET}/releases/{t}/binaries/SHA256SUMS");
+        if http.head(&url).send().await.is_ok_and(|r| r.status().is_success()) {
+            return Ok(t);
+        }
+    }
+    bail!("no v* tag has published binaries")
 }
 
 impl Binary {
@@ -69,7 +80,7 @@ impl Binary {
     /// and cached under ~/.tmp/swc-system-tests/bin.
     pub async fn resolve(spec: &str) -> Result<Self> {
         let prefix = match spec.split_once(':') {
-            _ if spec == "release" => format!("releases/{}", newest_tag()?),
+            _ if spec == "release" => format!("releases/{}", newest_tag().await?),
             Some(("release", tag)) => format!("releases/{tag}"),
             Some(("sha", sha)) => format!("main/{sha}"),
             Some(("path", p)) => return Self::at(expand(p)),

@@ -11,14 +11,5 @@
 	"calls": [
 		"computer.socialweb.test.page.round"
 	],
-	"hooks": [
-		{
-			"nsid": "computer.socialweb.test.page.round",
-			"required": true,
-			"entries": [
-				"run"
-			],
-			"reason": "the requester page in headless Chrome"
-		}
-	]
+	"hooks": []
 }

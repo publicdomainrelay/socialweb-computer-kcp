@@ -2,9 +2,21 @@
 	"name": "acc-0013",
 	"description": "Acceptance 0013 mixed prod: a (run requester, mixed-prod.yaml by discovery, restart, delete), c (the gateway in the requester kcp), b (install requester, staging).",
 	"actions": [
-		{ "entry": "run", "label": "Run 0013 A", "description": "Path A end to end." },
-		{ "entry": "c", "label": "Run 0013 C", "description": "Path C end to end." },
-		{ "entry": "b", "label": "Run 0013 B", "description": "Path B (root on a staging VM; skipped on prod)." }
+		{
+			"entry": "run",
+			"label": "Run 0013 A",
+			"description": "Path A end to end."
+		},
+		{
+			"entry": "c",
+			"label": "Run 0013 C",
+			"description": "Path C end to end."
+		},
+		{
+			"entry": "b",
+			"label": "Run 0013 B",
+			"description": "Path B (root on a staging VM; skipped on prod)."
+		}
 	],
 	"calls": [
 		"computer.socialweb.test.requester.start",
@@ -30,9 +42,22 @@
 		"computer.socialweb.test.assert.tombstoned"
 	],
 	"hooks": [
-		{ "nsid": "computer.socialweb.test.assert.recordsGone", "reason": "records RecordNotFound after the delete" },
-		{ "nsid": "computer.socialweb.test.assert.tombstoned", "reason": "agent1's R2 and agent tombstoned" },
-		{ "nsid": "computer.socialweb.test.requester.start", "required": true, "entries": ["run", "c"], "reason": "the long-lived requester" },
-		{ "nsid": "com.fedfork.exec.kube.apply", "required": true, "entries": ["run", "c"], "reason": "kubectl apply, in-process" }
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "records RecordNotFound after the delete"
+		},
+		{
+			"nsid": "computer.socialweb.test.assert.tombstoned",
+			"reason": "agent1's R2 and agent tombstoned"
+		},
+		{
+			"nsid": "com.fedfork.exec.kube.apply",
+			"required": true,
+			"entries": [
+				"run",
+				"c"
+			],
+			"reason": "kubectl apply, in-process"
+		}
 	]
 }

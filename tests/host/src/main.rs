@@ -276,6 +276,15 @@ async fn main_() -> Result<bool> {
     ];
     let provides = Arc::new(atlibs_host::transport::provides(&transports));
     compose::check(&comp, &provides).map_err(|e| anyhow!(e))?;
+    // a required hook outside com.fedfork.exec.* needs an edge at run time (host transports serve only that prefix)
+    for (name, m) in &comp.modules {
+        for hk in &m.hooks {
+            let routed = comp.manifest["edges"].as_array().into_iter().flatten().any(|e| e["from"] == name.as_str() && e["nsid"] == hk.nsid.as_str());
+            if hk.required && !hk.nsid.starts_with("com.fedfork.exec.") && !routed {
+                anyhow::bail!("instance {name}: required hook {} has no edge (a host call is a call, not a hook)", hk.nsid);
+            }
+        }
+    }
     if dry {
         println!(
             "dry run {runbook}: composition ok ({} instances), requester {}",
@@ -549,7 +558,7 @@ async fn main_() -> Result<bool> {
         eprintln!(
             "FROZEN: {} (attach: swc-test-host attach {}; thaws in {:?})",
             result["error"],
-            dir.display(),
+            dump.display(),
             ttl
         );
         tokio::select! {

@@ -23,14 +23,6 @@
 		{
 			"nsid": "computer.socialweb.test.assert.recordsGone",
 			"reason": "every record of the run RecordNotFound"
-		},
-		{
-			"nsid": "computer.socialweb.test.requester.start",
-			"required": true,
-			"entries": [
-				"run"
-			],
-			"reason": "the long-lived requester"
 		}
 	]
 }

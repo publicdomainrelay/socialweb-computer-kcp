@@ -38,23 +38,6 @@
 	],
 	"hooks": [
 		{
-			"nsid": "computer.socialweb.test.kube.addCluster",
-			"required": true,
-			"entries": [
-				"run",
-				"s2"
-			],
-			"reason": "the tenant kubeconfigs as host clusters"
-		},
-		{
-			"nsid": "computer.socialweb.test.page.signin",
-			"required": true,
-			"entries": [
-				"run"
-			],
-			"reason": "the k8s page signed in (headless Chrome)"
-		},
-		{
 			"nsid": "com.fedfork.exec.kube.raw",
 			"required": true,
 			"entries": [
