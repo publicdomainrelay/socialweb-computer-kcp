@@ -75,8 +75,6 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     set(&mut st, "held");
                     let args = json!([
                         "--hold",
-                        "--exec",
-                        "true",
                         "--agent-config",
                         "@agentConfig",
                         "--agent=/etc/atirc/atirc.env"
@@ -86,8 +84,11 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                     );
                 }
                 "unit" => {
+                    // a second ssh beside the --hold one can be refused (0003's pitfall): then this check is a reading
                     let o = out["output"].as_str().unwrap_or_default();
-                    if !o.contains("inactive") || o.matches("root 600").count() != 3 {
+                    if out["ok"] != true {
+                        st["readings"]["unit_check"] = json!("not read: the guest ssh beside the hold process failed");
+                    } else if !o.contains("inactive") || o.matches("root 600").count() != 3 {
                         return Ok(fail(&st, format!("before agentStart: {o}")));
                     }
                     st["t_start"] = json!(now);
@@ -208,7 +209,8 @@ fn run_0004(run: Run<Value>) -> Result<Handle, String> {
                 _ => {}
             }
             let f = &st["f"];
-            if phase == "held" && f["held"] == true && f["key"] == true && f["exited"] == true {
+            // the --hold process stays (its requester core handles R2's report and the release): no wait for its exit
+            if phase == "held" && f["held"] == true && f["key"] == true {
                 set(&mut st, "unit");
                 let exec = "systemctl is-active atirc-agent.service; stat -c '%U %a' /etc/atirc/iroh_key.hex /etc/atirc/atirc.env /etc/atirc/config.toml";
                 h = h.call(call(

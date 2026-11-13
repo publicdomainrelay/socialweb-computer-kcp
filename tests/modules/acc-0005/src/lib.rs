@@ -24,7 +24,7 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
     match &run.event {
         Event::Start => {
             s.set("held");
-            let a = json!(["--hold", "--exec", "true", "--guest-tools", "socialweb-computer", "--associate", "guest", "--agent"]);
+            let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest", "--agent"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
@@ -40,7 +40,7 @@ fn run_a(run: Run<Value>) -> Result<Handle, String> {
                 "requester_association_deleted" => s.flag("assocDeleted"),
                 _ => {}
             }
-            if s.is("held") && s.has("held") && s.has("exited") {
+            if s.is("held") && s.has("held") {
                 s.set("r2");
                 h = h.call(host("r2", "request.r2", json!({ "name": name, "r2Name": "r2-st", "agent": true })));
             }
@@ -162,7 +162,7 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            let a = json!(["--hold", "--exec", "true", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
+            let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 60 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 60 min (phase {})", s.phase()))),
@@ -179,7 +179,7 @@ fn run_b(run: Run<Value>) -> Result<Handle, String> {
                 "requester_contract_records_deleted" => s.flag("recordsDeleted"),
                 _ => {}
             }
-            if s.is("held") && s.has("held") && s.has("exited") {
+            if s.is("held") && s.has("held") {
                 s.set("start-r2");
                 // the runbook's start, exactly: never `install -d /run/socialweb-r2` (it resets the mode the guest agent set,
                 // and R2 cannot write requester-did)
@@ -314,7 +314,7 @@ fn run_r2fail(run: Run<Value>) -> Result<Handle, String> {
     match run.event {
         Event::Start => {
             s.set("held");
-            let a = json!(["--hold", "--exec", "true", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
+            let a = json!(["--hold", "--guest-tools", "socialweb-computer", "--associate", "guest"]);
             h = h.call(steps::host_sub("req", "request.start", json!({ "name": name, "args": a }))).timer("deadline", 40 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 40 min (phase {})", s.phase()))),
@@ -326,7 +326,7 @@ fn run_r2fail(run: Run<Value>) -> Result<Handle, String> {
                 "requester_guest_requester_reported" if s.st["r2"].is_null() => s.st["r2"] = data["did"].clone(),
                 _ => {}
             }
-            if s.is("held") && s.has("held") && s.has("exited") {
+            if s.is("held") && s.has("held") {
                 s.set("r2");
                 h = h.call(host("r2", "request.r2", json!({ "name": name, "r2Name": "r2-fail" })));
             }
