@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -132,20 +133,74 @@ func hashFile(path string) (string, int64, error) {
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
+const VerifiedName = ".verified"
+
+type verifiedFile struct {
+	SHA256 string `json:"sha256"`
+
+	Bytes int64 `json:"bytes"`
+
+	ModNs int64 `json:"modNs"`
+}
+
+func readVerified(dir string) map[string]verifiedFile {
+	raw, err := os.ReadFile(filepath.Join(dir, VerifiedName))
+	if err != nil {
+		return nil
+	}
+	var out map[string]verifiedFile
+	if json.Unmarshal(raw, &out) != nil {
+		return nil
+	}
+	return out
+}
+
+func writeVerified(dir string, files map[string]verifiedFile) {
+	raw, err := json.Marshal(files)
+	if err != nil {
+		return
+	}
+	tmp := filepath.Join(dir, VerifiedName+".part")
+	if os.WriteFile(tmp, raw, 0o644) != nil {
+		return
+	}
+	if os.Rename(tmp, filepath.Join(dir, VerifiedName)) != nil {
+		os.Remove(tmp)
+	}
+}
+
 func (s Store) Verify(pin Pin) (string, error) {
 	if err := pin.Valid(); err != nil {
 		return "", err
 	}
 	dir := s.Dir(pin)
+	held := readVerified(dir)
+	files := map[string]verifiedFile{}
+	changed := false
 	for _, name := range []string{ManifestName, KernelName, RootfsName} {
-		got, _, err := hashFile(filepath.Join(dir, name))
+		path := filepath.Join(dir, name)
+		fi, err := os.Stat(path)
 		if err != nil {
 			return "", err
 		}
-		if got != pin.Files[name].SHA256 {
-			return "", fmt.Errorf("guestimage: the stored %s of %s hashes to %s and is pinned at %s",
-				name, pin.Target, got, pin.Files[name].SHA256)
+		want := pin.Files[name]
+		if v, ok := held[name]; ok && v.SHA256 == want.SHA256 && v.Bytes == fi.Size() && v.ModNs == fi.ModTime().UnixNano() {
+			files[name] = v
+			continue
 		}
+		got, n, err := hashFile(path)
+		if err != nil {
+			return "", err
+		}
+		if got != want.SHA256 {
+			return "", fmt.Errorf("guestimage: the stored %s of %s hashes to %s and is pinned at %s",
+				name, pin.Target, got, want.SHA256)
+		}
+		files[name] = verifiedFile{SHA256: got, Bytes: n, ModNs: fi.ModTime().UnixNano()}
+		changed = true
+	}
+	if changed {
+		writeVerified(dir, files)
 	}
 	return dir, nil
 }
@@ -221,6 +276,15 @@ func (s Store) Ensure(ctx context.Context, pin Pin, source string) (Result, erro
 		}
 		return Result{}, fmt.Errorf("guestimage: placing %s: %w", dir, err)
 	}
+	stamped := map[string]verifiedFile{}
+	for _, name := range []string{ManifestName, KernelName, RootfsName} {
+		fi, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			return Result{Dir: dir, Fetched: true}, nil
+		}
+		stamped[name] = verifiedFile{SHA256: pin.Files[name].SHA256, Bytes: fi.Size(), ModNs: fi.ModTime().UnixNano()}
+	}
+	writeVerified(dir, stamped)
 	return Result{Dir: dir, Fetched: true}, nil
 }
 

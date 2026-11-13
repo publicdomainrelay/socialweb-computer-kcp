@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -80,9 +81,28 @@ func PublicClient() *http.Client {
 	}
 }
 
+type fetchedManifest struct {
+	manifest Manifest
+	bytes    int64
+}
+
+var (
+	manifestMu sync.Mutex
+
+	manifests = map[Requested]fetchedManifest{}
+)
+
+const manifestsMax = 256
+
 func FetchManifest(ctx context.Context, client *http.Client, req Requested) (Manifest, int64, error) {
 	if err := req.Valid(); err != nil {
 		return Manifest{}, 0, err
+	}
+	manifestMu.Lock()
+	held, ok := manifests[req]
+	manifestMu.Unlock()
+	if ok {
+		return held.manifest, held.bytes, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, RequestedManifestTimeout)
 	defer cancel()
@@ -117,6 +137,12 @@ func FetchManifest(ctx context.Context, client *http.Client, req Requested) (Man
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return Manifest{}, 0, fmt.Errorf("%w: %s: %w", ErrRequestedRefused, get.URL, err)
 	}
+	manifestMu.Lock()
+	if len(manifests) >= manifestsMax {
+		clear(manifests)
+	}
+	manifests[req] = fetchedManifest{manifest: m.Manifest, bytes: int64(len(raw))}
+	manifestMu.Unlock()
 	return m.Manifest, int64(len(raw)), nil
 }
 
