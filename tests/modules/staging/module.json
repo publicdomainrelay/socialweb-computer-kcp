@@ -46,6 +46,12 @@
 			"description": "minutes for the whole run (default 180)"
 		},
 		{
+			"key": "fault",
+			"label": "fault",
+			"type": "string",
+			"description": "status: that step fails (dev status of an instance the VM does not have), the proof of a failed run's logs/"
+		},
+		{
 			"key": "requester",
 			"label": "requester",
 			"type": "string",

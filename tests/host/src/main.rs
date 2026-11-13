@@ -631,6 +631,10 @@ async fn main_() -> Result<bool> {
     let failed = result["pass"] != true;
     ticks.flush();
     swc.write_resources().await;
+    if failed {
+        swc.collect_logs(&dump.join("logs")).await;
+        eprintln!("logs: {}", dump.join("logs").display());
+    }
     if failed && freeze_on_fail && signal.reason().is_none() {
         freezer.set_failure(
             json!({ "error": result.get("error"), "phase": result.get("phase"), "result": result }),

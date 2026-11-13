@@ -5,7 +5,7 @@
 //! com.fedfork.exec.identlink.{walk,plc}: identlink against the target's PLC.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -748,6 +748,86 @@ impl Swc {
         }
     }
 
+    /// A failed run's logs into `out` (the dump's logs/), before the freeze or the cleanup, each redacted: per
+    /// invocation `<name>/local/` (this host's request log, its requester's dev logs) and `<name>/vm/` (over
+    /// request.ssh: the VM's journal and every *.log under /home and /root: core.log, dev logs, step logs), and per
+    /// requester its log. What could not be read goes into `<name>/errors.txt`.
+    pub async fn collect_logs(&self, out: &Path) {
+        let requests: Vec<(String, PathBuf)> = self
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(n, s)| (n.clone(), s.clone()))
+            .collect();
+        for (name, state) in requests {
+            let o = out.join(&name);
+            let mut files = vec![state.join(format!("{name}-request.log"))];
+            walk(&state.join("requests").join(&name), &mut files);
+            for f in &files {
+                copy_redacted(f, &o.join("local").join(f.strip_prefix(&state).unwrap_or(f)));
+            }
+            match self.vm_logs(&name).await {
+                Ok(tree) => {
+                    let mut files = vec![];
+                    walk(&tree, &mut files);
+                    for f in &files {
+                        copy_redacted(f, &o.join("vm").join(f.strip_prefix(&tree).unwrap_or(f)));
+                    }
+                    let _ = std::fs::remove_dir_all(&tree);
+                }
+                Err(e) => {
+                    let _ = std::fs::create_dir_all(&o);
+                    let _ = std::fs::write(o.join("errors.txt"), redact_log(&e));
+                }
+            }
+        }
+        for (name, (state, _)) in self.requesters.lock().await.iter() {
+            let f = state.join(format!("{name}.log"));
+            copy_redacted(&f, &out.join(format!("requester-{name}")).join(format!("{name}.log")));
+        }
+    }
+
+    /// The VM of invocation `name`: its logs as a tar.gz (base64 between markers: the CLI's own lines share the
+    /// output), unpacked into a dir of the work dir.
+    async fn vm_logs(&self, name: &str) -> Result<PathBuf, String> {
+        const LOGS: &str = "cd / && journalctl --no-pager -o short-iso -n 20000 > root/swc-journal.log 2>&1; \
+            find home root -xdev -type f -name '*.log' -size -64M > root/swc-logs.list 2>/dev/null; echo SWC-LOGS-BEGIN; \
+            tar -czf - -T root/swc-logs.list 2>/dev/null | base64 -w0; echo; echo SWC-LOGS-END; rm -f root/swc-journal.log root/swc-logs.list";
+        let (_, text) = tokio::time::timeout(
+            Duration::from_secs(300),
+            self.cli(&self.sub_args("ssh", name, &["--exec", LOGS])),
+        )
+        .await
+        .map_err(|_| format!("{name}: the VM's logs not read in 5 min"))??;
+        let b64 = text
+            .split_once("SWC-LOGS-BEGIN\n")
+            .and_then(|(_, r)| r.split_once("\nSWC-LOGS-END"))
+            .map(|(b, _)| b.trim().to_string())
+            .ok_or_else(|| format!("{name}: no logs from the VM: {}", tail(&text)))?;
+        let (file, tree) = (
+            self.dir.join(format!("logs-{name}.b64")),
+            self.dir.join(format!("logs-{name}")),
+        );
+        std::fs::write(&file, b64).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&tree).map_err(|e| e.to_string())?;
+        let out = tokio::process::Command::new("sh")
+            .args(["-c", "base64 -d < \"$1\" | tar -xzf - -C \"$2\"", "sh"])
+            .arg(&file)
+            .arg(&tree)
+            .output()
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&file);
+        if !out.status.success() {
+            return Err(format!(
+                "{name}: unpacking the VM's logs: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        Ok(tree)
+    }
+
     /// Release every invocation, stop every requester (Ctrl-C), remove the password env files. The errors.
     pub async fn cleanup(&self) -> Vec<String> {
         let mut errors = self.knotless_cleanup().await;
@@ -851,4 +931,99 @@ impl Call for Swc {
             }
         })
     }
+}
+
+/// Every regular *.log file under `dir` (never a symlink, a kubeconfig, a key or a state file).
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let (p, Ok(t)) = (e.path(), e.file_type()) else {
+            continue;
+        };
+        if t.is_dir() {
+            walk(&p, out);
+        } else if t.is_file() && p.extension().is_some_and(|x| x == "log") {
+            out.push(p);
+        }
+    }
+}
+
+/// The last 8 MiB of a log, redacted, at `to` (0600).
+fn copy_redacted(from: &Path, to: &Path) {
+    let Ok(bytes) = std::fs::read(from) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(8 << 20)..]);
+    if let Some(d) = to.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(to)
+    {
+        let _ = f.write_all(redact_log(&text).as_bytes());
+    }
+}
+
+/// Words that name a secret in a log: the dump's (atlibs ticks) and a kubeconfig's, a header's, a PEM's.
+const SECRET_WORDS: &[&str] = &[
+    "password", "passwd", "token", "secret", "kubeconfig", "cookie", "authorization", "bearer", "jwt", "apikey",
+    "api_key", "privatekey", "private_key", "private-key", "key-data", "credential", "seed",
+];
+
+/// A log redacted line by line: JSON (whole or after a prefix) as the dump is (secret-named keys) plus every string
+/// value scrubbed; other text cut after the first secret word's `=` or `:`; JWT-like words and PEM blocks dropped.
+pub fn redact_log(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut pem = false;
+    for l in text.lines() {
+        if l.contains("-----BEGIN") {
+            pem = !l.contains("-----END");
+            out.push_str("<redacted pem>\n");
+            continue;
+        }
+        if pem {
+            pem = !l.contains("-----END");
+            continue;
+        }
+        let line = match l.find('{').map(|i| (i, serde_json::from_str::<Value>(&l[i..]))) {
+            Some((i, Ok(v))) => format!("{}{}", scrub(&l[..i]), scrub_strings(atlibs_host::ticks::redact(&v))),
+            _ => scrub(l),
+        };
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+fn scrub_strings(v: Value) -> Value {
+    match v {
+        Value::String(s) => Value::String(scrub(&s)),
+        Value::Array(a) => Value::Array(a.into_iter().map(scrub_strings).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, scrub_strings(v))).collect()),
+        v => v,
+    }
+}
+
+fn scrub(s: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    let cut = SECRET_WORDS
+        .iter()
+        .filter_map(|w| lower.find(w).map(|i| i + w.len()))
+        .filter_map(|i| lower[i..].find(['=', ':']).filter(|j| *j < 40).map(|j| i + j))
+        .min();
+    let mut s = match cut {
+        Some(j) => format!("{}<redacted>", &s[..=j]),
+        None => s.to_string(),
+    };
+    for w in s.clone().split(|c: char| c.is_whitespace() || "\"'=,;()[]{}".contains(c)) {
+        if w.len() > 20 && w.starts_with("eyJ") && w.matches('.').count() >= 2 {
+            s = s.replace(w, "<redacted>");
+        }
+    }
+    s
 }

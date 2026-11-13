@@ -657,7 +657,11 @@ cargo test -p swc-vmm-tests -- --nocapture                                   # V
 ```
 
 Debug a failed CI run (a composition run dir holds `ticks.ndjson.zst`, `state.json`, `failure.json`,
-`resources.json`, `run.json`; no secret in any of them):
+`resources.json`, `run.json`, and on a failure `logs/`, read before the freeze or the cleanup: per invocation
+`<name>/local/` (the request log and its requester's dev logs) and `<name>/vm/` (over request.ssh: the VM's journal and
+every `*.log` under /home and /root: core.log, dev logs, step logs; a failed staging run's `dev down` keeps its state for
+this); no secret in any of them: secret-named JSON keys as in the dump, other text cut after a secret word's `=` or `:`,
+JWT-like words and PEM blocks dropped):
 
 ```sh
 # 1. the failed check's artifacts (a workflow declares `artifacts: [runs/]` and runs with SWC_RUNS=runs; private to

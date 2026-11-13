@@ -1,7 +1,7 @@
 // tests/compositions/staging/README.md as a state machine: rent one nested-virt VM, install the socialweb-computer
 // under test on it, `dev up --profile market-network` there (own PLC, relay, PDSes, bidders, gateway), read `dev
 // status`, `dev down`. Input {name (the run), requester (the target's binary spec: release:<tag> | sha:<commit>),
-// cpus?, mem? (default 16, 32G)}.
+// cpus?, mem? (default 16, 32G), fault? ("status": that step fails)}.
 // Result {pass, error?, phase, readings}. The host releases the VM however it ends.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
@@ -73,9 +73,11 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
         if s.is("down") {
             return s.keep(h);
         }
+        // a failed run keeps the instance's state (its logs) for the host to read before the release
+        let keep = if result["pass"] == true { "" } else { " --keep-state" };
         s.st["result"] = result;
         s.set("down");
-        s.keep(h.call(ssh("down", bg("down", swc(&format!("dev down {INST}"))))))
+        s.keep(h.call(ssh("down", bg("down", swc(&format!("dev down {INST}{keep}"))))))
     };
     match run.event {
         Event::Start => {
@@ -136,7 +138,10 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                         "0" if step == "up" => {
                             s.mark("up");
                             s.set("status");
-                            h = h.call(ssh("status", swc(&format!("dev status {INST}"))));
+                            // fault "status": dev status of an instance the VM does not have (a failing step on
+                            // the run's own VM only)
+                            let inst = if args["fault"] == "status" { "--instance stg-fault --state-dir /home/stg/stg/s" } else { INST };
+                            h = h.call(ssh("status", swc(&format!("dev status {inst}"))));
                         }
                         rc if step == "suite" => {
                             let results: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("RESULT ")).collect();

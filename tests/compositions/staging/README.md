@@ -16,7 +16,11 @@ Every service is on the VM's loopback, so anything that uses it runs on the VM (
 3. As `stg`, detached from the ssh session and polled (`/home/stg/up.rc`): `dev up --instance stg --state-dir /home/stg/stg/s
    --profile market-network --bidders 3 --with-gateway --compute-kinds vm,deno --host-backend proc`.
 4. `dev status --instance stg --state-dir /home/stg/stg/s`.
-5. Always: `dev down` (detached, polled); the host releases the VM.
+5. Always: `dev down` (detached, polled; `--keep-state` when the run failed); the host copies a failed run's logs into
+   the dump's `logs/` (redacted), then releases the VM.
+
+Input `fault: "status"` makes step 4 fail (`dev status` of an instance the VM does not have): the proof of a failed
+run's `logs/` (only the run's own VM is touched).
 
 The target's `requester` picks the binary: `release:<tag>` or `sha:<commit>` (a bare `release` is refused).
 
