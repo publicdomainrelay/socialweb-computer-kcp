@@ -156,19 +156,18 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                 "status" if o["ok"] == true => {
                     s.st["readings"]["status"] = json!(text);
                     s.set("suite");
-                    s.st["puts"] = json!(2);
-                    h = h
-                        .call(host("put-host", "request.put", json!({ "name": name, "what": "testHost", "remote": "/home/stg/stg/swc-test-host" })))
-                        .call(host("put-suite", "request.put", json!({ "name": name, "what": "suite", "remote": "/home/stg/stg/suite.tgz" })));
+                    // one ssh session at a time: two concurrent `run request ssh` of one invocation broke a pipe
+                    s.st["puts"] = json!(1);
+                    h = h.call(host("put-host", "request.put", json!({ "name": name, "what": "testHost", "remote": "/home/stg/stg/swc-test-host" })));
                 }
                 "status" => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("dev status: {text}") }))),
                 "put-host" | "put-suite" if result.output().is_err() => {
                     return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{id}: {text}") })));
                 }
                 "put-host" | "put-suite" => {
-                    let left = s.st["puts"].as_u64().unwrap_or(1) - 1;
-                    s.st["puts"] = json!(left);
-                    if left == 0 {
+                    if id == "put-host" {
+                        h = h.call(host("put-suite", "request.put", json!({ "name": name, "what": "suite", "remote": "/home/stg/stg/suite.tgz" })));
+                    } else {
                         let list: Vec<String> = args["suite"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_else(|| SUITE.map(String::from).to_vec());
                         let run_name = args["name"].as_str().unwrap_or_default();
                         let d = "/home/stg/stg";
