@@ -115,8 +115,9 @@ fn run_0003(run: Run<Value>) -> Result<Handle, String> {
                     if o["ok"] != true || !txt.contains("Linux") || !txt.contains("uid=") {
                         return Ok(s.fail(format!("restarted ssh: {txt}")));
                     }
-                    if t > 10.0 {
-                        return Ok(s.fail(format!("the restarted invocation's ssh took {t} s (want <= 10 s)")));
+                    let max = args["restartSshMaxS"].as_f64().unwrap_or(10.0);
+                    if t > max {
+                        return Ok(s.fail(format!("the restarted invocation's ssh took {t} s (want <= {max} s)")));
                     }
                     s.st["restarted"] = json!(t);
                     h = h.call(host("summary", "request.summary", json!({ "name": name })));
