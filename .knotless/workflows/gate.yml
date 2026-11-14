@@ -2,9 +2,9 @@
 # builds included), and a clean tree after. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
 on:
   push:
-    refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
+    refs: [refs/heads/*, refs/tags/v*]
   asked:
-    refs: [refs/heads/main, refs/heads/knotless-ci]
+    refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
 executor: kcp-build
 steps:

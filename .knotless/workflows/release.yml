@@ -10,9 +10,9 @@
 # Go compile, and the gate's 12 + this 8 + testhost's 4 fit the prod market of 16 + 12 + 8 vCPUs beside each other).
 on:
   push:
-    refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
+    refs: [refs/heads/*, refs/tags/v*]
   asked:
-    refs: [refs/heads/main, refs/heads/knotless-ci]
+    refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
 executor: kcp-medium
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]

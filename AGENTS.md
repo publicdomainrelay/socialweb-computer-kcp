@@ -1060,6 +1060,13 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   last). knotless's merge queue would do this landing itself, but knotless-run refuses `--queue` with the
   composition executor ("--queue lands code anyone can open a pull with: it takes --executor docker"; the queue's
   batches are on no remote a rented VM can check out), so the single lander is the rule until the fork has it.
+- Test by pushing a branch and watching its CI (owner, 2026-11-14): `gate`, `release`, `testhost` and `test` run on a push to ANY
+  branch (`refs/heads/*`; `test`, and the VMM and dev-network workflows, only when code changes: their `paths`), with no
+  bucket key (a branch restores the caches read-only and publishes nothing; `publish` and every bucket write stay main and v*
+  tags), and a newer push to the branch supersedes its running one. Push the branch to `knotless` (`git push knotless <branch>`),
+  `knotless run list knotless://<owner>/socialweb-computer-kcp --ref refs/heads/<branch> --wait <secs>`, and `--log` for a
+  failure; `knotless run rerun ... --ref refs/heads/<branch> --workflow <name>` asks for one workflow. Local hat-8 runs
+  (`deploy/check.sh`, `tests/gate.sh`, a hand-run staging network) are for interactive debugging only, under `swc-heavy`.
 - Heavy jobs on hat-8 (VMM tests, a local gate or `make check-pins`, release or guest image builds, staging stand-up
   and its suites) run under `scripts/swc-heavy.sh <command...>`: two at a time (`SWC_HEAVY_SLOTS`, default 2: an
   `flock -n` on `/var/tmp/swc-heavy.lock.d/slot-<n>` plus a shared `flock` on `/var/tmp/swc-heavy.lock`, which a copy of the

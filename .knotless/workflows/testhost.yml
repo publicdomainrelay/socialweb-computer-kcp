@@ -2,17 +2,20 @@
 # test-modules.tar.gz) and the static socialweb-meshd of this rust/ tree (meshd/<git tree of rust/>/), published to the bucket
 # for `test` to download (tests/publish-test-host.sh, BUILD_HOST=local). Each is skipped when its SHA256SUMS is already
 # there, so most pushes publish nothing and rent the VM for seconds. The bucket key is a sealed secret given only to pushes to
-# main and v* tags: a branch (knotless-ci) does not run this, and its `test` builds what it lacks on its own VM. 4 vCPU / 8 GB
+# main and v* tags. A branch runs this too, without the key: what its tests/ or rust/ tree has that is not published is
+# built and kept as this run's artifacts (dist/), which `test`, `vmm` and `compositions` read (`after: [testhost]`); nothing
+# is written to the bucket. 4 vCPU / 8 GB
 # (binding kcp-small: this is rare, and a cold build of the host, the modules and meshd does not need the 12 cores of gate
 # and release, which would fill the market beside them).
 on:
   push:
-    refs: [refs/heads/main, refs/tags/v*]
+    refs: [refs/heads/*, refs/tags/v*]
   asked:
-    refs: [refs/heads/main]
+    refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
 executor: kcp-small
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
+artifacts: [dist]
 env:
   SPACES_BUCKET: socialweb-computer-kcp
   SPACES_REGION: sfo3
@@ -28,4 +31,5 @@ steps:
       fi
       if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --wasm --deno; fi
       . /opt/ci/env
-      BUILD_HOST=local sh tests/publish-test-host.sh
+      # a branch has no bucket key: DIST is where the unpublished builds go, as this run's artifacts
+      BUILD_HOST=local DIST="$PWD/dist" sh tests/publish-test-host.sh

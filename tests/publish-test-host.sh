@@ -30,8 +30,17 @@ tree="$2" rtree="$3" dir="$HOME/$4"
 $local || { echo "publish-test-host: not on $host" >&2; exit 1; }
 # the build host's key file, else SPACES_* in the environment (knotless CI's testhost workflow)
 [ ! -f "$HOME/.spaces_swc_kcp_source" ] || . "$HOME/.spaces_swc_kcp_source"
-: "${SPACES_BUCKET:?}" "${SPACES_REGION:?}" "${SPACES_ACCESS_KEY_ID:?}" "${SPACES_SECRET_ACCESS_KEY:?}"
-publish() { deno run -A --no-lock "$dir/scripts/publish-spaces.ts" --dir "$1" --prefix "$2" --content-addressed; }
+# no bucket key (a branch's CI run): nothing is published, what is not already published is built into DIST, an absolute path
+# (knotless CI's testhost workflow keeps it as the run's artifacts; `test`, `vmm` and `compositions` read it)
+if [ -z "${SPACES_ACCESS_KEY_ID:-}" ]; then
+	: "${DIST:?no SPACES_ACCESS_KEY_ID and no DIST to build into}"
+	mkdir -p "$DIST"
+	publish() { :; }
+else
+	: "${SPACES_BUCKET:?}" "${SPACES_REGION:?}" "${SPACES_ACCESS_KEY_ID:?}" "${SPACES_SECRET_ACCESS_KEY:?}"
+	DIST=""
+	publish() { deno run -A --no-lock "$dir/scripts/publish-spaces.ts" --dir "$1" --prefix "$2" --content-addressed; }
+fi
 if ! curl -sfo /dev/null "$base/tests/$tree/SHA256SUMS"; then
 	cd "$dir/tests"
 	out="$dir/out" sums="$dir/sums"
@@ -42,6 +51,7 @@ if ! curl -sfo /dev/null "$base/tests/$tree/SHA256SUMS"; then
 	(cd "$out" && sha256sum swc-test-host test-modules.tar.gz > "$sums/SHA256SUMS" && cat "$sums/SHA256SUMS")
 	publish "$out" "tests/$tree"
 	publish "$sums" "tests/$tree"
+	[ -z "$DIST" ] || { cp "$out"/swc-test-host "$out"/test-modules.tar.gz "$DIST/" && cp "$sums/SHA256SUMS" "$DIST/tests.SHA256SUMS"; }
 fi
 if ! curl -sfo /dev/null "$base/meshd/$rtree/SHA256SUMS"; then
 	m="$dir/meshd" ms="$dir/meshd-sums"
@@ -50,6 +60,7 @@ if ! curl -sfo /dev/null "$base/meshd/$rtree/SHA256SUMS"; then
 	(cd "$m" && rm -f ./*.sha256 && sha256sum socialweb-meshd-x86_64 > "$ms/SHA256SUMS" && cat "$ms/SHA256SUMS")
 	publish "$m" "meshd/$rtree"
 	publish "$ms" "meshd/$rtree"
+	[ -z "$DIST" ] || { cp "$m/socialweb-meshd-x86_64" "$DIST/" && cp "$ms/SHA256SUMS" "$DIST/meshd.SHA256SUMS"; }
 fi
 rm -rf "$dir"
-echo "$base/tests/$tree/ $base/meshd/$rtree/"
+if [ -z "$DIST" ]; then echo "$base/tests/$tree/ $base/meshd/$rtree/"; else echo "built into $DIST (unpublished, no bucket key)"; fi

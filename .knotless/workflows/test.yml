@@ -3,14 +3,18 @@
 # run's dump is an artifact (runs/), kept on failure.
 # TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
 # then `after: [build]` and its artifacts again (build.yml).
-# A run rents, as R2, the multi-VM staging layout (four VMs, two of them 4/8 nested-virt): pushes to knotless-ci only,
-# and when asked at main (`knotless run rerun knotless://<owner>/socialweb-computer-kcp --ref refs/heads/main --workflow test`).
+# A run rents, as R2, the multi-VM staging layout (four VMs, two of them 4/8 nested-virt): on a push to any branch that
+# changes code (paths below; a new branch runs everything), and when asked (`knotless run rerun knotless://<owner>/
+# socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). The test host and meshd come from this commit's
+# `testhost` run (`after`: its artifacts when the branch changed tests/ or rust/, else the bucket's published build).
 on:
   push:
-    refs: [refs/heads/knotless-ci]
+    refs: [refs/heads/*]
+    paths: [internal/**, cmd/**, api/**, tests/**, rust/**, deploy/**, scripts/**, go.mod, go.sum, .knotless/**]
   asked:
-    refs: [refs/heads/main, refs/heads/knotless-ci]
+    refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
+after: [testhost]
 executor: kcp-test
 artifacts: [runs]
 # a failed run freezes (--on-fail freeze): `knotless run attach` gives the owner's or a collaborator's key this, as
@@ -29,9 +33,19 @@ steps:
       command -v curl >/dev/null && command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq curl jq >/dev/null; }
       u=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/tests/$(git rev-parse HEAD:tests)
       d=$(mktemp -d)
-      if curl -sfo "$d/SHA256SUMS" "$u/SHA256SUMS"; then
-        echo "tests: $u"
-        for f in swc-test-host test-modules.tar.gz; do curl -sfo "$d/$f" "$u/$f"; done
+      # this commit's testhost run kept what the bucket lacks (a branch that changed tests/ or rust/) as dist/ artifacts
+      art() { [ -n "${KNOTLESS_ARTIFACTS_URL:-}" ] && curl -sfo "$2" -H "Authorization: Bearer $KNOTLESS_ARTIFACTS_TOKEN" "$KNOTLESS_ARTIFACTS_URL?workflow=testhost&name=dist/$1"; }
+      got=
+      if art tests.SHA256SUMS "$d/SHA256SUMS" && art swc-test-host "$d/swc-test-host" && art test-modules.tar.gz "$d/test-modules.tar.gz"; then
+        got=artifacts; echo "tests: testhost artifacts of this commit"
+      else
+        rm -f "$d/swc-test-host" "$d/test-modules.tar.gz"
+        if curl -sfo "$d/SHA256SUMS" "$u/SHA256SUMS"; then
+          got=bucket; echo "tests: $u"
+          for f in swc-test-host test-modules.tar.gz; do curl -sfo "$d/$f" "$u/$f"; done
+        fi
+      fi
+      if [ -n "$got" ]; then
         (cd "$d" && sha256sum -c --quiet SHA256SUMS)
         tar -C tests -xzf "$d/test-modules.tar.gz"
         install -D -m 0755 "$d/swc-test-host" tests/target/release/swc-test-host
@@ -46,7 +60,10 @@ steps:
       install -m 0755 tests/target/release/swc-test-host /usr/local/bin/swc-test-host
       # the static socialweb-meshd the multi-VM layout puts on each VM (SWC_MESHD), of this rust/ tree
       m=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/meshd/$(git rev-parse HEAD:rust)
-      if curl -sfo "$d/meshd.SHA256SUMS" "$m/SHA256SUMS" && curl -sfo "$d/socialweb-meshd-x86_64" "$m/socialweb-meshd-x86_64"; then
+      if art meshd.SHA256SUMS "$d/meshd.SHA256SUMS" && art socialweb-meshd-x86_64 "$d/socialweb-meshd-x86_64"; then
+        echo "meshd: testhost artifacts of this commit"
+        (cd "$d" && sha256sum -c --quiet meshd.SHA256SUMS)
+      elif curl -sfo "$d/meshd.SHA256SUMS" "$m/SHA256SUMS" && curl -sfo "$d/socialweb-meshd-x86_64" "$m/socialweb-meshd-x86_64"; then
         echo "meshd: $m"
         (cd "$d" && sha256sum -c --quiet meshd.SHA256SUMS)
       else
