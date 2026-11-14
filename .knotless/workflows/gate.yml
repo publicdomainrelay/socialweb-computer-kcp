@@ -1,8 +1,11 @@
 # knotless CI: the gate (AGENTS.md: How to verify): deploy/check.sh --fast (go build, go vet, the cross-OS and release
 # builds included), and a clean tree after. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
+# A push to a branch that changes only docs (*.md, images), AGENTS.md or the like skips it (the check files as skipped, which what `after`s it goes on); main and v* tags always run it (`always`): every main commit is built and published.
 on:
   push:
     refs: [refs/heads/*, refs/tags/v*]
+    paths: [internal/**, cmd/**, api/**, lexicons/**, deploy/**, tests/**, rust/**, scripts/**, infra/**, examples/**, pkg/**, hack/**, third_party/**, .knotless/**, Makefile, go.mod, go.sum, socialweb-node*, NEXT.yaml, handoff.yaml, docs/*.yaml, docs/**/*.yaml, .gitattributes, .dockerignore]
+    always: [refs/heads/main, refs/tags/v*]
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]

@@ -9,9 +9,12 @@
 # does not cancel a release that holds its turn (`superseded: finish`: the newest waits for it): without that, a run of pushes to
 # main cancelled every release and the reproducible build never finished; a branch push cancels nothing else on its own. 8 vCPU / 16 GB (binding kcp-medium: with the asset cache warm the build is minutes of
 # Go compile, and the gate's 12 + this 8 + testhost's 4 fit the prod market of 16 + 12 + 8 vCPUs beside each other).
+# A push to a branch that changes only docs (*.md, images), AGENTS.md or the like skips it (the check files as skipped, which what `after`s it goes on); main and v* tags always run it (`always`): every main commit is built and published.
 on:
   push:
     refs: [refs/heads/*, refs/tags/v*]
+    paths: [internal/**, cmd/**, api/**, lexicons/**, deploy/**, rust/**, scripts/**, pkg/**, third_party/**, go.mod, go.sum, .knotless/workflows/release.yml, .knotless/workflows/publish.yml]
+    always: [refs/heads/main, refs/tags/v*]
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]

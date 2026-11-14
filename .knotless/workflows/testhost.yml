@@ -7,9 +7,12 @@
 # is written to the bucket. 4 vCPU / 8 GB
 # (binding kcp-small: this is rare, and a cold build of the host, the modules and meshd does not need the 12 cores of gate
 # and release, which would fill the market beside them).
+# A push to a branch that changes only docs (*.md, images), AGENTS.md or the like skips it (the check files as skipped, which what `after`s it goes on); main and v* tags always run it (`always`): every main commit is built and published.
 on:
   push:
     refs: [refs/heads/*, refs/tags/v*]
+    paths: [tests/**, rust/**, scripts/**, .knotless/workflows/testhost.yml]
+    always: [refs/heads/main, refs/tags/v*]
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
