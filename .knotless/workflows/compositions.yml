@@ -1,12 +1,12 @@
 # knotless CI: the dev-network-only entries of the acceptance suite (0007:restart, 0014:*, 0015:pressure, 0016:*) against the
 # multi-VM staging layout (R2 on the kcp-test VM rents four small VMs: atproto 2/4, gateway 4/8, two 4/8 nested-virt bidders
 # on one meshd overlay), and the suite runs from the atproto VM (tests/compositions/staging/suite.sh). 0014:run needs three
-# network bidders and SKIPs on two. Same stand-up and test host as `test.yml` (kept in step with it); on a push to any branch that changes code (paths; a new branch
-# runs everything) and when asked, after `gate` and `testhost`. The requester under test is this commit's build (step `binary`,
+# network bidders and SKIPs on two. Same stand-up and test host as `test.yml` (kept in step with it); on a push to main that changes code (paths) and, until the binary
+# reaches the staging VMs reliably, on a branch only when asked, after `gate` and `testhost`. The requester under test is this commit's build (step `binary`,
 # as test.yml: built here, put on the staging VM).
 on:
   push:
-    refs: [refs/heads/*]
+    refs: [refs/heads/main]
     paths: [internal/**, cmd/**, api/**, tests/**, deploy/**, scripts/**, go.mod, go.sum, .knotless/workflows/compositions.yml]
   asked:
     refs: [refs/heads/*]

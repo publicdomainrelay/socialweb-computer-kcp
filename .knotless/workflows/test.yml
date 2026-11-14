@@ -1,7 +1,8 @@
 # knotless CI: the staging composition (tests/compositions/staging) on THIS commit's build: step `binary` builds the
 # release socialweb-computer here (asset and build caches restored read-only: a branch has no bucket key), and the test host
 # puts it on the staging VMs (target requester `path:<file>`, SWC_BINARY; request.put). Runs after `gate` and `testhost` on a
-# push to any branch that changes code (paths below; a new branch runs everything), and when asked (`knotless run rerun
+# push to main that changes code (paths below) and, until the binary reaches the staging VMs reliably (a 589 MB put through the
+# requester's ssh took 12 to 38 min and broke a pipe), on a branch only when asked (`knotless run rerun
 # knotless://<owner>/socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). Rented by R2 from the kcp-test VM
 # (4 vCPU / 8 GB): the multi-VM layout (four small VMs, two of them 4/8 nested-virt bidders, one meshd overlay) and the staging
 # suite (0003 0005 0006 0007 0008 0012 0013; the dev-network-only entries are `compositions`) run from its atproto VM.
@@ -10,7 +11,7 @@
 # (runs/), kept on failure.
 on:
   push:
-    refs: [refs/heads/*]
+    refs: [refs/heads/main]
     paths: [internal/**, cmd/**, api/**, tests/**, rust/**, deploy/**, scripts/**, go.mod, go.sum, .knotless/**]
   asked:
     refs: [refs/heads/*]
