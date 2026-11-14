@@ -594,6 +594,51 @@ impl Swc {
             },
             // a network bidder's core restarted in place (staging; 0007 restart): `dev restart <network> <bidder>/core` with
             // the network's own binary; its VMs stay up and the new core adopts them
+            // the memory cgroup of THIS run's own VM (staging / dev network, VM units under the account's systemd user
+            // manager): {receipt, cluster, vm} -> unit, current, high, max, swapMax, events {high, max, oom, oom_kill}. With
+            // `setHigh` (bytes, or "max" for no limit) it first sets the unit's MemoryHigh (runtime property: fault injection on
+            // the test's own VM only; the receipt is one this run made and names the ComputeVM `vm`)
+            "vm.memory" => {
+                let (Some(receipt), Ok(cluster), Ok(vm)) = (input["receipt"].as_str().filter(|r| r.starts_with("at://")), str_of(input, "cluster"), str_of(input, "vm")) else { return Some(Err("receipt (an at:// URI), cluster and vm are required".into())) };
+                if self.target.network.is_none() {
+                    return Some(Err("vm.memory: the target is no market network (staging only)".into()));
+                }
+                if !self.receipts.lock().unwrap().iter().any(|r| r == receipt) {
+                    return Some(Err(format!("vm.memory: {receipt} is not a contract of this run")));
+                }
+                if vm.is_empty() || !vm.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                    return Some(Err("vm.memory: vm is a ComputeVM name".into()));
+                }
+                let cv = atlibs_host::run::Call::call(
+                    &*self.kube,
+                    atlibs_kube::GET.into(),
+                    atlibs_host::run::Request { input: Some(json!({ "cluster": cluster, "apiVersion": "socialweb.computer/v1alpha1", "kind": "ComputeVM", "name": vm })), ..Default::default() },
+                ).await;
+                match cv {
+                    Ok(Some(o)) if o["spec"]["contract"]["receipt"]["uri"] == receipt => {}
+                    Ok(_) => return Some(Err(format!("vm.memory: the ComputeVM {vm} is not the receipt's"))),
+                    Err(e) => return Some(Err(format!("vm.memory: {e}"))),
+                }
+                let set = match input["setHigh"].as_u64() {
+                    Some(n) => format!("MemoryHigh={n}"),
+                    None if input["setHigh"] == "max" => "MemoryHigh=infinity".to_string(),
+                    None => String::new(),
+                };
+                let script = format!(
+                    r#"export XDG_RUNTIME_DIR="${{XDG_RUNTIME_DIR:-/run/user/$(id -u)}}"
+u=$(systemctl --user list-units --all --plain --no-legend 'socialweb-vm-*-{vm}.service' 2>/dev/null | awk '{{print $1}}' | head -1)
+[ -n "$u" ] || {{ echo '{{"error":"no VM unit of {vm} in this account'"'"'s user manager (a proc-backend bidder has no VM cgroup)"}}'; exit 0; }}
+{setcmd}
+cg=$(systemctl --user show "$u" -p ControlGroup --value)
+d=/sys/fs/cgroup$cg
+[ -r "$d/memory.current" ] || {{ echo '{{"error":"no readable memory cgroup for the unit"}}'; exit 0; }}
+ev=$(awk '{{printf "\"%s\":%s,", $1, $2}}' "$d/memory.events" | sed 's/,$//')
+printf '{{"unit":"%s","current":%s,"high":"%s","max":"%s","swapMax":"%s","events":{{%s}}}}\n' "$u" "$(cat $d/memory.current)" "$(cat $d/memory.high)" "$(cat $d/memory.max)" "$(cat $d/memory.swap.max 2>/dev/null)" "$ev"
+"#,
+                    setcmd = if set.is_empty() { String::new() } else { format!("systemctl --user set-property --runtime \"$u\" {set} || {{ echo '{{\"error\":\"set-property failed\"}}'; exit 0; }}") },
+                );
+                on_host(None, &script).await.and_then(|o| serde_json::from_str::<Value>(o.trim()).map_err(|e| format!("vm.memory: {e}: {}", tail(&o)))).and_then(|v| match v["error"].as_str() { Some(e) => Err(format!("vm.memory: {e}")), None => Ok(v) })
+            }
             "bidder.restart" => {
                 let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
                 if !self.target.bidders.iter().any(|b| b.name == name) {

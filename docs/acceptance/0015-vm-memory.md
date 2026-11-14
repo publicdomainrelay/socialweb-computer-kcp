@@ -54,6 +54,33 @@ Inputs (`--input '{...}'`): `cpus` (default "2"), `mem` ("2G"), `pct` (95), `sec
 Readings: `winner`, `peak_used_pct`, `fsyncs`, `guest_oom_lines` (the guest's own OOM killer, a reading: the guest may
 kill the hog when its page cache needs room), `ssh_missed`, `computevm`, `memoryPressure`, `oomKilled`.
 
+## Entry `pressure`: the memory events fire once per crossing and re-arm
+
+Proves the bidder's edge-triggered `compute.events.vm.memoryPressure` (internal/market/bidder/memory.go: it polls the VM
+cgroup's `memory.events` every 15 s; one record per crossing, at most one per kind per `MemoryTypeGap` 10 min, re-armed only
+after `MemoryRearmQuiet` 5 min without a rise and usage under 90% of the limit) fires exactly once per crossing, not once per
+poll, and not again inside the gap. Staging only (SKIP on prod): the test host lowers THIS run's own VM unit's `MemoryHigh`
+(`vm.memory` host call: `systemctl --user set-property --runtime`, only for a ComputeVM of a receipt this run made, on a network
+target) and restores it; a bidder without per-VM cgroups (proc backend) SKIPs with that reason.
+
+1. `run request --hold --cpus 2 --mem 2G`; in the guest a python3 process holds 55% of RAM (os.urandom chunks) and, while
+   `/var/tmp/memhold.go` exists, reads every page of it again and again
+2. Crossing n: `MemoryHigh` to half the VM's `memory.current` (256 MiB at least), the guest touches its memory for 60 s
+   (memory.events `high` must rise at least 3 times), then `MemoryHigh` restored and the touching stopped
+3. Crossing 1: exactly one `vm.memoryPressure` record of this receipt (kind `high`, `observed` > 0), still one 45 s after it
+   appeared (the polls that follow add none); crossing 2 at record 1 + 6.5 min (past the 5 min re-arm, inside the 10 min gap):
+   still exactly one 75 s later; crossing 3 at record 1 + 10.75 min (past the gap): exactly two
+4. Never a kind `max` record or a `vm.oomKilled` one; the ComputeVM `Running`, the guest's boot id unchanged, the contract
+   never left Held, no `vm.terminated`; release; every record gone
+
+Readings: `limits` (unit, high, max, swapMax, memory.events before), `crossings` (lowered, highEventsRose, restored limit),
+`record1`, `records`, `oomKilledRecords`. Run time about 15 min (the gap makes it so: a second record cannot appear sooner;
+a test-only knob for the gap would make it shorter but would not test the product constant).
+
+```sh
+SWC_TARGET=<dev or staging target.json> cargo run -p swc-test-host -- compositions/0015 --account alice --entry pressure
+```
+
 ## Known pitfalls
 
 | Symptom | Cause / fix |

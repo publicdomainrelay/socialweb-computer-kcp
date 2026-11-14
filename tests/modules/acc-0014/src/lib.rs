@@ -560,9 +560,14 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
             s.st["results"] = json!([]);
             s.reading("bidder", b["did"].clone());
             s.set("baseline");
+            // the bidder's offering first (it publishes it once its pinned guest image verified: minutes after dev up)
             h = h
                 .call(host("log0", "bidder.logCount", json!({ "name": b["name"], "texts": [EARLY_KILL] })))
-                .timer("deadline", (count * 7 + 10) * MIN);
+                .call(get_record("off", &format!("at://{}/com.publicdomainrelay.temp.market.offering/self", b["did"].as_str().unwrap_or_default())))
+                .timer("deadline", (count * 7 + 10) * MIN + 10 * MIN);
+        }
+        Event::Timer { id } if id == "offretry" => {
+            h = h.call(get_record("off", &format!("at://{}/com.publicdomainrelay.temp.market.offering/self", s.st["bidder"]["did"].as_str().unwrap_or_default())));
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in time (phase {}, VM {i})", s.phase()))),
         Event::Timer { id } if id == format!("held:{i}") && s.is("held") => {
@@ -597,6 +602,24 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
         }
         Event::Result { id, result, .. } => {
             let r = result.output();
+            if id == "off" {
+                if r.as_ref().is_err_and(|e| e.contains("RecordNotFound")) {
+                    let n = s.st["offTries"].as_u64().unwrap_or(0) + 1;
+                    s.st["offTries"] = json!(n);
+                    if n > 60 {
+                        return Ok(s.fail("the bidder's offering is not published after 10 min"));
+                    }
+                    return Ok(s.keep(h.timer("offretry", 10_000)));
+                }
+                if let Err(e) = r {
+                    return Ok(s.fail(format!("off: {e}")));
+                }
+                s.flag("offered");
+                if s.has("logged") {
+                    h = next(&mut s, h, 0);
+                }
+                return Ok(s.keep(h));
+            }
             match id.as_str() {
                 "log0" | "log1" => {
                     let o = match out(&s, &id, r) {
@@ -606,7 +629,10 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
                     let n = o["counts"][EARLY_KILL].as_u64().unwrap_or(0);
                     if id == "log0" {
                         s.st["early0"] = json!(n);
-                        h = next(&mut s, h, 0);
+                        s.flag("logged");
+                        if s.has("offered") {
+                            h = next(&mut s, h, 0);
+                        }
                     } else {
                         let early = n.saturating_sub(s.st["early0"].as_u64().unwrap_or(0));
                         s.reading("earlyKillLines", early);
