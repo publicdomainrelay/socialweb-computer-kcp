@@ -131,7 +131,7 @@ sequenceDiagram
 | `guest.r2Released` | `ok`, `message` | |
 | `guest.memoryPressure` | `kind` psi / swap, `threshold`, `psiSomeAvg10`, `psiFullAvg10`, `swapUsed`, `swapTotal`, `observedAt` | every VM whose bidder serves the guest agent (`memory.json`); edge-triggered: PSI some avg10 >= 10.00% or swap >= 10% in use, re-armed after 5 min under half; one per kind per 10 min, ten memory events per contract (agent and bidder) |
 | `guest.oomKill` | `kills` (since the last one), `total` (oom_kill since boot), `observedAt` | one per /proc/vmstat oom_kill rise, same caps |
-| `guest.image` | `marker` (first line of `/etc/swc-image`, printable ASCII, at most 256 bytes) | once at agent start, when the file exists; the bidder publishes one per contract |
+| `guest.image` | `marker` (first line of `/etc/swc-image`, printable ASCII with spaces, at most 256 bytes) | once at agent start, when the file exists; the bidder publishes one per contract |
 
 ## Boot: hostKeys And onNetwork
 

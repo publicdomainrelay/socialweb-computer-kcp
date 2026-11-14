@@ -597,8 +597,8 @@ func CheckGuestEvent(record map[string]any) (string, error) {
 		if _, err := syntax.ParseDatetime(r.CreatedAt); err != nil {
 			return "", fmt.Errorf("%w: createdAt is not an atproto datetime", ErrReportRefused)
 		}
-		if r.Marker == "" || len(r.Marker) > MaxGuestImageMarker || !printableASCII(r.Marker) {
-			return "", fmt.Errorf("%w: marker is printable ASCII of 1 to %d bytes", ErrReportRefused, MaxGuestImageMarker)
+		if r.Marker == "" || len(r.Marker) > MaxGuestImageMarker || !lineASCII(r.Marker) {
+			return "", fmt.Errorf("%w: marker is one line of printable ASCII (spaces too) of 1 to %d bytes", ErrReportRefused, MaxGuestImageMarker)
 		}
 	default:
 		return "", fmt.Errorf("%w: %q is not a guest event", ErrReportRefused, nsid)
@@ -632,6 +632,15 @@ func checkGuestEventFields(tag, kind string, maxKind int, createdAt string) erro
 func printableASCII(value string) bool {
 	for i := 0; i < len(value); i++ {
 		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func lineASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
 			return false
 		}
 	}
