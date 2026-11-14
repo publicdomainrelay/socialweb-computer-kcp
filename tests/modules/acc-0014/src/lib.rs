@@ -140,8 +140,9 @@ fn check(s: &mut S, mut h: Handle, shape: &Shape) -> Result<Handle, Handle> {
             let msg = r["failMsg"].as_str().unwrap_or_default();
             let waits = r["waits"].as_u64().unwrap_or(0);
             if shape.mode == 1 {
-                if !msg.contains("gave up waiting for capacity") || waits < 2 {
-                    p.push(format!("{} failed, not by giving up waiting for capacity after at least 2 rounds ({waits} waiting lines): {msg}", r["name"]));
+                // the round that gives up logs no waiting line: "after N rounds" has N-1 of them
+                if !msg.contains("gave up waiting for capacity after") || waits < 1 {
+                    p.push(format!("{} failed, not by giving up waiting for capacity after waiting at least once ({waits} waiting lines): {msg}", r["name"]));
                 }
             } else {
                 p.push(format!("{} failed instead of waiting for capacity: {msg}", r["name"]));
@@ -380,6 +381,7 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
         Event::Message { id, data, .. } if id.starts_with("req:") => {
             let i: usize = id[4..].parse().unwrap_or(0);
             let (freed, held_phase, since_freed) = (s.has("freed"), s.is("held"), s.since("freed"));
+            let after_settle = !s.is("held") && !s.is("settle");
             let mut free_filler = false;
             let mut fail_now: Option<String> = None;
             let mut held_readings: Option<(f64, Value, Value)> = None;
@@ -425,7 +427,7 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                 "contract" if data["phase"] == "Failed" && r["held"] != true => {
                     return Ok(s.fail(format!("{} failed before Held: {}", s.st["rentals"][i]["name"], data["message"])));
                 }
-                "exited" if r["held"] != true && r["failed"] != true => return Ok(s.fail(format!("{} exited before Held: {}", s.st["rentals"][i]["name"], data))),
+                "exited" if r["held"] != true && r["failed"] != true && !(after_settle && r["waits"].as_u64().unwrap_or(0) > 0) => return Ok(s.fail(format!("{} exited before Held: {}", s.st["rentals"][i]["name"], data))),
                 _ => {}
             }
             if let Some(m) = fail_now {

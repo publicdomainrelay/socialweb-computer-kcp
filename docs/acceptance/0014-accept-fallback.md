@@ -43,7 +43,7 @@ from the bidders' offerings (`maxCpus`) less the guests already on their kcp, so
 | `run` | first 3 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required; up to 3 rounds (a round where every first pick had room has none) |
 | `concurrent` | first 2 of the target | 4 | `min(free)/2` (two per bidder) | a reading |
 | `backtoback` | the target's first | 6 (input `count`), one after another | 1 (input `cpus`), mem 1G | none: every VM Held |
-| `giveup` | first 2 of the target | 1 | both bidders full (one pinned 1 h filler each) | one rental with `--expires-in 150s` has no room: it waits in rounds (at least 2 `requester_waiting_for_capacity`) and fails at its deadline with "gave up waiting for capacity after N rounds" |
+| `giveup` | first 2 of the target | 1 | both bidders full (one pinned 1 h filler each) | one rental with `--expires-in 150s` has no room: it waits in rounds (at least one `requester_waiting_for_capacity`) and fails at its deadline with "gave up waiting for capacity after N rounds" |
 | `wait` | first 2 of the target | 1 | both bidders full | one rental with `--expires-in 15m` waits; after two rounds a filler is released: the rental is Held on the freed bidder within 300 s of the release (about one backoff and a boot); readings `waitRounds`, `heldAfterFreeS` |
 | `exhausted` | first 2 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required: one rental is refused by both, its bids run out, its new RFP (the refusers excluded, as specified) finds no bid: the rental WAITS for capacity (`requester_waiting_for_capacity`, rounds with a backoff of 30 s, 1 min, 2 min, a fresh RFP asking every bidder each time) and is released by the test |
 
@@ -156,3 +156,11 @@ Dev market network `capt` on hat-8 (3 bidders, `--vmm qemu`, 16 CPUs each in the
 - Found by the first runs (22c89875): a reservation whose ComputeVM was released before the bidder's next capacity
   check counted for its whole 10 min hold: bidder-2 refused 409 "hold 16 of its 16" with one live VM, a rental was
   refused by both bidders and failed (fixed in 91103758)
+
+- port-wait-for-capacity (requester that waits for a slot), capt dev network (hat-8, 2 bidders, 2026-11-14), CLI and net core = branch 77029b12
+  vs main 3c725c6f: `exhausted` PASS 2/2 (the unplaced rental waits, released by the test) and FAILS on main ("failed instead of waiting for
+  capacity: requester_no_bidders"); `giveup` (both bidders filled by pinned fillers, rental `--expires-in 150s`) PASS 2/2 with "gave up
+  waiting for capacity after 2 rounds" after one `requester_waiting_for_capacity` line, FAILS on main (Failed after one 30 s round, no
+  "gave up"); `wait` (`--expires-in 15m`, a filler released after two waiting rounds) PASS 2/2: Held 77.1 s after the release (readings
+  `heldAfterFreeS`, `waitRounds` 2, `waitSlot` 2-vCPU), FAILS on main (the rental fails after one 30 s round); `concurrent` and
+  `backtoback` PASS on the fix, `run` needs 3 bidders (skipped on this 2-bidder net)
