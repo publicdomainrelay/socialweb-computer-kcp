@@ -118,6 +118,8 @@ fn run_with(run: Run<Value>, killed: bool, kill_ms: u64) -> Result<Handle, Strin
                     if killed {
                         // a second release of the taken-over invocation only removes it
                         h = h.call(host("release2", "request.release", json!({ "name": name })));
+                    } else {
+                        h = h.call(host("sshafter", "request.sshTry", json!({ "name": name })));
                     }
                 }
                 "release2" => {
@@ -125,10 +127,34 @@ fn run_with(run: Run<Value>, killed: bool, kill_ms: u64) -> Result<Handle, Strin
                     h = h.call(host("state", "request.state", json!({ "name": name })));
                 }
                 "state" => {
-                    if o["exists"] != false {
-                        return Ok(s.fail(format!("after the second release the invocation directory {} is still there", o["dir"])));
+                    // a second release that finds the invocation's state gone only removes the directory; one that has to
+                    // restart the kcp (the dying owner left its state) finishes like any release: the record (summary
+                    // Released, kcpRunning false) may stay, the instance state and every process of it may not
+                    let summary_ok = phase_of(&o["summary"]) == "released" && o["summary"]["kcpRunning"] == false;
+                    s.reading("dirKept", o["exists"].clone());
+                    if o["instanceState"] == true || o["liveProcesses"].as_u64().unwrap_or(0) > 0 {
+                        return Ok(s.fail(format!("after the second release the invocation {} still has instance state ({}) or live processes ({})", o["dir"], o["instanceState"], o["liveProcesses"])));
+                    }
+                    if o["exists"] != false && !summary_ok {
+                        return Ok(s.fail(format!("after the second release the invocation directory {} is still there and its summary is not Released with kcpRunning false: {}", o["dir"], o["summary"])));
                     }
                     s.flag("removedOk");
+                    h = h.call(host("sshafter", "request.sshTry", json!({ "name": name })));
+                }
+                "sshafter" => {
+                    // ssh on a finished invocation must not start its kcp again
+                    let out = o["output"].as_str().unwrap_or_default().to_string();
+                    s.reading("sshAfter", json!({ "ok": o["ok"], "restarted": o["restarted"], "output": out.clone() }));
+                    if o["ok"] == true || o["restarted"] == true {
+                        return Ok(s.fail(format!("run request ssh on the released invocation succeeded or restarted its kcp: {out}")));
+                    }
+                    h = h.call(host("state3", "request.state", json!({ "name": name })));
+                }
+                "state3" => {
+                    if o["instanceState"] == true || o["liveProcesses"].as_u64().unwrap_or(0) > 0 {
+                        return Ok(s.fail(format!("run request ssh on the released invocation left instance state ({}) or processes ({})", o["instanceState"], o["liveProcesses"])));
+                    }
+                    s.flag("sshGuardOk");
                 }
                 "records" => {
                     s.reading("records_checked", o["uris"].as_array().map_or(0, Vec::len));
@@ -145,7 +171,7 @@ fn run_with(run: Run<Value>, killed: bool, kill_ms: u64) -> Result<Handle, Strin
         }
         _ => {}
     }
-    if s.is("release") && s.has("released") && s.has("summaryOk") && s.has("exited") && (killed || s.has("exitSummaryOk")) && (!killed || s.has("removedOk")) {
+    if s.is("release") && s.has("released") && s.has("summaryOk") && s.has("exited") && (killed || s.has("exitSummaryOk")) && (!killed || s.has("removedOk")) && s.has("sshGuardOk") {
         s.set("records");
         h = h.call(host("records", "request.records", json!({ "name": name })));
     }

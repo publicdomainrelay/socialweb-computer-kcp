@@ -39,7 +39,9 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/001
    process of this invocation; its kcp child keeps running); the release client takes the invocation over (`TakeOwner`,
    restarts the kcp from its state, releases) and still returns within 60 s with the summary Released
    After the takeover release the summary says Released and `kcpRunning` false, a SECOND `run request release <name>` exits
-   OK, and the invocation directory is gone
+   OK, and the invocation has no instance state and no live process; its directory is gone (a second release that finds the kcp state
+   gone only removes the directory) or, when the release had to restart the kcp, it keeps only the record (summary Released,
+   `kcpRunning` false). Then `run request ssh` on it must fail without starting its kcp again
    `killedlate`: the same with the kill 2 s after the release was asked, while the owner stops its kcp after Released: the
    release returns OK, the summary's `kcpRunning` stays true (the dead owner's last word), the SECOND release must exit OK
    (the application is gone and the summary says Released: only the removal is left) and the directory is gone
@@ -80,3 +82,7 @@ capt dev network (hat-8, 2 bidders, 2026-11-14), CLI = main a529874b ("old") vs 
 - `devsup`, capt dev network (hat-8, 2026-11-14), the target's requester binary old = main a529874b vs fix = 7ebd228c: old FAILS 2/2
   (6 of 12 restarts each: `bootstrap: ... is Unknown (... is deactivating)` or a kcp not ready 6 s after its `dev up`), fix PASSES 2/2 (12 of 12
   ready, each `dev up` about 8 s: it waits for the old devsup to exit and starts a new one)
+- ssh on a released invocation (fix-ssh-released, dev net 2026-11-14): `run` FAILS on main 4d54b2b4 (`run request ssh` restarts the kcp of the
+  released invocation from its state: "the invocation's kcp does not answer; starting it again from its state dir") and PASSES with the guard
+  ("the contract is Released: there is no VM to reach"); `killed` and `killedlate` pass on both (the kill lands where a second release finds
+  the state gone: the directory is removed)

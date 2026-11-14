@@ -34,6 +34,7 @@
 		"computer.socialweb.test.request.kill",
 		"computer.socialweb.test.devsup.race",
 		"computer.socialweb.test.request.state",
+		"computer.socialweb.test.request.sshTry",
 		"computer.socialweb.test.request.setPhase",
 		"computer.socialweb.test.request.releaseTry",
 		"computer.socialweb.test.request.removeState",
