@@ -1,0 +1,15 @@
+{
+	"name": "acc-0018",
+	"description": "Acceptance 0018: the shipped binary never uses a tampered downloads tree: an extracted tree that differs from its build record (a file, or a file and its sidecar) is replaced from the embedded blob, a binary whose embedded record names another tree refuses to start.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0018",
+			"description": "Tamper the extracted socialweb-guest-downloads tree (file only, file and sidecar) and run `dev verify-assets` again: healed, served bytes equal the recorded ones; flip one digit of the embedded record in a copy of the binary: it refuses."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.assets.tamper"
+	],
+	"hooks": []
+}

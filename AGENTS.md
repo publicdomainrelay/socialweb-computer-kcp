@@ -1032,6 +1032,9 @@ A prod deployment guarantees nothing; the routine path preserves most things.
     from the blobs the release binary embeds, naming the asset, platform and files; it gates the cache uploads and
     the stage. Without `--against` it builds twice and compares the two. A cache poisoned in the bucket
     (`ASSET_CACHE_URL`, keyed by source inputs, not by output) is therefore caught at the next release, not trusted.
+  - Tampering is a testcase: composition 0018 (`tests/compositions/0018`, `0018:run` in `tests/gate.sh`, staging only) flips a byte
+    of a download in the extracted tree (with and without its sidecar) and of the embedded record in a copy of the binary, and
+    asserts the binary heals the tree or refuses (`docs/acceptance/0018-downloads-integrity.md`).
   - Adding such an asset: give it fetch kind `go` or `script` and NO `platforms` / `sha256`; add its inputs to the
     script's `# stage-assets inputs:` line so its cache key sees them. Checkouts, caches and outputs stay under
   `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and `SHA256SUMS` that

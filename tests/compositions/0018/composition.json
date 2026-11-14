@@ -1,0 +1,12 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0018",
+	"description": "Acceptance 0018: the shipped binary never uses a tampered downloads tree. (docs/acceptance/0018-downloads-integrity.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0018"
+		}
+	]
+}
+

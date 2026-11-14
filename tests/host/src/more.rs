@@ -639,6 +639,11 @@ printf '{{"unit":"%s","current":%s,"high":"%s","max":"%s","swapMax":"%s","events
                 );
                 on_host(None, &script).await.and_then(|o| serde_json::from_str::<Value>(o.trim()).map_err(|e| format!("vm.memory: {e}: {}", tail(&o)))).and_then(|v| match v["error"].as_str() { Some(e) => Err(format!("vm.memory: {e}")), None => Ok(v) })
             }
+            // the shipped binary against a tampered copy of what it extracts (acceptance 0018, staging): variant file / fileSidecar
+            // flips a byte of a download in the extracted socialweb-guest-downloads tree (and, for fileSidecar, rewrites its
+            // sidecar to match) and runs `dev verify-assets` again on the same asset cache; variant record flips one digit of
+            // the embedded build record in a copy of the binary and runs it
+            "assets.tamper" => self.assets_tamper(input).await,
             "bidder.restart" => {
                 let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
                 if !self.target.bidders.iter().any(|b| b.name == name) {
@@ -1257,4 +1262,105 @@ async fn on_host(host: Option<&str>, script: &str) -> Result<String, String> {
         return Err(format!("{}: {}", host.unwrap_or("this host"), String::from_utf8_lossy(&out.stderr).trim()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+const TAMPERED_DOWNLOAD: &str = "socialweb-guest-agent-x86_64";
+
+async fn sha256_of(p: &std::path::Path) -> Result<String, String> {
+    let out = tokio::process::Command::new("sha256sum").arg(p).output().await.map_err(|e| e.to_string())?;
+    String::from_utf8_lossy(&out.stdout).split_whitespace().next().map(String::from).ok_or_else(|| format!("sha256sum {}: {}", p.display(), String::from_utf8_lossy(&out.stderr)))
+}
+
+/// The extracted tree of socialweb-guest-downloads in an asset cache: the directory that holds the tampered download.
+fn downloads_tree(cache: &std::path::Path) -> Result<PathBuf, String> {
+    std::fs::read_dir(cache)
+        .map_err(|e| format!("{}: {e}", cache.display()))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.join(format!("{TAMPERED_DOWNLOAD}.sha256")).is_file())
+        .ok_or_else(|| format!("no extracted socialweb-guest-downloads tree under {}", cache.display()))
+}
+
+async fn remove_tree(p: &std::path::Path) {
+    let _ = tokio::process::Command::new("chmod").args(["-R", "u+w"]).arg(p).status().await;
+    let _ = std::fs::remove_dir_all(p);
+}
+
+impl Swc {
+    async fn verify_assets(&self, bin: &std::path::Path, cache: &std::path::Path) -> Result<(bool, String), String> {
+        let out = tokio::process::Command::new(bin)
+            .args(["dev", "verify-assets", "--asset-cache"])
+            .arg(cache)
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .map_err(|e| format!("{}: {e}", bin.display()))?;
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        Ok((out.status.success(), text))
+    }
+
+    async fn assets_tamper(&self, input: &Value) -> Result<Value, String> {
+        let variant = str_of(input, "variant")?;
+        let root = expand("~/.tmp/swc-system-tests/assets-tamper").join(format!("{}-{variant}", std::process::id()));
+        remove_tree(&root).await;
+        std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+        let r = self.assets_tamper_in(variant, &root).await;
+        remove_tree(&root).await;
+        r
+    }
+
+    async fn assets_tamper_in(&self, variant: &str, root: &std::path::Path) -> Result<Value, String> {
+        let bin = self.bin.path.clone();
+        let cache = root.join("cache");
+        let (ok, first) = self.verify_assets(&bin, &cache).await?;
+        if !ok {
+            return Err(format!("dev verify-assets on an untouched cache failed (this binary embeds no verifiable assets?): {}", tail(&first)));
+        }
+        let tree = downloads_tree(&cache)?;
+        match variant {
+            "file" | "fileSidecar" => {
+                let (f, side) = (tree.join(TAMPERED_DOWNLOAD), tree.join(format!("{TAMPERED_DOWNLOAD}.sha256")));
+                let (want, want_side) = (sha256_of(&f).await?, std::fs::read(&side).map_err(|e| e.to_string())?);
+                let _ = tokio::process::Command::new("chmod").args(["-R", "u+w"]).arg(&tree).status().await;
+                let mut b = std::fs::read(&f).map_err(|e| e.to_string())?;
+                let n = b.len();
+                b[n / 2] ^= 1;
+                std::fs::write(&f, &b).map_err(|e| e.to_string())?;
+                if variant == "fileSidecar" {
+                    let now = sha256_of(&f).await?;
+                    std::fs::write(&side, format!("{now}  {TAMPERED_DOWNLOAD}\n")).map_err(|e| e.to_string())?;
+                }
+                let tampered = sha256_of(&f).await? != want;
+                let (verify_ok, text) = self.verify_assets(&bin, &cache).await?;
+                let healed = downloads_tree(&cache).is_ok_and(|t| t == tree)
+                    && sha256_of(&f).await.is_ok_and(|h| h == want)
+                    && std::fs::read(&side).is_ok_and(|s| s == want_side);
+                Ok(json!({ "variant": variant, "tampered": tampered, "verifyOk": verify_ok, "healed": healed, "output": tail(&text) }))
+            }
+            "record" => {
+                let name = tree.file_name().and_then(|n| n.to_str()).ok_or("tree name")?.to_string();
+                let mut bytes = std::fs::read(&bin).map_err(|e| format!("{}: {e}", bin.display()))?;
+                let digest = name.as_bytes();
+                let mut flipped = 0;
+                let mut at = 0;
+                while let Some(i) = bytes[at..].windows(digest.len()).position(|w| w == digest) {
+                    let i = at + i;
+                    bytes[i] = if bytes[i] == b'0' { b'1' } else { b'0' };
+                    flipped += 1;
+                    at = i + digest.len();
+                }
+                if flipped == 0 {
+                    return Err(format!("the tree digest {name} of the embedded build record is not in {}", bin.display()));
+                }
+                let copy = root.join("swc-tampered");
+                std::fs::write(&copy, &bytes).map_err(|e| e.to_string())?;
+                let _ = tokio::process::Command::new("chmod").args(["0755"]).arg(&copy).status().await;
+                let cache1 = root.join("cache1");
+                let (ok, text) = self.verify_assets(&copy, &cache1).await?;
+                Ok(json!({ "variant": variant, "recordFlipped": true, "flippedOccurrences": flipped, "refused": !ok && text.contains("unpacks to tree"),
+                           "extractedNothing": downloads_tree(&cache1).is_err(), "output": tail(&text) }))
+            }
+            other => Err(format!("variant {other:?}: file, fileSidecar or record")),
+        }
+    }
 }

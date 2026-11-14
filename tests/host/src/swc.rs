@@ -77,6 +77,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.vm.memory",
     "computer.socialweb.test.bidder.logLines",
     "computer.socialweb.test.bidder.restart",
+    "computer.socialweb.test.assets.tamper",
     "computer.socialweb.test.gateway.log",
     "com.fedfork.exec.identlink.walk",
     "com.fedfork.exec.identlink.plc",
