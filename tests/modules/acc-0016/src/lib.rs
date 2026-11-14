@@ -150,7 +150,7 @@ fn run_with(run: Run<Value>, bad: bool) -> Result<Handle, String> {
                         s.st["f"] = json!({});
                         s.set("held");
                         let a = json!(["--hold", "--cpus", "2", "--mem", "4G", "--expires-in", "1h", "--image", format!("{url}@{sha}")]);
-                        h = h.call(steps::host_sub("req2", "request.start", json!({ "name": format!("{}-b", args["name"].as_str().unwrap_or_default()), "args": a })));
+                        h = h.call(steps::host_sub("req2", "request.start", json!({ "name": format!("{}-b", args["name"].as_str().unwrap_or_default()), "args": a, "bidderDids": [winner] })));
                         return Ok(s.keep(h));
                     }
                     return Ok(s.pass());
