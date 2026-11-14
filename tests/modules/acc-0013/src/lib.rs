@@ -308,6 +308,7 @@ fn c_handler(run: Run<Value>) -> Result<Handle, String> {
             h = h.call(host("req", "requester.start", json!({ "name": "mk", "withGateway": true }))).timer("deadline", 45 * MIN);
         }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 45 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "idxpoll" => h = h.call(steps::get_record("idx", &format!("at://{did}/computer.socialweb.infra/self"))),
         Event::Timer { id } if id == "poll" => {
             h = match s.phase().as_str() {
                 "pods" => h.call(kube("pods", "list", t, json!({ "apiVersion": "v1", "kind": "Pod", "namespace": "default", "labelSelector": "app=quickstart-k8s" }))),
@@ -317,6 +318,11 @@ fn c_handler(run: Run<Value>) -> Result<Handle, String> {
             };
         }
         Event::Result { id, result, .. } => {
+            // no index record at all: nothing is listed
+            if id == "idx" && result.output().is_err_and(|e| e.contains("RecordNotFound")) {
+                s.reading("index_live", 0);
+                return Ok(s.pass());
+            }
             let o = match out(&s, &id, result.output()) {
                 Ok(o) => o,
                 Err(f) => return Ok(f),
@@ -378,12 +384,32 @@ fn c_handler(run: Run<Value>) -> Result<Handle, String> {
                 }
                 "gone" => {
                     if o["left"].as_array().is_some_and(Vec::is_empty) {
-                        return Ok(s.pass());
+                        // the index of live deployments (computer.socialweb.infra/self) must not list this cluster's Infra any more; the
+                        // ended records themselves are kept, only the index says what is live
+                        s.set("index");
+                        s.mark("index");
+                        h = h.call(steps::get_record("idx", &format!("at://{did}/computer.socialweb.infra/self")));
+                        return Ok(s.keep(h));
                     }
                     if s.since("zero") > 180.0 {
                         return Ok(s.fail(format!("records of {did} left after nodes 0: {}", o["left"])));
                     }
                     h = h.timer("poll", 10_000);
+                }
+                "idx" => {
+                    let live: Vec<Value> = o["value"]["index"]["live"].as_array().cloned().unwrap_or_default();
+                    s.reading("index_live", live.len());
+                    let mine: Vec<String> = s.st["infra"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|u| u.rsplit('/').next().unwrap_or_default().to_string()).collect();
+                    s.reading("infra_rkeys", json!(mine));
+                    let listed: Vec<&Value> = live.iter().filter(|e| e["rkey"].as_str().is_some_and(|r| mine.iter().any(|m| m == r))).collect();
+                    if !listed.is_empty() {
+                        if s.since("index") > 120.0 {
+                            return Ok(s.fail(format!("the index at computer.socialweb.infra/self still lists this run's Infra as live after nodes 0: {}", json!(listed))));
+                        }
+                        h = h.timer("idxpoll", 10_000);
+                    } else {
+                        return Ok(s.pass());
+                    }
                 }
                 _ => {}
             }
