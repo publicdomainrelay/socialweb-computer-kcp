@@ -9,7 +9,7 @@ case "$mode" in
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
     echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests (run beside the cross-OS builds: they wait on timers), cross-OS builds (and pkg/embedded for ios/arm64) and release builds (not with CHECK_SKIP_RELEASE_BUILDS=1)" >&2
-    echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
+    echo "  --local  --fast plus cargo test of rust/, the embedded asset check (dev verify-assets) and a --dev build that must start (scripts/check-dev-build.sh); lists what it skipped" >&2
     echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
     ;;
@@ -196,4 +196,6 @@ if [ "$run" != fast ]; then
   else
     echo "check.sh: skipped embedded asset extraction (no staged blobs for $hostplat; run scripts/stage-assets.sh)"
   fi
+  scripts/check-dev-build.sh || fail "the --dev build must start (version, dev verify-assets): scripts/check-dev-build.sh"
+  echo "check.sh: ok the --dev build starts"
 fi

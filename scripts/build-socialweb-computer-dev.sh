@@ -145,7 +145,9 @@ rec_of() {
     missing=()
     for asset in $(jq -r --arg p "$plat" '.platforms[$p].assets[]' "$versions"); do
       from_tree "$asset" "$plat" && continue
-      [ -f "$(blob_of "$plat" "$asset")" ] && continue
+      if [ -f "$(blob_of "$plat" "$asset")" ] && { ! from_script "$asset" "$plat" || [ -f "$(rec_of "$plat" "$asset")" ]; }; then
+        continue
+      fi
       missing+=(--asset "$asset")
     done
     if [ ${#missing[@]} -gt 0 ]; then
@@ -172,7 +174,7 @@ for plat in "${platforms[@]}"; do
     (cd "$root/$(echo "$spec" | jq -r '.module // "."')" && GOOS="${plat%/*}" GOARCH="${plat#*/}" go build -trimpath \
       -buildvcs=false -ldflags='-s -w -buildid=' -o "$probe" "$(echo "$spec" | jq -r .package)")
     sum="$(sha_of "$probe")"
-    if [ -f "$(blob_of "$plat" "$asset")" ] && [ "$(cat "$probe.staged" 2>/dev/null)" = "$sum" ]; then
+    if [ -f "$(blob_of "$plat" "$asset")" ] && [ -f "$(rec_of "$plat" "$asset")" ] && [ "$(cat "$probe.staged" 2>/dev/null)" = "$sum" ]; then
       continue
     fi
     tree_assets+=(--asset "$asset")
@@ -207,6 +209,8 @@ for plat in "${platforms[@]}"; do
       jq -n --arg k "$root/internal/assets/blobs/$key/$asset.tar.zst" --arg v "$(blob_of "$plat" "$asset")" '{($k): $v}'
       if [ -f "$(rec_of "$plat" "$asset")" ]; then
         jq -n --arg k "$root/internal/assets/blobs/$key/$asset.built.json" --arg v "$(rec_of "$plat" "$asset")" '{($k): $v}'
+      elif from_tree "$asset" "$plat" || from_script "$asset" "$plat"; then
+        die "$asset ($plat) is built from this commit and has no build record at $(rec_of "$plat" "$asset"): the binary would refuse to start; remove its blob and build again"
       fi
     done
   } | jq -s '{Replace: add}' >"$overlay"
