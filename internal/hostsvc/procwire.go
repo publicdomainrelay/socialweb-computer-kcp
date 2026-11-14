@@ -51,6 +51,9 @@ type ProcHello struct {
 	Started    time.Time `json:"started"`
 	State      string    `json:"state"`
 	Socket     string    `json:"socket"`
+	// Stopping: the devsup is shutting down (stopping its units in order, then exiting); it takes no new unit and an
+	// instance must not adopt its units: wait for it to exit and start a new one
+	Stopping bool `json:"stopping,omitempty"`
 }
 
 type ProcResponse struct {

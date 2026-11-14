@@ -43,6 +43,8 @@ import (
 
 const (
 	devsupReadyTimeout = 15 * time.Second
+	// devsupStopWait bounds the wait for a stopping devsup to exit (a unit stop takes up to its stop timeout)
+	devsupStopWait     = 120 * time.Second
 	devsupExitTimeout  = 90 * time.Second
 	networkDownTimeout = 2 * time.Minute
 	coreStopTimeout    = 10 * time.Second
@@ -226,6 +228,31 @@ func helloDevsup(ctx context.Context, l devinstance.Layout) (hostsvc.ProcClient,
 var errDevsupDetached = errors.New("the instance is already up with a detached devsup")
 
 func startOrAdoptDevsup(ctx context.Context, a *app, l devinstance.Layout, exe string, dieWith int, fg bool) (hostsvc.ProcClient, devinstance.Devsup, error) {
+	if c, h, err := helloDevsup(ctx, l); err == nil && h.Stopping {
+		// the instance's previous devsup is shutting down (its owner stopped the instance, or died mid-stop): its units are
+		// going away in order, so none is adopted; wait for it to exit and start a new one
+		c.Close()
+		a.log.Info("the instance's devsup is stopping; waiting for it to exit before starting", "pid", h.PID, "instance", h.Instance)
+		wait := time.Now().Add(devsupStopWait)
+		for {
+			c2, h2, err2 := helloDevsup(ctx, l)
+			if err2 != nil || h2.PID != h.PID || !h2.Stopping {
+				if c2 != nil {
+					c2.Close()
+				}
+				break
+			}
+			c2.Close()
+			if time.Now().After(wait) {
+				return nil, devinstance.Devsup{}, fmt.Errorf("the instance's devsup (pid %d) is still stopping after %s", h.PID, devsupStopWait)
+			}
+			select {
+			case <-ctx.Done():
+				return nil, devinstance.Devsup{}, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 	if c, h, err := helloDevsup(ctx, l); err == nil {
 		if fg {
 			c.Close()
