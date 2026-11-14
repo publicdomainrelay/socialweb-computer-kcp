@@ -56,6 +56,14 @@ fi
 if ! curl -sfo /dev/null "$base/meshd/$rtree/SHA256SUMS"; then
 	m="$dir/meshd" ms="$dir/meshd-sums"
 	rm -rf "$m" "$ms" && mkdir -p "$m" "$ms"
+	# rust/rust-toolchain.toml pins rustc and its musl targets, which rustup fetches on first use: installed up front, retried: a
+	# download that dies mid-cargo (curl 35, a TLS record error) must not fail the publish
+	for i in 1 2 3 4; do
+		(cd "$dir/rust" && rustup toolchain install >&2) && break
+		echo "rustup toolchain install: attempt $i failed" >&2
+		[ "$i" -lt 4 ] || exit 1
+		sleep $((i * 15))
+	done
 	MESHD_DIST="$m" bash "$dir/rust/build.sh" x86_64 >&2
 	(cd "$m" && rm -f ./*.sha256 && sha256sum socialweb-meshd-x86_64 > "$ms/SHA256SUMS" && cat "$ms/SHA256SUMS")
 	publish "$m" "meshd/$rtree"
