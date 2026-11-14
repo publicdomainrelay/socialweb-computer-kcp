@@ -1,0 +1,73 @@
+# knotless CI: the three nested VMM tests (tests/vmm, `cargo test -p swc-vmm-tests`: QEMU as the default VMM with its nested
+# guest, Firecracker selectable, a market-network bidder inside a QEMU guest) on a CI VM with nested KVM (every kcp-* VM is a
+# KVM guest of a bidder that exposes vmx). Self-contained: it builds this commit's socialweb-computer (so a branch's Go code is
+# what runs), stages the VMM assets from the asset cache (public bucket URL, read only) and the guest image from the bucket, and
+# runs the tests as an unprivileged user with a systemd user manager and a subordinate id range, as tests/vmm/README.md says.
+# On a push to any branch that changes code (paths), and when asked.
+on:
+  push:
+    refs: [refs/heads/*]
+    paths: [internal/**, cmd/**, api/**, tests/vmm/**, tests/testkit/**, deploy/**, scripts/stage-assets.sh, scripts/host-nested-kvm.sh, go.mod, go.sum, .knotless/workflows/vmm.yml]
+  asked:
+    refs: [refs/heads/*]
+runners: [aliceoa.bsky.social]
+executor: kcp-medium
+env:
+  ASSET_CACHE_URL: https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/asset-cache
+steps:
+  - name: toolchain
+    run: |
+      if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno; fi
+  - name: host
+    timeout: 20
+    run: |
+      set -eu
+      ls -l /dev/kvm
+      command -v getfacl >/dev/null && command -v ssh-keygen >/dev/null && command -v sshd >/dev/null && command -v newuidmap >/dev/null \
+        || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq acl openssh-client openssh-server uidmap zstd curl jq >/dev/null; }
+      getent group kvm >/dev/null || groupadd -r kvm
+      id vmm >/dev/null 2>&1 || useradd -m -s /bin/bash -G kvm vmm
+      sed -i /^vmm:/d /etc/subuid /etc/subgid
+      usermod --add-subuids 1000000-2048575 --add-subgids 1000000-2048575 vmm
+      loginctl enable-linger vmm
+      for i in $(seq 60); do [ -d "/run/user/$(id -u vmm)" ] && break; sleep 1; done
+      ls -ld "/run/user/$(id -u vmm)"
+      # the tests' checkout and build space belong to vmm
+      install -d -o vmm -g vmm /home/vmm/swc-vmm /work-vmm
+      cp -a "$PWD/." /work-vmm/src
+      chown -R vmm:vmm /work-vmm
+  - name: build
+    timeout: 40
+    run: |
+      set -eu
+      . /opt/ci/env
+      B=/home/vmm/swc-vmm
+      # the VMM assets and a release-like binary (the third test runs the bidder from it: assets embedded)
+      scripts/stage-assets.sh --platform linux/amd64 --asset pasta --asset swc-userns-stage --asset socialweb-vmexec --asset firecracker --asset qemu \
+        --blobs $B/blobs --blob-cache $B/blob-cache --print-pins >/dev/null
+      for a in pasta swc-userns-stage socialweb-vmexec firecracker qemu; do mkdir -p $B/$a && tar --zstd -xf $B/blobs/linux_amd64/$a.tar.zst -C $B/$a; done
+      sha=$(jq -r '.guestImages.targets["firecracker-x86_64"].outputs["image.json"].sha256' internal/versions/versions.json)
+      mkdir -p $B/image
+      for f in vmlinux rootfs.ext4 image.json; do curl -fsSLo $B/image/$f https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/guest-images/firecracker-x86_64/$sha/$f; done
+      go build -o $B/swc ./cmd/socialweb-computer
+      root=/root/vmm-build; mkdir -p "$root"
+      BUILD_CACHE_URL=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/build-cache bash scripts/ci-build-cache.sh restore "$root" || echo "build-cache: restore failed: cold build"
+      scripts/build-socialweb-computer.sh --platform linux/amd64 --commit "$(git rev-parse HEAD)" --build-root "$root" >/dev/null
+      cp "$root/release/$(git rev-parse HEAD)/socialweb-computer-linux-amd64" $B/socialweb-computer-release
+      ls -la $B/socialweb-computer-release
+      chown -R vmm:vmm $B
+  - name: vmm tests
+    timeout: 60
+    run: |
+      set -eu
+      . /opt/ci/env
+      B=/home/vmm/swc-vmm
+      u=$(id -u vmm)
+      runuser -u vmm -- env HOME=/home/vmm XDG_RUNTIME_DIR=/run/user/$u PATH="$PATH" CARGO_HOME=/opt/ci/cargo RUSTUP_HOME=/opt/ci/rustup \
+        SWC=$B/swc SOCIALWEB_HOST_BACKEND=systemd-user SOCIALWEB_STATE_DIR=$B/state SOCIALWEB_HANDLE=vmmtest.invalid \
+        SOCIALWEB_USERNS_STAGE_PATH=$B/swc-userns-stage/swc-userns-stage SOCIALWEB_PASTA_PATH=$B/pasta/pasta \
+        SOCIALWEB_VMEXEC_PATH=$B/socialweb-vmexec/socialweb-vmexec SOCIALWEB_FIRECRACKER_PATH=$B/firecracker/firecracker \
+        SOCIALWEB_QEMU_PATH=$B/qemu/usr/bin/qemu-system-x86_64 SOCIALWEB_GUEST_IMAGE_SOURCE=file://$B/image \
+        SWC_GUEST_BIN=$B/socialweb-computer-release \
+        CARGO_TARGET_DIR=/home/vmm/target \
+        sh -c "cd /work-vmm/src && cargo test --manifest-path tests/Cargo.toml -p swc-vmm-tests -- --nocapture"
