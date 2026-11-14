@@ -34,7 +34,11 @@ func (b *Bidder) reconcileBid(ctx context.Context, name string) (time.Duration, 
 	}
 	wait, err := b.stepBid(ctx, &bid, b.now().UTC())
 	if err != nil {
-		if ctx.Err() == nil {
+		if unresolved, ok := errors.AsType[*rfpUnresolvedError](err); ok {
+			if unresolved.tries <= 2 {
+				b.log.Info("bidder_rfp_unresolved", "bid", name, "tries", unresolved.tries, "err", err)
+			}
+		} else if ctx.Err() == nil {
 			b.log.Warn("reconciling a bid failed; it is retried", "bid", name, "err", err)
 		}
 		b.retryLater(name)
@@ -243,6 +247,13 @@ func (b *Bidder) revalidateBid(ctx context.Context, bid *v1alpha1.Bid, now time.
 
 func (b *Bidder) decideBid(ctx context.Context, bid *v1alpha1.Bid, now time.Time, stage, lead string) (*market.RFP, error) {
 	resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: bid.Spec.Rfp.URI, CID: bid.Spec.Rfp.CID})
+	if errors.Is(err, market.ErrNotFound) {
+		gone, tries := b.rfpGone(ctx, bid, now, err)
+		if gone {
+			return nil, nil
+		}
+		return nil, &rfpUnresolvedError{tries: tries, cause: fmt.Errorf("resolving the RFP of a bid: %w", err)}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolving the RFP of a bid: %w", err)
 	}

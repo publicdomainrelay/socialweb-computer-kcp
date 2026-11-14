@@ -1,10 +1,12 @@
 package bidder
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/atproto/market"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/market/participant"
 )
@@ -99,4 +101,52 @@ func (b *Bidder) forgetAccept(acceptURI string) {
 	defer b.acceptMu.Unlock()
 	delete(b.acceptTries, acceptURI)
 	delete(b.acceptRFPs, acceptURI)
+}
+
+// An RFP a bid is decided on can be deleted by its requester (a waiting round deletes its RFP) while the bid still resolves it:
+// the bid is failed (RFPGone, one "a bid failed" line) after RFPGiveUpTries failed reads once its RFP was seen RFPNotFoundGiveUpAfter
+// ago (replication lag is a minute or two; the bid window closes the bid at 10 min anyway). Until then the retry is one quiet line.
+const (
+	RFPGiveUpTries = 3
+
+	RFPNotFoundGiveUpAfter = 2 * time.Minute
+)
+
+type rfpUnresolvedError struct {
+	tries int
+
+	cause error
+}
+
+func (e *rfpUnresolvedError) Error() string { return e.cause.Error() }
+
+func (e *rfpUnresolvedError) Unwrap() error { return e.cause }
+
+// rfpGone counts a not-found read of the bid's RFP; true when the bid is given up (failed) now.
+func (b *Bidder) rfpGone(ctx context.Context, bid *v1alpha1.Bid, now time.Time, cause error) (bool, int) {
+	key := "rfp:" + bid.Name
+	b.acceptMu.Lock()
+	if b.acceptTries == nil {
+		b.acceptTries = map[string]*acceptTry{}
+	}
+	t := b.acceptTries[key]
+	if t == nil {
+		t = &acceptTry{first: now}
+		b.acceptTries[key] = t
+	}
+	t.tries++
+	tries, first := t.tries, t.first
+	if seen, err := time.Parse(time.RFC3339, bid.Status.Timings.RfpSeenAt); err == nil && seen.Before(first) {
+		first = seen
+	}
+	giveUp := tries >= RFPGiveUpTries && now.Sub(first) >= RFPNotFoundGiveUpAfter
+	if giveUp {
+		delete(b.acceptTries, key)
+	}
+	b.acceptMu.Unlock()
+	if !giveUp {
+		return false, tries
+	}
+	b.failBid(ctx, bid, "RFPGone", fmt.Sprintf("the RFP is gone (deleted by its requester): not found over %d reads in %s: %s", tries, now.Sub(first).Round(time.Second), cause), now)
+	return true, tries
 }
