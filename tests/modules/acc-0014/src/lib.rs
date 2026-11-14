@@ -241,6 +241,11 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
             }
             h = h.timer("deadline", (25 * shape.rounds + 15) * MIN);
         }
+        Event::Timer { id } if id.starts_with("offretry:") => {
+            let j: usize = id[9..].parse().unwrap_or(0);
+            let b = chosen(&s).get(j).cloned().unwrap_or_default();
+            h = h.call(get_record(&format!("off:{j}"), &format!("at://{}/{OFFERING}/self", b["did"].as_str().unwrap_or_default())));
+        }
         Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in time (phase {})", s.phase()))),
         Event::Timer { id } if id.starts_with("round:") => {
             if (s.is("held") || s.is("settle")) && id == format!("round:{}", s.st["round"]) {
@@ -366,6 +371,17 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
             }
         }
         Event::Result { id, result, .. } => {
+            // a bidder publishes its offering once its pinned guest image verified (a network that just came up may be
+            // seconds to minutes ahead of it): the read is asked again every 10 s, 10 min at most
+            if id.starts_with("off:") && result.output().is_err_and(|e| e.contains("RecordNotFound")) {
+                let j: usize = id[4..].parse().unwrap_or(0);
+                let n = s.st["offTries"].as_u64().unwrap_or(0) + 1;
+                s.st["offTries"] = json!(n);
+                if n > 60 * chosen(&s).len() as u64 {
+                    return Ok(s.fail(format!("{id}: the bidder's offering is not published after 10 min")));
+                }
+                return Ok(s.keep(h.timer(&format!("offretry:{j}"), 10_000)));
+            }
             let o = match out(&s, &id, result.output()) {
                 Ok(o) => o,
                 Err(f) => return Ok(f),
