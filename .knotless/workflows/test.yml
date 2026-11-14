@@ -36,7 +36,7 @@ steps:
         tar -C tests -xzf "$d/test-modules.tar.gz"
         install -D -m 0755 "$d/swc-test-host" tests/target/release/swc-test-host
       else
-        # FALLBACK: no published build of this tests/ tree (run tests/publish-test-host.sh before pushing)
+        # FALLBACK: no published build of this tests/ tree (`testhost` publishes it on a push to main; a branch builds here)
         echo "fallback: building test host ($u: none)"
         bash scripts/knotless-ci-toolchain.sh --wasm
         . /opt/ci/env
@@ -68,12 +68,12 @@ steps:
       git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
       git -C /opt/swc-watch checkout -q 83541a1bd622a8679d90226fa72cab2af87dcde3
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
-      # the newest published release build at or below this commit: knotless release's main/<sha>, else a hat-8 release
-      # build by hand at local/<sha> (AGENTS.md: Release pipeline)
+      # the newest CI-built release at or below this commit (main/<sha>, knotless `publish`); only when none of the last 30
+      # commits has one, a hat-8 release build by hand at local/<sha> (AGENTS.md: Release pipeline)
       bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
       spec=
-      for c in $(git rev-list --max-count 30 HEAD); do
-        for p in main:sha local:local; do
+      for p in main:sha local:local; do
+        for c in $(git rev-list --max-count 30 HEAD); do
           curl -sfo /dev/null "$bucket/${p%%:*}/$c/binaries/SHA256SUMS" && { spec="${p#*:}:$c"; break 2; }
         done
       done

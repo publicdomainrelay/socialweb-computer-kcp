@@ -1,7 +1,7 @@
 #!/bin/sh
-# What knotless CI's test.yml downloads instead of building on its VM, built on hat-8 from this checkout's committed
-# trees and published to the bucket with scripts/publish-spaces.ts and the bucket credential on the build host
-# (~/.spaces_swc_kcp_source), SHA256SUMS last:
+# What knotless CI's test.yml downloads instead of building on its VM, built from this checkout's committed trees and
+# published to the bucket with scripts/publish-spaces.ts: by knotless CI's testhost workflow on every push to main, or by hand
+# on hat-8 (the bucket credential on the build host, ~/.spaces_swc_kcp_source), SHA256SUMS last:
 #   tests/<git rev-parse HEAD:tests>/  the static (musl) swc-test-host and the module wasm (test-modules.tar.gz)
 #   meshd/<git rev-parse HEAD:rust>/   the static socialweb-meshd-x86_64 (rust/build.sh) the multi-VM layout puts on
 #                                      each VM (SWC_MESHD)
@@ -28,7 +28,9 @@ if [ "${1:-}" != --on-build-host ]; then
 fi
 tree="$2" rtree="$3" dir="$HOME/$4"
 $local || { echo "publish-test-host: not on $host" >&2; exit 1; }
-. "$HOME/.spaces_swc_kcp_source"
+# the build host's key file, else SPACES_* in the environment (knotless CI's testhost workflow)
+[ ! -f "$HOME/.spaces_swc_kcp_source" ] || . "$HOME/.spaces_swc_kcp_source"
+: "${SPACES_BUCKET:?}" "${SPACES_REGION:?}" "${SPACES_ACCESS_KEY_ID:?}" "${SPACES_SECRET_ACCESS_KEY:?}"
 publish() { deno run -A --no-lock "$dir/scripts/publish-spaces.ts" --dir "$1" --prefix "$2" --content-addressed; }
 if ! curl -sfo /dev/null "$base/tests/$tree/SHA256SUMS"; then
 	cd "$dir/tests"

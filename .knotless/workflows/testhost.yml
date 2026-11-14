@@ -1,0 +1,30 @@
+# knotless CI: the test host and test modules of this tests/ tree (tests/<git tree of tests/>/: the static swc-test-host and
+# test-modules.tar.gz) and the static socialweb-meshd of this rust/ tree (meshd/<git tree of rust/>/), published to the bucket
+# for `test` to download (tests/publish-test-host.sh, BUILD_HOST=local). Each is skipped when its SHA256SUMS is already
+# there, so most pushes publish nothing and rent the VM for seconds. The bucket key is a sealed secret given only to pushes to
+# main and v* tags: a branch (knotless-ci) does not run this, and its `test` builds what it lacks on its own VM. 12 vCPU /
+# 16 GB (binding kcp-build: a cold build of the host, the modules and meshd).
+on:
+  push:
+    refs: [refs/heads/main, refs/tags/v*]
+  asked:
+    refs: [refs/heads/main]
+runners: [aliceoa.bsky.social]
+executor: kcp-build
+secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
+env:
+  SPACES_BUCKET: socialweb-computer-kcp
+  SPACES_REGION: sfo3
+steps:
+  - name: publish
+    timeout: 90
+    run: |
+      base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
+      tree="$(git rev-parse HEAD:tests)" rtree="$(git rev-parse HEAD:rust)"
+      if curl -sfo /dev/null "$base/tests/$tree/SHA256SUMS" && curl -sfo /dev/null "$base/meshd/$rtree/SHA256SUMS"; then
+        echo "tests/$tree/ and meshd/$rtree/ are published: nothing to build"
+        exit 0
+      fi
+      if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --wasm --deno; fi
+      . /opt/ci/env
+      BUILD_HOST=local sh tests/publish-test-host.sh
