@@ -1018,8 +1018,11 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   composition executor ("--queue lands code anyone can open a pull with: it takes --executor docker"; the queue's
   batches are on no remote a rented VM can check out), so the single lander is the rule until the fork has it.
 - Heavy jobs on hat-8 (VMM tests, a local gate or `make check-pins`, release or guest image builds, staging stand-up
-  and its suites) run one at a time under `scripts/swc-heavy.sh <command...>` (an exclusive `flock` on
-  `/var/tmp/swc-heavy.lock`; `SWC_HEAVY_WAIT=<secs>` gives up after that long). `tests/gate.sh` takes it itself (for the whole run on a target with a local `network`; on prod, whose VMs run on the prod bidders, only for its build). A dev
+  and its suites) run under `scripts/swc-heavy.sh <command...>`: two at a time (`SWC_HEAVY_SLOTS`, default 2: an
+  `flock -n` on `/var/tmp/swc-heavy.lock.d/slot-<n>` plus a shared `flock` on `/var/tmp/swc-heavy.lock`, which a copy of the
+  script from before the slots still holds exclusively), or alone with `SWC_HEAVY_EXCLUSIVE=1` (a job that needs the whole
+  box, VMM tests: running jobs drain, new ones hold off); `SWC_HEAVY_WAIT=<secs>` gives up after that long. `~/.local/bin/swc-heavy`
+  is a copy of the script for any checkout's use. `tests/gate.sh` takes it itself (for the whole run on a target with a local `network`; on prod, whose VMs run on the prod bidders, only for its build). A dev
   network for an item still takes a live slot (`live-slot.ts`) for its whole life, not this lock.
 - Before you mark a goal complete cut a release candidate
   - Babysit CI every time you tag a release candidate. You are only allowed to
