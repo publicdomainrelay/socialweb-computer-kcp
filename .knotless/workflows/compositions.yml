@@ -104,11 +104,14 @@ steps:
       loginctl enable-linger r2
       for i in $(seq 60); do [ -d "/run/user/$(id -u r2)" ] && break; sleep 1; done
       rc=0
+      # a failed run holds its VMs (a freeze) for 30 min on main, 5 min elsewhere: the dump and artifacts carry a branch run's evidence, and a frozen
+      # staging holds ~4 VMs of the 36-vCPU market
+      if [ "$KNOTLESS_RUN_REF" = refs/heads/main ]; then freeze_ttl=1800; else freeze_ttl=300; fi
       # the multi-VM layout, then the dev-network-only suite from its atproto VM
       (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
         SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test \
         SWC_TEST_HOST_STATIC=/usr/local/bin/swc-test-host CI=1 target/release/swc-test-host \
-        compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"layout": "multi", "provision": "infra", "deadlineMin": 200, "suite": ["0007:restart", "0014:run", "0014:concurrent", "0014:exhausted", "0014:backtoback", "0015:pressure", "0016:run", "0016:badsha"]}') || rc=$?
+        compositions/staging --account r2 --on-fail freeze --freeze-ttl "$freeze_ttl" --input '{"layout": "multi", "provision": "infra", "deadlineMin": 200, "suite": ["0007:restart", "0014:run", "0014:concurrent", "0014:exhausted", "0014:backtoback", "0015:pressure", "0016:run", "0016:badsha"]}') || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc
