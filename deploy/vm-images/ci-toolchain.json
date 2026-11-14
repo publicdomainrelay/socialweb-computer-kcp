@@ -1,5 +1,5 @@
 {
-  "url": "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/vm-images/ci-toolchain/c14aeda4d02157ae8594d23ad8066dadf98d0a24bceded92eedc6118e9c9ea89",
-  "sha256": "c14aeda4d02157ae8594d23ad8066dadf98d0a24bceded92eedc6118e9c9ea89",
-  "marker": "ci-toolchain base=3edacb6a2537704a13f66f91880ce916eb0be299d514be523beb5e907e5de947 kcp=632db54182d438bbedf772014f7a074f3eb67ab6 toolchain=db422b4ab242d13b6c25d523459ab2b568f2f49ce1c55852e93b07f08da13b4c"
+  "url": "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/vm-images/ci-toolchain/bb59b6472b7c62ff4ce70f77121b5e9481616d052246be1088dfcc83329e4507",
+  "sha256": "bb59b6472b7c62ff4ce70f77121b5e9481616d052246be1088dfcc83329e4507",
+  "marker": "ci-toolchain base=3edacb6a2537704a13f66f91880ce916eb0be299d514be523beb5e907e5de947 kcp=4be00b13b4cc402f1064eb8f0a1980ebe7cf470a toolchain=9cd5bdda394578116c71c8b986139631300fc37bd91ab41a8b1ab84cc59f0d26 pins=ccd19877f2ea5b024e6d91b25d0ca7e4aa06de30c8048c095875fe7af567447c"
 }
