@@ -10,7 +10,7 @@ takes the invocation over when the owner exits before the release settled).
 
 - Code: `cmd/socialweb-computer/request.go` (`carryOn`, `followRelease`, `releaseForOwner`, `runRequestRelease`),
   `internal/stack/request/owner.go`
-- Test: `tests/compositions/0017` (module `tests/modules/acc-0017`), entries `run`, `killed`, `killedlate` and `half`; prod and staging (they
+- Test: `tests/compositions/0017` (module `tests/modules/acc-0017`), entries `run`, `killed`, `killedlate`, `half` and `devsup`; prod and staging (they
   touch only their own invocation and VM: one 1-vCPU VM each; the owner process is local)
 - Last pass: see Evidence
 
@@ -50,6 +50,12 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/001
    <name>` must exit non-zero naming the phase (Held) and must leave the invocation directory (a VM may still be held);
    the test then removes its own directory (`request.removeState`). It touches only its own invocation: prod-safe
 
+7. `devsup` (the restart race, no VM, no account): the test host runs `dev up --profile quick` (proc backend, a real devsup) in an
+   instance of its own with the target's requester binary, then 12 times (delays 0.5, 1.0 and 2.0 s, 4 each) `dev down` SIGKILLed that
+   long after it started (devsup keeps stopping bao, core, kcp, front, kine in order and exits) and `dev up` at once; 6 s later the kcp
+   must answer `/readyz` 200. Every restart must succeed. It touches only its own instance on the test host (a local kcp, about 500 MB);
+   it runs on prod and dev targets alike and skips when the binary has no `dev up`
+
 ## Evidence
 
 capt dev network (hat-8, 3 bidders, 2026-11-14), CLI = main e13494b1 ("old") vs fix-owner-release 716f4ef4 ("fix"):
@@ -70,3 +76,7 @@ capt dev network (hat-8, 2 bidders, 2026-11-14), CLI = main a529874b ("old") vs 
 - `half`: fix passes; old fails (its release does not name the phase). The summary of the fixed release names `Held` and leaves the
   directory
 - `run`: fix passes
+
+- `devsup`, capt dev network (hat-8, 2026-11-14), the target's requester binary old = main a529874b vs fix = 7ebd228c: old FAILS 2/2
+  (6 of 12 restarts each: `bootstrap: ... is Unknown (... is deactivating)` or a kcp not ready 6 s after its `dev up`), fix PASSES 2/2 (12 of 12
+  ready, each `dev up` about 8 s: it waits for the old devsup to exit and starts a new one)
