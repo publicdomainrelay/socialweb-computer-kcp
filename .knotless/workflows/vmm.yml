@@ -64,7 +64,7 @@ steps:
       . /opt/ci/env
       B=/home/vmm/swc-vmm
       u=$(id -u vmm)
-      runuser -u vmm -- env HOME=/home/vmm XDG_RUNTIME_DIR=/run/user/$u PATH="$PATH" CARGO_HOME=/opt/ci/cargo RUSTUP_HOME=/opt/ci/rustup \
+      runuser -u vmm -- env HOME=/home/vmm XDG_RUNTIME_DIR=/run/user/$u PATH="$PATH" CARGO_HOME=/home/vmm/cargo RUSTUP_HOME=/opt/ci/rustup \
         SWC=$B/swc SOCIALWEB_HOST_BACKEND=systemd-user SOCIALWEB_STATE_DIR=$B/state SOCIALWEB_HANDLE=vmmtest.invalid \
         SOCIALWEB_USERNS_STAGE_PATH=$B/swc-userns-stage/swc-userns-stage SOCIALWEB_PASTA_PATH=$B/pasta/pasta \
         SOCIALWEB_VMEXEC_PATH=$B/socialweb-vmexec/socialweb-vmexec SOCIALWEB_FIRECRACKER_PATH=$B/firecracker/firecracker \
