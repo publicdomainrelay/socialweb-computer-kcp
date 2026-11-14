@@ -685,7 +685,7 @@ async fn main_() -> Result<bool> {
         ..Default::default()
     };
     let started = atlibs_host::iso_now();
-    let name = format!("st-{runbook}-{}", atlibs_host::now_ms() / 1000);
+    let name = format!("st-{runbook}-{}-{}", atlibs_host::now_ms() / 1000, std::process::id() % 10000);
     // what a test module knows of the target: no credential, no path
     let bidders: Vec<Value> = target
         .bidders
