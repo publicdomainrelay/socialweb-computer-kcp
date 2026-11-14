@@ -28,7 +28,7 @@ needs the argument behind it. Do not read it end to end.
 | What a host must provide | `socialweb-computer check-host -role gateway`, `-role bidder` or `-role requester`, `docs/host-contract.md` |
 | The market network | `deploy/market-network/README.md` |
 | The operator handoff | `handoff.yaml` |
-| What CI runs on a push, and its runners | `.knotless/workflows/` (knotless only; GitHub CI is gone): `gate` and `release` (kcp-build 12/16; release after gate, publishing to the bucket, its key a sealed secret of main and v* pushes) on pushes to main, knotless-ci and v* tags; `pins` (kcp-small 4/8) only when asked; `test` (the staging run as R2) on knotless-ci and when asked. See Release pipeline |
+| What CI runs on a push, and its runners | `.knotless/workflows/` (knotless only; GitHub CI is gone): `gate` and `release` (kcp-build 12/16, in parallel: release builds and stages in the bucket, its key a sealed secret of main and v* pushes) on pushes to main, knotless-ci and v* tags; `publish` (kcp-small, `after: [gate, release]`) copies the staged build to `main/<sha>/` on main and v* only; `pins` (kcp-small 4/8) only when asked; `test` (the staging run as R2) on knotless-ci and when asked. See Release pipeline |
 | What the system does, end to end, and its tests | `docs/acceptance/` (the runbooks), `tests/system` (one test file per runbook), `tests/testkit/README.md` |
 
 ## Layout
@@ -764,8 +764,10 @@ pushing.
 Release pipeline. kcp CI is the knotless workflows only (`.knotless/workflows/`, the fork's runner; GitHub CI is gone, its
 `SPACES_*` secrets unused; hat-8's GitHub self-hosted runner, account socialweb-ci from `scripts/gh-runner-install.sh`, is
 stopped and disabled with its files kept: `sudo systemctl --user -M socialweb-ci@ status
-gh-actions-runner-socialweb-computer-kcp.service`, `--remove` deletes it). The knotless `release` workflow publishes `main/<sha>/` and `main/latest/` (a v* tag:
-`releases/<tag>/`), `downloads/` and `guest-images/` as GitHub CI did. Until it has passed on main, builds are hat-8
+gh-actions-runner-socialweb-computer-kcp.service`, `--remove` deletes it). The knotless `release` workflow builds in parallel with `gate` and stages `staging/<sha>/` (plus the content-addressed
+`downloads/` and `guest-images/`); the `publish` workflow, after both pass at the commit, copies it inside the bucket
+(`scripts/copy-spaces.ts`) to `main/<sha>/` and `main/latest/` (a v* tag: `releases/<tag>/`) and checks it. `staging/` is
+scratch for a build whose gate failed. Until it has passed on main, builds are hat-8
 release builds (never `--dev`), published by hand to `local/<sha>/binaries/` (testkit's `local:<sha>`), and the test host
 and module wasm to `tests/<tree>/` (`tests/publish-test-host.sh`):
 

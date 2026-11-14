@@ -1,0 +1,83 @@
+# knotless CI: publishes what `release` staged, once the gate and the release have both passed at this commit: staging/<sha>/
+# is copied inside the bucket (no bytes move through this VM) to main/<sha>/ and main/latest/ (a tag: releases/<tag>/), then
+# the published binaries and guest image are checked from the public URLs. The bucket key is a sealed secret given only to
+# pushes to main and v* tags. A newer push cancels an older commit's publish until its copy starts. 4 vCPU / 8 GB (binding
+# kcp-small).
+on:
+  push:
+    refs: [refs/heads/main, refs/tags/v*]
+  asked:
+    refs: [refs/heads/main]
+runners: [aliceoa.bsky.social]
+executor: kcp-small
+after: [gate, release]
+secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
+env:
+  SPACES_BUCKET: socialweb-computer-kcp
+  SPACES_REGION: sfo3
+  TARGET: firecracker-x86_64
+steps:
+  - name: deno
+    timeout: 10
+    run: |
+      command -v curl >/dev/null && command -v jq >/dev/null && command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl jq unzip >/dev/null; }
+      ci=/opt/ci
+      mkdir -p "$ci/deno"
+      deno_url="$(jq -er '.assets.deno.fetch["linux/amd64"].url' internal/versions/versions.json)"
+      deno_sha="$(jq -er '.assets.deno.fetch["linux/amd64"].sha256' internal/versions/versions.json)"
+      curl -fsSL --max-time 120 -o "$ci/deno.zip" "$deno_url"
+      echo "$deno_sha  $ci/deno.zip" | sha256sum -c --quiet -
+      unzip -q -o "$ci/deno.zip" deno -d "$ci/deno" && rm -f "$ci/deno.zip"
+      "$ci/deno/deno" --version | head -1
+  - name: publish
+    # a newer push cancels a publish before it starts, never once it has (main/latest half written)
+    finish: true
+    timeout: 30
+    run: |
+      export PATH=/opt/ci/deno:$PATH
+      test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"
+      case "$KNOTLESS_RUN_REF" in
+        refs/tags/*) set -- --to "releases/${KNOTLESS_RUN_REF#refs/tags/}" ;;
+        *) set -- --to "main/$KNOTLESS_RUN_SHA" --to main/latest ;;
+      esac
+      deno run -A --no-lock scripts/copy-spaces.ts --from "staging/$KNOTLESS_RUN_SHA" "$@"
+  - name: the published binaries and guest image
+    timeout: 30
+    run: |
+      base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
+      case "$KNOTLESS_RUN_REF" in
+        refs/tags/*) at="releases/${KNOTLESS_RUN_REF#refs/tags/}" ;;
+        *) at="main/$KNOTLESS_RUN_SHA" ;;
+      esac
+      d="$(mktemp -d)"
+      curl -sSf -o "$d/STAGED" "$base/staging/$KNOTLESS_RUN_SHA/binaries/SHA256SUMS"
+      curl -sSf -o "$d/SHA256SUMS" "$base/$at/binaries/SHA256SUMS"
+      diff "$d/STAGED" "$d/SHA256SUMS"
+      if [ "$at" = "main/$KNOTLESS_RUN_SHA" ]; then
+        curl -sSf -o "$d/LATEST" "$base/main/latest/binaries/SHA256SUMS"
+        diff "$d/STAGED" "$d/LATEST"
+      fi
+      while read -r sum name; do
+        curl -sSfL -o "$d/$name" "$base/$at/binaries/$name"
+        echo "$sum  $d/$name" | sha256sum -c --quiet -
+        echo "$at/binaries/$name: sha256 $sum, readable without credentials"
+      done < "$d/SHA256SUMS"
+      pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
+      for f in image.json vmlinux rootfs.ext4; do
+        want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].bytes' internal/versions/versions.json)"
+        size="$(curl -sSI --max-time 60 "$base/guest-images/$TARGET/$pin/$f" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
+        echo "guest-images/$TARGET/$pin/$f $size bytes (pinned $want)"
+        test "$size" = "$want"
+      done
+      # as an account of its own (the binary refuses root): it must resolve its guest image before the bad handle
+      id probe >/dev/null 2>&1 || useradd -m probe
+      probe=/home/probe/p && rm -rf "$probe" && mkdir -p "$probe/run"
+      install -m 0755 "$d/socialweb-computer-linux-amd64" "$probe/socialweb-computer" && chown -R probe "$probe"
+      runuser -u probe -- env HOME=/home/probe XDG_RUNTIME_DIR="$probe/run" "$probe/socialweb-computer" run bidder --handle 'NOT A HANDLE' \
+        --host-backend proc --profile dev-local --state-dir "$probe/state" > "$probe/out.txt" 2>&1 || true
+      cat "$probe/out.txt"
+      if grep -qE 'guestimagerelease|guest-image-source is required' "$probe/out.txt"; then
+        echo "the published binary cannot fetch the guest image of its own build"
+        exit 1
+      fi
+      echo "the published binary resolved its own guest image"

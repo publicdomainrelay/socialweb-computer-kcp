@@ -1,9 +1,11 @@
 # knotless CI: the release binaries (linux/amd64, linux/arm64), the node downloads by sha256 and the pinned guest
-# image, published to the bucket (the paths GitHub CI used): main/<sha>/ and main/latest/ (a tag: releases/<tag>/),
-# downloads/<sha256>/, guest-images/<target>/<pin>/. After gate and pins pass at the same commit. The bucket key is a
-# sealed secret given only to pushes to main and v* tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a
-# pull) the publish steps are skipped. A newer push to the ref cancels an older commit's release (each workflow's runs:
-# knotless's superseded: cancel) until its publish starts. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8 offer it).
+# image, built and staged in the bucket in parallel with the gate: downloads/<sha256>/ and guest-images/<target>/<pin>/
+# (content-addressed, so nothing a failed gate can poison) and staging/<sha>/ (the binaries and their manifest). The
+# `publish` workflow, after gate and release at this commit, copies staging/<sha>/ to main/<sha>/ and main/latest/ (a tag:
+# releases/<tag>/) and checks what it published. The bucket key is a sealed secret given only to pushes to main and v*
+# tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a pull) the staging steps are skipped. A newer push to the ref
+# cancels an older commit's release. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8
+# offer it).
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
@@ -11,7 +13,6 @@ on:
     refs: [refs/heads/main, refs/heads/knotless-ci]
 runners: [aliceoa.bsky.social]
 executor: kcp-build
-after: [gate]
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
 env:
   SPACES_BUCKET: socialweb-computer-kcp
@@ -29,6 +30,7 @@ steps:
       (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
       trap "kill $! 2>/dev/null" EXIT
       root=/root/release-build
+      mkdir -p "$root"
       case "$KNOTLESS_RUN_REF" in refs/tags/v*) ;; *) export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache ;; esac
       bash scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" --build-root "$root"
       rel="$root/release/$KNOTLESS_RUN_SHA"
@@ -87,58 +89,15 @@ steps:
     run: |
       . /opt/ci/env
       scripts/asset-cache-upload.sh /root/release-build/cache/blobs
-  - name: publish
+  - name: stage
     on: {refs: [refs/heads/main, refs/tags/v*]}
-    # a newer push cancels a release before it publishes, never once it has started (main/latest half written)
-    finish: true
     timeout: 90
     run: |
       . /opt/ci/env
       test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"
-      case "$KNOTLESS_RUN_REF" in
-        refs/tags/*) prefix="releases/${KNOTLESS_RUN_REF#refs/tags/}"; also="" ;;
-        *) prefix="main/$KNOTLESS_RUN_SHA"; also="main/latest" ;;
-      esac
       if [ ! -e /root/ci-guest-image.published ]; then
         pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
         deno run -A --no-lock scripts/publish-spaces.ts --dir "/root/ci-guest-image/$TARGET" --prefix "guest-images/$TARGET/$pin" --content-addressed
       fi
       deno run -A --no-lock scripts/publish-spaces.ts --dir /root/ci-downloads --prefix downloads --content-addressed
-      deno run -A --no-lock scripts/publish-spaces.ts --dir "$OUT" --prefix "$prefix" ${also:+--also "$also"}
-  - name: the published binaries and guest image
-    on: {refs: [refs/heads/main, refs/tags/v*]}
-    timeout: 30
-    run: |
-      . /opt/ci/env
-      base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
-      case "$KNOTLESS_RUN_REF" in
-        refs/tags/*) at="releases/${KNOTLESS_RUN_REF#refs/tags/}" ;;
-        *) at="main/$KNOTLESS_RUN_SHA" ;;
-      esac
-      d="$(mktemp -d)"
-      curl -sSf -o "$d/SHA256SUMS" "$base/$at/binaries/SHA256SUMS"
-      diff "$d/SHA256SUMS" "$OUT/binaries/SHA256SUMS"
-      while read -r sum name; do
-        curl -sSfL -o "$d/$name" "$base/$at/binaries/$name"
-        echo "$sum  $d/$name" | sha256sum -c --quiet -
-        echo "$at/binaries/$name: sha256 $sum, readable without credentials"
-      done < "$d/SHA256SUMS"
-      pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
-      for f in image.json vmlinux rootfs.ext4; do
-        want="$(jq -er --arg t "$TARGET" --arg f "$f" '.guestImages.targets[$t].outputs[$f].bytes' internal/versions/versions.json)"
-        size="$(curl -sSI --max-time 60 "$base/guest-images/$TARGET/$pin/$f" | tr -d '\r' | awk 'tolower($1)=="content-length:" {print $2}')"
-        echo "guest-images/$TARGET/$pin/$f $size bytes (pinned $want)"
-        test "$size" = "$want"
-      done
-      # as an account of its own (the binary refuses root): it must resolve its guest image before the bad handle
-      id probe >/dev/null 2>&1 || useradd -m probe
-      probe=/home/probe/p && rm -rf "$probe" && mkdir -p "$probe/run"
-      install -m 0755 "$d/socialweb-computer-linux-amd64" "$probe/socialweb-computer" && chown -R probe "$probe"
-      runuser -u probe -- env HOME=/home/probe XDG_RUNTIME_DIR="$probe/run" "$probe/socialweb-computer" run bidder --handle 'NOT A HANDLE' \
-        --host-backend proc --profile dev-local --state-dir "$probe/state" > "$probe/out.txt" 2>&1 || true
-      cat "$probe/out.txt"
-      if grep -qE 'guestimagerelease|guest-image-source is required' "$probe/out.txt"; then
-        echo "the published binary cannot fetch the guest image of its own build"
-        exit 1
-      fi
-      echo "the published binary resolved its own guest image"
+      deno run -A --no-lock scripts/publish-spaces.ts --dir "$OUT" --prefix "staging/$KNOTLESS_RUN_SHA"
