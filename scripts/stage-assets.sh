@@ -24,7 +24,7 @@ usage() {
   echo "  the downloads (keyed by sha256) in DIR instead of internal/assets/blobs/.cache. --blobs writes" >&2
   echo "  <goos>_<goarch>/<asset>.tar.zst under DIR instead of internal/assets/blobs (the --dev build's cache)." >&2
   echo "  --blob-cache keeps every zstd blob in DIR: an asset of pinned inputs (kind file, oci, debs, gosrc, cargosrc) by" >&2
-  echo "  the sha256 of its versions.json entry, this script, assetpack and the zstd version and flags (a hit" >&2
+  echo "  the sha256 of its versions.json entry, this script, the sources of assetpack and the zstd version and flags (a hit" >&2
   echo "  skips its download or build, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
   echo "  and checked against its pin every time, and only its zstd step is reused, keyed by the sha256 of" >&2
   echo "  its tar stream, or, when its tracked source inputs hash as before (kind go: the in-repo packages it builds from," >&2
@@ -372,7 +372,8 @@ script_sha=""
 if [ -n "$blob_cache" ]; then
   mkdir -p "$blob_cache"
   blob_cache="$(cd "$blob_cache" && pwd -P)"
-  pack_id="$(printf '%s\n' "$(sha_of "$work/assetpack")" "$(zstd -V)" "${zstd_args[*]}" | sha256sum | cut -d' ' -f1)"
+  pack_src="$(cd "$root" && cat internal/assets/assetpack/*.go internal/assets/*.go internal/kit/sha256sum/*.go | sha256sum | cut -d' ' -f1)"
+  pack_id="$(printf '%s\n' "$pack_src" "$(zstd -V)" "${zstd_args[*]}" | sha256sum | cut -d' ' -f1)"
   script_sha="$(sha_of "${BASH_SOURCE[0]}")"
 fi
 
