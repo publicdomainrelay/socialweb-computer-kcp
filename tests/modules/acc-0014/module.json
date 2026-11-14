@@ -20,7 +20,7 @@
 		{
 			"entry": "impossible",
 			"label": "Run 0014 impossible",
-			"description": "A request no bidder can ever take (more vCPUs than any offering's maxCpus; nestedVirt when none offers it) fails fast naming why; it never waits for capacity."
+			"description": "A request no bidder can ever take (more vCPUs than any offering's maxCpus; nestedVirt when none offers it; a deadline that passes before the RFP) fails fast naming why; it never waits for capacity."
 		},
 		{
 			"entry": "giveup",
