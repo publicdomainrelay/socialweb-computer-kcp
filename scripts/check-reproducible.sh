@@ -5,6 +5,7 @@
 # cargo caches, no blob cache, no ASSET_CACHE_URL, nothing taken from a bucket) and compares every unpacked tree digest
 # with the other build it is given; any byte of difference fails the check and names the asset, platform and files.
 #   without --against   two independent cold builds (a, b) are made and compared with each other
+#   --asset NAME        only these assets (repeatable; default every built asset)
 #   --against DIR       DIR is the blobs directory of the build to prove (<goos>_<goarch>/<asset>.tar.zst, as embedded in
 #                       the release binary, e.g. <build-root>/src/1/internal/assets/blobs): its blobs are unpacked and
 #                       hashed (not its .built.json, which must also equal them), and one cold build is compared to them,
@@ -17,9 +18,10 @@ rev="HEAD"
 against=""
 gomod_cache=""
 platforms=()
+only=()
 
 usage() {
-  echo "usage: $0 [--platform P]... [--commit REV] [--build-root DIR] [--against BLOBS_DIR] [--gomod-cache DIR]" >&2
+  echo "usage: $0 [--platform P]... [--commit REV] [--build-root DIR] [--asset NAME]... [--against BLOBS_DIR] [--gomod-cache DIR]" >&2
   echo "  stages the assets built from this repository cold (twice, or once against --against) and fails on any difference" >&2
   exit 2
 }
@@ -28,6 +30,7 @@ while [ $# -gt 0 ]; do
     --platform) platforms+=("$2"); shift 2 ;;
     --commit) rev="$2"; shift 2 ;;
     --build-root) build_root="$2"; shift 2 ;;
+    --asset) only+=("$2"); shift 2 ;;
     --against) against="$2"; shift 2 ;;
     --gomod-cache) gomod_cache="$2"; shift 2 ;;
     -h|--help) usage ;;
@@ -52,9 +55,12 @@ case "$build_root" in /tmp|/tmp/*) die "--build-root $build_root is under /tmp" 
 [ -z "$against" ] || against="$(cd "$against" && pwd -P)"
 
 assets_of() {
+  local a
   jq -r --arg p "$1" '
     . as $v | $v.platforms[$p].assets[] | select(. as $a | ($v.assets[$a].fetch // {}) | length > 0
-      and ([.[].kind] | all(. == "go" or . == "script")))' "$versions"
+      and ([.[].kind] | all(. == "go" or . == "script")))' "$versions" | while read -r a; do
+    if [ ${#only[@]} -eq 0 ] || [[ " ${only[*]} " == *" $a "* ]]; then echo "$a"; fi
+  done
 }
 
 want_go="$(git -C "$root" show "$commit:go.mod" | awk '$1=="toolchain"{print $2; exit}')"
