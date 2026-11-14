@@ -9,6 +9,9 @@ use steps::{MIN, S, host, kube, sw};
 
 const BUCKET: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com";
 const BIN: &str = "socialweb-computer-linux-amd64";
+/// the prefix of a binary the host puts on the VM, and where it lands before install moves it to the account stg
+const PUT: &str = "put";
+const PUT_AT: &str = "/root/swc-binary";
 /// the instance on the VM, as the account stg (dev refuses root; a short state dir: socket paths fit in 107 bytes)
 const INST: &str = "--instance stg --state-dir /home/stg/stg/s";
 /// dev up's market network: `bidders` bidders (nested VMs), the gateway, vm and deno compute
@@ -16,9 +19,11 @@ fn dev_up(bidders: u64) -> String {
     format!("--profile market-network --bidders {bidders} --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m")
 }
 
-/// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build).
+/// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build); `put:<label>`
+/// is no prefix: the host puts its SWC_BINARY (a build of this checkout, a branch's) on the VM (request.put).
 fn prefix(spec: &str) -> Result<String, String> {
     match spec.split_once(':') {
+        Some(("put", _)) => Ok(PUT.into()),
         Some(("release", tag)) => Ok(format!("releases/{tag}")),
         Some(("sha", sha)) => Ok(format!("main/{sha}")),
         Some(("local", sha)) => Ok(format!("local/{sha}")),
@@ -30,12 +35,17 @@ fn prefix(spec: &str) -> Result<String, String> {
 /// binary under test in /home/stg/stg checked against SHA256SUMS.
 fn install(prefix: &str) -> String {
     let b = format!("{BUCKET}/{prefix}/binaries");
+    let fetch = if prefix == PUT {
+        format!("install -o stg -g stg -m 0755 {PUT_AT} /home/stg/stg/{BIN} && rm -f {PUT_AT}; cd /home/stg/stg")
+    } else {
+        format!("cd /home/stg/stg; curl -fsSLO {b}/{BIN}; curl -fsSL {b}/SHA256SUMS | grep '  {BIN}$' | sha256sum -c; chmod 0755 {BIN}")
+    };
     format!(
         "set -e; getent group kvm >/dev/null || groupadd -r kvm; id stg >/dev/null 2>&1 || useradd -m -s /bin/bash -G kvm stg; sed -i /^stg:/d /etc/subuid /etc/subgid; \
          usermod --add-subuids 1000000-2048575 --add-subgids 1000000-2048575 stg; \
          command -v newuidmap >/dev/null || {{ apt-get update -q >/dev/null; DEBIAN_FRONTEND=noninteractive apt-get install -y -q uidmap >/dev/null; }}; \
-         loginctl enable-linger stg; install -d -o stg -g stg /home/stg/stg /home/stg/stg/s; cd /home/stg/stg; \
-         curl -fsSLO {b}/{BIN}; curl -fsSL {b}/SHA256SUMS | grep '  {BIN}$' | sha256sum -c; chmod 0755 {BIN}; echo \"VERSION $(./{BIN} version | head -1)\""
+         loginctl enable-linger stg; install -d -o stg -g stg /home/stg/stg /home/stg/stg/s; \
+         {fetch}; echo \"VERSION $(./{BIN} version | head -1)\""
     )
 }
 
@@ -123,14 +133,28 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
             }
             if s.is("held") && s.has("vm") && s.has("exited") {
                 s.mark("held");
-                s.set("install");
-                h = h.cancel("req").call(ssh("install", install(s.st["prefix"].as_str().unwrap_or_default())));
+                let prefix = s.st["prefix"].as_str().unwrap_or_default().to_string();
+                h = h.cancel("req");
+                if prefix == PUT {
+                    // the VM's account and directory do not exist yet: the binary waits in /root, install moves it
+                    s.set("put-binary");
+                    h = h.call(host("put-binary", "request.put", json!({ "name": name, "what": "binary", "remote": PUT_AT })));
+                } else {
+                    s.set("install");
+                    h = h.call(ssh("install", install(&prefix)));
+                }
             }
         }
         Event::Result { id, result, .. } => {
             let o = result.output().cloned().unwrap_or_else(|e| json!({ "ok": false, "output": e.to_string() }));
             let text = o["output"].as_str().unwrap_or_default().to_string();
             match id.as_str() {
+                "put-binary" if result.output().is_err() => return Ok(s.fail(format!("putting the binary under test on the VM: {text}"))),
+                "put-binary" => {
+                    s.mark("binary put");
+                    s.set("install");
+                    h = h.call(ssh("install", install(s.st["prefix"].as_str().unwrap_or_default())));
+                }
                 "install" if o["ok"] == true => {
                     s.flag("installed");
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));

@@ -3,7 +3,7 @@
 # KVM guest of a bidder that exposes vmx). Self-contained: it builds this commit's socialweb-computer (so a branch's Go code is
 # what runs), stages the VMM assets from the asset cache (public bucket URL, read only) and the guest image from the bucket, and
 # runs the tests as an unprivileged user with a systemd user manager and a subordinate id range, as tests/vmm/README.md says.
-# On a push to any branch that changes code (paths), and when asked.
+# On a push to any branch that changes code (paths), and when asked, after `gate` (no point on a commit whose gate failed).
 on:
   push:
     refs: [refs/heads/*]
@@ -11,6 +11,7 @@ on:
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
+after: [gate]
 executor: kcp-medium
 env:
   ASSET_CACHE_URL: https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/asset-cache

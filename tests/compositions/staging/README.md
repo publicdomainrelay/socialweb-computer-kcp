@@ -24,6 +24,8 @@ run's `logs/` (only the run's own VM is touched).
 
 The target's `requester` picks the binary: `release:<tag>`, `sha:<commit>` (CI's `main/<commit>`) or `local:<commit>` (a hand build
 published to `local/<commit>/binaries/` with `scripts/publish-spaces.ts`); a bare `release` is refused.
+`put:<label>` puts the host's `SWC_BINARY` (a release build of the checkout under test, a branch's: CI's `test` and
+`compositions` build it on their VM) on the VM with `request.put`, no bucket involved.
 
 ```sh
 cd tests/modules && cargo wasm && cd ..

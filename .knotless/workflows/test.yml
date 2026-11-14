@@ -1,12 +1,13 @@
-# knotless CI: the staging composition (tests/compositions/staging) on the published build of this commit
-# (testkit's `sha:<commit>`, checked against the bucket's SHA256SUMS). On a 4 vCPU / 8 GB VM (binding kcp-test). The
-# run's dump is an artifact (runs/), kept on failure.
-# TEMPORARY (owner, 2026-11-13): published binaries, not build.yml's artifacts, until the staging run is green in CI;
-# then `after: [build]` and its artifacts again (build.yml).
-# A run rents, as R2, the multi-VM staging layout (four VMs, two of them 4/8 nested-virt): on a push to any branch that
-# changes code (paths below; a new branch runs everything), and when asked (`knotless run rerun knotless://<owner>/
-# socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). The test host and meshd come from this commit's
-# `testhost` run (`after`: its artifacts when the branch changed tests/ or rust/, else the bucket's published build).
+# knotless CI: the staging composition (tests/compositions/staging) on THIS commit's build: step `binary` builds the
+# release socialweb-computer here (asset and build caches restored read-only: a branch has no bucket key), and the test host
+# puts it on the staging VMs (target requester `put:<sha>`, SWC_BINARY; request.put). Runs after `gate` and `testhost` on a
+# push to any branch that changes code (paths below; a new branch runs everything), and when asked (`knotless run rerun
+# knotless://<owner>/socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). Rented by R2 from the kcp-test VM
+# (4 vCPU / 8 GB): one 8/16 nested-virt staging VM with two bidders running the staging suite (0003 0005 0006 0007 0008
+# 0012 0013; the dev-network-only entries are `compositions`), and, on main, the multi-VM layout stand-up (four VMs, two
+# 4/8 nested-virt, one meshd overlay; no suite there yet). The test host and meshd come from this commit's `testhost` run
+# (its artifacts when the branch changed tests/ or rust/, else the bucket's published build). The run's dump is an artifact
+# (runs/), kept on failure.
 on:
   push:
     refs: [refs/heads/*]
@@ -14,7 +15,7 @@ on:
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
-after: [testhost]
+after: [gate, testhost]
 executor: kcp-test
 artifacts: [runs]
 # a failed run freezes (--on-fail freeze): `knotless run attach` gives the owner's or a collaborator's key this, as
@@ -73,8 +74,22 @@ steps:
         MESHD_DIST="$d" bash rust/build.sh x86_64
       fi
       install -m 0755 "$d/socialweb-meshd-x86_64" /usr/local/bin/socialweb-meshd
+  - name: binary
+    timeout: 45
+    run: |
+      # the socialweb-computer under test is THIS commit's release build (a branch cannot publish: no bucket key), built here with the
+      # asset and build caches restored read-only, and put on the staging VMs by the test host (request.put, SWC_BINARY)
+      set -eu
+      if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno; fi
+      . /opt/ci/env
+      sha=$(git rev-parse HEAD); root=/root/branch-build; mkdir -p "$root"
+      export ASSET_CACHE_URL=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/asset-cache
+      BUILD_CACHE_URL=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/build-cache bash scripts/ci-build-cache.sh restore "$root" || echo "build-cache: restore failed: cold build"
+      scripts/build-socialweb-computer.sh --platform linux/amd64 --commit "$sha" --build-root "$root" >/dev/null
+      install -D -m 0755 -o r2 "$root/release/$sha/socialweb-computer-linux-amd64" /home/r2/swc-under-test
+      /home/r2/swc-under-test version | head -1
   - name: staging
-    timeout: 110
+    timeout: 240
     run: |
       # TEMPORARY: the stand-up only (suite: false) until the guests' kernel has CONFIG_NFT_BRIDGE_REJECT
       # as the guest requester R2 (the runner associated it with the pusher's session; kcp refuses root): no creds here
@@ -85,27 +100,28 @@ steps:
       git clone -q https://knotless.dev/johnandersen777.bsky.social/socialweb-computer-watch /opt/swc-watch
       git -C /opt/swc-watch checkout -q 83541a1bd622a8679d90226fa72cab2af87dcde3
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
-      # the newest CI-built release at or below this commit (main/<sha>, knotless `publish`); only when none of the last 30
-      # commits has one, a hat-8 release build by hand at local/<sha> (AGENTS.md: Release pipeline)
-      bucket=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com
-      spec=
-      for p in main:sha local:local; do
-        for c in $(git rev-list --max-count 30 HEAD); do
-          curl -sfo /dev/null "$bucket/${p%%:*}/$c/binaries/SHA256SUMS" && { spec="${p#*:}:$c"; break 2; }
-        done
-      done
-      test -n "$spec" && echo "requester $spec"
+      # the binary under test: this commit's build (step binary), put on each staging VM by the host
+      spec="put:$(git rev-parse HEAD)"
+      echo "requester $spec"
       jq --arg b "$spec" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
       # r2's user manager (the requester's units): its runtime dir, else mkdir /run/user/0/swc is refused
       loginctl enable-linger r2
       for i in $(seq 60); do [ -d "/run/user/$(id -u r2)" ] && break; sleep 1; done
       rc=0
-      # the multi-VM layout (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay), its four contracts
-      # held by one long-lived guest requester (provision infra: an EphemeralInfra of R2's `run requester`)
-      (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
-        SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd CI=1 target/release/swc-test-host \
-        compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"suite": false, "layout": "multi", "provision": "infra"}') || rc=$?
+      stage() {
+        (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
+          SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test CI=1 target/release/swc-test-host \
+          compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input "$1")
+      }
+      # one nested-virt staging VM (8 vCPU / 16 GB) with a dev network of two bidders and the staging suite on it
+      # (the dev-network-only entries are the `compositions` workflow's)
+      stage '{"bidders": 2, "cpus": 8, "mem": "16G", "suite": ["0003", "0005", "0006", "0007", "0008", "0012", "0013"]}' || rc=$?
+      # main also stands up the multi-VM layout (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay), its
+      # four contracts held by one long-lived guest requester (provision infra: an EphemeralInfra of R2's `run requester`)
+      case "$KNOTLESS_RUN_REF" in
+        refs/heads/main) stage '{"suite": false, "layout": "multi", "provision": "infra"}' || rc=$?
+      esac
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc

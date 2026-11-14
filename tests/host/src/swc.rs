@@ -283,7 +283,12 @@ impl Swc {
                     .map_err(|_| "SWC_MESHD is not set (a static socialweb-meshd, rust/build.sh)")?;
                 std::fs::read(&p).map_err(|e| format!("{p}: {e}"))?
             }
-            other => return Err(format!("what {other:?}: testHost, suite or meshd")),
+            "binary" => {
+                let p = std::env::var("SWC_BINARY")
+                    .map_err(|_| "SWC_BINARY is not set (the socialweb-computer under test, a release build of this checkout)")?;
+                std::fs::read(&p).map_err(|e| format!("{p}: {e}"))?
+            }
+            other => return Err(format!("what {other:?}: testHost, suite, meshd or binary")),
         };
         let exec = format!("cat > '{remote}.part' && mv '{remote}.part' '{remote}'");
         // contract: a Held contract of the run requester `name` (an Infra's), else `name` is a run request invocation
