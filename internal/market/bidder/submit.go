@@ -42,26 +42,55 @@ type contractInfo struct {
 	submitEventURL string
 }
 
-func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (string, error) {
+// SubmitRFP records the bid intent. The Decline is why this bidder will not bid (the checks of the bid decision that need no
+// wait: kind, size, capacity now, image, guest tools, net), answered to the requester so it can tell a full bidder from one
+// that cannot serve the request; the intent is recorded either way and fails the way it always did.
+func (b *Bidder) SubmitRFP(ctx context.Context, rfpURI, rfpCID, issuer string) (string, *Decline, error) {
 	if b.cfg.Suspend {
-		return "", ErrSuspended
+		return "", nil, ErrSuspended
 	}
 	if b.rfpClosed(rfpURI, nil, "submitRfp") {
-		return "", ErrRFPClosed
+		return "", nil, ErrRFPClosed
 	}
 	kind, err := b.rfpKind(ctx, rfpURI, rfpCID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !b.servesKind(kind) {
 		b.log.Info("bidder: an RFP asks for a compute kind this bidder does not serve", "rfp", rfpURI, "kind", kind)
-		return "", ErrKindUnsupported
+		return "", &Decline{Kind: DeclineUnservable, Reason: fmt.Sprintf("this bidder does not serve compute kind %q", kind)}, nil
 	}
+	decline := b.declineFor(ctx, rfpURI, rfpCID, issuer)
 	bid, err := b.enqueueBid(ctx, rfpURI, rfpCID, issuer)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return bid.Name, nil
+	return bid.Name, decline, nil
+}
+
+// declineFor runs the refusals of decideBid that depend on the RFP alone; an error reading the RFP or its payload gives no
+// answer (nil): the decision runs them again.
+func (b *Bidder) declineFor(ctx context.Context, rfpURI, rfpCID, requester string) *Decline {
+	resolved, err := b.records.Resolve(ctx, market.RecordRef{URI: rfpURI, CID: rfpCID})
+	if err != nil {
+		return nil
+	}
+	rfp, err := market.ParseRFP(resolved.Value)
+	if err != nil {
+		return nil
+	}
+	if d, err := b.payloadDecline(ctx, rfpURI, rfp); err != nil {
+		return nil
+	} else if d != nil {
+		return d
+	}
+	if refused, err := b.guestToolsRefused(ctx, rfp); err == nil && refused != "" {
+		return &Decline{Kind: DeclineUnservable, Reason: refused}
+	}
+	if refused, err := b.netRefused(ctx, rfp, requester); err == nil && refused != "" {
+		return &Decline{Kind: DeclineUnservable, Reason: refused}
+	}
+	return nil
 }
 
 func (b *Bidder) AnswerIngress(ctx context.Context, offer tunnel.Offer, requesterDID string) (tunnel.Answer, error) {

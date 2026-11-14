@@ -54,10 +54,42 @@ type Bidder struct {
 	NestedVirt bool
 
 	Images bool
+
+	MaxCpus int64
+}
+
+// BidderDeclined is a bidder's answer to submitRfp that it will not bid, with why (docs/protocol/market.md): Kind "capacity"
+// (it is full now: wait) or "unservable" (nothing but another bidder will do: no waiting helps).
+type BidderDeclined struct {
+	DID    string
+	Kind   string
+	Reason string
+}
+
+func (e *BidderDeclined) Error() string {
+	return "requester: the bidder " + e.DID + " declined the RFP (" + e.Kind + "): " + e.Reason
+}
+
+const (
+	declineCapacity   = "capacity"
+	declineUnservable = "unservable"
+)
+
+// permanentDrop: a candidate dropped for something that waiting cannot change (the capabilities and the maximum size of its
+// offering); a missing heartbeat, offering or endpoint may well appear.
+func permanentDrop(reason string) bool {
+	for _, p := range []string{dropNoNestedVirt, dropNoImages, dropMaxCpus} {
+		if strings.HasPrefix(reason, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b Bidder) Lacks(spec v1alpha1.ComputeContractTemplate) string {
 	switch {
+	case b.MaxCpus > 0 && int64(spec.Cpus) > b.MaxCpus:
+		return dropMaxCpus + strconv.FormatInt(b.MaxCpus, 10) + " (the request asks " + strconv.Itoa(int(spec.Cpus)) + ")"
 	case spec.NestedVirt && !b.NestedVirt:
 		return dropNoNestedVirt
 	case spec.Image != nil && !b.Images:
@@ -128,6 +160,7 @@ const (
 	dropEndpoint       = "offering endpoint refused: "
 	dropNoNestedVirt   = "the offering does not set nestedVirt"
 	dropNoImages       = "the offering does not set images"
+	dropMaxCpus        = "the offering's maxCpus is below the request: "
 
 	maxDropsInMessage = 5
 )
@@ -426,7 +459,7 @@ func (m *HTTPMarket) offeredBidders(ctx context.Context, did string) ([]Bidder, 
 	if !ok {
 		return nil, dropNoEndpoint
 	}
-	bidder.NestedVirt, bidder.Images = offering.NestedVirt, offering.Images
+	bidder.NestedVirt, bidder.Images, bidder.MaxCpus = offering.NestedVirt, offering.Images, offering.MaxCpus
 	return []Bidder{bidder}, dropNoOffering
 }
 
@@ -540,6 +573,9 @@ func (m *HTTPMarket) SubmitRFP(ctx context.Context, bidder Bidder, rfp SubmitRFP
 	}
 	if offered {
 		m.acceptIngress(ctx, bidder.DID, offer, reply)
+	}
+	if d, ok := reply["declined"].(map[string]any); ok {
+		return nil, &BidderDeclined{DID: bidder.DID, Kind: stringOf(d["kind"]), Reason: stringOf(d["reason"])}
 	}
 	return bidsFromReply(bidder.DID, reply), nil
 }

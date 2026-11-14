@@ -101,18 +101,26 @@ func (b *Bidder) staticRefused(record vmRecord) (vmLimits, int, string) {
 }
 
 func (b *Bidder) reserve(key string, record vmRecord, hold time.Duration) string {
+	reason, _ := b.reserveVerdict(key, record, hold)
+	return reason
+}
+
+// reserveVerdict is reserve with the kind of a refusal: DeclineUnservable when no amount of waiting makes this bidder able to
+// take the VM (its offering lacks nestedVirt or images, or the VM is above its maxCpus or maxMem), DeclineCapacity when its
+// running and reserved guests (or its host's free memory) leave no room now.
+func (b *Bidder) reserveVerdict(key string, record vmRecord, hold time.Duration) (string, string) {
 	if record.Kind == string(v1alpha1.ComputeKindDeno) {
-		return ""
+		return "", ""
 	}
 	limits, mib, refused := b.staticRefused(record)
 	if refused != "" {
-		return refused
+		return refused, DeclineUnservable
 	}
 	b.reserveMu.Lock()
 	defer b.reserveMu.Unlock()
 	mib = contracthost.VMCommitMiB(mib)
 	if refused := b.capacityRefused(limits, key, int64(record.CPUs), mib); refused != "" || hold <= 0 {
-		return refused
+		return refused, DeclineCapacity
 	}
 	if b.reserved == nil {
 		b.reserved = map[string]reservation{}
@@ -122,7 +130,7 @@ func (b *Bidder) reserve(key string, record vmRecord, hold time.Duration) string
 		until = held.until
 	}
 	b.reserved[key] = reservation{cpus: int64(record.CPUs), mib: mib, until: until}
-	return ""
+	return "", ""
 }
 
 func (b *Bidder) reservedFor(key, vm string) {

@@ -613,6 +613,105 @@ fn wait_0014(r: Run<Value>) -> Result<Handle, String> {
 }
 
 
+
+/// impossible: requests NO bidder can ever take fail fast with the reason instead of waiting for capacity: a VM of more vCPUs than
+/// the largest offering's maxCpus, and (when no offering sets nestedVirt) a nestedVirt request. Each must end Failed within 120 s
+/// naming why; nothing is Held and no requester_waiting_for_capacity line appears.
+fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
+    let name = args["name"].as_str().ok_or("name")?.to_string();
+    let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
+    let mut h = Handle::new();
+    // the cases still to run: "maxCpus", then "nested" when no offering sets it
+    let launch = |s: &mut S, h: Handle, case: &str| -> Handle {
+        s.set(case);
+        s.mark("case");
+        s.st["cur"] = json!({ "case": case, "waits": 0 });
+        let a = if case == "maxCpus" {
+            json!(["--hold", "--cpus", (s.st["maxMax"].as_i64().unwrap_or(0) + 1).to_string(), "--mem", "1G", "--expires-in", "1h"])
+        } else {
+            json!(["--hold", "--cpus", "1", "--mem", "1G", "--nested-virt", "--expires-in", "1h"])
+        };
+        h.call(steps::host_sub("req", "request.start", json!({ "name": format!("{name}-{case}"), "args": a }))).timer(&format!("case:{case}"), 4 * MIN)
+    };
+    match run.event {
+        Event::Start => {
+            if bidders.is_empty() {
+                return Ok(s.skip("the target names no bidder"));
+            }
+            s.st["wait"] = json!(bidders.len());
+            s.st["maxMax"] = json!(0);
+            s.st["nestedAny"] = json!(false);
+            s.set("offerings");
+            for (j, b) in bidders.iter().enumerate() {
+                h = h.call(get_record(&format!("off:{j}"), &format!("at://{}/{OFFERING}/self", b["did"].as_str().unwrap_or_default())));
+            }
+            h = h.timer("deadline", 15 * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 15 min (phase {})", s.phase()))),
+        Event::Timer { id } if id.starts_with("case:") => {
+            if s.is(&id[5..]) {
+                return Ok(s.fail(format!("the {} request did not fail within 4 min: it waits for something nobody can serve", &id[5..])));
+            }
+        }
+        Event::Result { id, result, .. } if id.starts_with("off:") => {
+            let o = match steps::out(&s, &id, result.output()) {
+                Ok(o) => o,
+                Err(f) => return Ok(f),
+            };
+            let m = o["value"]["maxCpus"].as_i64().unwrap_or(0);
+            if m > s.st["maxMax"].as_i64().unwrap_or(0) {
+                s.st["maxMax"] = json!(m);
+            }
+            if o["value"]["nestedVirt"] == true {
+                s.st["nestedAny"] = json!(true);
+            }
+            if landed(&mut s) {
+                if s.st["maxMax"].as_i64().unwrap_or(0) <= 0 {
+                    return Ok(s.skip("no offering names a maxCpus"));
+                }
+                s.reading("maxCpus", s.st["maxMax"].clone());
+                s.reading("nestedOffered", s.st["nestedAny"].clone());
+                h = launch(&mut s, h, "maxCpus");
+            }
+        }
+        Event::Message { id, data, .. } if id == "req" => {
+            let case = s.st["cur"]["case"].as_str().unwrap_or_default().to_string();
+            match data["msg"].as_str().unwrap_or_default() {
+                "requester_waiting_for_capacity" => return Ok(s.fail(format!("the {case} request waits for capacity: {data}"))),
+                "contract" if data["phase"] == "Held" => return Ok(s.fail(format!("the {case} request was Held: {data}"))),
+                "contract" if data["phase"] == "Failed" => {
+                    let msg = data["message"].as_str().unwrap_or_default().to_string();
+                    let want = if case == "maxCpus" { "maxCpus" } else { "nestedVirt" };
+                    let t = s.since("case");
+                    s.reading(&format!("{case}_failed_s"), t);
+                    s.reading(&format!("{case}_message"), msg.clone());
+                    if !msg.contains(want) || (!msg.contains("no bidder") && !msg.contains("requester_no_bidders")) {
+                        return Ok(s.fail(format!("the {case} request failed, but not naming why ({want}): {msg}")));
+                    }
+                    if t > 120.0 {
+                        return Ok(s.fail(format!("the {case} request took {t} s to fail (more than 120 s): {msg}")));
+                    }
+                    s.set(&format!("done-{case}"));
+                    s.flag(&format!("{case}Done"));
+                    if case == "maxCpus" && s.st["nestedAny"] != true {
+                        h = launch(&mut s, h, "nested");
+                    } else {
+                        return Ok(s.pass());
+                    }
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    Ok(s.keep(h))
+}
+
 /// The bidder log line of a VM its placer saw inactive and killed before the VMM answered (91103758, fixed f15dda15).
 const EARLY_KILL: &str = "before its VMM answered";
 
@@ -798,4 +897,4 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-entries! { run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, giveup => giveup_0014, wait => wait_0014, backtoback => backtoback_0014 }
+entries! { impossible => impossible_0014, run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, giveup => giveup_0014, wait => wait_0014, backtoback => backtoback_0014 }

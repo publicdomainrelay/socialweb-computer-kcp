@@ -26,6 +26,15 @@
             "ok": { "type": "boolean" },
             "name": { "type": "string", "description": "The bid intent the bidder recorded." },
             "phase": { "type": "string", "description": "The phase of the bid intent." },
+            "declined": {
+              "type": "object",
+              "required": ["kind", "reason"],
+              "description": "Present when this bidder will not bid on the RFP, found by the checks of the bid decision that need no wait. The intent is recorded and fails as before.",
+              "properties": {
+                "kind": { "type": "string", "knownValues": ["capacity", "unservable"], "description": "capacity: the bidder is full now (its running and reserved guests leave no room, or its host lacks the memory), another round may find room. unservable: nothing but another bidder will do (the compute kind, nestedVirt, images, a size above its maxCpus or maxMem, an image it cannot fetch or verify, guest tools or net it does not serve). A requester that finds every bidder it asked unservable fails at once with the reasons; it waits for capacity while any bidder is full or did not answer." },
+                "reason": { "type": "string", "description": "Why, as the bidder's own words." }
+              }
+            },
             "ingress": { "type": "array", "items": { "type": "ref", "ref": "com.atproto.repo.strongRef" }, "description": "The bidder's com.publicdomainrelay.temp.ingress.webRTC answer and listen records for the request's offers, carrying the SDP and the bidder's STUN servers." }
           }
         }

@@ -18,6 +18,11 @@
 			"description": "Three rentals on two one-VM bidders: two Held, the third refused by both, its new RFP fails at once."
 		},
 		{
+			"entry": "impossible",
+			"label": "Run 0014 impossible",
+			"description": "A request no bidder can ever take (more vCPUs than any offering's maxCpus; nestedVirt when none offers it) fails fast naming why; it never waits for capacity."
+		},
+		{
 			"entry": "giveup",
 			"label": "Run 0014 giveup",
 			"description": "Bidders full, a rental with a short --expires-in waits in rounds and fails at its deadline: gave up waiting for capacity."

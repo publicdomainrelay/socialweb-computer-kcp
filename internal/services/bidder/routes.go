@@ -117,7 +117,7 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 	if bidder == nil {
 		return
 	}
-	name, err := bidder.SubmitRFP(r.Context(), body.RFPURI, body.RFPCID, issuer)
+	name, decline, err := bidder.SubmitRFP(r.Context(), body.RFPURI, body.RFPCID, issuer)
 	if errors.Is(err, core.ErrRFPClosed) {
 		participant.WriteXRPCError(w, http.StatusConflict, "RFPClosed", err.Error())
 		return
@@ -128,6 +128,9 @@ func (s *Service) handleSubmitRFP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"ok": true, "name": name, "phase": string(v1alpha1.BidPhaseDeciding)}
+	if decline != nil {
+		out["declined"] = map[string]any{"kind": decline.Kind, "reason": decline.Reason}
+	}
 	if len(body.Ingress) > 0 {
 		if refs, err := bidder.AnswerIngressRecords(r.Context(), body.Ingress, issuer); err != nil {
 			s.log.Warn("bidder_webrtc_answer_failed", "rfp", body.RFPURI, "requester", issuer, "err", err)

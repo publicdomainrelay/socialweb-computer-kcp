@@ -53,6 +53,10 @@ type contractRunner struct {
 
 	waitFrom time.Time
 
+	bidderDeclines map[string]BidderDeclined
+
+	unservable string
+
 	refusersExcluded bool
 
 	releaseOnce sync.Once
@@ -318,6 +322,8 @@ loop:
 		case errors.Is(err, errGuestImage) && replaced < MaxAcceptReplacements:
 			replaced++
 			r.replaceWrongImage(ctx, err)
+		case r.isUnservable():
+			break loop
 		case r.outcomeNoBids() && len(r.denied(nil)) > 0 && !r.refusersExcluded && replaced < MaxAcceptReplacements:
 			replaced++
 			r.mu.Lock()
@@ -423,6 +429,34 @@ func CapacityBackoff(round int) time.Duration {
 		d *= 2
 	}
 	return min(d, CapacityBackoffMax)
+}
+
+func (r *contractRunner) isUnservable() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.unservable != ""
+}
+
+// unservableBy: when every bidder the RFP went to answered submitRfp with a decline of kind unservable, why each (else "": a
+// bidder that is full, did not answer or answered nothing may serve it later).
+func (r *contractRunner) unservableBy(bidders []Bidder) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reasons := []string{}
+	for _, bidder := range bidders {
+		if bidder.Endpoint == "" {
+			continue
+		}
+		d, ok := r.bidderDeclines[bidder.DID]
+		if !ok || d.Kind != declineUnservable {
+			return ""
+		}
+		reasons = append(reasons, bidder.DID+": "+d.Reason)
+	}
+	if len(reasons) == 0 {
+		return ""
+	}
+	return strings.Join(reasons, "; ")
 }
 
 func (r *contractRunner) outcomeNoBids() bool {
@@ -692,9 +726,21 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 			state.Error = noBidders
 			return errors.New(state.Error)
 		}
+		if len(discovery.Dropped) > 0 && !slices.ContainsFunc(discovery.Dropped, func(d BidderDrop) bool { return !permanentDrop(d.Reason) }) {
+			// every candidate lacks a capability or is too small: no wait changes that
+			state.Outcome = v1alpha1.ContractOutcomeNoBids
+			state.Error = noBidders
+			r.mu.Lock()
+			r.unservable = noBidders
+			r.mu.Unlock()
+			return errors.New(state.Error)
+		}
 		r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, "the RFP is submitted; "+noBidders+"; waiting for bids", state, nil, nil, "collectingBids", 1)
 	}
 	q.rememberBidders(bidders)
+	r.mu.Lock()
+	r.bidderDeclines, r.unservable = nil, ""
+	r.mu.Unlock()
 	considered := consideredBidderDIDs(bidders, only)
 	catchUpCtx, stopCatchUp := context.WithCancel(ctx)
 	r.catchUpBids(catchUpCtx, considered, rfpURI, rfpCID)
@@ -715,6 +761,14 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	if winner == nil {
 		if len(allBids) == 0 {
 			state.Outcome = v1alpha1.ContractOutcomeNoBids
+			if why := r.unservableBy(bidders); why != "" {
+				// every bidder asked answered that it cannot serve this request (not that it is full): nobody will bid
+				state.Error = "no bidder can serve this request: " + why
+				r.mu.Lock()
+				r.unservable = state.Error
+				r.mu.Unlock()
+				return errors.New(state.Error)
+			}
 			state.Error = fmt.Sprintf("no bids received within %s", q.cfg.BidWindow)
 			if noBidders != "" {
 				state.Error += "; " + noBidders
@@ -856,6 +910,17 @@ func (r *contractRunner) solicitBids(ctx context.Context, bidders []Bidder, rfpU
 			cctx, cancel := context.WithTimeout(ctx, max(r.q.cfg.BidWindow, 5*time.Second))
 			defer cancel()
 			bids, err := submitRFPWithin(cctx, r.q.market, bidder, SubmitRFPRequest{URI: rfpURI, CID: rfpCID})
+			var declined *BidderDeclined
+			if errors.As(err, &declined) {
+				r.mu.Lock()
+				if r.bidderDeclines == nil {
+					r.bidderDeclines = map[string]BidderDeclined{}
+				}
+				r.bidderDeclines[bidder.DID] = *declined
+				r.mu.Unlock()
+				r.log().Info("requester_bidder_declined", "bidder", bidder.DID, "kind", declined.Kind, "reason", declined.Reason)
+				return
+			}
 			if err != nil {
 				r.log().Warn("requester_submit_rfp_failed", "bidder", bidder.DID, "err", err)
 				return

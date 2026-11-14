@@ -15,7 +15,7 @@ refused before any VM exists. The CI toolchain image (`deploy/vm-images/ci-toolc
   (the bidder keeps requested images by last use within `requested-image-budget`, 16G by default, and evicts the least
   recently used only over the budget or with under 8G free; an image a VM uses, or used in the last 10 minutes, stays)
 - `badsha`: the same with the first digit of the sha256 changed: every bidder refuses to bid (the fetched `image.json`
-  hashes to another value), so the contract fails `no bids` before a receipt; nothing Held, no VM on any host
+  hashes to another value): each answers submitRfp `declined` kind `unservable` with that reason, so the requester does not wait for capacity: the contract fails at once, `no bidder can serve this request: <bidder>: <reason>`, before a receipt; nothing Held, no VM on any host (about 40 s)
 - Refusals after a bid are re-placed: a bidder that declines the accept (its image check failed at provision), a guest that
   reports another marker or none, a `vm.terminated` `image_refused` (a file's sha or size did not match while fetching):
   the VM is released and the RFP goes to another bidder that offers `images`, up to `MaxAcceptReplacements`

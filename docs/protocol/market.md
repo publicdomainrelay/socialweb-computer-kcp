@@ -133,7 +133,7 @@ Every record also reaches the other side two ways. The XRPC call is the fast pat
 
 | NSID | served by | caller | body | answer | file |
 |---|---|---|---|---|---|
-| `market.submitRfp` | bidder ingress | requester | `{rfpUri, rfpCid, ingress?}` | 200 `{ok, name, phase: Deciding, ingress?}`; 409 `RFPClosed` after the bid window | `internal/services/bidder/routes.go` `handleSubmitRFP` |
+| `market.submitRfp` | bidder ingress | requester | `{rfpUri, rfpCid, ingress?}` | 200 `{ok, name, phase: Deciding, ingress?, declined?: {kind: capacity|unservable, reason}}`; 409 `RFPClosed` after the bid window | `internal/services/bidder/routes.go` `handleSubmitRFP` |
 | `market.submitBid` | requester ingress | bidder | `{uri, cid, record}` of the `market.bid` | 200 `{ok}`; 403 when the record is not the issuer's | `internal/services/requester/routes.go`, `Requester.SubmitBid` in `internal/market/requester/callbacks.go` |
 | `market.submitAccept` | bidder ingress | requester | `{acceptUri, acceptCid, ingress?}` | 202 `{ok, id, acceptUri, acceptCid}` (`id` = the provisioning intent); the receipt follows as a record. the lexicon also allows `uri`, `cid`, `submitEvent`, `ingress` | `handleSubmitAccept` |
 | `market.submitEvent` | both ingresses | the contract party that wrote the event | `{uri, cid, record}` of the `market.event` | 200 `{ok}`; 403 `Forbidden` when the sender is not the accept author (to a bidder) or the receipt author (to a requester) | `handleSubmitEvent`, `Requester.SubmitEvent` |

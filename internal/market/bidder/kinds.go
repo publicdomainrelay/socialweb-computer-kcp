@@ -15,6 +15,22 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/policyengine/trust"
 )
 
+// The kinds of a decline the bidder answers submitRfp with (docs/protocol/market.md): the requester waits for capacity only
+// while some bidder declined for DeclineCapacity or did not answer; when every bidder it asked declined for another reason
+// nobody can serve the request and it fails at once with the reasons.
+const (
+	DeclineCapacity   = "capacity"
+	DeclineUnservable = "unservable"
+)
+
+// Decline is why a bidder will not bid on an RFP, found when submitRfp arrives (the same checks the bid decision runs).
+type Decline struct {
+	Kind   string
+	Reason string
+}
+
+func (d Decline) Error() string { return d.Kind + ": " + d.Reason }
+
 var ErrKindUnsupported = fmt.Errorf("bidder: the RFP asks for a compute kind this bidder does not serve")
 
 func (b *Bidder) servesKind(kind string) bool {
@@ -61,24 +77,37 @@ func (b *Bidder) inboxServesKind(ctx context.Context, rfpURI, rfpCID string) (st
 }
 
 func (b *Bidder) payloadRefused(ctx context.Context, rfpURI string, rfp *market.RFP) (string, error) {
+	d, err := b.payloadDecline(ctx, rfpURI, rfp)
+	if d == nil || err != nil {
+		return "", err
+	}
+	return d.Reason, nil
+}
+
+// payloadDecline is the check of the RFP's compute.vm payload with the kind of a refusal (DeclineCapacity or
+// DeclineUnservable); nil when the bidder would take it.
+func (b *Bidder) payloadDecline(ctx context.Context, rfpURI string, rfp *market.RFP) (*Decline, error) {
 	payload, err := b.records.Resolve(ctx, market.RecordRef{URI: rfp.Payload.URI, CID: rfp.Payload.CID})
 	if err != nil {
-		return "", fmt.Errorf("bidder: resolving the RFP payload: %w", err)
+		return nil, fmt.Errorf("bidder: resolving the RFP payload: %w", err)
 	}
 	record, err := parseVMRecord(payload.Value)
 	if err != nil {
-		return err.Error(), nil
+		return &Decline{Kind: DeclineUnservable, Reason: err.Error()}, nil
 	}
 	if at, err := market.ParseTime(record.ExpiresAt); err == nil && !at.After(b.now()) {
-		return fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt), nil
+		return &Decline{Kind: DeclineUnservable, Reason: fmt.Sprintf("bidder: the RFP payload's expiresAt %s has passed", record.ExpiresAt)}, nil
 	}
 	if msg := b.imageErr.Load(); msg != nil && record.Kind != string(v1alpha1.ComputeKindDeno) && record.Image == nil {
-		return "bidder: the bidder's pinned guest image does not verify: " + *msg, nil
+		return &Decline{Kind: DeclineUnservable, Reason: "bidder: the bidder's pinned guest image does not verify: " + *msg}, nil
 	}
-	if refused := b.reserve(rfpURI, record, 0); refused != "" {
-		return refused, nil
+	if refused, kind := b.reserveVerdict(rfpURI, record, 0); refused != "" {
+		return &Decline{Kind: kind, Reason: refused}, nil
 	}
-	return b.imageRefused(ctx, record), nil
+	if refused := b.imageRefused(ctx, record); refused != "" {
+		return &Decline{Kind: DeclineUnservable, Reason: refused}, nil
+	}
+	return nil, nil
 }
 
 func (b *Bidder) imageRefused(ctx context.Context, record vmRecord) string {

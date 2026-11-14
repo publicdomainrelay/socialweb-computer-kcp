@@ -316,7 +316,7 @@
 | file | `market/submitRfp.json` |
 | type | procedure, service auth `lxm` = the NSID, issuer = requester |
 | input | `{rfpUri, rfpCid, ingress?}` (ingress = `ingress.webRTC` offers) |
-| output | `{ok, name, phase, ingress?}`; errors `InvalidRequest`, `Unauthorized`, `Forbidden`, `Unavailable`; the code also answers 409 `RFPClosed` |
+| output | `{ok, name, phase, ingress?, declined?: {kind, reason}}` (`declined`: the bidder will not bid; kind `capacity` = full now, `unservable` = nothing but another bidder will do); errors `InvalidRequest`, `Unauthorized`, `Forbidden`, `Unavailable`; the code also answers 409 `RFPClosed` |
 | served by | bidder: `handleSubmitRFP` in `internal/services/bidder/routes.go` -> `Bidder.SubmitRFP` |
 | called by | requester: `solicitBids` -> `HTTPMarket.SubmitRFP` (`internal/market/requester/runner.go`, `market.go`) |
 | step | [S3](README.md#step-s3) |
