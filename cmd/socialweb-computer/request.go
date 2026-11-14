@@ -1547,6 +1547,17 @@ func (a *app) loadRequest(vals clicfg.Values, rest []string, verb string) (*requ
 		r.cleanupOnly = true
 		return r, exitOK
 	}
+	if verb == "release" && inv.Mode != request.ModeNetwork && inv.Identity == "" {
+		if _, err := os.Stat(request.InstanceStateDir(r.stateRoot, inv.Name)); err != nil {
+			if r.summary.Phase == string(v1alpha1.ComputeContractReleased) || neverHeld {
+				r.log("the invocation's kcp state is gone and its state says the contract ended; the invocation is only removed", "phase", r.summary.Phase)
+				r.cleanupOnly = true
+				return r, exitOK
+			}
+			return nil, a.fail(exitFailed, "run request release: the invocation's kcp state is gone but the invocation's state does not say its contract ended (phase %q): a VM may still be held; check the contract's market records before removing %s",
+				r.summary.Phase, request.Dir(r.stateRoot, inv.Name))
+		}
+	}
 	if inv.Identity != "" {
 		instanceState := request.InstanceStateDir(r.stateRoot, inv.Name)
 		if _, err := os.Stat(instanceState); err != nil {
