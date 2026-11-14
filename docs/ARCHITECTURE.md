@@ -4593,6 +4593,27 @@ fail, rather than the code read against this document alone.
 
 ## 15. Settled decisions, and the defects they closed
 
+- **`versions.json` pins third-party inputs only; the outputs of what we build from our own commit are recorded by
+  the build and proven by CI (2026-11-14).** Before: socialweb-vmexec, the two OpenBao plugins, swc-userns-stage,
+  socialweb-computer-k8s-downloads and socialweb-guest-downloads carried a `treeSha256` (and a binary `sha256`) of
+  their own output in `internal/versions/versions.json`. cmd/socialweb-node and the guest agent import `internal/`, so
+  any Go change under it changed the output and failed `make check-pins` until a re-pin commit: 53 pin commits in
+  477 on main from 2026-11-10, `versions.json` touched 35 times, 17 self re-pins. Now an asset whose fetch kind is
+  `go` or `script` has no `platforms` entry and no fetch `sha256` (`deploy/check.sh` fails if one comes back).
+  `scripts/stage-assets.sh` writes `<asset>.built.json` (tree digest, sizes, binary sha256) beside each blob;
+  the record is embedded with the blob, `assets.PlatformPins` overlays it on the versions.json pins, the store
+  re-hashes the unpacked tree against it before every use, `Ready()` refuses a release build that embeds a built
+  asset without one, and the OpenBao plugin placement checks the placed binary against it. The release publishes
+  the produced hashes (`release.json` `builds[].builtAssets`, `built-assets-<goos>-<goarch>.json`). The integrity
+  proof moved to CI: the release workflow's `reproducible` step (`scripts/check-reproducible.sh`) stages every built
+  asset cold (fresh checkout at another path, empty go/cargo/meshd caches, no bucket cache) and fails on any byte
+  of difference from the blobs the release embeds, so a poisoned bucket cache, which is keyed by source inputs and
+  not by output, no longer passes as it could once the output pin was gone. What stays pinned: every download,
+  signed upstream, deb and image, and the output trees of kcp and atirc (built from pinned upstream source). Not
+  touched: the guest image output pins (`guestImages`). The bytes did not change: the six linux/amd64 trees a local release build of this change records equal the
+  old pins (vmexec 0db4dbfd, k8s-downloads 4a7447ee, guest-downloads b6577c26, userns-stage 99e3ed4c, the plugins
+  37dea85f and 330dbd48).
+
 - **The guest report's read-modify-write is serialized per bidder and builds on the last report written
   (2026-11-10).** Before: the guest reports `vm.onNetwork` for ssh and shell a few ms apart, and the bidder's
   guest recorder (`internal/guestidentity/guestrecord.go` `OnNetwork`, also `HostKeys`) read the ComputeVM
