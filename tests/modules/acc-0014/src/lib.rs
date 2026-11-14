@@ -631,12 +631,18 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
         s.set(case);
         s.mark("case");
         s.st["cur"] = json!({ "case": case, "waits": 0 });
-        let a = if case == "maxCpus" {
-            json!(["--hold", "--cpus", (s.st["maxMax"].as_i64().unwrap_or(0) + 1).to_string(), "--mem", "1G", "--expires-in", "1h"])
-        } else {
-            json!(["--hold", "--cpus", "1", "--mem", "1G", "--nested-virt", "--expires-in", "1h"])
+        let a = match case {
+            "maxCpus" => json!(["--hold", "--cpus", (s.st["maxMax"].as_i64().unwrap_or(0) + 1).to_string(), "--mem", "1G", "--expires-in", "1h"]),
+            "nested" => json!(["--hold", "--cpus", "1", "--mem", "1G", "--nested-virt", "--expires-in", "1h"]),
+            // a deadline that passes while the requester starts: the contract is created after it, so no RFP may go out
+            _ => json!(["--hold", "--cpus", "1", "--mem", "1G", "--expires-in", "2s"]),
         };
-        h.call(steps::host_sub(if case == "maxCpus" { "req" } else { "req2" }, "request.start", json!({ "name": format!("{name}-{}", if case == "maxCpus" { "mx" } else { "nv" }), "args": a }))).timer(&format!("case:{case}"), 4 * MIN)
+        let (id, tag) = match case {
+            "maxCpus" => ("req", "mx"),
+            "nested" => ("req2", "nv"),
+            _ => ("req3", "ex"),
+        };
+        h.call(steps::host_sub(id, "request.start", json!({ "name": format!("{name}-{tag}"), "args": a }))).timer(&format!("case:{case}"), 4 * MIN)
     };
     match run.event {
         Event::Start => {
@@ -679,21 +685,25 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
                 h = launch(&mut s, h, "maxCpus");
             }
         }
-        Event::Closed { id, error } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) => {
+        Event::Closed { id, error } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) || (id == "req3" && s.is("expired")) => {
             return Ok(s.fail(format!("the request closed before it failed: {}", error.unwrap_or_default())));
         }
-        Event::Message { id, data, .. } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) => {
+        Event::Message { id, data, .. } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) || (id == "req3" && s.is("expired")) => {
             let case = s.st["cur"]["case"].as_str().unwrap_or_default().to_string();
             match data["msg"].as_str().unwrap_or_default() {
                 "requester_waiting_for_capacity" => return Ok(s.fail(format!("the {case} request waits for capacity: {data}"))),
                 "contract" if data["phase"] == "Held" => return Ok(s.fail(format!("the {case} request was Held: {data}"))),
                 "contract" if data["phase"] == "Failed" => {
                     let msg = data["message"].as_str().unwrap_or_default().to_string();
-                    let want = if case == "maxCpus" { "maxCpus" } else { "nestedVirt" };
+                    let want = match case.as_str() {
+                        "maxCpus" => "maxCpus",
+                        "nested" => "nestedVirt",
+                        _ => "deadline",
+                    };
                     let t = s.since("case");
                     s.reading(&format!("{case}_failed_s"), t);
                     s.reading(&format!("{case}_message"), msg.clone());
-                    if !msg.contains(want) || (!msg.contains("no bidder") && !msg.contains("requester_no_bidders")) {
+                    if !msg.contains(want) || (case != "expired" && !msg.contains("no bidder") && !msg.contains("requester_no_bidders")) {
                         return Ok(s.fail(format!("the {case} request failed, but not naming why ({want}): {msg}")));
                     }
                     if t > 120.0 {
@@ -703,6 +713,8 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
                     s.flag(&format!("{case}Done"));
                     if case == "maxCpus" && s.st["nestedAny"] != true {
                         h = launch(&mut s, h, "nested");
+                    } else if case != "expired" {
+                        h = launch(&mut s, h, "expired");
                     } else {
                         return Ok(s.pass());
                     }
