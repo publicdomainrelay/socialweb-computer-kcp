@@ -3,9 +3,9 @@
 # puts it on the staging VMs (target requester `put:<sha>`, SWC_BINARY; request.put). Runs after `gate` and `testhost` on a
 # push to any branch that changes code (paths below; a new branch runs everything), and when asked (`knotless run rerun
 # knotless://<owner>/socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). Rented by R2 from the kcp-test VM
-# (4 vCPU / 8 GB): one 8/16 nested-virt staging VM with two bidders running the staging suite (0003 0005 0006 0007 0008
-# 0012 0013; the dev-network-only entries are `compositions`), and, on main, the multi-VM layout stand-up (four VMs, two
-# 4/8 nested-virt, one meshd overlay; no suite there yet). The test host and meshd come from this commit's `testhost` run
+# (4 vCPU / 8 GB): the multi-VM layout (four small VMs, two of them 4/8 nested-virt bidders, one meshd overlay) and the staging
+# suite (0003 0005 0006 0007 0008 0012 0013; the dev-network-only entries are `compositions`) run from its atproto VM.
+# The test host and meshd come from this commit's `testhost` run
 # (its artifacts when the branch changed tests/ or rust/, else the bucket's published build). The run's dump is an artifact
 # (runs/), kept on failure.
 on:
@@ -111,17 +111,14 @@ steps:
       rc=0
       stage() {
         (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
-          SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test CI=1 target/release/swc-test-host \
+          SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test \
+          SWC_TEST_HOST_STATIC=/usr/local/bin/swc-test-host CI=1 target/release/swc-test-host \
           compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input "$1")
       }
-      # one nested-virt staging VM (8 vCPU / 16 GB) with a dev network of two bidders and the staging suite on it
-      # (the dev-network-only entries are the `compositions` workflow's)
-      stage '{"bidders": 2, "cpus": 8, "mem": "16G", "suite": ["0003", "0005", "0006", "0007", "0008", "0012", "0013"]}' || rc=$?
-      # main also stands up the multi-VM layout (atproto 2/4, gateway 4/8, two 4/8 nested bidders on one meshd overlay), its
-      # four contracts held by one long-lived guest requester (provision infra: an EphemeralInfra of R2's `run requester`)
-      case "$KNOTLESS_RUN_REF" in
-        refs/heads/main) stage '{"suite": false, "layout": "multi", "provision": "infra"}' || rc=$?
-      esac
+      # the multi-VM layout (atproto 2/4, gateway 4/8, two 4/8 nested-virt bidders on one meshd overlay), its four contracts
+      # held by one long-lived guest requester (provision infra: an EphemeralInfra of R2's `run requester`), the two requests on
+      # the bidders, then the staging suite on the atproto VM against that network
+      stage '{"layout": "multi", "provision": "infra", "deadlineMin": 200, "suite": ["0003", "0005", "0006", "0007", "0008", "0012", "0013"]}' || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc

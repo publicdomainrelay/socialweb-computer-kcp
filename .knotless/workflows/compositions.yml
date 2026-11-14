@@ -1,7 +1,7 @@
 # knotless CI: the dev-network-only entries of the acceptance suite (0007:restart, 0014:*, 0015:pressure, 0016:*) against the
-# staging layout: R2 on the kcp-test VM rents ONE nested-virt staging VM (8 vCPU / 16 GB, input cpus/mem) that runs
-# `dev up --profile market-network` with three bidders, and the suite runs on it (tests/compositions/staging/suite.sh). Same
-# stand-up and test host as `test.yml` (kept in step with it); on a push to any branch that changes code (paths; a new branch
+# multi-VM staging layout (R2 on the kcp-test VM rents four small VMs: atproto 2/4, gateway 4/8, two 4/8 nested-virt bidders
+# on one meshd overlay), and the suite runs from the atproto VM (tests/compositions/staging/suite.sh). 0014:run needs three
+# network bidders and SKIPs on two. Same stand-up and test host as `test.yml` (kept in step with it); on a push to any branch that changes code (paths; a new branch
 # runs everything) and when asked, after `gate` and `testhost`. The requester under test is this commit's build (step `binary`,
 # as test.yml: built here, put on the staging VM).
 on:
@@ -104,10 +104,11 @@ steps:
       loginctl enable-linger r2
       for i in $(seq 60); do [ -d "/run/user/$(id -u r2)" ] && break; sleep 1; done
       rc=0
-      # one nested-virt staging VM with a dev network of three bidders, and the dev-network-only suite on it
+      # the multi-VM layout, then the dev-network-only suite from its atproto VM
       (cd tests && runuser -u r2 -- env HOME=/home/r2 XDG_RUNTIME_DIR="/run/user/$(id -u r2)" SWC_TARGET=/home/r2/target-ci.json \
-        SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test CI=1 target/release/swc-test-host \
-        compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"bidders": 3, "cpus": 8, "mem": "16G", "suite": ["0007:restart", "0014:run", "0014:concurrent", "0014:exhausted", "0014:backtoback", "0015:pressure", "0016:run", "0016:badsha"]}') || rc=$?
+        SWC_RUNS=/work/runs SWC_REPO="$(cd .. && pwd)" SWC_MESHD=/usr/local/bin/socialweb-meshd SWC_BINARY=/home/r2/swc-under-test \
+        SWC_TEST_HOST_STATIC=/usr/local/bin/swc-test-host CI=1 target/release/swc-test-host \
+        compositions/staging --account r2 --on-fail freeze --freeze-ttl 3600 --input '{"layout": "multi", "provision": "infra", "deadlineMin": 200, "suite": ["0007:restart", "0014:run", "0014:concurrent", "0014:exhausted", "0014:backtoback", "0015:pressure", "0016:run", "0016:badsha"]}') || rc=$?
       kill "$(cat /work/runs/watch.ndjson.pid)" 2>/dev/null || echo "watch: the capture was not running at the end"
       echo "watch: $(wc -l < /work/runs/watch.ndjson) lines in runs/watch.ndjson"
       exit $rc

@@ -77,8 +77,17 @@ SWC_MESHD=<static socialweb-meshd x86_64> SWC_TARGET=~/.tmp/target-staging.json 
   cargo run -p swc-test-host -- compositions/staging --input '{"layout": "multi"}'
 ```
 
+## Suite on the multi-VM layout
+
+With `"suite": ["0003", "0007:restart", ...]` the multi layout goes on after the two `run request`s: the host puts `swc-test-host`
+(`SWC_TEST_HOST_STATIC`) and the suite tarball on the atproto VM (`request.put`, one at a time) and runs `suite.sh` there as `stg`, detached
+and polled, as the single-VM layout does: `target.sh` reads `dev status` of the network (`stg`), whose bidders are on other VMs and
+so are not `MarketBidder` apps of it: the target's `bidders` is empty, and an entry that needs a bidder's kcp (0015's kube reads,
+0014's fill and VM counts, a bidder core restart: 0007:restart) cannot run until a bidder's kcp is reachable from the atproto VM
+(`run bidder --kcp-front-address` on the overlay address, its admin kubeconfig put on the atproto VM). The binary under test of
+every VM may be `put:<label>` (`SWC_BINARY`).
+
 ## Later
 
-- The suite against it: test steps that start requesters run them on the VM (`run requester --network stg`).
-- Multi-VM: the suite from a requester VM, the gateway layer on the gateway VM, layers placed through another kcp
+- Multi-VM: the bidders' kcp reachable from the suite's VM, the gateway layer on the gateway VM, layers placed through another kcp
   (`dev up --parent`), the roster as a `computer.socialweb.mesh.roster` record with TXT and wildcard names.

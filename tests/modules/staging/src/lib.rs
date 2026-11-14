@@ -298,9 +298,15 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
         true => host(id, "requester.ssh", json!({ "name": RQ, "contract": cc(v), "exec": exec })),
         false => host(id, "request.ssh", json!({ "name": format!("{base}-{v}"), "exec": exec })),
     };
-    let put = |v: &str| match infra {
-        true => host(&format!("{v}:put"), "request.put", json!({ "name": RQ, "contract": cc(v), "what": "meshd", "remote": MESHD })),
-        false => host(&format!("{v}:put"), "request.put", json!({ "name": format!("{base}-{v}"), "what": "meshd", "remote": MESHD })),
+    let put_what = |v: &str, step: &str, what: &str, remote: &str| match infra {
+        true => host(&format!("{v}:{step}"), "request.put", json!({ "name": RQ, "contract": cc(v), "what": what, "remote": remote })),
+        false => host(&format!("{v}:{step}"), "request.put", json!({ "name": format!("{base}-{v}"), "what": what, "remote": remote })),
+    };
+    let put = |v: &str| put_what(v, "put", "meshd", MESHD);
+    // the install of a VM: the binary under test is downloaded (a bucket prefix) or put by the host first (`put:`)
+    let start_install = |v: &str, prefix: &str| match prefix == PUT {
+        true => put_what(v, "putbin", "binary", PUT_AT),
+        false => ssh(v, &format!("{v}:install"), install(prefix)),
     };
     let handle_of = |v: &str| format!("{}-{tag}.bob.test", v.replace("bidder-", "b"));
     let down = |s: &mut S, h: Handle, result: Value| {
@@ -361,7 +367,7 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                 s.flag(&format!("install:{v}"));
                 s.mark(&format!("held:{v}"));
                 s.st["readings"]["heldS"][&v] = json!(s.t());
-                h = h.cancel(&id).call(ssh(&v, &format!("{v}:install"), install(s.st["prefix"].as_str().unwrap_or_default())));
+                h = h.cancel(&id).call(start_install(&v, s.st["prefix"].as_str().unwrap_or_default()));
             }
         }
         Event::Result { id, result, .. } => {
@@ -464,9 +470,10 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     for (n, ..) in VMS {
                         s.flag(&format!("install:{n}"));
                         s.st["readings"]["heldS"][n] = json!(s.since("apply"));
-                        h = h.call(ssh(n, &format!("{n}:install"), install(s.st["prefix"].as_str().unwrap_or_default())));
+                        h = h.call(start_install(n, s.st["prefix"].as_str().unwrap_or_default()));
                     }
                 }
+                "putbin" if ok => h = h.call(ssh(&v, &format!("{v}:install"), install(s.st["prefix"].as_str().unwrap_or_default()))),
                 "install" if ok => {
                     s.flag(&format!("installed:{v}"));
                     s.st["readings"]["version"] = json!(text.lines().find_map(|l| l.strip_prefix("VERSION ")));
@@ -509,6 +516,33 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                         s.st["readings"]["meshS"] = json!(s.t());
                     }
                 }
+                // one ssh session at a time (the single-VM layout's rule): the host, then the suite tarball, then the run
+                "put-host" if ok => h = h.call(put_what("atproto", "put-suite", "suite", "/home/stg/stg/suite.tgz")),
+                "put-suite" if ok => {
+                    let list: Vec<String> = args["suite"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+                    let run_name = args["name"].as_str().unwrap_or_default();
+                    let d = "/home/stg/stg";
+                    let cmd = format!(
+                        "set -e; chmod 0755 {d}/swc-test-host; rm -rf {d}/suite; mkdir -p {d}/suite; tar -xzf {d}/suite.tgz -C {d}/suite; chown -R stg:stg {d}/suite; {}",
+                        bg("suite", as_stg(&format!("{d}/suite/tests/compositions/staging/suite.sh {run_name} {}", list.join(" "))))
+                    );
+                    h = h.call(ssh("atproto", "atproto:suite", cmd));
+                }
+                "suite" if ok => h = h.timer("poll-atproto:suite", 30_000),
+                "suite-poll" => {
+                    let (rc, log) = text.split_once('\n').unwrap_or((text.as_str(), ""));
+                    match rc.trim() {
+                        _ if !ok => h = h.timer("poll-atproto:suite", 30_000),
+                        "" => h = h.timer("poll-atproto:suite", 30_000),
+                        rc => {
+                            let results: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("RESULT ")).collect();
+                            s.st["readings"]["suite"] = json!(results);
+                            s.st["readings"]["suiteS"] = json!(s.since("suite"));
+                            let r = if rc == "0" { json!({ "pass": true }) } else { json!({ "pass": false, "error": format!("suite exit {rc}: {}", results.join(", ")) }) };
+                            return Ok(down(&mut s, h, r));
+                        }
+                    }
+                }
                 "up" | "bidder" | "request" if ok => h = h.timer(&format!("poll-{v}:{step}"), 10_000),
                 "up-poll" | "request-poll" => {
                     let step = &step[..step.len() - 5];
@@ -525,6 +559,13 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                             s.st["readings"]["request"] = json!(log.lines().filter(|l| l.starts_with("RENTED")).collect::<Vec<_>>());
                             // the staging requesters' DIDs (an isolation check greps prod bidders' journals for them)
                             s.st["readings"]["requesterDids"] = json!(log.lines().filter_map(|l| l.strip_prefix("REQUESTER")).filter_map(|l| l.rfind("did:plc:").map(|i| &l[i..])).collect::<Vec<_>>());
+                            // an `suite` input (a list of runbook[:entry]) goes on: the suite runs on the atproto VM, where the
+                            // network's requesters run, against the network the bidder VMs joined (suite.sh, target.sh)
+                            if args["suite"].as_array().is_some_and(|a| !a.is_empty()) {
+                                s.set("suite");
+                                s.mark("suite");
+                                return Ok(s.keep(h.call(put_what("atproto", "put-host", "testHost", "/home/stg/stg/swc-test-host"))));
+                            }
                             return Ok(down(&mut s, h, json!({ "pass": true })));
                         }
                         rc => return Ok(down(&mut s, h, json!({ "pass": false, "error": format!("{step} exit {rc}: {log}") }))),
