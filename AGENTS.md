@@ -986,7 +986,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   batches are on no remote a rented VM can check out), so the single lander is the rule until the fork has it.
 - Heavy jobs on hat-8 (VMM tests, a local gate or `make check-pins`, release or guest image builds, staging stand-up
   and its suites) run one at a time under `scripts/swc-heavy.sh <command...>` (an exclusive `flock` on
-  `/var/tmp/swc-heavy.lock`; `SWC_HEAVY_WAIT=<secs>` gives up after that long). `tests/gate.sh` takes it itself. A dev
+  `/var/tmp/swc-heavy.lock`; `SWC_HEAVY_WAIT=<secs>` gives up after that long). `tests/gate.sh` takes it itself (for the whole run on a target with a local `network`; on prod, whose VMs run on the prod bidders, only for its build). A dev
   network for an item still takes a live slot (`live-slot.ts`) for its whole life, not this lock.
 - Before you mark a goal complete cut a release candidate
   - Babysit CI every time you tag a release candidate. You are only allowed to

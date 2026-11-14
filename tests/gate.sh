@@ -9,11 +9,16 @@
 # VMs of its entry's weight (WEIGHT below, default 1) out of GATE_VMS (4) so the target's bidders are not oversubscribed.
 # An exclusive entry (EXCLUSIVE: it fills or counts bidders, or places VMs per host) runs alone: the gate drains first.
 # GATE_JOBS=1 runs it serially in gate order.
+# The heavy-job lock: held for the whole run on a target with local networks, for the build only on prod (no `network`).
 # A failed run freezes (attach: the FROZEN line of its log) until GATE_FREEZE_TTL (900 s), then its slot goes on.
 # SWC_COMPAT_REQUESTER (the previous rc's CLI, e.g. release:v0.0.0-rc165) runs 0006:compat; unset, it is skipped.
 # GATE_SKIP="<runbook>:<entry>=<reason>;..." skips more (no ";" in a reason), with the reason in its RESULT line.
 set -uo pipefail
-[ -n "${SWC_HEAVY_HELD:-}" ] || exec "$(dirname "$0")/../scripts/swc-heavy.sh" "$0" "$@"
+# The heavy-job lock (hat-8's one heavy job at a time) covers the whole run only for a target with local networks (dev, staging:
+# VMs and cores run here); a target without `network` (prod) runs its VMs on the prod bidders and holds the lock only for the build.
+if [ -z "${SWC_HEAVY_HELD:-}" ] && jq -e '.network' "${1:?usage: gate.sh <target.json> [--account <name>[,<name>...]] [<runbook>[:<entry>] ...]}" > /dev/null 2>&1; then
+  exec "$(dirname "$0")/../scripts/swc-heavy.sh" "$0" "$@"
+fi
 target=$(realpath "${1:?usage: gate.sh <target.json> [--account <name>[,<name>...]] [<runbook>[:<entry>] ...]}"); shift
 accounts=${GATE_ACCOUNTS:-bob}
 if [ "${1:-}" = --account ]; then accounts=$2; shift 2; fi
@@ -30,7 +35,11 @@ cd "$(dirname "$0")"
 unset ATPROTO_HANDLE ATPROTO_PASSWORD ATP_USERNAME ATP_PASSWORD ATPROTO_PDS
 out=${GATE_OUT:-$HOME/.tmp/swc-system-tests/gate/$(date -u +%Y%m%dT%H%M%SZ)}
 mkdir -p "$out" && chmod 700 "$out"
-(cd modules && cargo wasm -q) && cargo build -q -p swc-test-host || exit 2
+if [ -n "${SWC_HEAVY_HELD:-}" ]; then
+  (cd modules && cargo wasm -q) && cargo build -q -p swc-test-host || exit 2
+else
+  ../scripts/swc-heavy.sh sh -c '(cd modules && cargo wasm -q) && cargo build -q -p swc-test-host' || exit 2
+fi
 host=$PWD/target/debug/swc-test-host
 export SWC_TARGET=$target SWC_READINGS=$out
 skip_of() {
