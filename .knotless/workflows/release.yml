@@ -3,7 +3,9 @@
 # (content-addressed, so nothing a failed gate can poison) and staging/<sha>/ (the binaries and their manifest). The
 # `publish` workflow, after gate and release at this commit, copies staging/<sha>/ to main/<sha>/ and main/latest/ (a tag:
 # releases/<tag>/) and checks what it published. The bucket key is a sealed secret given only to pushes to main and v*
-# tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a pull) the staging steps are skipped. A newer push to the ref
+# tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a pull) the staging steps are skipped. The caches of the
+# build (scripts/asset-cache-upload.sh, scripts/ci-build-cache.sh: restored before a non-tag build, uploaded after one on
+# main and v*) cut what a clean VM rebuilds; a build with them gives the bytes of a cold one. A newer push to the ref
 # cancels an older commit's release. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8
 # offer it).
 on:
@@ -31,7 +33,13 @@ steps:
       trap "kill $! 2>/dev/null" EXIT
       root=/root/release-build
       mkdir -p "$root"
-      case "$KNOTLESS_RUN_REF" in refs/tags/v*) ;; *) export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache ;; esac
+      case "$KNOTLESS_RUN_REF" in
+        refs/tags/v*) ;;
+        *)
+          export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache
+          BUILD_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/build-cache bash scripts/ci-build-cache.sh restore "$root" || echo "build-cache: restore failed: cold build"
+          ;;
+      esac
       bash scripts/build-socialweb-computer.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" --build-root "$root"
       rel="$root/release/$KNOTLESS_RUN_SHA"
       ls -la "$rel"
@@ -89,6 +97,12 @@ steps:
     run: |
       . /opt/ci/env
       scripts/asset-cache-upload.sh /root/release-build/cache/blobs
+  - name: build cache
+    on: {refs: [refs/heads/main, refs/tags/v*]}
+    timeout: 30
+    run: |
+      . /opt/ci/env
+      bash scripts/ci-build-cache.sh save /root/release-build || echo "build-cache: save failed: the build is not affected"
   - name: stage
     on: {refs: [refs/heads/main, refs/tags/v*]}
     timeout: 90
