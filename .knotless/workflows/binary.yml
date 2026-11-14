@@ -1,0 +1,20 @@
+# knotless CI: the socialweb-computer binary of this commit, built ONCE for the staging runs (`test`, `compositions`: after: [binary]) and
+# pushed to ttl.sh (an anonymous, ephemeral OCI registry) with oras: the reference, <host/name>@sha256:<manifest digest>, is this run's
+# artifact oci/binary.ref, and the staging VMs pull it by that digest (scripts/ci-staging-binary.sh). A commit whose binary a published
+# main build serves (nothing a binary is built from changed since the nearest published main ancestor) builds nothing: the run is
+# seconds. 8 vCPU / 16 GB (binding kcp-medium, as `release`).
+on:
+  push:
+    refs: [refs/heads/*]
+    paths: [internal/**, cmd/**, api/**, rust/**, lexicons/**, deploy/**, scripts/**, go.mod, go.sum, .knotless/workflows/binary.yml]
+  asked:
+    refs: [refs/heads/*]
+runners: [aliceoa.bsky.social]
+executor: kcp-medium
+artifacts: [oci]
+steps:
+  - name: binary
+    timeout: 30
+    run: |
+      set -eu
+      bash scripts/ci-staging-binary.sh --push

@@ -2,8 +2,8 @@
 # multi-VM staging layout (R2 on the kcp-test VM rents four small VMs: atproto 2/4, gateway 4/8, two 4/8 nested-virt bidders
 # on one meshd overlay), and the suite runs from the atproto VM (tests/compositions/staging/suite.sh). 0014:run needs three
 # network bidders and SKIPs on two. Same stand-up and test host as `test.yml` (kept in step with it); on a push to main that changes code (paths) and, until the binary
-# reaches the staging VMs reliably, on a branch only when asked, after `gate` and `testhost`. The requester under test is this commit's build (step `binary`,
-# as test.yml: built here, put on the staging VM).
+# reaches the staging VMs reliably, on a branch only when asked, after `gate`, `testhost` and `binary`. The requester under test is this commit's build (step `binary`,
+# as test.yml: the `binary` workflow's, pulled from ttl.sh by digest).
 on:
   push:
     refs: [refs/heads/main]
@@ -11,7 +11,7 @@ on:
   asked:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
-after: [gate, testhost]
+after: [gate, testhost, binary]
 executor: kcp-test
 artifacts: [runs]
 # a failed run freezes (--on-fail freeze): `knotless run attach` gives the owner's or a collaborator's key this, as
