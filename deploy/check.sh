@@ -8,7 +8,7 @@ case "$mode" in
   --full) run=full ;;
   *)
     echo "usage: $0 [--fast|--local|--full]" >&2
-    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests, cross-OS builds (and pkg/embedded for ios/arm64) and release builds" >&2
+    echo "  --fast   the build gate: gofmt, go build, apigen, codegen drift, go vet, architecture rules, policy engine specification tests (run beside the cross-OS builds: they wait on timers), cross-OS builds (and pkg/embedded for ios/arm64) and release builds (not with CHECK_SKIP_RELEASE_BUILDS=1)" >&2
     echo "  --local  --fast plus cargo test of rust/ and the embedded asset check (dev verify-assets); lists what it skipped" >&2
     echo "  --full   --local, and a skip is a failure; needs sudo -n, cargo and the staged assets on this host" >&2
     exit 2
@@ -73,8 +73,10 @@ go run ./hack/identlinkvectors internal/identlink/vectors.json || fail "identlin
 echo "check.sh: ok identlink vectors"
 
 policyspec="./internal/policyengine/... ./internal/market/bidder/ ./internal/market/requester/"
-go test -count=1 -timeout 15m $policyspec || fail "policy engine specification tests (go test $policyspec)"
-echo "check.sh: ok policy engine specification tests"
+policylog="$(mktemp)"
+go test -count=1 -timeout 15m $policyspec >"$policylog" 2>&1 &
+policypid=$!
+trap 'kill "$policypid" 2>/dev/null; rm -f "$policylog"' EXIT
 
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"
@@ -113,8 +115,17 @@ if [ -n "$crossfailed" ]; then
   fail "cross-OS gate:$crossfailed"
 fi
 
+if wait "$policypid"; then
+  cat "$policylog"
+  echo "check.sh: ok policy engine specification tests"
+else
+  cat "$policylog" >&2
+  fail "policy engine specification tests (go test $policyspec)"
+fi
+
 releasedir="$(mktemp -d)"
 for target in $releasetargets; do
+  [ "${CHECK_SKIP_RELEASE_BUILDS:-}" != 1 ] || break
   goos="${target%/*}"
   goarch="${target#*/}"
   if ! GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -tags release -trimpath -o "$releasedir/$goos-$goarch" ./cmd/socialweb-computer; then
@@ -125,6 +136,7 @@ for target in $releasetargets; do
   echo "check.sh: ok release build $target"
 done
 rm -rf "$releasedir"
+[ "${CHECK_SKIP_RELEASE_BUILDS:-}" != 1 ] || echo "check.sh: release builds skipped (CHECK_SKIP_RELEASE_BUILDS=1: the release workflow builds them)"
 
 rust_check() {
   if ! command -v cargo >/dev/null 2>&1; then
