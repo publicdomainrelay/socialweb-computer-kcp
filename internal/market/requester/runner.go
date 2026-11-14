@@ -53,6 +53,8 @@ type contractRunner struct {
 
 	waitFrom time.Time
 
+	refusersExcluded bool
+
 	releaseOnce sync.Once
 
 	tombstoneOnce sync.Once
@@ -316,6 +318,14 @@ loop:
 		case errors.Is(err, errGuestImage) && replaced < MaxAcceptReplacements:
 			replaced++
 			r.replaceWrongImage(ctx, err)
+		case r.outcomeNoBids() && len(r.denied(nil)) > 0 && !r.refusersExcluded && replaced < MaxAcceptReplacements:
+			replaced++
+			r.mu.Lock()
+			r.refusersExcluded = true
+			r.mu.Unlock()
+			if !r.reRFPAfterRefusals(ctx, err) {
+				break loop
+			}
 		case r.outcomeNoBids():
 			rounds++
 			if !r.waitForCapacity(ctx, rounds, err) {
@@ -379,6 +389,21 @@ func (r *contractRunner) replaceDeclined(ctx context.Context, cause error) {
 	state.Accept, state.AcceptURI, state.AcceptPending, state.Bid, state.Winner = nil, "", nil, nil, nil
 	state.Phase = v1alpha1.ContractRFPSubmitted
 	r.setState(state)
+}
+
+func (r *contractRunner) reRFPAfterRefusals(ctx context.Context, cause error) bool {
+	state := r.stateCopy()
+	if state == nil || state.Outcome != v1alpha1.ContractOutcomeNoBids || len(r.denied(nil)) == 0 {
+		return false
+	}
+	r.log().Warn("requester_bids_exhausted_new_rfp", "declined", r.denied(nil), "err", cause.Error())
+	if state.RFP != nil && state.RFP.URI != "" {
+		r.deleteRecord(ctx, state.RFP.URI)
+	}
+	state.RFP, state.RFPURI, state.Outcome, state.Error, state.Bids = nil, "", "", "", nil
+	state.Phase = v1alpha1.ContractRFPSubmitted
+	r.setState(state)
+	return true
 }
 
 const (
@@ -463,6 +488,7 @@ func (r *contractRunner) waitForCapacity(ctx context.Context, round int, cause e
 	r.mu.Lock()
 	r.declined = nil
 	r.chosen = nil
+	r.refusersExcluded = false
 	r.mu.Unlock()
 	state = r.stateCopy()
 	if state == nil {
