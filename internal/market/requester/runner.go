@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,8 @@ type contractRunner struct {
 	resumed bool
 
 	releaseCh chan struct{}
+
+	waitFrom time.Time
 
 	releaseOnce sync.Once
 
@@ -303,13 +306,26 @@ func (r *contractRunner) Run(ctx context.Context) {
 		return
 	}
 	err := r.requestOnce(ctx)
-	for replaced := 0; err != nil && replaced < MaxAcceptReplacements && !r.released() && !r.q.stopping(); replaced++ {
-		if errors.Is(err, ErrAcceptDeclined) {
+	replaced, rounds := 0, 0
+loop:
+	for err != nil && !r.released() && !r.q.stopping() {
+		switch {
+		case errors.Is(err, ErrAcceptDeclined) && replaced < MaxAcceptReplacements:
+			replaced++
 			r.replaceDeclined(ctx, err)
-		} else if errors.Is(err, errGuestImage) {
+		case errors.Is(err, errGuestImage) && replaced < MaxAcceptReplacements:
+			replaced++
 			r.replaceWrongImage(ctx, err)
-		} else if !r.reRFPAfterRefusals(ctx, err) {
-			break
+		case r.outcomeNoBids():
+			rounds++
+			if !r.waitForCapacity(ctx, rounds, err) {
+				if rounds > 1 || r.capacityWaited() {
+					err = fmt.Errorf("%w; gave up waiting for capacity after %d rounds (deadline %s)", err, rounds, r.capacityDeadline().Format(time.RFC3339))
+				}
+				break loop
+			}
+		default:
+			break loop
 		}
 		err = r.requestOnce(ctx)
 	}
@@ -365,14 +381,92 @@ func (r *contractRunner) replaceDeclined(ctx context.Context, cause error) {
 	r.setState(state)
 }
 
-func (r *contractRunner) reRFPAfterRefusals(ctx context.Context, cause error) bool {
+const (
+	CapacityBackoffFirst = 30 * time.Second
+
+	CapacityBackoffMax = 2 * time.Minute
+
+	DefaultCapacityWait = 30 * time.Minute
+)
+
+func CapacityBackoff(round int) time.Duration {
+	if round < 1 {
+		round = 1
+	}
+	d := CapacityBackoffFirst
+	for i := 1; i < round && d < CapacityBackoffMax; i++ {
+		d *= 2
+	}
+	return min(d, CapacityBackoffMax)
+}
+
+func (r *contractRunner) outcomeNoBids() bool {
 	state := r.stateCopy()
-	if state == nil || state.Outcome != v1alpha1.ContractOutcomeNoBids || len(r.denied(nil)) == 0 {
+	return state != nil && state.Outcome == v1alpha1.ContractOutcomeNoBids
+}
+
+func (r *contractRunner) capacityWaited() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.waitFrom.IsZero()
+}
+
+func (r *contractRunner) capacityDeadline() time.Time {
+	r.mu.Lock()
+	from := r.waitFrom
+	r.mu.Unlock()
+	if sec, err := strconv.ParseInt(strings.TrimSpace(r.snapshot().Labels[ContractExpiresAtLabel]), 10, 64); err == nil && sec > 0 {
+		return time.Unix(sec, 0)
+	}
+	if from.IsZero() {
+		from = r.q.now()
+	}
+	return from.Add(DefaultCapacityWait)
+}
+
+func (r *contractRunner) waitForCapacity(ctx context.Context, round int, cause error) bool {
+	state := r.stateCopy()
+	if state == nil {
 		return false
 	}
-	r.log().Warn("requester_bids_exhausted_new_rfp", "declined", r.denied(nil), "err", cause.Error())
+	r.mu.Lock()
+	if r.waitFrom.IsZero() {
+		r.waitFrom = r.q.now()
+	}
+	r.mu.Unlock()
+	if strings.Contains(cause.Error(), "bidderDids name no bidder") {
+		return false
+	}
+	backoff := CapacityBackoff(round)
+	deadline := r.capacityDeadline()
+	if !r.q.now().Add(backoff).Before(deadline) {
+		return false
+	}
+	slot := "default-size"
+	if cpus := r.snapshot().Spec.ComputeContractTemplate.Cpus; cpus > 0 {
+		slot = fmt.Sprintf("%d-vCPU", cpus)
+	}
+	r.log().Warn("requester_waiting_for_capacity", "slot", slot, "round", round, "retryIn", backoff.String(), "deadline", deadline.Format(time.RFC3339), "declined", r.denied(nil), "err", cause.Error())
+	r.writeStatus(ctx, v1alpha1.ComputeContractRequesting, fmt.Sprintf("waiting for a %s slot: round %d, a new RFP in %s (until %s)", slot, round, backoff.Round(time.Second), deadline.Format(time.RFC3339)), state, r.currentBids(), nil, "collectingBids", 1)
 	if state.RFP != nil && state.RFP.URI != "" {
 		r.deleteRecord(ctx, state.RFP.URI)
+	}
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-r.releaseCh:
+		return false
+	case <-timer.C:
+	}
+	r.mu.Lock()
+	r.declined = nil
+	r.chosen = nil
+	r.mu.Unlock()
+	state = r.stateCopy()
+	if state == nil {
+		return false
 	}
 	state.RFP, state.RFPURI, state.Outcome, state.Error, state.Bids = nil, "", "", "", nil
 	state.Phase = v1alpha1.ContractRFPSubmitted

@@ -88,6 +88,7 @@ type requestRun struct {
 	instanceDir       string
 	resuming          bool
 	cleanupOnly       bool
+	capacityWait      time.Duration
 	identity          *request.IdentityStore
 	identityState     *request.Identity
 	identityObject    *v1alpha1.MarketIdentity
@@ -371,6 +372,9 @@ func newRequestRun(a *app, vals clicfg.Values) (*requestRun, error) {
 			return nil, fmt.Errorf("expires-in %q: want a positive Go duration", in)
 		}
 		r.expiresAt = strconv.FormatInt(time.Now().Add(d).Unix(), 10)
+		r.capacityWait = d
+	} else {
+		r.capacityWait = requester.DefaultCapacityWait
 	}
 	if r.networkTimeout, err = time.ParseDuration(vals.String("network-timeout")); err != nil {
 		return nil, fmt.Errorf("network-timeout: %w", err)
@@ -1192,7 +1196,7 @@ func (r *requestRun) keptForRevokes(err error) {
 }
 
 func (r *requestRun) carryOn(ctx context.Context) int {
-	c, err := r.kcp.WaitContract(ctx, r.contractTimeout, contractSettled, r.progress)
+	c, err := r.kcp.WaitContract(ctx, r.contractTimeout+r.capacityWait, contractSettled, r.progress)
 	if err != nil {
 		r.a.log.Error("the contract did not settle", "err", err.Error())
 		r.writeSummary(ctx, c)
