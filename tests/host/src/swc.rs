@@ -37,6 +37,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.agent",
     "computer.socialweb.test.request.summary",
     "computer.socialweb.test.request.release",
+    "computer.socialweb.test.request.kill",
     "computer.socialweb.test.request.records",
     "computer.socialweb.test.account.envFile",
     "computer.socialweb.test.atirc.meshSub",
@@ -488,11 +489,31 @@ impl Swc {
             cmd.arg("--");
         }
         cmd.args(&pass);
-        let mut child = cmd
+        // pty: the invocation runs on a pseudo-terminal (util-linux `script`) whose stdin stays open, so `run request`
+        // without --exec opens its interactive ssh session (a terminal on stdin) and holds it
+        let pty = input["pty"] == true;
+        let mut spawn_cmd = if pty {
+            let std_cmd = cmd.as_std();
+            let line = std::iter::once(std_cmd.get_program())
+                .chain(std_cmd.get_args())
+                .map(|w| format!("'{}'", w.to_string_lossy().replace('\'', r#"'"'"'"#)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let envs: Vec<_> = std_cmd.get_envs().filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string()))).collect();
+            let mut script = tokio::process::Command::new("script");
+            script.args(["-qefc", &line, "/dev/null"]).envs(envs);
+            script.stdin(Stdio::piped());
+            script
+        } else {
+            cmd
+        };
+        let mut child = spawn_cmd
             .stdout(f.try_clone().map_err(|e| e.to_string())?)
             .stderr(f)
             .spawn()
             .map_err(|e| e.to_string())?;
+        // held open until the invocation is over
+        let pty_stdin = child.stdin.take();
         self.requests.lock().unwrap().insert(name.clone(), state);
         let (tx, messages) = mpsc::unbounded_channel();
         // which binary runs the invocation (0006 compat: the unchanged CLI's)
@@ -514,6 +535,7 @@ impl Swc {
             .guest_requester
             .then(|| Instant::now() + R2_REF_WAIT);
         tokio::spawn(async move {
+            let _pty_stdin = pty_stdin;
             let mut offsets = vec![0usize; logs.len()];
             let mut exited = false;
             // the run's dev core.log is copied to logs/core.log when the process ends: each line once
@@ -561,7 +583,10 @@ impl Swc {
                         if (msg == "contract"
                             || msg == "ssh returned"
                             || msg.starts_with("requester_")
-                            || msg.starts_with("guest_"))
+                            || msg.starts_with("guest_")
+                            || msg.starts_with("ssh to the guest over")
+                            || msg.starts_with("no --exec and stdin is not a terminal")
+                            || msg.starts_with("ssh not ready yet"))
                             && tx.send(Ok(v)).is_err()
                         {
                             return;
@@ -613,6 +638,38 @@ impl Swc {
             }
         }
         Ok(v)
+    }
+
+    /// SIGKILL (or `signal`) to the process that owns the invocation `name`: `<bin> run request ... --name <name>` of this
+    /// run (not a release, proxy or ssh verb), found by its command line; the kcp child it started keeps running.
+    fn kill_owner(&self, name: &str, signal: &str) -> Result<Value, String> {
+        if !["KILL", "TERM", "INT"].contains(&signal) {
+            return Err(format!("signal {signal}: KILL, TERM or INT"));
+        }
+        let state = self.request_state().display().to_string();
+        let mut pids = vec![];
+        for e in std::fs::read_dir("/proc").map_err(|e| e.to_string())?.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+            let Ok(raw) = std::fs::read(e.path().join("cmdline")) else { continue };
+            let argv: Vec<&str> = raw.split(|b| *b == 0).filter_map(|a| std::str::from_utf8(a).ok()).collect();
+            let named = argv.windows(2).any(|w| w[0] == "--name" && w[1] == name);
+            let owner = argv.len() > 3
+                && argv[0].rsplit('/').next().is_some_and(|b| b.starts_with("socialweb-computer"))
+                && argv[1] == "run"
+                && argv[2] == "request"
+                && argv[3].starts_with("--")
+                && argv.contains(&state.as_str());
+            if named && owner {
+                pids.push(pid);
+            }
+        }
+        if pids.is_empty() {
+            return Err(format!("no process owns the invocation {name}"));
+        }
+        for p in &pids {
+            let _ = std::process::Command::new("kill").arg(format!("-{signal}")).arg(p.to_string()).status();
+        }
+        Ok(json!({ "killed": pids }))
     }
 
     async fn release(&self, name: &str) -> Result<Value, String> {
@@ -756,6 +813,7 @@ impl Swc {
             }
             "request.summary" => self.summary(str_of(&input, "name")?),
             "request.release" => self.release(str_of(&input, "name")?).await,
+            "request.kill" => self.kill_owner(str_of(&input, "name")?, input["signal"].as_str().unwrap_or("KILL")),
             "request.records" => {
                 let name = str_of(&input, "name")?;
                 let did = self.acct()?.did_now();
