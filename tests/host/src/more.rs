@@ -1282,7 +1282,7 @@ fn downloads_tree(cache: &std::path::Path) -> Result<PathBuf, String> {
 }
 
 async fn remove_tree(p: &std::path::Path) {
-    let _ = tokio::process::Command::new("chmod").args(["-R", "u+w"]).arg(p).status().await;
+    let _ = tokio::process::Command::new("chmod").args(["-R", "u+w"]).arg(p).stderr(Stdio::null()).status().await;
     let _ = std::fs::remove_dir_all(p);
 }
 
@@ -1295,7 +1295,10 @@ impl Swc {
             .output()
             .await
             .map_err(|e| format!("{}: {e}", bin.display()))?;
-        let text = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        let mut text = String::from_utf8_lossy(&out.stderr).into_owned();
+        if !out.status.success() {
+            text.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
         Ok((out.status.success(), text))
     }
 
