@@ -258,7 +258,7 @@ requester's own kcp, and `install` prints both. A password never goes into reque
 - A restart from the recorded state (`dev up`, a `run request release` of a killed owner) never adopts the units of a devsup that is
   shutting down: its Hello says `stopping`, it refuses Start, `startOrAdoptDevsup` waits for it to exit (120 s) and starts a new one, and
   `Observe` waits for a unit that is deactivating (60 s). Before that, a release started right after its owner was SIGKILLed mid-stop
-  adopted kine and front that devsup then stopped under the new kcp (not ready for 60 s). Reproducer: `scripts/devsup-stop-race.sh`.
+  adopted kine and front that devsup then stopped under the new kcp (not ready for 60 s). Testcase: composition 0017 entry `devsup` (the host runs a real devsup with no VM: `dev up --profile quick`, then `dev down` SIGKILLed mid-stop and `dev up` at once, 12 times; every kcp must be ready).
 - Debugging a silent guest on a dev net: `SWC_DEV_GUEST_BOOT_ARGS_EXTRA` or the file
   `$XDG_RUNTIME_DIR/swc-dev-guest-boot-args-extra` (read by the VM runtime, dev only) appends kernel
   arguments; `sysrq_always_enabled=1 ignore_loglevel systemd.log_target=kmsg

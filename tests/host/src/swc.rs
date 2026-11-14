@@ -38,6 +38,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.summary",
     "computer.socialweb.test.request.release",
     "computer.socialweb.test.request.kill",
+    "computer.socialweb.test.devsup.race",
     "computer.socialweb.test.request.state",
     "computer.socialweb.test.request.setPhase",
     "computer.socialweb.test.request.releaseTry",
@@ -647,6 +648,86 @@ impl Swc {
         Ok(v)
     }
 
+    /// The restart race of a real devsup with no VM (docs/acceptance/0017): `dev up --profile quick` on the proc backend in an
+    /// instance of this run, then per delay `iterations` times: `dev down` SIGKILLed `delay` ms after it started (devsup keeps
+    /// stopping its units in order and exits), `dev up` at once, and 6 s later the kcp must answer /readyz 200. The binary is the
+    /// target's requester (the build under test). Skipped when it has no `dev up`.
+    async fn devsup_race(&self, input: &Value) -> Result<Value, String> {
+        let delays: Vec<u64> = input["delaysMs"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_else(|| vec![500, 1000, 2000]);
+        let per = input["perDelay"].as_u64().unwrap_or(4);
+        let inst = format!("race{}", std::process::id() % 100000);
+        let state = self.dir.join("devsup-race");
+        let logs = self.dump.join("logs").join("devsup-race");
+        let _ = std::fs::create_dir_all(&state);
+        let _ = std::fs::create_dir_all(&logs);
+        let base = |verb: &[&str]| {
+            let mut c = self.bin.cmd();
+            c.args(["dev", verb[0]]).args(&verb[1..]).args(["--instance", &inst, "--state-dir"]).arg(&state);
+            c
+        };
+        let up = |label: String| {
+            let mut c = base(&["up", "--profile", "quick"]);
+            c.args(["--host-backend", "proc"]);
+            (c, label)
+        };
+        let down = || async {
+            let _ = base(&["down"]).output().await;
+        };
+        let run_up = |c: tokio::process::Command, label: String| async move {
+            let mut c = c;
+            let t = Instant::now();
+            let out = tokio::time::timeout(Duration::from_secs(200), c.output()).await;
+            let secs = (t.elapsed().as_secs_f64() * 10.0).round() / 10.0;
+            let (rc, text) = match out {
+                Ok(Ok(o)) => (o.status.code().unwrap_or(-1), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))),
+                Ok(Err(e)) => (-1, e.to_string()),
+                Err(_) => (-2, "dev up did not return in 200 s".to_string()),
+            };
+            (rc, secs, text, label)
+        };
+        // the first up: a build without `dev up` (a release one) skips
+        let (c, l) = up("first".into());
+        let (rc, _, text, _) = run_up(c, l).await;
+        if rc != 0 {
+            down().await;
+            if text.contains("unknown command") || text.contains("flag provided but not defined") {
+                return Ok(json!({ "skipped": "the requester build has no `dev up --profile quick` on the proc backend" }));
+            }
+            return Err(format!("the first dev up of the race instance failed (exit {rc}): {}", tail(&text)));
+        }
+        let mut iterations = vec![];
+        let (mut ok, mut bad) = (0u64, 0u64);
+        for d in &delays {
+            for i in 0..per {
+                let mut dc = base(&["down"]).kill_on_drop(true).spawn().map_err(|e| e.to_string())?;
+                tokio::time::sleep(Duration::from_millis(*d)).await;
+                let _ = dc.start_kill();
+                let _ = dc.wait().await;
+                let (c, l) = up(format!("{d}ms-{i}"));
+                let (rc, secs, text, label) = run_up(c, l).await;
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                let url = text.lines().find(|l| l.contains("\"kcpURL\"")).and_then(|l| l.split('"').nth(3)).unwrap_or_default().to_string();
+                let code = if url.is_empty() {
+                    "none".to_string()
+                } else {
+                    let o = tokio::process::Command::new("curl").args(["-sk", "-m", "5", "-o", "/dev/null", "-w", "%{http_code}"]).arg(format!("{url}/readyz")).output().await;
+                    o.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()
+                };
+                let good = rc == 0 && code == "200";
+                if good {
+                    ok += 1;
+                } else {
+                    bad += 1;
+                    let _ = std::fs::write(logs.join(format!("up-{label}.log")), redact_log(&text));
+                }
+                let why = text.lines().rev().find(|l| l.contains("dev up:")).unwrap_or_default().to_string();
+                iterations.push(json!({ "delayMs": d, "exit": rc, "upSeconds": secs, "readyz": code, "ok": good, "error": if good { Value::Null } else { json!(why) } }));
+            }
+        }
+        down().await;
+        Ok(json!({ "ok": ok, "bad": bad, "iterations": iterations, "binary": self.bin.version }))
+    }
+
     fn invocation_dir(&self, name: &str) -> PathBuf {
         self.request_state().join("requests").join(name)
     }
@@ -857,6 +938,7 @@ impl Swc {
                 let (ok, out) = self.cli(&self.sub_args("release", name, &[])).await?;
                 Ok(json!({ "ok": ok, "output": tail(&out), "seconds": (t.elapsed().as_secs_f64() * 10.0).round() / 10.0 }))
             }
+            "devsup.race" => self.devsup_race(&input).await,
             "request.kill" => self.kill_owner(str_of(&input, "name")?, input["signal"].as_str().unwrap_or("KILL")),
             "request.records" => {
                 let name = str_of(&input, "name")?;

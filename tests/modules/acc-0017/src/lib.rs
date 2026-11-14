@@ -253,4 +253,42 @@ fn killedlate_0017(run: Run<Value>) -> Result<Handle, String> {
     run_with(run, true, 2000)
 }
 
-entries! { run => run_0017, killed => killed_0017, killedlate => killedlate_0017, half => half_0017 }
+// devsup: the restart race of a real devsup, no VM (docs/acceptance/0017): the host runs `dev up --profile quick` in an instance of
+// its own, then 12 times (delays 0.5, 1.0, 2.0 s) `dev down` SIGKILLed mid-stop followed at once by `dev up`: every up must succeed
+// and its kcp be ready. Without the devsup `stopping` handling about half of them fail (a unit "deactivating", or a kcp whose kine
+// was stopped under it).
+fn devsup_0017(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    let mut h = Handle::new();
+    match run.event {
+        Event::Start => {
+            h = h
+                .call(host("race", "devsup.race", json!({ "delaysMs": [500, 1000, 2000], "perDelay": 4 })))
+                .timer("deadline", 25 * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => return Ok(s.fail("the devsup race did not finish in 25 min")),
+        Event::Result { id, result, .. } if id == "race" => {
+            let o = match steps::out(&s, &id, result.output()) {
+                Ok(o) => o,
+                Err(f) => return Ok(f),
+            };
+            if let Some(why) = o["skipped"].as_str() {
+                return Ok(s.skip(why));
+            }
+            s.reading("iterations", o["iterations"].clone());
+            s.reading("ok", o["ok"].clone());
+            s.reading("bad", o["bad"].clone());
+            s.reading("binary", o["binary"].clone());
+            if o["bad"].as_u64().unwrap_or(1) != 0 {
+                let bad: Vec<&Value> = o["iterations"].as_array().into_iter().flatten().filter(|i| i["ok"] != true).collect();
+                return Ok(s.fail(format!("{} of {} restarts after a SIGKILLed dev down failed: {}", o["bad"], o["ok"].as_u64().unwrap_or(0) + o["bad"].as_u64().unwrap_or(0), json!(bad))));
+            }
+            return Ok(s.pass());
+        }
+        _ => {}
+    }
+    Ok(s.keep(h))
+}
+
+entries! { run => run_0017, killed => killed_0017, killedlate => killedlate_0017, half => half_0017, devsup => devsup_0017 }
