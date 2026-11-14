@@ -16,6 +16,7 @@ use testkit::requester::tail;
 use super::Swc;
 
 const BINDING: &str = "com.fedfork.exec.binding";
+const PINS: &str = "com.fedfork.exec.pins";
 
 fn env_file(path: &str) -> Result<HashMap<String, String>, String> {
     let text = std::fs::read_to_string(path)
@@ -225,9 +226,14 @@ impl Swc {
         let version = registry::composition_version(rkey, &cid)
             .ok_or("the composition's CID makes no version rkey")?;
         seeded.push(pds.put(COMPOSITION, &version, &comp).await?.0);
+        // a binding names its composition by NAME: the owner's pins record lists it (the runner takes the CID from there)
+        let (pins_uri, _) = pds
+            .put(PINS, "atlibs", &json!({ "$type": PINS, "compositions": [{ "uri": c_uri, "cid": cid }], "createdAt": atlibs_host::iso_now() }))
+            .await?;
+        seeded.push(pins_uri.clone());
         let mut bindings = json!({});
         for (rkey, inputs) in input["bindings"].as_object().into_iter().flatten() {
-            let record = json!({ "$type": BINDING, "composition": { "uri": c_uri, "cid": cid }, "inputs": inputs, "createdAt": atlibs_host::iso_now() });
+            let record = json!({ "$type": BINDING, "composition": { "pins": pins_uri, "name": registry::split_uri(&c_uri).map(|(_, _, r)| r).unwrap_or_default() }, "inputs": inputs, "createdAt": atlibs_host::iso_now() });
             let (uri, _) = pds.put(BINDING, rkey, &record).await?;
             bindings[rkey] = json!(uri);
             seeded.push(uri);
