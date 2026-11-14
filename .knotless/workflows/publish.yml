@@ -19,7 +19,7 @@ env:
   TARGET: firecracker-x86_64
 steps:
   - name: deno
-    timeout: 10
+    timeout: 5
     run: |
       command -v curl >/dev/null && command -v jq >/dev/null && command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl jq unzip >/dev/null; }
       ci=/opt/ci
@@ -33,7 +33,7 @@ steps:
   - name: publish
     # a newer push cancels a publish before it starts, never once it has (main/latest half written)
     finish: true
-    timeout: 30
+    timeout: 15
     run: |
       export PATH=/opt/ci/deno:$PATH
       test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"
@@ -43,7 +43,7 @@ steps:
       esac
       deno run -A --no-lock scripts/copy-spaces.ts --from "staging/$KNOTLESS_RUN_SHA" "$@"
   - name: the published binaries and guest image
-    timeout: 30
+    timeout: 15
     run: |
       base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
       case "$KNOTLESS_RUN_REF" in

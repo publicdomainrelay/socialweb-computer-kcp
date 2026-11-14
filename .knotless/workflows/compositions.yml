@@ -24,7 +24,7 @@ env:
   SWC_RUNS: /work/runs
 steps:
   - name: swc-test-host
-    timeout: 60
+    timeout: 30
     run: |
       # the static swc-test-host and module wasm of this tests/ tree, built on hat-8 and in the bucket (tests/publish-test-host.sh)
       command -v curl >/dev/null && command -v jq >/dev/null || { apt-get update -qq && apt-get install -y -qq curl jq >/dev/null; }
@@ -71,7 +71,7 @@ steps:
       fi
       install -m 0755 "$d/socialweb-meshd-x86_64" /usr/local/bin/socialweb-meshd
   - name: binary
-    timeout: 45
+    timeout: 30
     run: |
       # the socialweb-computer under test is THIS commit's release build (a branch cannot publish: no bucket key), built here with the
       # asset and build caches restored read-only, and put on the staging VMs by the test host (request.put, SWC_BINARY)
@@ -85,7 +85,7 @@ steps:
       install -D -m 0755 -o r2 "$root/release/$sha/socialweb-computer-linux-amd64" /home/r2/swc-under-test
       /home/r2/swc-under-test version | head -1
   - name: staging
-    timeout: 200
+    timeout: 120
     run: |
       # as the guest requester R2 (the runner associated it with the pusher's session; kcp refuses root): no creds here
       id r2

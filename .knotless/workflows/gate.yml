@@ -9,10 +9,11 @@ runners: [aliceoa.bsky.social]
 executor: kcp-build
 steps:
   - name: toolchain
+    timeout: 10
     run: |
       if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno; fi
   - name: gate
-    timeout: 75
+    timeout: 30
     run: |
       . /opt/ci/env
       # the VM's memory and load each minute (the binding's size, and a step that loses the VM)

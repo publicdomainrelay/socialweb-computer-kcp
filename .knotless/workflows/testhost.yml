@@ -21,7 +21,7 @@ env:
   SPACES_REGION: sfo3
 steps:
   - name: publish
-    timeout: 90
+    timeout: 30
     run: |
       base="https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com"
       tree="$(git rev-parse HEAD:tests)" rtree="$(git rev-parse HEAD:rust)"

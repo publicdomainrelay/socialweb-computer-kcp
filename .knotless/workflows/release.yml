@@ -25,10 +25,11 @@ env:
   OUT: /root/ci-out
 steps:
   - name: toolchain
+    timeout: 10
     run: |
       if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno --arm64; fi
   - name: binaries
-    timeout: 110
+    timeout: 45
     run: |
       . /opt/ci/env
       (while sleep 60; do echo "vm: $(free -m | awk '/Mem:/ {print $3 "/" $2 " MiB used, " $7 " available"}'), load $(cut -d' ' -f1-3 /proc/loadavg)"; done) &
@@ -62,7 +63,7 @@ steps:
       done
       test "$(find /root/ci-downloads -type f | wc -l)" -gt 0
   - name: guest image
-    timeout: 120
+    timeout: 90
     run: |
       . /opt/ci/env
       pin="$(jq -er --arg t "$TARGET" '.guestImages.targets[$t].outputs["image.json"].sha256' internal/versions/versions.json)"
@@ -94,7 +95,7 @@ steps:
         test "$got" = "$want"
       done
   - name: reproducible
-    timeout: 110
+    timeout: 60
     run: |
       . /opt/ci/env
       # the assets built from this commit (vmexec, the OpenBao plugins, swc-userns-stage, the two downloads trees) are not
@@ -105,7 +106,7 @@ steps:
         --build-root /root/repro-build --gomod-cache /root/release-build/cache/gomod \
         --against /root/release-build/src/1/internal/assets/blobs
   - name: dev build
-    timeout: 40
+    timeout: 20
     run: |
       . /opt/ci/env
       # the dev build (scripts/build-socialweb-computer.sh --dev) is what live runs use: it must start. It is a -tags release
@@ -115,19 +116,19 @@ steps:
       bash scripts/check-dev-build.sh --build-root /root/dev-build
   - name: asset cache
     on: {refs: [refs/heads/main, refs/tags/v*]}
-    timeout: 30
+    timeout: 15
     run: |
       . /opt/ci/env
       scripts/asset-cache-upload.sh /root/release-build/cache/blobs
   - name: build cache
     on: {refs: [refs/heads/main, refs/tags/v*]}
-    timeout: 30
+    timeout: 15
     run: |
       . /opt/ci/env
       bash scripts/ci-build-cache.sh save /root/release-build || echo "build-cache: save failed: the build is not affected"
   - name: stage
     on: {refs: [refs/heads/main, refs/tags/v*]}
-    timeout: 90
+    timeout: 15
     run: |
       . /opt/ci/env
       test -n "$SPACES_ACCESS_KEY_ID" && test -n "$SPACES_SECRET_ACCESS_KEY"

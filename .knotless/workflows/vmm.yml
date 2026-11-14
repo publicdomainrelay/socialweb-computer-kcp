@@ -17,10 +17,11 @@ env:
   ASSET_CACHE_URL: https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/asset-cache
 steps:
   - name: toolchain
+    timeout: 10
     run: |
       if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno; fi
   - name: host
-    timeout: 20
+    timeout: 15
     run: |
       set -eu
       ls -l /dev/kvm
@@ -41,7 +42,7 @@ steps:
       cp -a "$PWD/." /work-vmm/src
       chown -R vmm:vmm /work-vmm
   - name: build
-    timeout: 40
+    timeout: 30
     run: |
       set -eu
       . /opt/ci/env
@@ -61,7 +62,7 @@ steps:
       ls -la $B/socialweb-computer-release
       chown -R vmm:vmm $B
   - name: vmm tests
-    timeout: 60
+    timeout: 40
     run: |
       set -eu
       . /opt/ci/env
