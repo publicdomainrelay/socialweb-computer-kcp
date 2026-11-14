@@ -165,3 +165,10 @@ Dev market network `capt` on hat-8 (3 bidders, `--vmm qemu`, 16 CPUs each in the
   "gave up"); `wait` (`--expires-in 15m`, a filler released after two waiting rounds) PASS 2/2: Held 77.1 s after the release (readings
   `heldAfterFreeS`, `waitRounds` 2, `waitSlot` 2-vCPU), FAILS on main (the rental fails after one 30 s round); `concurrent` and
   `backtoback` PASS on the fix, `run` needs 3 bidders (skipped on this 2-bidder net)
+
+- fail-fast-nobody-serves (port-wait requester that tells "no capacity" from "nobody can serve"), capt dev network (hat-8, 2 bidders, 2026-11-14), fix 9113a163 vs main aeb3ada0:
+  `0016:badsha` fix PASS 41.2 s and 42.1 s (the error names why: `no bidder can serve this request: <bidder>: guestimage: the requested image is refused: ...
+  hashes to ..., not the requested ...`), main did not finish in 420 s (it waits for capacity); `impossible` (17 vCPUs against maxCpus 16) fix PASS: Failed
+  10 s after the request, `requester_no_bidders: ... the offering's maxCpus is below the request: 16 (the request asks 17)`, main FAIL (`requester_waiting_for_capacity` round 1);
+  `wait`, `exhausted`, `giveup` still wait on the fix (PASS 238.7 s, 97.4 s, 213.4 s). Not provable on this net: the nestedVirt case (both dev bidders offer nestedVirt),
+  an image request against an offering without `images` (both set it), a bidder too old to answer `declined`

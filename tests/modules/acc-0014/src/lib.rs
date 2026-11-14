@@ -636,7 +636,7 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
         } else {
             json!(["--hold", "--cpus", "1", "--mem", "1G", "--nested-virt", "--expires-in", "1h"])
         };
-        h.call(steps::host_sub("req", "request.start", json!({ "name": format!("{name}-{case}"), "args": a }))).timer(&format!("case:{case}"), 4 * MIN)
+        h.call(steps::host_sub(if case == "maxCpus" { "req" } else { "req2" }, "request.start", json!({ "name": format!("{name}-{}", if case == "maxCpus" { "mx" } else { "nv" }), "args": a }))).timer(&format!("case:{case}"), 4 * MIN)
     };
     match run.event {
         Event::Start => {
@@ -679,7 +679,10 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
                 h = launch(&mut s, h, "maxCpus");
             }
         }
-        Event::Message { id, data, .. } if id == "req" => {
+        Event::Closed { id, error } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) => {
+            return Ok(s.fail(format!("the request closed before it failed: {}", error.unwrap_or_default())));
+        }
+        Event::Message { id, data, .. } if (id == "req" && s.is("maxCpus")) || (id == "req2" && s.is("nested")) => {
             let case = s.st["cur"]["case"].as_str().unwrap_or_default().to_string();
             match data["msg"].as_str().unwrap_or_default() {
                 "requester_waiting_for_capacity" => return Ok(s.fail(format!("the {case} request waits for capacity: {data}"))),
