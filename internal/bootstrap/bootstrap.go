@@ -26,12 +26,15 @@ import (
 )
 
 const (
-	PortPoll            = 20 * time.Millisecond
-	ReadyPoll           = 200 * time.Millisecond
-	FrontAddress        = "127.0.0.1:0"
-	LeaseStaleAfter     = 6 * time.Second
-	LeaseWatchWindow    = 12 * time.Second
-	RestartSettle       = 3 * time.Second
+	PortPoll         = 20 * time.Millisecond
+	ReadyPoll        = 200 * time.Millisecond
+	FrontAddress     = "127.0.0.1:0"
+	LeaseStaleAfter  = 6 * time.Second
+	LeaseWatchWindow = 12 * time.Second
+	RestartSettle    = 3 * time.Second
+	// StopSettle bounds the wait for a unit that is deactivating (a stop is in flight, e.g. its owner was killed while it
+	// stopped the invocation's kcp): a restart from the recorded state must not take that unit for a lost one nor fail on it
+	StopSettle          = 60 * time.Second
 	DefaultReadyTimeout = time.Minute
 )
 
@@ -239,6 +242,23 @@ func Observe(ctx context.Context, m hostsvc.Manager, want hostsvc.Identity) (hos
 		st.InvocationID != want.InvocationID && st.MainPID > 0 {
 		return hostsvc.Observation{Verdict: hostsvc.VerdictRunning, Status: st,
 			Detail: fmt.Sprintf("%s was restarted in place by its manager (invocation %s, recorded %s)", want.Unit, st.InvocationID, want.InvocationID)}, true, nil
+	}
+	if err == nil && st.State == hostsvc.Deactivating {
+		// a stop is in flight: wait for it to end, then the unit is gone and the caller places it again (a release started
+		// right after its owner was SIGKILLed mid-stop failed here with "is Unknown (... is deactivating)")
+		sctx, cancel := context.WithTimeout(ctx, StopSettle)
+		st, err = hostsvc.Await(sctx, m, want.Unit, func(st hostsvc.UnitStatus) bool { return st.State != hostsvc.Deactivating })
+		cancel()
+		if ctx.Err() != nil {
+			return hostsvc.Observation{}, false, ctx.Err()
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = nil
+		}
+		if err == nil && st.State == hostsvc.Deactivating {
+			return hostsvc.Observation{Verdict: hostsvc.VerdictUnknown, Status: st,
+				Detail: fmt.Sprintf("%s is still deactivating after %s", want.Unit, StopSettle)}, false, nil
+		}
 	}
 	obs, err := m.Check(ctx, want)
 	return obs, false, err
