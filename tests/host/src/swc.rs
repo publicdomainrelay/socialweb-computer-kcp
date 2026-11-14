@@ -499,6 +499,14 @@ impl Swc {
         let _ = tx.send(Ok(json!({ "msg": "requester_binary", "version": bin.version, "compat": input["compat"] == true })));
         let (commands, mut cmds) = mpsc::unbounded_channel::<SubCmd>();
         let receipts = self.receipts.clone();
+        // dev nets only: when the contract fails with "did not come on network", the tail of the console of the guest(s)
+        // that never reported (the cause is in the guest: PID 1, cloud-final), in the event and in the dump
+        let console_net = self
+            .target
+            .network
+            .as_ref()
+            .map(|n| (expand(&n.state_dir), n.instance.clone()));
+        let console_dump = self.dump.join("logs").join(&name);
         // R2 waits for its association ref, which the renter writes once it verified R2: one that never comes is an
         // error of its own, not a request that waits until the run's deadline
         let ref_by = self
@@ -536,7 +544,20 @@ impl Swc {
                                 rs.push(r.into());
                             }
                         }
-                        let msg = v["msg"].as_str().unwrap_or_default();
+                        let mut v = v;
+                        if v["msg"] == "contract"
+                            && v["phase"] == "Failed"
+                            && v["message"].as_str().is_some_and(|m| m.contains("did not come on network"))
+                            && let Some((state_dir, instance)) = &console_net
+                        {
+                            let tails = silent_console_tails(state_dir, instance, &console_dump);
+                            if !tails.is_empty() {
+                                let m = v["message"].as_str().unwrap_or_default().to_string();
+                                v["message"] = json!(format!("{m}\nconsole tail of the guest(s) that never reported (dev net):\n{tails}"));
+                            }
+                        }
+                        let msg = v["msg"].as_str().unwrap_or_default().to_string();
+                        let msg = msg.as_str();
                         if (msg == "contract"
                             || msg == "ssh returned"
                             || msg.starts_with("requester_")
@@ -1099,6 +1120,46 @@ const SECRET_WORDS: &[&str] = &[
 
 /// A log redacted line by line: JSON (whole or after a prefix) as the dump is (secret-named keys) plus every string
 /// value scrubbed; other text cut after the first secret word's `=` or `:`; JWT-like words and PEM blocks dropped.
+/// The last lines of the console of every VM of the dev net `instance` started in the last 15 minutes whose console
+/// never printed its "reporting iroh://" line (the guest never came on network): at most 3 VMs, 40 lines each, redacted;
+/// the last 300 lines of each go to `dump_dir/console-<vm>.log`.
+fn silent_console_tails(state_dir: &Path, instance: &str, dump_dir: &Path) -> String {
+    let apps = state_dir.join("dev").join(instance).join("apps/dev");
+    let mut found: Vec<(std::time::SystemTime, String, String)> = vec![];
+    let Ok(bidders) = std::fs::read_dir(&apps) else { return String::new() };
+    for b in bidders.flatten() {
+        let Ok(handles) = std::fs::read_dir(b.path().join("handles")) else { continue };
+        for h in handles.flatten() {
+            let Ok(vms) = std::fs::read_dir(h.path().join("vms")) else { continue };
+            for vm in vms.flatten() {
+                let console = vm.path().join("console.log");
+                let Ok(meta) = std::fs::metadata(&console) else { continue };
+                let Ok(modified) = meta.modified() else { continue };
+                if modified.elapsed().map_or(true, |e| e > Duration::from_secs(900)) {
+                    continue;
+                }
+                let Ok(raw) = std::fs::read(&console) else { continue };
+                let text = String::from_utf8_lossy(&raw).to_string();
+                if text.contains("reporting iroh://") {
+                    continue;
+                }
+                found.push((modified, vm.file_name().to_string_lossy().to_string(), text));
+            }
+        }
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out = String::new();
+    for (_, name, text) in found.into_iter().take(3) {
+        let lines: Vec<&str> = text.lines().collect();
+        let _ = std::fs::create_dir_all(dump_dir);
+        let from = lines.len().saturating_sub(300);
+        let _ = std::fs::write(dump_dir.join(format!("console-{name}.log")), redact_log(&lines[from..].join("\n")));
+        let from = lines.len().saturating_sub(40);
+        out.push_str(&format!("== {name} (last 40 of {} lines)\n{}\n", lines.len(), redact_log(&lines[from..].join("\n"))));
+    }
+    out
+}
+
 pub fn redact_log(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut pem = false;
