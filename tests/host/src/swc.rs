@@ -39,6 +39,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.release",
     "computer.socialweb.test.request.kill",
     "computer.socialweb.test.request.state",
+    "computer.socialweb.test.request.sshTry",
     "computer.socialweb.test.request.setPhase",
     "computer.socialweb.test.request.releaseTry",
     "computer.socialweb.test.request.removeState",
@@ -655,7 +656,19 @@ impl Swc {
     fn invocation_state(&self, name: &str) -> Result<Value, String> {
         let dir = self.invocation_dir(name);
         let summary = std::fs::read(dir.join("summary.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-        Ok(json!({ "dir": dir.display().to_string(), "exists": dir.exists(), "summary": summary }))
+        // the instance state of a standalone invocation (dev/<name> of its dir) and any live process whose command line names the
+        // invocation's dir (its devsup, kcp, kine, front, core)
+        let instance_state = std::fs::read_dir(dir.join("dev")).map(|mut d| d.next().is_some()).unwrap_or(false);
+        let needle = dir.display().to_string();
+        let live = std::fs::read_dir("/proc")
+            .map(|d| {
+                d.flatten()
+                    .filter(|e| e.file_name().to_str().is_some_and(|n| n.parse::<u32>().is_ok()))
+                    .filter(|e| std::fs::read(e.path().join("cmdline")).is_ok_and(|raw| String::from_utf8_lossy(&raw).replace('\0', " ").contains(&needle)))
+                    .count()
+            })
+            .unwrap_or(0);
+        Ok(json!({ "dir": needle, "exists": dir.exists(), "instanceState": instance_state, "liveProcesses": live, "summary": summary }))
     }
 
     /// Rewrites the phase of the test's own invocation summary (top level and contract): the state of a half-created
@@ -845,6 +858,11 @@ impl Swc {
             "request.summary" => self.summary(str_of(&input, "name")?),
             "request.release" => self.release(str_of(&input, "name")?).await,
             "request.state" => self.invocation_state(str_of(&input, "name")?),
+            "request.sshTry" => {
+                let name = str_of(&input, "name")?;
+                let (ok, out) = self.cli(&self.sub_args("ssh", name, &["--exec", "id"])).await?;
+                Ok(json!({ "ok": ok, "output": tail(&out), "restarted": out.contains("starting the invocation's kcp again") || out.contains("starting it again from its state dir") }))
+            }
             "request.setPhase" => self.set_phase(str_of(&input, "name")?, str_of(&input, "phase")?),
             "request.removeState" => {
                 let dir = self.invocation_dir(str_of(&input, "name")?);

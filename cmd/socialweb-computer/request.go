@@ -1545,6 +1545,12 @@ func (a *app) loadRequest(vals clicfg.Values, rest []string, verb string) (*requ
 		r.summary.Identity = inv.Identity
 	}
 	neverHeld := r.summary.Phase == string(v1alpha1.ComputeContractFailed) && (r.summary.Contract == nil || r.summary.Contract.ReceiptUri == "")
+	if verb != "release" && (r.summary.Phase == string(v1alpha1.ComputeContractReleased) || neverHeld) {
+		// nothing to reach: starting the invocation's kcp again for ssh, agent, proxy or resume would only recreate (and keep) the
+		// instance state of a finished invocation, which `release` then has to remove once more
+		return nil, a.fail(exitRefused, "run request %s: invocation %s's contract is %s: there is no VM to reach; `run request release %s` removes the invocation",
+			verb, inv.Name, r.summary.Phase, inv.Name)
+	}
 	if verb == "release" && (r.summary.Phase == string(v1alpha1.ComputeContractReleased) || neverHeld) && !r.summary.KcpRunning {
 		r.log("the contract is Released, or Failed before a VM was held, and no process runs the invocation's kcp; the invocation is only removed",
 			"phase", r.summary.Phase)
