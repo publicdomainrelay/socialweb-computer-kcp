@@ -104,6 +104,12 @@ say "the baked rootfs"
 docker export "$ctr" >"$tw/rootfs.tar"
 # docker writes its own /etc/resolv.conf, hosts and hostname into a container: the base's go back
 tar --delete -f "$tw/rootfs.tar" ./etc/resolv.conf ./etc/hosts ./etc/hostname 2>/dev/null || tar --delete -f "$tw/rootfs.tar" etc/resolv.conf etc/hosts etc/hostname 2>/dev/null || true
+# nor does a VM carry docker's /.dockerenv (or podman's /run/.containerenv): cloud-init takes a guest with one for a container
+# and skips growing the root filesystem to the VM's disk ("Device '/dev/root' did not exist in container")
+for marker_file in .dockerenv run/.containerenv; do
+  tar --delete -f "$tw/rootfs.tar" "./$marker_file" 2>/dev/null || tar --delete -f "$tw/rootfs.tar" "$marker_file" 2>/dev/null || true
+done
+if tar -tf "$tw/rootfs.tar" | grep -Eqx '(\./)?(\.dockerenv|run/\.containerenv)'; then die "the rootfs still holds a container marker (.dockerenv)"; fi
 [ -s "$tw/etc.tar" ] && tar -Af "$tw/rootfs.tar" "$tw/etc.tar"
 rm -f "$tw/etc.tar"
 tar_sha="$(sha_of "$tw/rootfs.tar")"
