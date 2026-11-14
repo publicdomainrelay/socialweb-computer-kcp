@@ -382,22 +382,22 @@ place() {
 }
 
 cache_get() {
-  local f="$blob_cache/$1.tar.zst" rec="$blob_cache/$1.sha256" u t
+  local f="$blob_cache/$1.tar.zst" rec="$blob_cache/$1.sha256" u t pid="$BASHPID"
   if { [ ! -f "$f" ] || [ ! -f "$rec" ]; } && [ -n "${ASSET_CACHE_URL:-}" ] && [ -n "${3:-}" ]; then
     u="$ASSET_CACHE_URL/$asset/${plat/\//_}/$1"
-    if curl -sfL --retry 2 --max-time 900 -o "$f.$BASHPID" "$u.tar.zst" && curl -sfL --max-time 60 -o "$rec.$BASHPID" "$u.sha256" &&
-      [ "$(sha_of "$f.$BASHPID")" = "$(cat "$rec.$BASHPID")" ]; then
+    if curl -sfL --retry 2 --max-time 900 -o "$f.$pid" "$u.tar.zst" && curl -sfL --max-time 60 -o "$rec.$pid" "$u.sha256" &&
+      [ "$(sha_of "$f.$pid")" = "$(cat "$rec.$pid")" ]; then
       t="$work/remote-$1"
-      mkdir -p "$t" && zstd -dcq "$f.$BASHPID" | tar -x -C "$t"
+      mkdir -p "$t" && zstd -dcq "$f.$pid" | tar -x -C "$t"
       if [ "$("$work/assetpack" digest "$t")" = "$3" ]; then
-        mv -f "$f.$BASHPID" "$f" && mv -f "$rec.$BASHPID" "$rec"
+        mv -f "$f.$pid" "$f" && mv -f "$rec.$pid" "$rec"
         say "$plat $asset: $1 from the asset cache, tree $3"
       else
         say "warn: $u does not unpack to the pinned tree $3; staging it"
       fi
       chmod -R u+w "$t" && rm -rf "$t"
     fi
-    rm -f "$f.$BASHPID" "$rec.$BASHPID"
+    rm -f "$f.$pid" "$rec.$pid"
   fi
   [ -f "$f" ] && [ -f "$rec" ] || return 1
   if [ "$(sha_of "$f")" != "$(cat "$rec")" ]; then
