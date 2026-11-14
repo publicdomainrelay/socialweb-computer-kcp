@@ -8,6 +8,16 @@
 			"description": "A second process releases the invocation whose owner holds an interactive ssh session."
 		},
 		{
+			"entry": "killedlate",
+			"label": "Run 0017 killedlate",
+			"description": "The owner is killed (SIGKILL) 2 s after the release was asked, while it stops its kcp; the invocation still ends Released with kcpRunning false."
+		},
+		{
+			"entry": "half",
+			"label": "Run 0017 half",
+			"description": "A release of an invocation whose application is gone but whose summary does not say Released fails and keeps the state."
+		},
+		{
 			"entry": "killed",
 			"label": "Run 0017 killed",
 			"description": "The owner is killed (SIGKILL) 100 ms after the release was asked; the release still completes."
@@ -17,6 +27,10 @@
 		"computer.socialweb.test.request.start",
 		"computer.socialweb.test.request.release",
 		"computer.socialweb.test.request.kill",
+		"computer.socialweb.test.request.state",
+		"computer.socialweb.test.request.setPhase",
+		"computer.socialweb.test.request.releaseTry",
+		"computer.socialweb.test.request.removeState",
 		"computer.socialweb.test.request.summary",
 		"computer.socialweb.test.request.records",
 		"computer.socialweb.test.assert.recordsGone"

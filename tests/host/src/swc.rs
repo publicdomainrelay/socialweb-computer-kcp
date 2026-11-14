@@ -38,6 +38,10 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.request.summary",
     "computer.socialweb.test.request.release",
     "computer.socialweb.test.request.kill",
+    "computer.socialweb.test.request.state",
+    "computer.socialweb.test.request.setPhase",
+    "computer.socialweb.test.request.releaseTry",
+    "computer.socialweb.test.request.removeState",
     "computer.socialweb.test.request.records",
     "computer.socialweb.test.account.envFile",
     "computer.socialweb.test.atirc.meshSub",
@@ -642,6 +646,30 @@ impl Swc {
         Ok(v)
     }
 
+    fn invocation_dir(&self, name: &str) -> PathBuf {
+        self.request_state().join("requests").join(name)
+    }
+
+    /// The test's own invocation directory: whether it exists and what its summary says.
+    fn invocation_state(&self, name: &str) -> Result<Value, String> {
+        let dir = self.invocation_dir(name);
+        let summary = std::fs::read(dir.join("summary.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+        Ok(json!({ "dir": dir.display().to_string(), "exists": dir.exists(), "summary": summary }))
+    }
+
+    /// Rewrites the phase of the test's own invocation summary (top level and contract): the state of a half-created
+    /// invocation whose network application is gone.
+    fn set_phase(&self, name: &str, phase: &str) -> Result<Value, String> {
+        let p = self.invocation_dir(name).join("summary.json");
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))?).map_err(|e| e.to_string())?;
+        v["phase"] = json!(phase);
+        if v["contract"].is_object() {
+            v["contract"]["phase"] = json!(phase);
+        }
+        std::fs::write(&p, serde_json::to_vec_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(json!({ "phase": phase }))
+    }
+
     /// SIGKILL (or `signal`) to the process that owns the invocation `name`: `<bin> run request ... --name <name>` of this
     /// run (not a release, proxy or ssh verb), found by its command line; the kcp child it started keeps running.
     fn kill_owner(&self, name: &str, signal: &str) -> Result<Value, String> {
@@ -815,6 +843,19 @@ impl Swc {
             }
             "request.summary" => self.summary(str_of(&input, "name")?),
             "request.release" => self.release(str_of(&input, "name")?).await,
+            "request.state" => self.invocation_state(str_of(&input, "name")?),
+            "request.setPhase" => self.set_phase(str_of(&input, "name")?, str_of(&input, "phase")?),
+            "request.removeState" => {
+                let dir = self.invocation_dir(str_of(&input, "name")?);
+                std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                Ok(json!({ "removed": dir.display().to_string() }))
+            }
+            "request.releaseTry" => {
+                let name = str_of(&input, "name")?;
+                let t = Instant::now();
+                let (ok, out) = self.cli(&self.sub_args("release", name, &[])).await?;
+                Ok(json!({ "ok": ok, "output": tail(&out), "seconds": (t.elapsed().as_secs_f64() * 10.0).round() / 10.0 }))
+            }
             "request.kill" => self.kill_owner(str_of(&input, "name")?, input["signal"].as_str().unwrap_or("KILL")),
             "request.records" => {
                 let name = str_of(&input, "name")?;
