@@ -35,7 +35,8 @@ cargo run -p testkit --bin last-pass -- readings/0004-*.json          # passing 
   (cd atlibs && cargo wasm -p iroh-user-data) && (cd atlibs-socialweb-computer-requester && cargo wasm)
   ```
 - `requester`: the orchestrator binary: `release` (newest `v*` tag), `release:<tag>`, `sha:<commit>` (CI's `main/<sha>`),
-  `path:<file>` (a local build). Downloads are checked against `SHA256SUMS`, cached in `~/.tmp/swc-system-tests/bin`.
+  `oci:<host/name>@sha256:<manifest digest>` (a CI build on ttl.sh, pulled with `oras`, which checks it against the digest), `path:<file>` (a local
+  build). Downloads are checked against `SHA256SUMS`, cached in `~/.tmp/swc-system-tests/bin`.
 - `accounts[].creds`: a shell file exporting `*ATPROTO_HANDLE` and `*ATPROTO_PASSWORD`, mode 0600 (refused otherwise).
   Read in process, never printed; a log that holds a password fails the test. Staging accounts are throwaway
   accounts on the staging PDS (`throwaway: true`), tombstoned with the staging PLC at teardown.

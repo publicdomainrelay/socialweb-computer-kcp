@@ -67,7 +67,7 @@
 			"key": "requester",
 			"label": "requester",
 			"type": "string",
-			"description": "the binary installed on the VM: release:<tag> or sha:<commit> (the target's requester)"
+			"description": "the binary installed on the VM: release:<tag>, sha:<commit> or oci:<ref>@sha256:<digest> (the target's requester)"
 		}
 	],
 	"calls": [

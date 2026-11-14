@@ -19,15 +19,34 @@ fn dev_up(bidders: u64) -> String {
     format!("--profile market-network --bidders {bidders} --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m")
 }
 
+/// the prefix of a binary pulled from an OCI registry by digest (`oci:<host/name>@sha256:<manifest digest>`): the reference follows it
+const OCI: &str = "oci=";
+/// CI's pinned tools (scripts/ci-tools.json): oras, which a staging VM does not have
+const TOOLS: &str = include_str!("../../../../scripts/ci-tools.json");
+
+/// As root: oras of the pin installed to /usr/local/bin (checked against the pinned sha256), then the artifact pulled by its manifest digest
+/// (oras checks every blob against the manifest, the manifest against the digest: a tag is never trusted).
+fn oci_fetch(reference: &str) -> String {
+    let t: serde_json::Value = serde_json::from_str(TOOLS).unwrap_or_default();
+    let (url, sum) = (t["oras"]["linux/amd64"]["url"].as_str().unwrap_or_default(), t["oras"]["linux/amd64"]["sha256"].as_str().unwrap_or_default());
+    format!(
+        "cd /home/stg/stg; curl -fsSL --retry 3 -o /tmp/oras.tgz {url}; echo '{sum}  /tmp/oras.tgz' | sha256sum -c --quiet -; \
+         tar -xzf /tmp/oras.tgz -C /usr/local/bin oras; rm -f /tmp/oras.tgz; chown stg:stg /home/stg/stg; \
+         runuser -u stg -- /usr/local/bin/oras pull --no-tty {reference} -o /home/stg/stg; chmod 0755 {BIN}"
+    )
+}
+
 /// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build); `path:<file>`
-/// is no prefix: the host puts its SWC_BINARY (the build of this checkout, a branch's, the same file) on the VM (request.put).
+/// is no prefix: the host puts its SWC_BINARY (the build of this checkout, a branch's, the same file) on the VM (request.put);
+/// `oci:<ref>` is the OCI prefix.
 fn prefix(spec: &str) -> Result<String, String> {
     match spec.split_once(':') {
         Some(("path", _)) => Ok(PUT.into()),
+        Some(("oci", r)) if r.contains("@sha256:") && !r.contains(['\'', ' ', ';']) => Ok(format!("{OCI}{r}")),
         Some(("release", tag)) => Ok(format!("releases/{tag}")),
         Some(("sha", sha)) => Ok(format!("main/{sha}")),
         Some(("local", sha)) => Ok(format!("local/{sha}")),
-        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag>, sha:<commit>, local:<commit> or path:<file> (got {spec:?})")),
+        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag>, sha:<commit>, local:<commit>, oci:<ref>@sha256:<digest> or path:<file> (got {spec:?})")),
     }
 }
 
@@ -35,7 +54,9 @@ fn prefix(spec: &str) -> Result<String, String> {
 /// binary under test in /home/stg/stg checked against SHA256SUMS.
 fn install(prefix: &str) -> String {
     let b = format!("{BUCKET}/{prefix}/binaries");
-    let fetch = if prefix == PUT {
+    let fetch = if let Some(r) = prefix.strip_prefix(OCI) {
+        oci_fetch(r)
+    } else if prefix == PUT {
         format!("install -o stg -g stg -m 0755 {PUT_AT} /home/stg/stg/{BIN} && rm -f {PUT_AT}; cd /home/stg/stg")
     } else {
         format!("cd /home/stg/stg; curl -fsSLO {b}/{BIN}; curl -fsSL {b}/SHA256SUMS | grep '  {BIN}$' | sha256sum -c; chmod 0755 {BIN}")

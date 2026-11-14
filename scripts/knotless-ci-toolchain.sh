@@ -46,6 +46,8 @@ export PATH="$ci/go/bin:$CARGO_HOME/bin:$PATH"
 (cd rust && rustup toolchain install)
 # the zig rust/build.sh pins (the C compiler of the static meshd), fetched here rather than by the job
 MESHD_ZIG_CACHE="$ci/zig-cache" bash rust/build.sh --prefetch
+# oras (scripts/ci-tools.json: the pinned release, sha256 checked): a job moves its outputs to and from ttl.sh with it (scripts/oci-push.sh)
+ORAS_DIR="$ci/bin" bash scripts/ci-oras.sh >/dev/null
 case " $* " in *" --wasm "*) rustup target add wasm32-unknown-unknown ;; esac
 case " $* " in *" --arm64 "*)
 	apt-get install -y -qq --no-install-recommends qemu-user-static binfmt-support >/dev/null ||

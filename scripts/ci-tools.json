@@ -1,0 +1,14 @@
+{
+  "_": "CI tools pinned like our other assets: resolved from the aqua registry (pkgs/oras-project/oras: github_release, asset oras_<ver>_<os>_<arch>.tar.gz, sha256 from the release's checksums.txt). The CI toolchain image bakes them (scripts/knotless-ci-toolchain.sh), scripts/knotless-ci-pins.sh digests this file, and the staging module embeds it (it installs oras on a VM that has none). Move a pin: edit here.",
+  "oras": {
+    "version": "1.3.6",
+    "linux/amd64": {
+      "url": "https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_linux_amd64.tar.gz",
+      "sha256": "66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0"
+    },
+    "linux/arm64": {
+      "url": "https://github.com/oras-project/oras/releases/download/v1.3.6/oras_1.3.6_linux_arm64.tar.gz",
+      "sha256": "b84269e78dfc2d5329a4aab373da3200de95e6c138338cf6c66c10c0a3f248c1"
+    }
+  }
+}

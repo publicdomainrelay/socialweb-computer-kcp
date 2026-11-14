@@ -1,6 +1,7 @@
-# knotless CI: the staging composition (tests/compositions/staging) on THIS commit's build: step `binary` builds the
-# release socialweb-computer here (asset and build caches restored read-only: a branch has no bucket key), and the test host
-# puts it on the staging VMs (target requester `path:<file>`, SWC_BINARY; request.put). Runs after `gate` and `testhost` on a
+# knotless CI: the staging composition (tests/compositions/staging) on THIS commit's build: step `binary` (scripts/ci-staging-binary.sh) uses
+# a published main build when nothing a binary is built from changed, else builds the release socialweb-computer here (asset and build
+# caches restored read-only: a branch has no bucket key) and pushes it to ttl.sh with oras, which each staging VM pulls by the manifest
+# digest (target requester `oci:<ref>@sha256:<digest>`; no credential, so a fork's run works). Runs after `gate` and `testhost` on a
 # push to main that changes code (paths below) and, until the binary reaches the staging VMs reliably (a 589 MB put through the
 # requester's ssh took 12 to 38 min and broke a pipe), on a branch only when asked (`knotless run rerun
 # knotless://<owner>/socialweb-computer-kcp --ref refs/heads/<branch> --workflow test`). Rented by R2 from the kcp-test VM

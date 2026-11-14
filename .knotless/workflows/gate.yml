@@ -7,6 +7,9 @@ on:
     refs: [refs/heads/*]
 runners: [aliceoa.bsky.social]
 executor: kcp-build
+# a newer push does not cancel a gate that holds its turn (the newest waits for it): on main a cancelled gate cancels the publish that follows it
+# (after: [gate, release]) and the commit is never published, which the staging runs' "the fork point is published" and the pins rely on
+superseded: finish
 steps:
   - name: toolchain
     timeout: 10

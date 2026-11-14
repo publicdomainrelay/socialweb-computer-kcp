@@ -24,8 +24,10 @@ run's `logs/` (only the run's own VM is touched).
 
 The target's `requester` picks the binary: `release:<tag>`, `sha:<commit>` (CI's `main/<commit>`) or `local:<commit>` (a hand build
 published to `local/<commit>/binaries/` with `scripts/publish-spaces.ts`); a bare `release` is refused.
-`path:<file>` puts the host's `SWC_BINARY` (that file) (a release build of the checkout under test, a branch's: CI's `test` and
-`compositions` build it on their VM) on the VM with `request.put`, no bucket involved.
+`oci:<host/name>@sha256:<manifest digest>` is a CI build pushed to https://ttl.sh (an anonymous, ephemeral OCI registry, the tag is the
+TTL) by `scripts/oci-push.sh` with oras (pinned in `scripts/ci-tools.json`, baked into the CI image): a branch's own build, no bucket key, so a
+fork's run does it too. Each VM installs the pinned oras and pulls by the manifest digest, which oras checks; a tag is never trusted.
+`path:<file>` puts the host's `SWC_BINARY` (that file) on the VM with `request.put` (slow: the fallback when ttl.sh is down).
 
 ```sh
 cd tests/modules && cargo wasm && cd ..

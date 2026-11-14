@@ -76,8 +76,36 @@ async fn newest_tag() -> Result<String> {
 }
 
 impl Binary {
-    /// "release" | "release:<tag>" | "sha:<full commit>" | "local:<full commit>" (a hand build, local/<commit>) | "path:<file>"; downloads are checked against SHA256SUMS
+    /// "release" | "release:<tag>" | "sha:<full commit>" | "local:<full commit>" (a hand build, local/<commit>) | "oci:<host/name>@sha256:<manifest digest>" (a
+    /// CI build pushed to ttl.sh, pulled with oras, which checks it against the digest) | "path:<file>"; downloads are checked against SHA256SUMS
     /// and cached under ~/.tmp/swc-system-tests/bin.
+    /// `<host/name>@sha256:<manifest digest>`: pulled with oras (the ORAS env, else `oras` on PATH) into ~/.tmp/swc-system-tests/bin/oci-<digest>
+    async fn oci(reference: &str) -> Result<Self> {
+        let (_, digest) = reference
+            .split_once("@sha256:")
+            .filter(|(_, d)| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit()))
+            .with_context(|| format!("oci:{reference}: want <host/name>@sha256:<64 hex>"))?;
+        let dir = home_tmp("bin").join(format!("oci-{digest}"));
+        let path = dir.join(format!("socialweb-computer-{}", arch()));
+        if !path.exists() {
+            std::fs::create_dir_all(&dir)?;
+            let oras = std::env::var("ORAS").unwrap_or_else(|_| "oras".into());
+            let out = tokio::process::Command::new(&oras)
+                .args(["pull", "--no-tty", reference, "-o"])
+                .arg(&dir)
+                .output()
+                .await
+                .with_context(|| format!("run {oras}"))?;
+            ensure!(
+                out.status.success(),
+                "oras pull {reference}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+        }
+        Self::at(path)
+    }
+
     pub async fn resolve(spec: &str) -> Result<Self> {
         let prefix = match spec.split_once(':') {
             _ if spec == "release" => format!("releases/{}", newest_tag().await?),
@@ -85,8 +113,9 @@ impl Binary {
             Some(("sha", sha)) => format!("main/{sha}"),
             Some(("local", sha)) => format!("local/{sha}"),
             Some(("path", p)) => return Self::at(expand(p)),
+            Some(("oci", r)) => return Self::oci(r).await,
             _ => bail!(
-                "requester {spec:?}: want release, release:<tag>, sha:<commit>, local:<commit> or path:<file>"
+                "requester {spec:?}: want release, release:<tag>, sha:<commit>, local:<commit>, oci:<ref>@sha256:<digest> or path:<file>"
             ),
         };
         let file = format!("socialweb-computer-{}", arch());
