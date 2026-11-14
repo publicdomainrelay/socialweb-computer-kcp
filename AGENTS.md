@@ -1227,3 +1227,19 @@ and older notes use the short names below; read them as the real names.
 | the soak | the last run against the real accounts (the bobvmbuilder bidder and alice), after the market network passes |
 | a gate | a check that must pass before an item or a merge goes on (`deploy/check.sh`, a plan's done_when) |
 | the seed | the first example that a model grows from |
+
+## Landing changes
+
+Agents never push to the base branch (`main`; `runner-atlibs-composition` in the knotless fork): it is protected with
+`--queue`, and the merge queue lands a change once its checks pass. Push a branch, open a pull and queue it:
+
+```sh
+U=knotless://<owner>/<repo>
+git push origin HEAD:refs/heads/<branch>
+knotless pull create $U <base> $U <branch> "<title>" -m "<why>"
+knotless pull merge $U <pull> --queue
+knotless queue list $U
+```
+
+`knotless pull show $U <pull>` says where it is; a pull whose checks fail is ejected from the queue (fix the branch, queue it
+again).
