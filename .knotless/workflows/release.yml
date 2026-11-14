@@ -6,15 +6,15 @@
 # tags (`knotless secret set ... --ref`): elsewhere (knotless-ci, a pull) the staging steps are skipped. The caches of the
 # build (scripts/asset-cache-upload.sh, scripts/ci-build-cache.sh: restored before a non-tag build, uploaded after one on
 # main and v*) cut what a clean VM rebuilds; a build with them gives the bytes of a cold one. A newer push to the ref
-# cancels an older commit's release. 12 vCPU / 16 GB (binding kcp-build: max cores, the RAM a build needs; hat-7 and hat-8
-# offer it).
+# cancels an older commit's release. 8 vCPU / 16 GB (binding kcp-medium: with the asset cache warm the build is minutes of
+# Go compile, and the gate's 12 + this 8 + testhost's 4 fit the prod market of 16 + 12 + 8 vCPUs beside each other).
 on:
   push:
     refs: [refs/heads/main, refs/heads/knotless-ci, refs/tags/v*]
   asked:
     refs: [refs/heads/main, refs/heads/knotless-ci]
 runners: [aliceoa.bsky.social]
-executor: kcp-build
+executor: kcp-medium
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
 env:
   SPACES_BUCKET: socialweb-computer-kcp
