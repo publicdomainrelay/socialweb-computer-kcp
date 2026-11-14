@@ -52,3 +52,5 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// staging-oci-proof: a throwaway comment so this branch builds its own binary (not a published ancestor): delete the branch.
