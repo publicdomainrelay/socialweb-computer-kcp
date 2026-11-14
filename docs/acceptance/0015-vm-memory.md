@@ -47,7 +47,7 @@ Inputs (`--input '{...}'`): `cpus` (default "2"), `mem` ("2G"), `pct` (95), `sec
 - The fill reached `pct - 3`% used (`peak_used_pct`), and at least one fsync'd write completed
 - The ComputeVM is `Running` with no `lostReason` (never `Lost`/`OOMKilled`)
 - Optional slot: no `vm.oomKilled` record of this receipt. `vm.memoryPressure` records are a reading (`high` is
-  expected under the fill: the VMM above `MemoryHigh` is throttled, not killed); a bidder that writes none (older than
+  expected only past 2 x guest now; the VM is throttled, not killed); a bidder that writes none (older than
   ccda777a) passes
 - After the release: every record of the contract RecordNotFound
 

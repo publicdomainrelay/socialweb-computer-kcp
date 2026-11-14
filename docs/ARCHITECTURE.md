@@ -703,7 +703,8 @@ stay CRDs (user). Components run inside the core process and stop with it. The c
 uses the default `KillMode=control-group`; transient units are separate cgroups, so no KillMode reaches
 them (proved: a unit survives restart, kill -9 and stop of its starter). Only cpu, memory and pids
 delegation is relied on (user); `AllowedCPUs` and `IOWeight` are not enforced in a user manager and are
-not used; VM units set `MemorySwapMax=0` with `MemoryMax` (otherwise the guest swaps) and live in their
+not used; VM units set `MemoryMax` = `MemoryHigh` = 2 x the guest and `MemorySwapMax` = the guest (`contract/host.VMLimits`: the host
+pages to swap rather than throttling or killing a VM, so a host needs swap of about its RAM) and live in their
 own slice, outside the `app.slice` Fedora's systemd-oomd watches. Minimum systemd 253 with each property
 probed by `check-host` (user).
 
@@ -4374,7 +4375,7 @@ fail, rather than the code read against this document alone.
   `MemoryMax` and `MemorySwapMax=0`: postgres 1 GiB (`pgunit.MemoryMax`), kine 512 MiB
   (`kcpdatastore.KineMemoryMax`), a kcp slot 3 GiB (`kcpserver.SlotMemoryMax`), the front 256 MiB
   (`kcpserver.FrontMemoryMax`), OpenBao 512 MiB (`openbaoctl.MemoryMax`), a stand-in 1 GiB
-  (`bootstrap.StandInMemoryMax`); VM units carry the VM's memory plus overhead, and a HostProcess object
+  (`bootstrap.StandInMemoryMax`); VM units carry `VMLimits` (2 x the VM's memory, swap up to the VM's memory), and a HostProcess object
   that sets none gets 2 GiB (`hostprocess.DefaultMemoryMax`). The `dev` backend (devsup, `proc`) enforces
   no unit limit by design. The components (Pds, Plc, Relay, Bidder, Requester and the rest) run in the
   core's own process, in the component runtime of `internal/component`, and the core unit carries no
