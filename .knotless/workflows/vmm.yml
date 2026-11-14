@@ -33,6 +33,9 @@ steps:
       loginctl enable-linger vmm
       for i in $(seq 60); do [ -d "/run/user/$(id -u vmm)" ] && break; sleep 1; done
       ls -ld "/run/user/$(id -u vmm)"
+      # this VM's own address is the guest link's (172.30.0.2): the webrtc UDP forward is never bound on it (guestnet.HostUDPPrefixes),
+      # so the tests send to a private address of the host's own (tests/vmm/src/lib.rs outbound_addr)
+      ip addr add 10.99.99.1/32 dev lo
       # the tests' checkout and build space belong to vmm
       install -d -o vmm -g vmm /home/vmm/swc-vmm /work-vmm
       cp -a "$PWD/." /work-vmm/src
@@ -68,7 +71,7 @@ steps:
         SWC=$B/swc SOCIALWEB_HOST_BACKEND=systemd-user SOCIALWEB_STATE_DIR=$B/state SOCIALWEB_HANDLE=vmmtest.invalid \
         SOCIALWEB_USERNS_STAGE_PATH=$B/swc-userns-stage/swc-userns-stage SOCIALWEB_PASTA_PATH=$B/pasta/pasta \
         SOCIALWEB_VMEXEC_PATH=$B/socialweb-vmexec/socialweb-vmexec SOCIALWEB_FIRECRACKER_PATH=$B/firecracker/firecracker \
-        SOCIALWEB_QEMU_PATH=$B/qemu/usr/bin/qemu-system-x86_64 SOCIALWEB_GUEST_IMAGE_SOURCE=file://$B/image \
+        SWC_VMM_LAN_ADDR=10.99.99.1 SOCIALWEB_QEMU_PATH=$B/qemu/usr/bin/qemu-system-x86_64 SOCIALWEB_GUEST_IMAGE_SOURCE=file://$B/image \
         SWC_GUEST_BIN=$B/socialweb-computer-release \
         CARGO_TARGET_DIR=/home/vmm/target \
         sh -c "cd /work-vmm/src && cargo test --manifest-path tests/Cargo.toml -p swc-vmm-tests -- --nocapture"

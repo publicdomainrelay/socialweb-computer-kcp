@@ -97,7 +97,15 @@ pub fn free_udp_port() -> u16 {
     UdpSocket::bind("0.0.0.0:0").unwrap().local_addr().unwrap().port()
 }
 
+/// The host address the webrtc UDP forward is tried on: SWC_VMM_LAN_ADDR, else the source address of the default route. The
+/// forward is bound by pasta on each host address in a private range except the guest link's (guestnet.HostUDPPrefixes skips
+/// 172.30.0.0/30: every guest's own address, 172.30.0.2, lives there), so on a host that IS a guest (a CI VM, a staging VM) the
+/// default route's address is never a forward address; give the host another private address (`ip addr add 10.99.99.1/32 dev
+/// lo`, before the tests start the VMs) and name it here.
 pub fn outbound_addr() -> String {
+    if let Ok(a) = env::var("SWC_VMM_LAN_ADDR") {
+        return a;
+    }
     let s = UdpSocket::bind("0.0.0.0:0").unwrap();
     s.connect("192.0.2.255:9").unwrap();
     s.local_addr().unwrap().ip().to_string()
