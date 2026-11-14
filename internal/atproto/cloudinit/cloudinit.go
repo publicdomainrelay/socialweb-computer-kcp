@@ -472,6 +472,35 @@ func assertResolver(base map[string]any, gateway string, fallbacks []string) map
 	return out
 }
 
+const CoreSysctlPath = "/etc/sysctl.d/99-swc-core.conf"
+
+// assertNoCorePipe keeps a crashing guest process from ever feeding a core dump into
+// apport. With apport's core_pattern pipe a crash of a PID 1 child (the forked systemd
+// exec helper of ssh.service) blocks in the pipe while apport asks PID 1 about the pid:
+// PID 1 waits for the child, the child for apport, apport for PID 1, and every systemctl
+// call times out (silent guest). New images carry no apport unit (deploy/guest-image);
+// for older images the first runcmd lines mask apport and set a plain core_pattern, so
+// the pattern is already a file when the later runcmd lines start ssh.service.
+func assertNoCorePipe(base map[string]any) map[string]any {
+	out := make(map[string]any, len(base))
+	maps.Copy(out, base)
+	files := append([]any{}, asArray(out["write_files"])...)
+	files = append(files, map[string]any{
+		"path": CoreSysctlPath, "owner": "root:root", "permissions": "0644",
+		"content": "kernel.core_pattern=core\nkernel.core_pipe_limit=0\nfs.suid_dumpable=0\n",
+	})
+	out["write_files"] = dedupeByKey(files, func(m map[string]any) string {
+		s, _ := m["path"].(string)
+		return s
+	})
+	runcmd := []any{
+		"systemctl mask --now apport.service || true",
+		"sysctl -w kernel.core_pattern=core kernel.core_pipe_limit=0 fs.suid_dumpable=0",
+	}
+	out["runcmd"] = append(runcmd, asArray(out["runcmd"])...)
+	return out
+}
+
 type BuildOptions struct {
 	Ctx          Context
 	Base         string
@@ -513,6 +542,7 @@ func BuildUserData(opts BuildOptions) (string, error) {
 		return "", err
 	}
 	obj = assertResolver(obj, gateway, fallbacks)
+	obj = assertNoCorePipe(obj)
 	body, err := yaml.Marshal(obj)
 	if err != nil {
 		return "", err

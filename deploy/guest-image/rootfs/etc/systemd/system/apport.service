@@ -1,0 +1,8 @@
+[Unit]
+Description=apport is not used in socialweb guests (a core dump through its pipe deadlocks PID 1)
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
