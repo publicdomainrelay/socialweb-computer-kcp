@@ -95,4 +95,11 @@ SWC_TARGET=<dev or staging target.json> cargo run -p swc-test-host -- compositio
   hm7ge..., Held 29.5 s, peak 95% used (lowest MemAvailable 109 MB of 2.0 GB), 1118 fsync'd 64 MiB writes in 349 s,
   boot id unchanged, ComputeVM `fc-65f2xp54oloh-a6ff487f` Running, no lostReason, no memory reports (the network's
   bidders run VMs with the proc backend: no per-VM cgroup, so this proves the guest side only), 3 records gone
+- `pressure`, dev network `captt` (test-0001, systemd-user VMs, `dev up` inside `systemd-run --user --scope` so the bidder core runs
+  under user@UID.service, bidder binary = main e13494b1 + fix-vm-cgroup-walk b8f323b5): PASS 2026-11-14 03:28-03:42Z, 799.9 s.
+  Crossing 1 (03:28:50, `MemoryHigh` 1.04 GB, memory.events high rose 24442 times): one record at 03:29:15Z (kind high, observed
+  1048645632, threshold 1044066304); crossing 2 (6.5 min later, 28277 rises): still one record; crossing 3 (record 1 + 10.75 min,
+  27460 rises): second record at 03:40:00Z (10 min 45 s after the first), `payload-2dedf4f6...`; no max record, no oomKilled,
+  ComputeVM Running, boot id unchanged, no vm.terminated, 3 records gone. Without b8f323b5 the same run fails at crossing 1
+  ("0 memoryPressure records 4 min after the window") because `vmCgroupDir` never found the VM cgroup
 - Prod (bob): waits until the release gate is done
