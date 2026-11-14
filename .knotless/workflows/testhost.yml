@@ -2,15 +2,16 @@
 # test-modules.tar.gz) and the static socialweb-meshd of this rust/ tree (meshd/<git tree of rust/>/), published to the bucket
 # for `test` to download (tests/publish-test-host.sh, BUILD_HOST=local). Each is skipped when its SHA256SUMS is already
 # there, so most pushes publish nothing and rent the VM for seconds. The bucket key is a sealed secret given only to pushes to
-# main and v* tags: a branch (knotless-ci) does not run this, and its `test` builds what it lacks on its own VM. 12 vCPU /
-# 16 GB (binding kcp-build: a cold build of the host, the modules and meshd).
+# main and v* tags: a branch (knotless-ci) does not run this, and its `test` builds what it lacks on its own VM. 4 vCPU / 8 GB
+# (binding kcp-small: this is rare, and a cold build of the host, the modules and meshd does not need the 12 cores of gate
+# and release, which would fill the market beside them).
 on:
   push:
     refs: [refs/heads/main, refs/tags/v*]
   asked:
     refs: [refs/heads/main]
 runners: [aliceoa.bsky.social]
-executor: kcp-build
+executor: kcp-small
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
 env:
   SPACES_BUCKET: socialweb-computer-kcp
