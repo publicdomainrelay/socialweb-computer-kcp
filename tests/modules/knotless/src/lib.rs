@@ -9,6 +9,9 @@
 //   fallback  one workflow per network bidder, each VM sized so a bidder holds one (its offering's maxCpus / 2 + 1):
 //             all succeed, and in one of up to 3 rounds a bidder declined an accept (409 CapacityExceeded) and the
 //             rent took the next bid (the atlibs requester module's accept fallback; acceptance 0014's atlibs path)
+//   cancel    every bidder held by a `hold-<n>` workflow (a VM each, on the `fill` binding with wait_capacity_s), then a `waiter`
+//             rent that has to wait for capacity is cancelled (`knotless run cancel`) and ends cancelled at once (not after
+//             the wait), and a hold cancelled with its VM held gives it back: the waiter's next rent gets that bidder and succeeds
 //   terminated a step powers off its own VM: its bidder's vm.terminated reaches the cicd workload as a market event
 //             and the step fails at once with the reason (not after the read retries)
 // Result {pass, error?, phase (the step), readings (seconds per step)}. The host deletes the repo and the seeded
@@ -71,9 +74,18 @@ fn checks(r: &str, of: &str, workflows: &[&str]) -> String {
     )
 }
 
+/// The workflows of `fallback`: one per bidder, each on the `fill` binding.
+const FALLBACK_FILES: &str = "for i in $(seq \"$n\"); do printf 'on:\n  push:\n    refs: [refs/heads/main]\nexecutor: fill\nsteps:\n  - name: size\n    run: nproc\n' > .knotless/workflows/fill-$i.yml; done";
+
 /// The `fill` binding (the bidders' tightest maxCpus / 2 + 1 vCPUs, 1 GiB) beside the seeded ones, then one workflow
 /// per bidder on it (`fill-<n>`), pushed; the bidders are the network relay's repos with a compute offering.
 fn fill_script(r: &str) -> String {
+    fill_with(r, "", FALLBACK_FILES)
+}
+
+/// `fill_script`, the binding's inputs given `inputs` more (`, wait_capacity_s: 900`), and `files` the shell that writes the workflows
+/// (it runs in the new repo's directory, `$n` bidders known).
+fn fill_with(r: &str, inputs: &str, files: &str) -> String {
     format!(
         r##"S=$(jq -n --arg i "$KNOTLESS_IDENTIFIER" --arg p "$KNOTLESS_PASSWORD" '{{identifier: $i, password: $p}}' | curl -sf -H 'content-type: application/json' -d @- "$KNOTLESS_PDS/xrpc/com.atproto.server.createSession")
 J=$(printf %s "$S" | jq -r .accessJwt); D=$(printf %s "$S" | jq -r .did)
@@ -88,24 +100,52 @@ n=$(wc -l < {r}.max); test "$n" -ge 2
 cpus=$(( $(sort -n -k2 {r}.max | head -1 | cut -d' ' -f2) / 2 + 1 ))
 echo "$n bidders, $cpus vCPUs a VM: one VM fills a bidder"
 comp=$(curl -sf "$KNOTLESS_PDS/xrpc/com.atproto.repo.getRecord?repo=$D&collection=com.fedfork.exec.binding&rkey=self" | jq -c .value.composition)
-jq -n --arg d "$D" --argjson c "$comp" --argjson cpus "$cpus" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"   '{{repo: $d, collection: "com.fedfork.exec.binding", rkey: "fill", record: {{"$type": "com.fedfork.exec.binding", composition: $c, inputs: {{cpus: $cpus, mem: 1}}, createdAt: $at}}}}' |
+jq -n --arg d "$D" --argjson c "$comp" --argjson cpus "$cpus" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"   '{{repo: $d, collection: "com.fedfork.exec.binding", rkey: "fill", record: {{"$type": "com.fedfork.exec.binding", composition: $c, inputs: {{cpus: $cpus, mem: 1{inputs}}}, createdAt: $at}}}}' |
   curl -sf -H "authorization: Bearer $J" -H 'content-type: application/json' -d @- "$KNOTLESS_PDS/xrpc/com.atproto.repo.putRecord" > /dev/null
 U=knotless://$KNOTLESS_IDENTIFIER/{r}
 rm -rf {r} && mkdir -p {r}/.knotless/workflows && cd {r}
 git init -q -b main
-for i in $(seq "$n"); do printf 'on:
-  push:
-    refs: [refs/heads/main]
-executor: fill
-steps:
-  - name: size
-    run: nproc
-' > .knotless/workflows/fill-$i.yml; done
+{files}
 echo 1 > round
 git add . && git commit -q -m 'swc-test knotless fallback'
 git remote add origin "$U"
 git push -q -u origin main
-"##
+"##,
+        inputs = inputs,
+        files = files
+    )
+}
+
+/// The workflows of `cancel`: a `hold-<n>` per bidder (a VM each, held 15 min), and a `waiter` only an ask runs.
+const CANCEL_FILES: &str = "for i in $(seq \"$n\"); do printf 'on:\\n  push:\\n    refs: [refs/heads/main]\\nexecutor: fill\\nsteps:\\n  - name: hold\\n    run: sleep 900\\n' > .knotless/workflows/hold-$i.yml; done\nprintf 'on:\\n  asked:\\n    refs: [refs/heads/main]\\nexecutor: fill\\nsteps:\\n  - name: size\\n    run: nproc\\n' > .knotless/workflows/waiter.yml";
+
+/// With every bidder held: a waiter's rent, waiting on capacity, is cancelled and its check says so within 90 s; a hold cancelled
+/// while it holds its VM gives it back, so the waiter's next rent succeeds.
+fn cancel_script(r: &str) -> String {
+    format!(
+        r#"U=knotless://$KNOTLESS_IDENTIFIER/{r}
+n=$(ls {r}/.knotless/workflows | grep -c '^hold-')
+line() {{ knotless run list "$U" --ref refs/heads/main --workflow "$1" 2>/dev/null | head -1; }}
+show() {{ echo "$1: $(line "$1")"; knotless run list "$U" --ref refs/heads/main --workflow "$1" --log | tail -30; }}
+until_line() {{ for i in $(seq "$3"); do line "$1" | grep -q "$2" && return 0; sleep 1; done; show "$1"; echo "wanted /$2/ in $3 s"; return 1; }}
+for i in $(seq "$n"); do until_line hold-$i '^running.*step hold' 900 || exit 1; done
+echo "$n bidders held"
+knotless run rerun "$U" --ref refs/heads/main --workflow waiter
+until_line waiter '^running' 120 || exit 1
+sleep 30
+line waiter | grep -q '^running' || {{ show waiter; exit 1; }}
+t=$(date +%s)
+knotless run cancel "$U" --ref refs/heads/main --workflow waiter
+until_line waiter '^cancelled' 90 || exit 1
+echo "the rent waiting on capacity was cancelled in $(( $(date +%s) - t )) s"
+knotless run list "$U" --ref refs/heads/main --workflow waiter --log | grep -q 'cancelled while renting its machine' || {{ show waiter; exit 1; }}
+knotless run cancel "$U" --ref refs/heads/main --workflow hold-1
+until_line hold-1 '^cancelled' 180 || exit 1
+knotless run rerun "$U" --ref refs/heads/main --workflow waiter
+until_line waiter '^success' 400 || exit 1
+echo "a hold cancelled with its VM gave it back: the waiter got a bidder"
+knotless run cancel "$U" --ref refs/heads/main
+"#
     )
 }
 
@@ -210,6 +250,23 @@ fn plan(entry: &str, r: &str) -> (Value, Vec<Step>) {
                 },
             ],
         ),
+        "cancel" => (
+            json!({ "self": one }),
+            vec![
+                Step {
+                    id: "create",
+                    script: create(r),
+                },
+                Step {
+                    id: "fill",
+                    script: fill_with(r, ", wait_capacity_s: 900", CANCEL_FILES),
+                },
+                Step {
+                    id: "cancel",
+                    script: cancel_script(r),
+                },
+            ],
+        ),
         "pull" => (
             json!({ "self": one }),
             vec![
@@ -298,7 +355,7 @@ fn run_entry(entry: &'static str, run: Run<Value>) -> Result<Handle, String> {
             let mut cleanup = format!(
                 "knotless repo delete knotless://$KNOTLESS_IDENTIFIER/{repo} --yes || true"
             );
-            if entry == "fallback" {
+            if entry == "fallback" || entry == "cancel" {
                 cleanup.push_str("\nS=$(jq -n --arg i \"$KNOTLESS_IDENTIFIER\" --arg p \"$KNOTLESS_PASSWORD\" '{identifier: $i, password: $p}' | curl -sf -H 'content-type: application/json' -d @- \"$KNOTLESS_PDS/xrpc/com.atproto.server.createSession\") && jq -n --arg d \"$(printf %s \"$S\" | jq -r .did)\" '{repo: $d, collection: \"com.fedfork.exec.binding\", rkey: \"fill\"}' | curl -sf -H \"authorization: Bearer $(printf %s \"$S\" | jq -r .accessJwt)\" -H 'content-type: application/json' -d @- \"$KNOTLESS_PDS/xrpc/com.atproto.repo.deleteRecord\" > /dev/null || true");
             }
             h = h
@@ -382,4 +439,8 @@ fn terminated_entry(r: Run<Value>) -> Result<Handle, String> {
     run_entry("terminated", r)
 }
 
-entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry, fallback => fallback_entry, terminated => terminated_entry }
+fn cancel_entry(r: Run<Value>) -> Result<Handle, String> {
+    run_entry("cancel", r)
+}
+
+entries! { push => push_entry, after => after_entry, executor => executor_entry, pull => pull_entry, fallback => fallback_entry, terminated => terminated_entry, cancel => cancel_entry }

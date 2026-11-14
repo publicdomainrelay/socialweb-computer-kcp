@@ -13,6 +13,7 @@ published `socialweb-computer-cicd` composition (`knotless.source`) once, its mo
 | `pull` | a sealed secret: the push to main sees it, a pull's run gets none |
 | `fallback` | one workflow per network bidder (the relay's repos with a `market.offering`), each on a `fill` binding of the tightest `maxCpus / 2 + 1` vCPUs so a bidder holds one: every check succeeds, and in one of up to 3 rounds the log shows `==> the rent noted: <bidder> declined the accept: ... CapacityExceeded` (the atlibs requester module's fallback; [0014](../../../docs/acceptance/0014-accept-fallback.md)'s atlibs path) |
 | `terminated` | a step ends its own VM 20 s in (sysrq `o` under QEMU's ACPI, `b` under Firecracker: either VMM exits): the bidder's `vm.terminated` reaches the cicd workload (`com.fedfork.market.watch` on the requester that rented it) and the step fails in under 5 min with `the VM was terminated by its bidder: <reason>` |
+| `cancel` | every bidder held by a workflow (the `fill` binding with `wait_capacity_s`); a rent waiting on capacity is cancelled (`knotless run cancel`) and its check says cancelled within 90 s; a hold cancelled with its VM held gives the VM back (the waiter's next rent succeeds) |
 
 ## Run
 
