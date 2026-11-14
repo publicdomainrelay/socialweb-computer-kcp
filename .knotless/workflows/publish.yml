@@ -1,7 +1,7 @@
 # knotless CI: publishes what `release` staged, once the gate and the release have both passed at this commit: staging/<sha>/
 # is copied inside the bucket (no bytes move through this VM) to main/<sha>/ and main/latest/ (a tag: releases/<tag>/), then
 # the published binaries and guest image are checked from the public URLs. The bucket key is a sealed secret given only to
-# pushes to main and v* tags. A newer push cancels an older commit's publish until its copy starts. 4 vCPU / 8 GB (binding
+# pushes to main and v* tags. A newer push waits for a publish that holds its turn (`superseded: finish`) and cancels one that has not started. 4 vCPU / 8 GB (binding
 # kcp-small).
 on:
   push:
@@ -10,6 +10,7 @@ on:
     refs: [refs/heads/main]
 runners: [aliceoa.bsky.social]
 executor: kcp-small
+superseded: finish
 after: [gate, release]
 secrets: [SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY]
 env:
