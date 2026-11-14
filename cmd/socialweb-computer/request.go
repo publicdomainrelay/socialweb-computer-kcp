@@ -1579,9 +1579,16 @@ func (a *app) restartLoaded(ctx context.Context, r *requestRun, verb string) (*r
 	r.resuming = verb == "resume"
 	if err := r.start(ctx, false); err != nil {
 		if verb == "release" && errors.Is(err, request.ErrNoApplication) {
-			r.log("the market network no longer has the invocation's application (an earlier release finished it); the invocation is only removed")
-			r.cleanupOnly = true
-			return r, exitOK
+			// "no application" is not "released": the invocation's own state must say its contract ended (Released, or Failed before
+			// a VM was held), else a typo'd or half-created invocation would exit OK and hide a VM that is still held
+			neverHeld := r.summary.Phase == string(v1alpha1.ComputeContractFailed) && (r.summary.Contract == nil || r.summary.Contract.ReceiptUri == "")
+			if r.summary.Phase == string(v1alpha1.ComputeContractReleased) || neverHeld {
+				r.log("the market network no longer has the invocation's application and its state says the contract ended; the invocation is only removed", "phase", r.summary.Phase)
+				r.cleanupOnly = true
+				return r, exitOK
+			}
+			return nil, a.fail(exitFailed, "run request release: the market network has no application %s but the invocation's state does not say its contract ended (phase %q): a VM may still be held; check the contract's market records before removing %s",
+				r.inv.Name, r.summary.Phase, request.Dir(r.stateRoot, r.inv.Name))
 		}
 		if verb == "release" && r.inv.GuestRequester && r.kcp != nil {
 			r.log("the guest requester never got Ready; it retires its local accounts before its guest goes", "err", err.Error())
