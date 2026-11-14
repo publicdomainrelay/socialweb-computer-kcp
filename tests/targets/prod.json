@@ -68,7 +68,7 @@
     "john": {
       "handle": "johnandersen777.bsky.social",
       "did": "did:plc:5svqtrhheairglgiiyvutzik",
-      "creds": "~/.atproto_source"
+      "creds": "~/.johnandersen777_bsky_social_source"
     }
   }
 }
