@@ -11,7 +11,7 @@ use steps::{MIN, S, host, host_sub};
 const RELEASE_MAX_S: f64 = 60.0;
 
 fn phase_of(summary: &Value) -> String {
-    summary["contract"]["phase"].as_str().or(summary["phase"].as_str()).unwrap_or_default().to_string()
+    summary["contract"]["phase"].as_str().or(summary["phase"].as_str()).unwrap_or_default().to_lowercase()
 }
 
 fn run_with(run: Run<Value>, killed: bool) -> Result<Handle, String> {
@@ -35,7 +35,7 @@ fn run_with(run: Run<Value>, killed: bool) -> Result<Handle, String> {
             s.mark("release");
             h = h.call(host("release", "request.release", json!({ "name": name }))).timer("relguard", 90_000);
             if killed {
-                h = h.timer("kill", 2_000);
+                h = h.timer("kill", 100);
             }
         }
         Event::Timer { id } if id == "settle" => return Ok(s.fail(format!("the owner is not holding an interactive ssh session (held {}, ssh {}, exited {})", s.has("held"), s.has("sshing"), s.has("exited")))),
@@ -70,7 +70,13 @@ fn run_with(run: Run<Value>, killed: bool) -> Result<Handle, String> {
             }
             _ => {}
         },
+        Event::Closed { id, error } if id == "req" && !s.has("exited") => return Ok(s.fail(format!("the owner's subscription closed before it exited: {}", error.unwrap_or_default()))),
         Event::Result { id, result, .. } => {
+            if id == "summary" {
+                if let Err(e) = result.output() {
+                    return Ok(s.fail(format!("the release returned but the invocation was left unsettled (no summary: {e}): the owner stopped mid-release and the release client did not take the invocation over")));
+                }
+            }
             let o = match steps::out(&s, &id, result.output()) {
                 Ok(o) => o,
                 Err(f) => return Ok(f),
@@ -94,7 +100,7 @@ fn run_with(run: Run<Value>, killed: bool) -> Result<Handle, String> {
                     let phase = phase_of(&o);
                     s.reading("owner_exit_phase", phase.clone());
                     s.reading("owner_exit_kcp_running", o["kcpRunning"].clone());
-                    if phase != "Released" || o["kcpRunning"] != false {
+                    if phase != "released" || o["kcpRunning"] != false {
                         return Ok(s.fail(format!("the owner exited with the contract in phase {phase:?} and kcpRunning {}: it stopped its kcp before Released", o["kcpRunning"])));
                     }
                     s.flag("exitSummaryOk");
@@ -103,7 +109,8 @@ fn run_with(run: Run<Value>, killed: bool) -> Result<Handle, String> {
                     let phase = phase_of(&o);
                     s.reading("summary_phase", phase.clone());
                     s.reading("summary_kcp_running", o["kcpRunning"].clone());
-                    if phase != "Released" || o["kcpRunning"] != false {
+                    // a killed owner never rewrote its summary: kcpRunning is then the dead owner's last word
+                    if phase != "released" || (!killed && o["kcpRunning"] != false) {
                         return Ok(s.fail(format!("after the release the summary says phase {phase:?}, kcpRunning {}", o["kcpRunning"])));
                     }
                     s.flag("summaryOk");
