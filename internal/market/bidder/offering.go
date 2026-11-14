@@ -190,6 +190,9 @@ func (b *Bidder) ensureOffering(ctx context.Context) error {
 }
 
 func (b *Bidder) ensureOfferingLocked(ctx context.Context, touch bool) error {
+	if b.imageErr.Load() != nil {
+		return nil
+	}
 	appliesTo := []string{market.ComputeVMNSID}
 	now := b.now().UTC().Format(time.RFC3339)
 	prior, err := b.selfOffering(ctx)
