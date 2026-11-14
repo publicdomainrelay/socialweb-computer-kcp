@@ -166,7 +166,7 @@ dependencies = [
 [[package]]
 name = "atlibs-host"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=fba979b9ca3235c6ca0a5b9855a23be5f5cdce90#fba979b9ca3235c6ca0a5b9855a23be5f5cdce90"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=e40f5d6624fd2d521814c197c47395cd0fbd0af3#e40f5d6624fd2d521814c197c47395cd0fbd0af3"
 dependencies = [
  "aes-gcm",
  "atproto-identity",
@@ -198,7 +198,7 @@ dependencies = [
 [[package]]
 name = "atlibs-iroh"
 version = "0.2.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh?rev=444bad4ced73b1dc87cdbae22836c379cce9f10d#444bad4ced73b1dc87cdbae22836c379cce9f10d"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=e40f5d6624fd2d521814c197c47395cd0fbd0af3#e40f5d6624fd2d521814c197c47395cd0fbd0af3"
 dependencies = [
  "atlibs-host",
  "base64 0.22.1",
@@ -211,7 +211,7 @@ dependencies = [
 [[package]]
 name = "atlibs-kube"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-kube?rev=8a71567cf7bcb2fa7440dd9a035d53602679f0a8#8a71567cf7bcb2fa7440dd9a035d53602679f0a8"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=e40f5d6624fd2d521814c197c47395cd0fbd0af3#e40f5d6624fd2d521814c197c47395cd0fbd0af3"
 dependencies = [
  "atlibs-host",
  "atlibs-iroh",
@@ -228,7 +228,7 @@ dependencies = [
 [[package]]
 name = "atlibs-ssh"
 version = "0.1.0"
-source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh?rev=8c1bea08fb5f1c7d5a10632eb5563f18125eab62#8c1bea08fb5f1c7d5a10632eb5563f18125eab62"
+source = "git+https://knotless.dev/johnandersen777.bsky.social/atlibs?rev=e40f5d6624fd2d521814c197c47395cd0fbd0af3#e40f5d6624fd2d521814c197c47395cd0fbd0af3"
 dependencies = [
  "atlibs-host",
  "serde",

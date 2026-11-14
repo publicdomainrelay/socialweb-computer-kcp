@@ -696,7 +696,7 @@ again; user_data installs `atirc-agent.service`
 - A failed composition run freezes (the default outside CI; knotless CI's test.yml freezes too): attach with
   `swc-test-host attach <run dir>` (MCP), read `failure`, `state`, `resources`, inspect with `kube_get` / `ssh_exec`, then
   `cleanup`; `swc-test-host replay <run dir>` reruns the module's decisions offline. Never leave a frozen run past its TTL by hand.
-- atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh and identlink follow one tested
+- atlibs pins: `tests/Cargo.toml`'s atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh (one atlibs repo rev: they are its workspace's crates) and identlink follow one tested
   set, atlibs `pins.json`, as the knotless runner does (fork branch `runner-atlibs-composition`, deployed by
   knotless-fork-infra `versions.env`; each of atlibs and knotless-fork-infra checks its own pins on push in its
   `pins` workflow). `pins.sh check` here fails when tests/ is behind; catch up (rewrites the revs,

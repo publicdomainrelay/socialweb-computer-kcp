@@ -26,13 +26,13 @@ cargo run -p testkit --bin last-pass -- readings/0004-*.json          # passing 
 (`handle`, `did`, `creds`, `oauthAccount`, `throwaway`), `agentConfig`, `pageRepo`, `requester`.
 
 - `pageRepo` (0009): a built checkout of the requester page repo (its README's Build: `cargo wasm` there and in the
-  atlibs-iroh sibling at its pin); unset, 0009 is skipped. Prod's:
+  atlibs checkout at its pin, `cargo wasm -p iroh-user-data`); unset, 0009 is skipped. Prod's:
 
   ```sh
   mkdir -p ~/.tmp/swc-system-tests/page && cd ~/.tmp/swc-system-tests/page
   git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs-socialweb-computer-requester
-  git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh && git -C atlibs-iroh checkout -q 444bad4
-  (cd atlibs-iroh && cargo wasm) && (cd atlibs-socialweb-computer-requester && cargo wasm)
+  git clone -q https://knotless.dev/johnandersen777.bsky.social/atlibs && git -C atlibs checkout -q e40f5d6
+  (cd atlibs && cargo wasm -p iroh-user-data) && (cd atlibs-socialweb-computer-requester && cargo wasm)
   ```
 - `requester`: the orchestrator binary: `release` (newest `v*` tag), `release:<tag>`, `sha:<commit>` (CI's `main/<sha>`),
   `path:<file>` (a local build). Downloads are checked against `SHA256SUMS`, cached in `~/.tmp/swc-system-tests/bin`.

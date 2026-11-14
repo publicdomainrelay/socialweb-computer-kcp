@@ -15,14 +15,14 @@ publish = false
 [workspace.dependencies]
 testkit = { path = "testkit" }
 anyhow = "1"
-# atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh, identlink: the atlibs pin set (atlibs pins.json, one copy of
-# each; AGENTS.md: pins.sh check). atlibs-host: app-password sessions saved in a state dir (no createSession per
+# atlibs-host, atlibs-iroh, atlibs-kube, atlibs-ssh (crates of the atlibs repo: one rev), identlink: the atlibs pin set
+# (atlibs pins.json, one copy of each; AGENTS.md: pins.sh check). atlibs-host: app-password sessions saved in a state dir (no createSession per
 # run), service auth, PDS/PLC reads.
-atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "fba979b9ca3235c6ca0a5b9855a23be5f5cdce90" }
+atlibs-host = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "e40f5d6624fd2d521814c197c47395cd0fbd0af3" }
 # iroh tickets of offering / onNetwork addresses; its raw `dumbpipe connect` is the iroh stream
-atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-iroh", rev = "444bad4ced73b1dc87cdbae22836c379cce9f10d" }
-atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-kube", rev = "8a71567cf7bcb2fa7440dd9a035d53602679f0a8" }
-atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-ssh", rev = "8c1bea08fb5f1c7d5a10632eb5563f18125eab62" }
+atlibs-iroh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "e40f5d6624fd2d521814c197c47395cd0fbd0af3" }
+atlibs-kube = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "e40f5d6624fd2d521814c197c47395cd0fbd0af3" }
+atlibs-ssh = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs", rev = "e40f5d6624fd2d521814c197c47395cd0fbd0af3" }
 # ident.link walks over verified sync.getRecord, the market's computed rkeys
 identlink = { git = "https://knotless.dev/johnandersen777.bsky.social/atlibs-identlink", rev = "aa7cacc3b355b217d7087cb3a95eb61ab16c8ad7", features = ["native"] }
 futures = "0.3"
