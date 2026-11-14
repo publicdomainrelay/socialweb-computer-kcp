@@ -232,6 +232,35 @@ requester's own kcp, and `install` prints both. A password never goes into reque
   stream resumes from its stored cursor only when it was saved in the last
   `delivery.RecentResumeWindow` (10 min), else it starts live. No live ComputeVM, no stream.
 
+## Guest user data: never reload systemd while a start job is in flight
+
+- The guest image's systemd (255.4-1ubuntu8.17) PID 1 aborts in `service_sigchld_event()`
+  (`src/core/service.c:4054`, `assert_not_reached()` in the control-process-exited switch) when a
+  `daemon-reload` lands while a service start job is in flight (observed: `ssh.service` starting, a
+  `systemctl` of cloud-final reloading 2 ms later). `CrashAction=freeze` then freezes PID 1: every
+  later `systemctl` gets `Connection reset by peer` or a 25 s timeout, iroh never starts, and the
+  guest never reports on the network ("did not come on network within 2m0s"; the apport core pipe
+  can deadlock the same crash). Closest upstream issue: systemd/systemd#44705 (same assert, line 4064,
+  a shutdown race, closed). We do not patch systemd.
+- Rule for everything that reaches `cloud-final` through `cloudinit.BuildUserData`: one
+  `systemctl daemon-reload`, before the first `systemctl` command of runcmd; every `enable` is
+  `systemctl --no-reload enable`; no `enable ssh` (it runs systemd-sysv-install and update-rc.d,
+  which reload; the image has `ssh.socket` enabled, runcmd only starts `ssh.service`); no reload and no
+  enable-with-reload after the first start. `serializeSystemd` (internal/atproto/cloudinit) applies this
+  to the combined runcmd of all modules (drops module-local reloads, rewrites enables, splits
+  `enable --now` into a no-reload enable plus a start) and fails the build of the user data when a
+  reload still follows a start or hides inside a compound `sh` line. A module writes one `systemctl`
+  command per runcmd entry.
+- Debugging a silent guest on a dev net: `SWC_DEV_GUEST_BOOT_ARGS_EXTRA` or the file
+  `$XDG_RUNTIME_DIR/swc-dev-guest-boot-args-extra` (read by the VM runtime, dev only) appends kernel
+  arguments; `sysrq_always_enabled=1 ignore_loglevel systemd.log_target=kmsg
+  systemd.journald.forward_to_console=1` puts PID 1's crash line on the serial console, and QMP
+  `send-key` alt+sysrq+w/t/s over the VM's `api.sock` shows what PID 1 waits for. With
+  `systemd.mask=apport.service sysctl.kernel.core_pattern=/var/tmp/core.%e.%p.%s` the core lands on the
+  guest disk (copy `rootfs.ext4` with `cp --reflink` and read it with gdb and debuginfod).
+  `systemd.log_level=debug` writes 7 MB to the serial console per boot and slows a boot past the
+  2 minute window by itself.
+
 ## Guest transports, guest events and the host-loopback fence
 
 - Three guest transports, and no other. Never add one.

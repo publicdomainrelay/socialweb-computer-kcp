@@ -348,7 +348,7 @@ wait "${DUMBPIPE_PID}"
 			"systemctl daemon-reload",
 			"systemctl enable iroh.service",
 			"systemctl start --no-block iroh.service",
-			"systemctl enable --now --no-block ssh || systemctl enable --now --no-block sshd",
+			"systemctl start --no-block ssh.service",
 		},
 	}, nil
 }

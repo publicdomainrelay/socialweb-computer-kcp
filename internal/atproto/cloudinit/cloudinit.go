@@ -472,6 +472,161 @@ func assertResolver(base map[string]any, gateway string, fallbacks []string) map
 	return out
 }
 
+// systemd 255.4 (the guest image's PID 1) aborts in service_sigchld_event() (src/core/service.c:4054,
+// assert_not_reached in the control-process-exited switch) when a daemon-reload lands while a service
+// start job is in flight, and then freezes (CrashAction=freeze): every later systemctl times out and the
+// guest never reports on the network. Each module of the user data used to bring its own
+// `systemctl daemon-reload` and `systemctl enable` (enable reloads too) next to `start --no-block` of
+// earlier modules, so reloads interleaved with the starts. serializeSystemd makes the order hold for
+// the combined runcmd: one reload before the first systemctl command, every enable/disable/mask without
+// a reload of its own, `enable --now` split into a no-reload enable plus a start, and no reload or
+// enable-with-reload after the first start. The assertion fails the build of user data otherwise.
+var systemctlReloadVerbs = map[string]bool{"enable": true, "disable": true, "mask": true, "unmask": true, "link": true, "reenable": true, "preset": true, "revert": true, "edit": true}
+
+func runcmdWords(entry any) ([]string, bool) {
+	switch v := entry.(type) {
+	case string:
+		return strings.Fields(v), true
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			s, ok := e.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+func systemctlParts(words []string) (verb string, flags []string, args []string, ok bool) {
+	if len(words) < 2 || words[0] != "systemctl" {
+		return "", nil, nil, false
+	}
+	for i, w := range words[1:] {
+		if strings.HasPrefix(w, "-") {
+			flags = append(flags, w)
+			continue
+		}
+		return w, flags, words[2+i:], true
+	}
+	return "", flags, nil, false
+}
+
+func isStartVerb(verb string, flags []string) bool {
+	switch verb {
+	case "start", "restart", "try-restart", "reload-or-restart", "stop":
+		return true
+	}
+	return slices.Contains(flags, "--now")
+}
+
+func serializeSystemd(base map[string]any) (map[string]any, error) {
+	in := asArray(base["runcmd"])
+	if len(in) == 0 {
+		return base, nil
+	}
+	out := make([]any, 0, len(in)+2)
+	firstSystemctl := -1
+	for _, entry := range in {
+		words, ok := runcmdWords(entry)
+		if !ok {
+			out = append(out, entry)
+			continue
+		}
+		if len(words) == 2 && words[0] == "systemctl" && words[1] == "daemon-reload" {
+			continue
+		}
+		if _, isString := entry.(string); isString {
+			joined := strings.Join(words, " ")
+			if strings.Contains(joined, "||") || strings.Contains(joined, "&&") || strings.Contains(joined, ";") {
+				out = append(out, entry)
+				continue
+			}
+		}
+		verb, flags, args, isCtl := systemctlParts(words)
+		if !isCtl {
+			out = append(out, entry)
+			continue
+		}
+		if systemctlReloadVerbs[verb] && !slices.Contains(flags, "--no-reload") {
+			now := slices.Contains(flags, "--now")
+			kept := []string{"--no-reload"}
+			for _, f := range flags {
+				if f != "--now" && f != "--no-block" {
+					kept = append(kept, f)
+				}
+			}
+			rewritten := append(append([]string{"systemctl"}, kept...), append([]string{verb}, args...)...)
+			out = append(out, joinLike(entry, rewritten))
+			if now && verb == "enable" {
+				start := append([]string{"systemctl", "start"}, args...)
+				if slices.Contains(flags, "--no-block") {
+					start = append([]string{"systemctl", "start", "--no-block"}, args...)
+				}
+				out = append(out, joinLike(entry, start))
+			}
+			continue
+		}
+		out = append(out, entry)
+	}
+	for i, entry := range out {
+		if words, ok := runcmdWords(entry); ok && len(words) >= 2 && words[0] == "systemctl" {
+			firstSystemctl = i
+			break
+		}
+	}
+	if firstSystemctl >= 0 {
+		out = append(out[:firstSystemctl], append([]any{"systemctl daemon-reload"}, out[firstSystemctl:]...)...)
+	}
+	started := false
+	for _, entry := range out {
+		words, ok := runcmdWords(entry)
+		if !ok {
+			continue
+		}
+		if len(words) >= 2 && words[0] == "systemctl" {
+			verb, flags, _, isCtl := systemctlParts(words)
+			if started && isCtl && (verb == "daemon-reload" || (systemctlReloadVerbs[verb] && !slices.Contains(flags, "--no-reload"))) {
+				return nil, fmt.Errorf("cloudinit: runcmd %q reloads systemd after a start job began (systemd 255 PID 1 aborts in service_sigchld_event when a daemon-reload lands during a start job)", strings.Join(words, " "))
+			}
+			if isCtl && isStartVerb(verb, flags) {
+				started = true
+			}
+			continue
+		}
+		line := strings.Join(words, " ")
+		if strings.Contains(line, "systemctl daemon-reload") {
+			return nil, fmt.Errorf("cloudinit: runcmd %q reloads systemd inside a compound command; write one systemctl command per runcmd entry", line)
+		}
+		for verb := range systemctlReloadVerbs {
+			if strings.Contains(line, "systemctl "+verb+" ") || strings.Contains(line, "systemctl --now "+verb+" ") {
+				return nil, fmt.Errorf("cloudinit: runcmd %q runs systemctl %s (which reloads systemd) inside a compound command; write one systemctl command per runcmd entry", line, verb)
+			}
+		}
+		if strings.Contains(strings.Join(words, " "), "systemctl") && (strings.Contains(strings.Join(words, " "), "systemctl start") || strings.Contains(strings.Join(words, " "), "systemctl enable --now")) {
+			started = true
+		}
+	}
+	res := make(map[string]any, len(base))
+	maps.Copy(res, base)
+	res["runcmd"] = out
+	return res, nil
+}
+
+func joinLike(entry any, words []string) any {
+	if _, ok := entry.(string); ok {
+		return strings.Join(words, " ")
+	}
+	out := make([]any, len(words))
+	for i, w := range words {
+		out[i] = w
+	}
+	return out
+}
+
 type BuildOptions struct {
 	Ctx          Context
 	Base         string
@@ -513,6 +668,10 @@ func BuildUserData(opts BuildOptions) (string, error) {
 		return "", err
 	}
 	obj = assertResolver(obj, gateway, fallbacks)
+	obj, err = serializeSystemd(obj)
+	if err != nil {
+		return "", err
+	}
 	body, err := yaml.Marshal(obj)
 	if err != nil {
 		return "", err
