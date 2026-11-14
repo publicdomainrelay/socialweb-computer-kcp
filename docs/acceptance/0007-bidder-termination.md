@@ -70,12 +70,14 @@ the `adopted` lines with a `role` (kine-a, front, kcp-a) are the core's own infr
 
 Test: `tests/compositions/0007` entry `restart`; staging only (SKIP on prod, whose rollout is the same restart). It holds
 a VM, reads its FirecrackerVM `status.runtime` (pid, invocationID, unit, startTicks, startTime) and the guest's boot id,
-restarts the winner's core, then asserts:
+restarts the winner's core (and reads its HostProcess `vm-<name>`: `status.runtime` pid = the unit's MainPID, invocationID,
+activeSince = ActiveEnterTimestamp, as the supervisor read them), then asserts:
 
 - the ComputeVM is `Running` every 2 s from before the restart to 30 s after it (never `Lost`, `Releasing`, deleted)
-- the VM's runtime (pid, invocationID, unit, startTicks, startTime) is unchanged, the guest's boot id is unchanged and ssh answers
+- the VM's runtime (FirecrackerVM and HostProcess: pid, invocationID, unit, startTicks, startTime, activeSince) is unchanged,
+  the guest's boot id is unchanged and ssh answers
 - the new core's log has exactly one `hostprocess_unit_adopted` line for `vm-<name>` whose pid and invocation are the
-  VM's, state active, activeSince within 5 s of its start time
+  unit's (HostProcess runtime) before the restart, state active, activeSince the unit's, to the second
 - none of the VM's `placed`, `stopped`, `shutdown`, `work dir and API socket removed`, `the process wait saw the VMM exit`,
   `a released bid is marked terminated` lines after the restart
 - the restart happened: a new `core holds the instance` line (a dev network's core), or at least 3 new `adopted` infra lines
