@@ -27,7 +27,7 @@ sections 2, 5 and 7).
   44 s after start, cluster c1 + kubeconfig 17 s, pod Ready 50 s after the apply (node `*-c1-node1` on hat-8),
   `quickstart-k8s-ok`; delete Deployment: nodes 0 in 156 s, node records 6/6, `self` and `nodes-<hex>` mirrors gone, 0
   ERROR
-- C also reads the index: after nodes 0 `computer.socialweb.infra/self`'s `live` list must not name this run's Infra (the ended records themselves are kept); not yet run with that check (a 2-bidder dev net 2026-11-14 never got a Ready quickstart-k8s pod in 15 min: the k8s node did not join there)
+- C also reads the index: after nodes 0 `computer.socialweb.infra/self`'s `live` list must not name this run's Infra (the ended records themselves are kept); not yet run with that check; the controller reconciles the index (`infra_index_reconciled`: entries whose record ended or is missing are dropped from `live` at start and on each index write) (a 2-bidder dev net 2026-11-14 never got a Ready quickstart-k8s pod in 15 min: the k8s node did not join there)
 - Previous pass C: 2026-11-12 21:12-21:19Z, kcp e190a3b1 (rollout 19, rc165 candidate): 0 ERROR, the infra `self` and
   `nodes-<hex>` mirror gone 20 s after nodes 0 (8e849b42). Before: 2026-11-12 20:02-20:10Z, kcp ac51b91e (rollout 18): node Ready, `quickstart-k8s-ok`, the requester logs 0
   ERROR (no ComponentLink errors: fixed in 363dd814); nodes 0 in 156 s; but the emptied

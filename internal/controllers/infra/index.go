@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
@@ -33,9 +34,13 @@ const (
 
 	IndexRetries = 5
 
-	IndexProbes = 2
+	IndexVerifyMax = 64
 
-	IndexProbeEvery = time.Hour
+	IndexVerifyEvery = 10 * time.Minute
+
+	IndexVerifyWorkers = 8
+
+	IndexVerifyBudget = 6 * time.Second
 
 	IndexFailedWait = 10 * time.Minute
 
@@ -431,7 +436,7 @@ func (r *reconciler[T]) mutateIndex(ctx context.Context, req ctlruntime.Request,
 	k := keyOf(req, v)
 	attrs := []any{"kind", v.kind, "workspace", req.Workspace, "name", req.Name, "index", infra.IndexURI(target.did), "rkey", target.key.Rkey}
 	view, cache, known := r.c.cachedView(req.Cluster, target.did)
-	if known && view.Settled(change) {
+	if known && view.Settled(change) && r.c.reconciledDID(req.Cluster, target.did) {
 		r.c.indexRetries.Reset(k)
 		reason, message := settledReason(change, target.did)
 		return reason, message, 0
@@ -449,7 +454,9 @@ func (r *reconciler[T]) mutateIndex(ctx context.Context, req ctlruntime.Request,
 	if cache, err = r.c.loadIndex(ctx, reader, req.Cluster, target.did); err != nil {
 		return r.indexFailed(k, "", target.own, attrs, err)
 	}
-	if view, _, _ = r.c.cachedView(req.Cluster, target.did); view.Settled(change) {
+	view, _, _ = r.c.cachedView(req.Cluster, target.did)
+	change.Dead = r.c.reconcileIndex(ctx, reader, req.Cluster, target, view.Live, now)
+	if len(change.Dead) == 0 && view.Settled(change) {
 		r.c.indexRetries.Reset(k)
 		r.c.setFailed(k, nil)
 		reason, message := settledReason(change, target.did)
@@ -464,7 +471,6 @@ func (r *reconciler[T]) mutateIndex(ctx context.Context, req ctlruntime.Request,
 	if !ok {
 		return r.indexFailed(k, cache.cid, target.own, attrs, errors.New("infra: the repo cannot put a record by its cid"))
 	}
-	change.Dead = r.c.probe(ctx, reader, target, view.Live, now)
 	var full error
 	for attempt := 1; attempt <= IndexAttempts; attempt++ {
 		var raw json.RawMessage
@@ -565,61 +571,152 @@ func (r *reconciler[T]) indexFailed(k indexKey, cid, own string, attrs []any, er
 	return reason, err.Error(), 0
 }
 
-func (c *Controller) probe(ctx context.Context, reader atprotorepo.RecordReader, target indexTarget, entries []infra.IndexEntry, now time.Time) []infra.IndexDead {
-	candidates := slices.DeleteFunc(slices.Clone(entries), func(e infra.IndexEntry) bool {
-		return e.Key() == target.key || e.Expired(now)
-	})
-	slices.SortStableFunc(candidates, func(a, b infra.IndexEntry) int { return a.AddedAt.Compare(b.AddedAt) })
-	var out []infra.IndexDead
-	probed := 0
-	for _, e := range candidates {
-		if probed >= IndexProbes {
-			break
-		}
-		uri := "at://" + target.did + "/" + e.Collection + "/" + e.Rkey
-		c.mu.Lock()
-		last, seen := c.probed[uri]
-		due := !seen || now.Sub(last) >= IndexProbeEvery
-		if due {
-			c.probed[uri] = now
-		}
-		c.mu.Unlock()
-		if !due {
-			continue
-		}
-		probed++
-		got, err := reader.GetRecord(ctx, target.did, e.Collection, e.Rkey)
-		if errors.Is(err, atprotorepo.ErrRecordNotFound) {
-			out = append(out, infra.IndexDead{IndexEnded: infra.IndexEnded{Collection: e.Collection, Rkey: e.Rkey, EndedAt: now}, Gone: true})
-			continue
-		}
-		if err != nil {
-			continue
-		}
-		kind := infra.KindInfra
-		if e.Collection == record.EphemeralInfraNSID {
-			kind = infra.KindEphemeralInfra
-		}
-		decoded, derr := infra.Decode(kind, got.Value)
-		if !errors.Is(derr, infra.ErrReserved) && !decoded.Over(kind, now) {
-			continue
-		}
-		ended := infra.IndexEnded{Collection: e.Collection, Rkey: e.Rkey, EndedAt: now, EndReason: strings.ToLower(string(decoded.EndReason))}
-		if at, err := time.Parse(time.RFC3339, decoded.EndedAt); err == nil {
-			ended.EndedAt = at
-		} else if decoded.Expired(kind, now) {
-			ended.EndedAt, ended.EndReason = decoded.CreatedAt.Add(time.Duration(decoded.TTLSeconds)*time.Second), infra.IndexEndDeadline
-		}
-		out = append(out, infra.IndexDead{IndexEnded: ended})
-	}
+func (c *Controller) reconciledDID(cluster, did string) bool {
 	c.mu.Lock()
-	for uri := range c.probed {
-		if strings.HasPrefix(uri, "at://"+target.did+"/") &&
-			!slices.ContainsFunc(entries, func(e infra.IndexEntry) bool { return uri == "at://"+target.did+"/"+e.Collection+"/"+e.Rkey }) {
-			delete(c.probed, uri)
+	defer c.mu.Unlock()
+	return c.reconciled[cacheKey(cluster, did)]
+}
+
+type verdict struct {
+	checked bool
+
+	dead *infra.IndexDead
+}
+
+func verdictOf(ctx context.Context, reader atprotorepo.RecordReader, did string, e infra.IndexEntry, now time.Time) verdict {
+	got, err := reader.GetRecord(ctx, did, e.Collection, e.Rkey)
+	if errors.Is(err, atprotorepo.ErrRecordNotFound) {
+		return verdict{checked: true, dead: &infra.IndexDead{IndexEnded: infra.IndexEnded{Collection: e.Collection, Rkey: e.Rkey, EndedAt: now}, Gone: true}}
+	}
+	if err != nil {
+		return verdict{}
+	}
+	kind := infra.KindInfra
+	if e.Collection == record.EphemeralInfraNSID {
+		kind = infra.KindEphemeralInfra
+	}
+	decoded, derr := infra.Decode(kind, got.Value)
+	phase := recordPhase(got.Value)
+	if !errors.Is(derr, infra.ErrReserved) && !decoded.Over(kind, now) && phase != "ended" && phase != "released" {
+		return verdict{checked: true}
+	}
+	ended := infra.IndexEnded{Collection: e.Collection, Rkey: e.Rkey, EndedAt: now, EndReason: strings.ToLower(string(decoded.EndReason))}
+	if at, err := time.Parse(time.RFC3339, decoded.EndedAt); err == nil {
+		ended.EndedAt = at
+	} else if decoded.Expired(kind, now) {
+		ended.EndedAt, ended.EndReason = decoded.CreatedAt.Add(time.Duration(decoded.TTLSeconds)*time.Second), infra.IndexEndDeadline
+	}
+	if ended.EndReason == "" {
+		ended.EndReason = infra.IndexEndDeleted
+	}
+	return verdict{checked: true, dead: &infra.IndexDead{IndexEnded: ended}}
+}
+
+func recordPhase(raw json.RawMessage) string {
+	var value struct {
+		Status struct {
+			Phase string `json:"phase"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(value.Status.Phase))
+}
+
+// reconcileIndex reads the Infra or EphemeralInfra record of live entries and returns those whose record ended, was released, expired or is
+// missing, for ApplyIndex to drop from the index (the records are never touched). At most IndexVerifyMax entries are read per call (all of
+// them, up to IndexMaxLive, the first time this process sees the index), each entry at most once per IndexVerifyEvery, with
+// IndexVerifyWorkers reads in flight and IndexVerifyBudget in all.
+func (c *Controller) reconcileIndex(ctx context.Context, reader atprotorepo.RecordReader, cluster string, target indexTarget, entries []infra.IndexEntry,
+	now time.Time) []infra.IndexDead {
+	ck := cacheKey(cluster, target.did)
+	prefix := "at://" + target.did + "/"
+	uriOf := func(e infra.IndexEntry) string { return prefix + e.Collection + "/" + e.Rkey }
+	candidates := slices.DeleteFunc(slices.Clone(entries), func(e infra.IndexEntry) bool { return e.Key() == target.key || e.Expired(now) })
+	c.mu.Lock()
+	first := !c.reconciled[ck]
+	last := map[string]time.Time{}
+	var due []infra.IndexEntry
+	for _, e := range candidates {
+		at, seen := c.probed[uriOf(e)]
+		if !seen || now.Sub(at) >= IndexVerifyEvery {
+			due = append(due, e)
+			last[uriOf(e)] = at
 		}
 	}
 	c.mu.Unlock()
+	slices.SortStableFunc(due, func(a, b infra.IndexEntry) int {
+		if d := last[uriOf(a)].Compare(last[uriOf(b)]); d != 0 {
+			return d
+		}
+		return a.AddedAt.Compare(b.AddedAt)
+	})
+	limit := IndexVerifyMax
+	if first {
+		limit = infra.IndexMaxLive
+	}
+	deferred := max(0, len(due)-limit)
+	due = due[:len(due)-deferred]
+	verdicts := make([]verdict, len(due))
+	if len(due) > 0 {
+		vctx, cancel := context.WithTimeout(ctx, IndexVerifyBudget)
+		var wg sync.WaitGroup
+		jobs := make(chan int)
+		for range min(IndexVerifyWorkers, len(due)) {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range jobs {
+					if vctx.Err() == nil {
+						verdicts[i] = verdictOf(vctx, reader, target.did, due[i], now)
+					}
+				}
+			}()
+		}
+		for i := range due {
+			jobs <- i
+		}
+		close(jobs)
+		wg.Wait()
+		cancel()
+	}
+	var out []infra.IndexDead
+	var live, ended, gone, young, failed int
+	c.mu.Lock()
+	for i, v := range verdicts {
+		e := due[i]
+		switch {
+		case !v.checked:
+			failed++
+		case v.dead == nil:
+			c.probed[uriOf(e)] = now
+			live++
+		case v.dead.Gone && now.Sub(e.AddedAt) < infra.IndexGoneAfter:
+			young++
+		default:
+			if v.dead.Gone {
+				gone++
+			} else {
+				ended++
+			}
+			out = append(out, *v.dead)
+		}
+	}
+	for uri := range c.probed {
+		if strings.HasPrefix(uri, prefix) && !slices.ContainsFunc(entries, func(e infra.IndexEntry) bool { return uri == uriOf(e) }) {
+			delete(c.probed, uri)
+		}
+	}
+	complete := deferred == 0 && failed == 0
+	if complete {
+		c.reconciled[ck] = true
+	}
+	c.mu.Unlock()
+	if first || len(out) > 0 || !complete {
+		c.log.Info("infra_index_reconciled", "index", infra.IndexURI(target.did), "first", first, "entries", len(entries), "checked", len(due)-failed,
+			"live", live, "ended", ended, "gone", gone, "young", young, "failed", failed, "deferred", deferred, "complete", complete)
+	}
 	return out
 }
 

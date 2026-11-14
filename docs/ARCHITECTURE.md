@@ -12125,10 +12125,19 @@ controller runs (page, iOS `pkg/embedded`, gateway, CLI); there is no central wr
   the prunes found. Permanent failures (403, link denied) wait 10 min or a new index or record CID.
   The index work of one pass has a 10 s budget.
 - Prune, by any writer during its own write: an expired entry (`expiresAt` passed, no read; endReason
-  `deadline`); and, from at most 2 probes per write (one getRecord each, oldest `addedAt` first, each
-  entry at most once an hour per process), an entry whose record ended or expired, or for which the
-  PDS answers `RecordNotFound` (`atprotorepo.ErrRecordNotFound`; a bare HTTP 404 or RepoNotFound is
-  not enough) and that was added more than 10 min ago (`infra.IndexGoneAfter`; endReason `deleted`).
+  `deadline`); and the reconcile (`reconcileIndex`): a getRecord of each live entry's own Infra or
+  EphemeralInfra record, dropping from `live` (the records and nodes are kept, never deleted) every entry
+  whose record ended (`endedAt`, phase `ended` or `released`), expired, or for which the PDS answers
+  `RecordNotFound` (`atprotorepo.ErrRecordNotFound`; a bare HTTP 404 or RepoNotFound is not enough) and
+  that was added more than 10 min ago (`infra.IndexGoneAfter`; endReason `deleted`). It runs on the
+  first index pass for an account after the process starts (all entries, up to 256) and then on every
+  index write (at most 64 entries per write, each at most once per 10 min per process, never-read and
+  longest-unread first, 8 reads in flight, 6 s in all, inside the 10 s pass budget); a read that fails
+  leaves the entry in place and the account unreconciled until a pass completes. Logged as
+  `infra_index_reconciled` (entries, checked, live, ended, gone, young, failed, deferred). It does not
+  depend on how the entry went stale (Infra object gone, release never finished, an unbound Retained
+  record whose `indexEnd` never ran). A record that is neither ended nor missing counts as live, even
+  when no Infra object in a cluster backs it any more.
   An added entry is dropped from `recentEnded`, and a changed `expiresAt` (or the record's
   `createdAt`) rewrites the entry in place, so a session is never both live and ended and never
   expires early.
@@ -12142,8 +12151,8 @@ controller runs (page, iOS `pkg/embedded`, gateway, CLI); there is no central wr
   (`infra_index_write_failed`) and shown as the condition `Indexed` (True `Indexed`; False `Pending`,
   `Removed`, `RecordInvalid`, `Contended`, `IndexWriteRetrying`, `IndexWriteFailed`, `IndexFull`,
   `IndexNotIndex`, `RepoPending`). The finalizer's removal is best effort.
-- Write load per session: start 1 index write, 1 getRecord of `infra/self` before it and at most 2
-  probe getRecords; end the same; each lost swap adds 1 getRecord and 1 write. Steady state: no index write; the index watch verifies 1 getRecord per 5 min per repo per
+- Write load per session: start 1 index write, 1 getRecord of `infra/self` before it and at most 64
+  reconcile getRecords (256 the first time after a process start); end the same; each lost swap adds 1 getRecord and 1 write. Steady state: no index write; the index watch verifies 1 getRecord per 5 min per repo per
   workspace.
 - The EphemeralInfra kind's ComponentLink (`compose.InfraLinks`) gains repo.write on
   `computer.socialweb.infra` for the index. No OAuth scope change: every infra-writing scope set

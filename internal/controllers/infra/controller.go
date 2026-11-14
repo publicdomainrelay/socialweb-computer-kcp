@@ -93,6 +93,8 @@ type Controller struct {
 
 	probed map[string]time.Time
 
+	reconciled map[string]bool
+
 	indexRetries *netretry.Tracker[indexKey]
 }
 
@@ -105,7 +107,7 @@ func New(opts Options) *Controller {
 		pulls: map[indexKey]pullNote{}, moved: map[indexKey]string{}, unwritten: map[indexKey]bool{}, retained: map[indexKey]bool{}, retries: netretry.NewTracker[indexKey](), repos: map[string]*binding.Table[struct{}]{
 			string(infra.KindInfra): binding.New[struct{}](), string(infra.KindEphemeralInfra): binding.New[struct{}]()},
 		writer: writerLabel(opts.Writer), indexes: map[string]indexCache{}, wants: map[indexKey]indexWant{}, indexFailed: map[indexKey]indexFailure{},
-		indexWatches: map[string]bool{}, probed: map[string]time.Time{}, indexRetries: netretry.NewTracker[indexKey]()}
+		indexWatches: map[string]bool{}, probed: map[string]time.Time{}, reconciled: map[string]bool{}, indexRetries: netretry.NewTracker[indexKey]()}
 }
 
 func writerLabel(raw string) string {
