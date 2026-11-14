@@ -263,6 +263,9 @@ func (b *Bidder) ensureProvisionSync(ctx context.Context, request provisionPaylo
 		return "", err
 	}
 	name := provisionSyncName(request.Accept.URI)
+	if b.acceptGivenUp(request.Accept.URI) {
+		return name, nil
+	}
 	sync := outboundSync(name, map[string]string{adapterLabel: ProvisionSyncAdapter}, nil, &v1alpha1.StateSyncSource{Workspace: b.cfg.Workspace},
 		ProvisionSyncAdapter, "accept:"+request.Accept.URI, payload)
 	if err := b.createSync(ctx, sync, "provision", "accept", request.Accept.URI); err != nil {

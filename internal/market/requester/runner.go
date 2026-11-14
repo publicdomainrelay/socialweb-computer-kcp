@@ -383,9 +383,8 @@ func (r *contractRunner) replaceDeclined(ctx context.Context, cause error) {
 	}
 	did := winnerDID(state)
 	r.log().Warn("requester_accept_declined_replace", "bidder", did, "err", cause.Error())
-	if state.Accept != nil && state.Accept.URI != "" {
-		r.deleteRecord(ctx, state.Accept.URI)
-	}
+	// the declined accept is kept: the bidder that declined it, or one still working on it, resolves it again and a missing record is
+	// retried until the bidder gives up (the owner's rule: old records are not deleted)
 	r.mu.Lock()
 	if did != "" {
 		r.declined = append(r.declined, did)

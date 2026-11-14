@@ -18,6 +18,11 @@
 			"description": "Three rentals on two one-VM bidders: two Held, the third refused by both, its new RFP fails at once."
 		},
 		{
+			"entry": "abandon",
+			"label": "Run 0014 abandon",
+			"description": "An accept whose record is not there (a requester that deleted it) is retried a bounded number of times and abandoned by the bidder: one bidder_accept_abandoned, no retry log after it."
+		},
+		{
 			"entry": "impossible",
 			"label": "Run 0014 impossible",
 			"description": "A request no bidder can ever take (more vCPUs than any offering's maxCpus; nestedVirt when none offers it; a deadline that passes before the RFP) fails fast naming why; it never waits for capacity."
@@ -43,6 +48,8 @@
 		"computer.socialweb.test.request.release",
 		"computer.socialweb.test.request.records",
 		"computer.socialweb.test.bidder.logCount",
+		"computer.socialweb.test.bidder.logLines",
+		"computer.socialweb.test.bidder.submitAccept",
 		"com.atproto.repo.getRecord",
 		"com.fedfork.exec.kube.list",
 		"computer.socialweb.test.assert.recordsGone"
@@ -50,7 +57,7 @@
 	"hooks": [
 		{
 			"nsid": "computer.socialweb.test.assert.recordsGone",
-			"reason": "the refused accepts, then every contract record, RecordNotFound"
+			"reason": "every contract record, RecordNotFound"
 		}
 	]
 }

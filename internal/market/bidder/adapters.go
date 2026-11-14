@@ -456,7 +456,7 @@ func (b *Bidder) observeProvision(_ context.Context, request participant.OutboxR
 
 func (b *Bidder) applyProvision(ctx context.Context, request participant.OutboxRequest) (participant.Observation, error) {
 	observation, err := b.provisionAccept(ctx, request)
-	if err != nil {
+	if _, logged := errors.AsType[*acceptUnresolvedError](err); err != nil && !logged {
 		b.log.Warn("the provision of an accept failed", "stateSync", request.Key, "err", err.Error())
 	}
 	return observation, err
@@ -467,6 +467,11 @@ func (b *Bidder) provisionAccept(ctx context.Context, request participant.Outbox
 	if err != nil {
 		return participant.Observation{}, err
 	}
+	if b.acceptGivenUp(payload.Accept.URI) {
+		// silent: the abandon was logged once, and a reconcile that still sees the intent as live (the status write has not come back
+		// through the informer yet) only ends it again
+		return participant.Observation{}, &acceptUnresolvedError{abandoned: true, cause: fmt.Errorf("bidder: the accept %s was abandoned: %w", payload.Accept.URI, participant.ErrObsolete)}
+	}
 	acceptResolved, err := b.records.Resolve(ctx, market.RecordRef{URI: payload.Accept.URI, CID: payload.Accept.CID})
 	if errors.Is(err, market.ErrNotFound) && b.bidForAcceptStatus(payload.Accept.URI, payload.Accept.CID) != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: the accept was resolved before and is gone now: %w: %w", err, participant.ErrObsolete)
@@ -475,8 +480,9 @@ func (b *Bidder) provisionAccept(ctx context.Context, request participant.Outbox
 		return participant.Observation{}, fmt.Errorf("bidder: the accept's author does not resolve on this bidder's PLC: %w: %w", err, participant.ErrObsolete)
 	}
 	if err != nil {
-		return participant.Observation{}, fmt.Errorf("bidder: resolving the accept: %w", err)
+		return participant.Observation{}, b.unresolvedAccept(request, payload.Accept.URI, err)
 	}
+	b.forgetAccept(payload.Accept.URI)
 	accept, err := market.ParseAccept(acceptResolved.Value)
 	if err != nil {
 		return participant.Observation{}, fmt.Errorf("bidder: the accept is invalid: %w", err)

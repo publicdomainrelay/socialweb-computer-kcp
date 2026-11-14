@@ -205,6 +205,7 @@ func (b *Bidder) acceptRefused(rfpURI, acceptURI, acceptCID string, payload mark
 	if b.vmForAccept(acceptURI, acceptCID) != nil {
 		return ""
 	}
+	b.rememberAcceptRFP(acceptURI, rfpURI)
 	record, err := parseVMRecord(payload.Value)
 	if err != nil {
 		return ""

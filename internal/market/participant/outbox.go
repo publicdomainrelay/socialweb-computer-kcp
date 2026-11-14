@@ -56,6 +56,8 @@ type OutboxRequest struct {
 	Source *v1alpha1.StateSyncSource
 
 	UID string
+
+	CreatedAt time.Time
 }
 
 type Observation struct {
@@ -177,7 +179,7 @@ func (r *outboxRun) write(ctx context.Context) error {
 
 func (r *outboxRun) request() OutboxRequest {
 	return OutboxRequest{Key: r.obj.Spec.IdempotencyKey, Payload: append(json.RawMessage(nil), r.obj.Spec.Payload...),
-		Sink: r.obj.Spec.Sink, Source: r.obj.Spec.Source, UID: string(r.obj.UID)}
+		Sink: r.obj.Spec.Sink, Source: r.obj.Spec.Source, UID: string(r.obj.UID), CreatedAt: r.obj.CreationTimestamp.Time}
 }
 
 func (r *outboxRun) set(kind string, ok bool, reason, message string) {

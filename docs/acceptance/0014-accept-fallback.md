@@ -2,7 +2,7 @@
 
 Proves a bidder never takes more VMs than it has room for, and that a requester whose accept is refused for capacity
 gets its VM elsewhere on the same RFP: the bidder answers the accept's `submitAccept` with HTTP 409
-`CapacityExceeded` (no receipt), the requester deletes that accept, denies the bidder for the contract and takes the
+`CapacityExceeded` (no receipt), the requester keeps that accept (a bidder may still act on it; old records are not deleted), denies the bidder for the contract and takes the
 next bid; with no bid left it deletes the RFP and issues a new one without the refusers.
 
 - Code: `internal/market/bidder/vmsize.go` (bid-time check, accept-time reservation keyed by RFP URI, 10 min hold,
@@ -25,7 +25,7 @@ sequenceDiagram
   R2->>Y: RFP 2; Y bids
   R1->>X: accept 1 -> reserved, receipt
   R2->>X: accept 2 -> 409 CapacityExceeded, no receipt
-  R2->>R2: requester_submit_accept_declined, requester_accept_declined_replace, delete accept 2, deny X
+  R2->>R2: requester_submit_accept_declined, requester_accept_declined_replace, keep accept 2, deny X
   R2->>Y: accept (Y's bid on RFP 2) -> receipt, Held
 ```
 
@@ -172,3 +172,12 @@ Dev market network `capt` on hat-8 (3 bidders, `--vmm qemu`, 16 CPUs each in the
   10 s after the request, `requester_no_bidders: ... the offering's maxCpus is below the request: 16 (the request asks 17)`, main FAIL (`requester_waiting_for_capacity` round 1);
   `wait`, `exhausted`, `giveup` still wait on the fix (PASS 238.7 s, 97.4 s, 213.4 s). Not provable on this net: the nestedVirt case (both dev bidders offer nestedVirt),
   an image request against an offering without `images` (both set it), a bidder too old to answer `declined`
+
+## abandon (an accept that cannot be read)
+
+`0014:abandon` submits an accept to the first bidder whose record does not exist (what a requester that deleted its accept before the
+bidder read it leaves): the bidder retries the provision (`bidder_accept_unresolved`: kind `notFound` or `unreachable`, the tries and the
+age) and, after 5 failed tries and an intent 3 min old (30 min for an unreachable PDS), abandons it: one `bidder_accept_abandoned`
+(accept, kind, tries, age, reservationReleased), its reservation released, the intent Obsolete (the outbox never retries it) and
+the accept remembered; nothing more is logged for it. About 8 min on a dev net (the outbox stalls after its first burst of retries and tries again 5 min later; 328 tries by then).
+Pass: exactly one abandon within 9 min, no `the provision of an accept failed` line, no retry line in the 2 min after.

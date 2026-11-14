@@ -78,6 +78,7 @@ pub const NSIDS: &[&str] = &[
     "computer.socialweb.test.bidder.logCount",
     "computer.socialweb.test.vm.memory",
     "computer.socialweb.test.bidder.logLines",
+    "computer.socialweb.test.bidder.submitAccept",
     "computer.socialweb.test.bidder.restart",
     "computer.socialweb.test.assets.tamper",
     "computer.socialweb.test.gateway.log",

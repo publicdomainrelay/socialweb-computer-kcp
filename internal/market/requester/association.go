@@ -558,6 +558,10 @@ func (r *contractRunner) deleteMarketRecords(ctx context.Context, state *v1alpha
 			refs = append(refs, state.Release.Event, state.Release.Payload)
 		}
 		for _, ref := range []*commonv1.StrongRef{state.Accept, state.RFP, state.Payload, state.Policy} {
+			// an accept with no receipt is one a bidder may still act on (it never answered, or it is provisioning): kept
+			if ref == state.Accept && state.Receipt == nil {
+				continue
+			}
 			if ref != nil {
 				refs = append(refs, *ref)
 			}

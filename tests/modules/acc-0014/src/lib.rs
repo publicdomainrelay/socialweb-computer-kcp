@@ -5,7 +5,7 @@
 // 2 bidders, two VMs each, 4 rentals. exhausted: 2 bidders, one VM each, 3 rentals: the third is refused by both, its
 // bids run out, its new RFP (the refusers excluded) has no bidder left: Failed at once (requester_no_bidders). All through the kcp CLI requester (`run request`); the atlibs requester
 // module's fallback is tests/compositions/knotless entry `fallback`. Both: every rental Held, never on a bidder that refused it, no bidder over its
-// vCPUs, the refused accepts gone, then all released and every record gone. Staging only (it fills bidders).
+// vCPUs, the refused accepts kept, then all released and every record gone. Staging only (it fills bidders).
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
 use steps::{MIN, S, get_record, host, kube, out};
@@ -198,10 +198,11 @@ fn check(s: &mut S, mut h: Handle, shape: &Shape) -> Result<Handle, Handle> {
     rounds.push(summary);
     s.set("verify");
     let mut wait = 0;
-    if !declined_uris.is_empty() {
-        h = h.call(host("gone:declined", "assert.recordsGone", json!({ "uris": declined_uris })));
-        wait += 1;
-    }
+    // a refused accept is kept (a bidder that has it may still act on it; a missing record would be retried until the bidder gives up)
+    s.reading(&format!("refusedAcceptsKept_{round}"), declined_uris.len());
+    let mut kept = s.st["kept"].as_array().cloned().unwrap_or_default();
+    kept.extend(declined_uris.iter().cloned());
+    s.st["kept"] = json!(kept);
     for (j, b) in chosen(s).iter().enumerate() {
         if let Some(c) = b["cluster"].as_str() {
             h = h.call(vms(&format!("vms:{j}"), c));
@@ -539,7 +540,8 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                     }
                 }
                 "rec" => {
-                    for u in o["uris"].as_array().into_iter().flatten() {
+                    let kept = s.st["kept"].as_array().cloned().unwrap_or_default();
+                    for u in o["uris"].as_array().into_iter().flatten().filter(|u| !kept.contains(u)) {
                         s.st["uris"].as_array_mut().map(|a| a.push(u.clone()));
                     }
                     if landed(&mut s) {
@@ -721,6 +723,102 @@ fn impossible_0014(run: Run<Value>) -> Result<Handle, String> {
                 }
                 _ => {}
             }
+        }
+        _ => {}
+    }
+    Ok(s.keep(h))
+}
+
+/// The CID of a record that does not exist (the example CID of the atproto docs).
+const NO_SUCH_CID: &str = "bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+/// An accept whose record cannot be read is abandoned by the bidder within this many seconds of the submit (the bound: 5 failed tries
+/// and 3 min, the outbox's stall retry is the next attempt at about 5.5 min).
+const ABANDON_WITHIN_S: f64 = 540.0;
+/// After the abandon the bidder does not try again for this long.
+const ABANDON_QUIET_S: f64 = 120.0;
+
+/// abandon: a requester that submits an accept and has no such record (it deleted it before the bidder read it): the bidder retries
+/// it a bounded number of times and gives up (bidder_accept_abandoned, one line, with the tries and the age), after which it logs
+/// nothing more of that accept: no bidder_accept_unresolved, no "the provision of an accept failed". The first bidder of the target.
+fn abandon_0014(run: Run<Value>) -> Result<Handle, String> {
+    let args = &run.args;
+    let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
+    if let Some(h) = steps::market_event(&mut s, &run.event) {
+        return Ok(h);
+    }
+    let bidders: Vec<Value> = args["bidders"].as_array().cloned().unwrap_or_default();
+    let polls = |s: &mut S, h: Handle| -> Handle {
+        let (name, uri) = (s.st["bidder"].clone(), s.st["uri"].as_str().unwrap_or_default().to_string());
+        s.st["wait"] = json!(3);
+        let rows = |id: &str, text: &str| host(id, "bidder.logLines", json!({ "name": name, "texts": [[uri, text]], "keys": ["accept", "kind", "tries", "age", "reservationReleased", "err"] }));
+        h.call(rows("ab", "bidder_accept_abandoned")).call(rows("un", "bidder_accept_unresolved")).call(rows("gf", "the provision of an accept failed"))
+    };
+    let mut h = Handle::new();
+    match run.event {
+        Event::Start => {
+            let Some(b) = bidders.first() else { return Ok(s.skip("the target names no bidder")) };
+            s.st["bidder"] = b["name"].clone();
+            s.set("submit");
+            let rkey = format!("abandon{}", (s.now * 1000.0) as u64);
+            h = h.call(host("sub", "bidder.submitAccept", json!({ "name": b["name"], "rkey": rkey, "cid": NO_SUCH_CID }))).timer("deadline", 15 * MIN);
+        }
+        Event::Timer { id } if id == "deadline" => return Ok(s.fail(format!("not done in 15 min (phase {})", s.phase()))),
+        Event::Timer { id } if id == "poll" => {
+            if s.is("watch") || s.is("settle") {
+                h = polls(&mut s, h);
+            }
+        }
+        Event::Result { id, result, .. } => {
+            let o = match steps::out(&s, &id, result.output()) {
+                Ok(o) => o,
+                Err(f) => return Ok(f),
+            };
+            if id == "sub" {
+                s.st["uri"] = o["acceptUri"].clone();
+                s.reading("submitted", json!({ "uri": o["acceptUri"], "reply": o["reply"] }));
+                s.mark("submitted");
+                s.set("watch");
+                return Ok(s.keep(h.timer("poll", 20_000)));
+            }
+            let n = o["lines"].as_array().map_or(0, Vec::len);
+            s.st[&id] = json!({ "n": n, "lines": o["lines"] });
+            if !landed(&mut s) {
+                return Ok(s.keep(h));
+            }
+            let (ab, un, gf) = (s.st["ab"]["n"].as_u64().unwrap_or(0), s.st["un"]["n"].as_u64().unwrap_or(0), s.st["gf"]["n"].as_u64().unwrap_or(0));
+            if gf > 0 {
+                return Ok(s.fail(format!("the generic provision failure was logged {gf} times for an accept that is not there: {}", s.st["gf"]["lines"])));
+            }
+            if s.is("watch") {
+                let t = s.since("submitted");
+                if ab == 0 {
+                    if t > ABANDON_WITHIN_S {
+                        return Ok(s.fail(format!("the bidder did not abandon the accept within {ABANDON_WITHIN_S} s ({un} unresolved lines): {}", s.st["un"]["lines"])));
+                    }
+                    return Ok(s.keep(h.timer("poll", 20_000)));
+                }
+                if ab != 1 {
+                    return Ok(s.fail(format!("{ab} bidder_accept_abandoned lines for one accept: {}", s.st["ab"]["lines"])));
+                }
+                s.reading("abandoned_s", t);
+                s.reading("abandoned", s.st["ab"]["lines"][0].clone());
+                s.reading("unresolved_before_abandon", un);
+                s.st["un0"] = json!(un);
+                s.mark("abandoned");
+                s.set("settle");
+                return Ok(s.keep(h.timer("poll", 20_000)));
+            }
+            if ab != 1 {
+                return Ok(s.fail(format!("{ab} bidder_accept_abandoned lines after the abandon: {}", s.st["ab"]["lines"])));
+            }
+            if un != s.st["un0"].as_u64().unwrap_or(0) {
+                return Ok(s.fail(format!("the bidder logged {un} bidder_accept_unresolved lines, {} at the abandon: it retries an abandoned accept", s.st["un0"])));
+            }
+            if s.since("abandoned") < ABANDON_QUIET_S {
+                return Ok(s.keep(h.timer("poll", 20_000)));
+            }
+            s.reading("quiet_s", s.since("abandoned"));
+            return Ok(s.pass());
         }
         _ => {}
     }
@@ -912,4 +1010,4 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-entries! { impossible => impossible_0014, run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, giveup => giveup_0014, wait => wait_0014, backtoback => backtoback_0014 }
+entries! { abandon => abandon_0014, impossible => impossible_0014, run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, giveup => giveup_0014, wait => wait_0014, backtoback => backtoback_0014 }

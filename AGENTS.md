@@ -944,7 +944,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
 - Bidder capacity (`internal/market/bidder/vmsize.go`): a guest counts as its vCPUs and its memory plus the VM overhead
   (`contract/host.VMCommitMiB`, unchanged; the VM's cgroup itself may use up to 2 x the guest memory, `VMLimits`: MemoryMax = MemoryHigh = 2 x guest, MemorySwapMax = guest, so the host pages to swap rather than throttling or killing a VM; a host needs swap of about its RAM). A bid only checks; an accept reserves (per RFP, 10 min,
   dropped once its ComputeVM exists), and an accept that would overcommit is refused before any receipt: submitAccept
-  answers 409 `CapacityExceeded`. The requester then deletes its accept, excludes that bidder and accepts the next bid of
+  answers 409 `CapacityExceeded`. The requester then keeps its accept (never deletes one a bidder may still act on: a bidder that finds it gone retries until `bidder_accept_abandoned`), excludes that bidder and accepts the next bid of
   the same RFP (up to 3 times); when the bids run out after a refusal it publishes a new RFP at once without the refusers (it keeps excluding
   them until an accept works). A round that gets no bid at all, that exclude-the-refusers RFP included, is not a failure: the requester waits
   for capacity (`requester_waiting_for_capacity`, status message `waiting for a N-vCPU slot: round k`), deletes the RFP, and after a backoff

@@ -644,6 +644,25 @@ printf '{{"unit":"%s","current":%s,"high":"%s","max":"%s","swapMax":"%s","events
             // sidecar to match) and runs `dev verify-assets` again on the same asset cache; variant record flips one digit of
             // the embedded build record in a copy of the binary and runs it
             "assets.tamper" => self.assets_tamper(input).await,
+            // submitAccept of an accept record that does not exist (a requester that deleted its accept before the bidder read it): the
+            // account's service auth to the bidder's https endpoint (its offering), for at://<account>/market.accept/<rkey>
+            "bidder.submitAccept" => {
+                let (Ok(name), Ok(rkey), Ok(cid)) = (str_of(input, "name"), str_of(input, "rkey"), str_of(input, "cid")) else { return Some(Err("name, rkey and cid are required".into())) };
+                let Some(b) = self.target.bidders.iter().find(|b| b.name == name) else { return Some(Err(format!("no bidder {name} in the target"))) };
+                async {
+                    let at = testkit::Atproto::new(&self.target);
+                    let sess = at.session(self.acct()?).await.map_err(|e| e.to_string())?;
+                    let offering = at.record(&format!("at://{}/com.publicdomainrelay.temp.market.offering/self", b.did)).await.map_err(|e| e.to_string())?.ok_or("the bidder has no offering record")?;
+                    let endpoint = offering["endpoints"].as_array().into_iter().flatten().find(|e| e["kind"] == "https").and_then(|e| e["address"].as_str()).ok_or("the offering names no https endpoint")?.to_string();
+                    let uri = format!("at://{}/com.publicdomainrelay.temp.market.accept/{rkey}", sess.did());
+                    let reply = at
+                        .service_call(&sess, &endpoint, &format!("{}#pdr_temp_market", b.did), "com.publicdomainrelay.temp.market.submitAccept", Some(&json!({ "acceptUri": uri, "acceptCid": cid })), &[])
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(json!({ "acceptUri": uri, "reply": reply }))
+                }
+                .await
+            }
             "bidder.restart" => {
                 let Ok(name) = str_of(input, "name") else { return Some(Err("name is required".into())) };
                 if !self.target.bidders.iter().any(|b| b.name == name) {

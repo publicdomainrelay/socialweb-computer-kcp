@@ -37,6 +37,15 @@ const (
 
 	ReservedVMSeenGrace = time.Minute
 
+	// An accept whose record stays unresolvable (the requester deleted it, or it never existed) is given up once AcceptGiveUpTries
+	// attempts have failed and the provision intent is AcceptNotFoundGiveUpAfter old (record not found: a PDS and a relay replicate
+	// within a minute or two) or AcceptUnreachableGiveUpAfter old (the PDS did not answer: a longer outage is waited out).
+	AcceptGiveUpTries = 5
+
+	AcceptNotFoundGiveUpAfter = 3 * time.Minute
+
+	AcceptUnreachableGiveUpAfter = 30 * time.Minute
+
 	ImageRetry = time.Minute
 
 	PublishStallThreshold = 3
@@ -301,6 +310,14 @@ type Bidder struct {
 	reserveMu sync.Mutex
 
 	reserved map[string]reservation
+
+	acceptMu sync.Mutex
+
+	acceptTries map[string]*acceptTry
+
+	acceptAbandoned map[string]bool
+
+	acceptRFPs map[string]string
 
 	sandboxes map[string]*sandboxRun
 
