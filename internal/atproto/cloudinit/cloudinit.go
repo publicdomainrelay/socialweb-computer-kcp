@@ -477,10 +477,16 @@ func assertResolver(base map[string]any, gateway string, fallbacks []string) map
 // start job is in flight, and then freezes (CrashAction=freeze): every later systemctl times out and the
 // guest never reports on the network. Each module of the user data used to bring its own
 // `systemctl daemon-reload` and `systemctl enable` (enable reloads too) next to `start --no-block` of
-// earlier modules, so reloads interleaved with the starts. serializeSystemd makes the order hold for
-// the combined runcmd: one reload before the first systemctl command, every enable/disable/mask without
-// a reload of its own, `enable --now` split into a no-reload enable plus a start, and no reload or
-// enable-with-reload after the first start. The assertion fails the build of user data otherwise.
+// earlier modules, so reloads interleaved with the starts.
+//
+// ourRuncmd lays out the runcmd entries OUR modules contribute (RuncmdPrepend and Runcmd of the modules and
+// the overrides); the base's own entries (a requester's user_data, or what an earlier BuildUserData wrote)
+// pass through byte for byte, never rewritten and never an error: their VM, their user data. Layout:
+// our prepended entries, the base, our appended entries, then every start of ours. In our entries ONE
+// `systemctl daemon-reload` stands where our first systemctl command stood, every enable/disable/mask/...
+// is `--no-reload`, `enable --now` is split into a no-reload enable plus a start, and all our starts
+// come last: every reload of the base and of ours happens before any start job of ours. A module writes one
+// `systemctl` command per runcmd entry (a compound line with a reloading verb fails the build: our bug).
 var systemctlReloadVerbs = map[string]bool{"enable": true, "disable": true, "mask": true, "unmask": true, "link": true, "reenable": true, "preset": true, "revert": true, "edit": true}
 
 func runcmdWords(entry any) ([]string, bool) {
@@ -515,105 +521,12 @@ func systemctlParts(words []string) (verb string, flags []string, args []string,
 	return "", flags, nil, false
 }
 
-func isStartVerb(verb string, flags []string) bool {
+func isStartVerb(verb string) bool {
 	switch verb {
 	case "start", "restart", "try-restart", "reload-or-restart", "stop":
 		return true
 	}
-	return slices.Contains(flags, "--now")
-}
-
-func serializeSystemd(base map[string]any) (map[string]any, error) {
-	in := asArray(base["runcmd"])
-	if len(in) == 0 {
-		return base, nil
-	}
-	out := make([]any, 0, len(in)+2)
-	firstSystemctl := -1
-	for _, entry := range in {
-		words, ok := runcmdWords(entry)
-		if !ok {
-			out = append(out, entry)
-			continue
-		}
-		if len(words) == 2 && words[0] == "systemctl" && words[1] == "daemon-reload" {
-			continue
-		}
-		if _, isString := entry.(string); isString {
-			joined := strings.Join(words, " ")
-			if strings.Contains(joined, "||") || strings.Contains(joined, "&&") || strings.Contains(joined, ";") {
-				out = append(out, entry)
-				continue
-			}
-		}
-		verb, flags, args, isCtl := systemctlParts(words)
-		if !isCtl {
-			out = append(out, entry)
-			continue
-		}
-		if systemctlReloadVerbs[verb] && !slices.Contains(flags, "--no-reload") {
-			now := slices.Contains(flags, "--now")
-			kept := []string{"--no-reload"}
-			for _, f := range flags {
-				if f != "--now" && f != "--no-block" {
-					kept = append(kept, f)
-				}
-			}
-			rewritten := append(append([]string{"systemctl"}, kept...), append([]string{verb}, args...)...)
-			out = append(out, joinLike(entry, rewritten))
-			if now && verb == "enable" {
-				start := append([]string{"systemctl", "start"}, args...)
-				if slices.Contains(flags, "--no-block") {
-					start = append([]string{"systemctl", "start", "--no-block"}, args...)
-				}
-				out = append(out, joinLike(entry, start))
-			}
-			continue
-		}
-		out = append(out, entry)
-	}
-	for i, entry := range out {
-		if words, ok := runcmdWords(entry); ok && len(words) >= 2 && words[0] == "systemctl" {
-			firstSystemctl = i
-			break
-		}
-	}
-	if firstSystemctl >= 0 {
-		out = append(out[:firstSystemctl], append([]any{"systemctl daemon-reload"}, out[firstSystemctl:]...)...)
-	}
-	started := false
-	for _, entry := range out {
-		words, ok := runcmdWords(entry)
-		if !ok {
-			continue
-		}
-		if len(words) >= 2 && words[0] == "systemctl" {
-			verb, flags, _, isCtl := systemctlParts(words)
-			if started && isCtl && (verb == "daemon-reload" || (systemctlReloadVerbs[verb] && !slices.Contains(flags, "--no-reload"))) {
-				return nil, fmt.Errorf("cloudinit: runcmd %q reloads systemd after a start job began (systemd 255 PID 1 aborts in service_sigchld_event when a daemon-reload lands during a start job)", strings.Join(words, " "))
-			}
-			if isCtl && isStartVerb(verb, flags) {
-				started = true
-			}
-			continue
-		}
-		line := strings.Join(words, " ")
-		if strings.Contains(line, "systemctl daemon-reload") {
-			return nil, fmt.Errorf("cloudinit: runcmd %q reloads systemd inside a compound command; write one systemctl command per runcmd entry", line)
-		}
-		for verb := range systemctlReloadVerbs {
-			if strings.Contains(line, "systemctl "+verb+" ") || strings.Contains(line, "systemctl --now "+verb+" ") {
-				return nil, fmt.Errorf("cloudinit: runcmd %q runs systemctl %s (which reloads systemd) inside a compound command; write one systemctl command per runcmd entry", line, verb)
-			}
-		}
-		if strings.Contains(strings.Join(words, " "), "systemctl") && (strings.Contains(strings.Join(words, " "), "systemctl start") || strings.Contains(strings.Join(words, " "), "systemctl enable --now")) {
-			started = true
-		}
-	}
-	res := make(map[string]any, len(base))
-	maps.Copy(res, base)
-	res["runcmd"] = out
-	return res, nil
+	return false
 }
 
 func joinLike(entry any, words []string) any {
@@ -625,6 +538,96 @@ func joinLike(entry any, words []string) any {
 		out[i] = w
 	}
 	return out
+}
+
+type ourRuncmd struct {
+	reloadPlaced bool
+	starts       []any
+}
+
+// lay returns entries with our reload placed, our reloads dropped, our enables without a reload, and our starts
+// moved to o.starts.
+func (o *ourRuncmd) lay(entries []any) ([]any, error) {
+	out := make([]any, 0, len(entries)+1)
+	for _, entry := range entries {
+		words, ok := runcmdWords(entry)
+		if !ok {
+			out = append(out, entry)
+			continue
+		}
+		if str, isString := entry.(string); isString && strings.ContainsAny(str, "|&;") && strings.Contains(str, "systemctl") {
+			for verb := range systemctlReloadVerbs {
+				if strings.Contains(str, "systemctl "+verb) || strings.Contains(str, "daemon-reload") {
+					return nil, fmt.Errorf("cloudinit: runcmd %q mixes systemctl %s (a systemd reload) into a compound command; write one systemctl command per runcmd entry", str, verb)
+				}
+			}
+			if strings.Contains(str, "daemon-reload") {
+				return nil, fmt.Errorf("cloudinit: runcmd %q mixes daemon-reload into a compound command; write one systemctl command per runcmd entry", str)
+			}
+			out = append(out, entry)
+			continue
+		}
+		verb, flags, args, isCtl := systemctlParts(words)
+		if !isCtl {
+			out = append(out, entry)
+			continue
+		}
+		if !o.reloadPlaced {
+			out = append(out, "systemctl daemon-reload")
+			o.reloadPlaced = true
+		}
+		switch {
+		case verb == "daemon-reload":
+		case systemctlReloadVerbs[verb]:
+			now := slices.Contains(flags, "--now")
+			if now && verb != "enable" {
+				return nil, fmt.Errorf("cloudinit: runcmd %q: only enable takes --now here", strings.Join(words, " "))
+			}
+			kept := []string{"--no-reload"}
+			for _, f := range flags {
+				if f != "--now" && f != "--no-block" && f != "--no-reload" {
+					kept = append(kept, f)
+				}
+			}
+			out = append(out, joinLike(entry, append(append([]string{"systemctl"}, kept...), append([]string{verb}, args...)...)))
+			if now {
+				start := []string{"systemctl", "start"}
+				if slices.Contains(flags, "--no-block") {
+					start = append(start, "--no-block")
+				}
+				o.starts = append(o.starts, joinLike(entry, append(start, args...)))
+			}
+		case isStartVerb(verb):
+			o.starts = append(o.starts, entry)
+		default:
+			out = append(out, entry)
+		}
+	}
+	return out, nil
+}
+
+// assembleRuncmd: our prepended entries, the base's runcmd, our appended entries, our starts.
+func assembleRuncmd(base map[string]any, pre, post []any) (map[string]any, error) {
+	if len(pre) == 0 && len(post) == 0 {
+		return base, nil
+	}
+	var o ourRuncmd
+	prePart, err := o.lay(pre)
+	if err != nil {
+		return nil, err
+	}
+	postPart, err := o.lay(post)
+	if err != nil {
+		return nil, err
+	}
+	runcmd := append([]any{}, prePart...)
+	runcmd = append(runcmd, asArray(base["runcmd"])...)
+	runcmd = append(runcmd, postPart...)
+	runcmd = append(runcmd, o.starts...)
+	out := make(map[string]any, len(base))
+	maps.Copy(out, base)
+	out["runcmd"] = runcmd
+	return out, nil
 }
 
 type BuildOptions struct {
@@ -653,25 +656,33 @@ func BuildUserData(opts BuildOptions) (string, error) {
 		return "", err
 	}
 	obj := parseBase(opts.Base)
+	var ourPre, ourPost []any
 	for _, module := range modules {
 		patch, err := module(ctx)
 		if err != nil {
 			return "", err
 		}
+		ourPre = append(append([]any{}, patch.RuncmdPrepend...), ourPre...)
+		ourPost = append(ourPost, patch.Runcmd...)
+		patch.RuncmdPrepend, patch.Runcmd = nil, nil
 		obj = applyPatch(obj, patch)
 	}
 	if opts.Overrides != nil {
-		obj = applyPatch(obj, *opts.Overrides)
+		patch := *opts.Overrides
+		ourPre = append(append([]any{}, patch.RuncmdPrepend...), ourPre...)
+		ourPost = append(ourPost, patch.Runcmd...)
+		patch.RuncmdPrepend, patch.Runcmd = nil, nil
+		obj = applyPatch(obj, patch)
+	}
+	obj, err = assembleRuncmd(obj, ourPre, ourPost)
+	if err != nil {
+		return "", err
 	}
 	obj, err = guardPackages(obj)
 	if err != nil {
 		return "", err
 	}
 	obj = assertResolver(obj, gateway, fallbacks)
-	obj, err = serializeSystemd(obj)
-	if err != nil {
-		return "", err
-	}
 	body, err := yaml.Marshal(obj)
 	if err != nil {
 		return "", err

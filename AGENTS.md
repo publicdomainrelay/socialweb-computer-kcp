@@ -242,15 +242,19 @@ requester's own kcp, and `install` prints both. A password never goes into reque
   guest never reports on the network ("did not come on network within 2m0s"; the apport core pipe
   can deadlock the same crash). Closest upstream issue: systemd/systemd#44705 (same assert, line 4064,
   a shutdown race, closed). We do not patch systemd.
-- Rule for everything that reaches `cloud-final` through `cloudinit.BuildUserData`: one
-  `systemctl daemon-reload`, before the first `systemctl` command of runcmd; every `enable` is
-  `systemctl --no-reload enable`; no `enable ssh` (it runs systemd-sysv-install and update-rc.d,
-  which reload; the image has `ssh.socket` enabled, runcmd only starts `ssh.service`); no reload and no
-  enable-with-reload after the first start. `serializeSystemd` (internal/atproto/cloudinit) applies this
-  to the combined runcmd of all modules (drops module-local reloads, rewrites enables, splits
-  `enable --now` into a no-reload enable plus a start) and fails the build of the user data when a
-  reload still follows a start or hides inside a compound `sh` line. A module writes one `systemctl`
-  command per runcmd entry.
+- Rule for the runcmd entries OUR modules contribute (RuncmdPrepend and Runcmd of the modules and the
+  overrides of `cloudinit.BuildUserData`, which also covers guestseed's seed modules): one
+  `systemctl daemon-reload`, standing where our first systemctl command stood; every `enable` is
+  `systemctl --no-reload enable`; no `enable ssh` (it runs systemd-sysv-install and update-rc.d, which
+  reload; the image has `ssh.socket` enabled, runcmd only starts `ssh.service`); all our `start`s come
+  last, after the base's entries and our appended ones. `assembleRuncmd` lays this out: our prepended
+  entries, the base's runcmd, our appended entries, our starts; it drops module-local reloads, rewrites
+  enables and splits `enable --now` into a no-reload enable plus a start. A module writes one
+  `systemctl` command per runcmd entry (a compound line with a reloading verb fails the build: our bug).
+- The base's runcmd entries (a requester's user_data, or what an earlier BuildUserData wrote) pass through
+  byte for byte and never fail a rental: their VM, their user data. Each BuildUserData layer puts its
+  reload before its own starts, so layers stack safely. An older requester CLI builds its modules' reloads
+  and starts into the base it sends: the bidder cannot fix those; they need a requester release.
 - Debugging a silent guest on a dev net: `SWC_DEV_GUEST_BOOT_ARGS_EXTRA` or the file
   `$XDG_RUNTIME_DIR/swc-dev-guest-boot-args-extra` (read by the VM runtime, dev only) appends kernel
   arguments; `sysrq_always_enabled=1 ignore_loglevel systemd.log_target=kmsg
