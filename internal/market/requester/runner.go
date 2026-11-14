@@ -1356,8 +1356,19 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 	var retry eventRetry
 	defer retry.stop()
 	retryC := retry.after(r.q.drainEvents(ctx, r.name, receiptURI))
+	var imageTimer *time.Timer
+	var imageC <-chan time.Time
+	defer func() {
+		if imageTimer != nil {
+			imageTimer.Stop()
+		}
+	}()
 	for {
 		imageSeen = imageSeen || state.GuestImageMarker != ""
+		if !imageSeen && state.VMAddress != "" && imageTimer == nil {
+			imageTimer = time.NewTimer(DefaultVMReadyTimeout)
+			imageC = imageTimer.C
+		}
 		if state.Termination != nil {
 			if state.Termination.Reason == imageRefusedReason {
 				return fmt.Errorf("%w: the bidder refused the image before boot", errGuestImage)
@@ -1395,6 +1406,8 @@ func (r *contractRunner) waitGuest(ctx context.Context, state *v1alpha1.NodeClai
 			addressLate = true
 		case <-hostKeysDeadline.C:
 			hostKeysLate = true
+		case <-imageC:
+			return fmt.Errorf("%w: no guest.image event within %s of the guest coming on network", errGuestImage, DefaultVMReadyTimeout)
 		case event := <-events:
 			if handle(event) {
 				return imageErr
