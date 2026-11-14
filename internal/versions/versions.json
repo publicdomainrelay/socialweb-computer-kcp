@@ -1885,14 +1885,14 @@
       },
       "platforms": {
         "linux/amd64": {
-          "treeSha256": "f12c9754bd3821a603b1ac849738a6695d6515e906418d8cd5421aad5668bdcd",
+          "treeSha256": "4a7447ee4334cba7fd20d911dc717b4211d795932a2eff386c8266ac40c9af97",
           "rawBytes": 42480712,
-          "zstdBytes": 12904383
+          "zstdBytes": 12904597
         },
         "linux/arm64": {
-          "treeSha256": "f12c9754bd3821a603b1ac849738a6695d6515e906418d8cd5421aad5668bdcd",
+          "treeSha256": "4a7447ee4334cba7fd20d911dc717b4211d795932a2eff386c8266ac40c9af97",
           "rawBytes": 42480712,
-          "zstdBytes": 12904383
+          "zstdBytes": 12904597
         }
       }
     },
