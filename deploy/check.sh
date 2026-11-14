@@ -78,6 +78,11 @@ go test -count=1 -timeout 15m $policyspec >"$policylog" 2>&1 &
 policypid=$!
 trap 'kill "$policypid" 2>/dev/null; rm -f "$policylog"' EXIT
 
+selfpinned="$(jq -r '.assets | to_entries[] | select([.value.fetch[]?.kind] | length > 0 and all(. == "go" or . == "script"))
+  | select((.value.platforms // {}) != {} or ([.value.fetch[] | has("sha256")] | any)) | .key' internal/versions/versions.json)"
+[ -z "$selfpinned" ] || fail "versions.json pins the output of an asset built from this repository's own commit (fetch kind go or script): $(echo $selfpinned); remove its platforms and fetch sha256 (the build records them, scripts/check-reproducible.sh proves them)"
+echo "check.sh: ok versions.json pins no output of an asset built from this commit"
+
 for module in $(jq -r '[.assets[].fetch // {} | .[] | select(.kind == "go") | .module // empty] | unique[]' internal/versions/versions.json); do
   (cd "$module" && go build -o /dev/null ./... && go vet ./...) || fail "go build and go vet of the asset module $module"
   echo "check.sh: ok go build and go vet of the asset module $module"

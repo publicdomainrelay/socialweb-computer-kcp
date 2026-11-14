@@ -7,31 +7,34 @@ blobs="$root/internal/assets/blobs"
 cache=""
 print_pins=0
 update_pins=0
+print_src_key=0
 blob_cache=""
 jobs=6
 platforms=()
 only=()
 
 usage() {
-  echo "usage: $0 [--platform linux/amd64|linux/arm64]... [--asset NAME]... [--cache DIR] [--blobs DIR] [--blob-cache DIR] [--jobs N] [--print-pins|--update-pins]" >&2
+  echo "usage: $0 [--platform linux/amd64|linux/arm64]... [--asset NAME]... [--cache DIR] [--blobs DIR] [--blob-cache DIR] [--jobs N] [--print-pins|--update-pins|--print-src-key]" >&2
   echo "  downloads every pinned asset of versions.json, verifies its sha256 (and the upstream signature" >&2
   echo "  where one is published), repacks it as internal/assets/blobs/<goos>_<goarch>/<asset>.tar.zst and" >&2
-  echo "  checks the unpacked tree against its treeSha256 pin. --print-pins prints the measured pins and" >&2
-  echo "  stages even when a tree pin differs. --update-pins does the same for the assets built from this" >&2
-  echo "  repository (fetch kind go or script) or built here from pinned upstream source (fetch kind gosrc or cargosrc)" >&2
-  echo "  and writes their new pins into versions.json; pins of" >&2
-  echo "  downloaded assets are never changed. --cache keeps" >&2
+  echo "  checks the unpacked tree against its treeSha256 pin. An asset built from this repository's own commit" >&2
+  echo "  (fetch kind go or script) has NO pin: its tree digest, sizes and binary sha256 are written beside its blob as" >&2
+  echo "  <blobs>/<goos>_<goarch>/<asset>.built.json (embedded in the release binary, which checks the unpacked tree" >&2
+  echo "  against it); scripts/check-reproducible.sh is what proves a second cold build gives the same bytes." >&2
+  echo "  --print-pins prints the measured digests and stages even when a tree pin differs. --update-pins writes the" >&2
+  echo "  new pins of the assets built here from pinned upstream source (fetch kind gosrc or cargosrc) into" >&2
+  echo "  versions.json; pins of downloaded assets are never changed. --print-src-key (with --blob-cache, one --asset" >&2
+  echo "  and one --platform) prints the source-input key of a built asset and stages nothing. --cache keeps" >&2
   echo "  the downloads (keyed by sha256) in DIR instead of internal/assets/blobs/.cache. --blobs writes" >&2
   echo "  <goos>_<goarch>/<asset>.tar.zst under DIR instead of internal/assets/blobs (the --dev build's cache)." >&2
   echo "  --blob-cache keeps every zstd blob in DIR: an asset of pinned inputs (kind file, oci, debs, gosrc, cargosrc) by" >&2
   echo "  the sha256 of its versions.json entry, this script, the sources of assetpack and the zstd version and flags (a hit" >&2
   echo "  skips its download or build, verification and repack); an asset built from this checkout (kind go, script) is rebuilt" >&2
-  echo "  and checked against its pin every time, and only its zstd step is reused, keyed by the sha256 of" >&2
-  echo "  its tar stream, or, when its tracked source inputs hash as before (kind go: the in-repo packages it builds from," >&2
+  echo "  unless its tracked source inputs hash as before (kind go: the in-repo packages it builds from," >&2
   echo "  go.mod and go.sum; kind script: the script, the paths its '# stage-assets inputs:' line names (go:<module>:<pkg>" >&2
   echo "  for a package) and versions.json), by those. ASSET_CACHE_URL (the bucket's asset-cache/): a blob the" >&2
   echo "  --blob-cache misses is fetched from <url>/<asset>/<goos>_<goarch>/<key>.tar.zst and its tree checked against" >&2
-  echo "  its pin; each blob put in the --blob-cache is listed in <blob-cache>/.new for scripts/asset-cache-upload.sh." >&2
+  echo "  its pin (a built asset: that it unpacks); each blob put in the --blob-cache is listed in <blob-cache>/.new for scripts/asset-cache-upload.sh." >&2
   echo "  --jobs stages up to N assets at once (default 6)." >&2
   exit 2
 }
@@ -46,11 +49,12 @@ while [ $# -gt 0 ]; do
     --jobs) jobs="$2"; shift 2 ;;
     --print-pins) print_pins=1; shift ;;
     --update-pins) update_pins=1; shift ;;
+    --print-src-key) print_src_key=1; shift ;;
     -h|--help) usage ;;
     *) usage ;;
   esac
 done
-[ "$print_pins" = 0 ] || [ "$update_pins" = 0 ] || { echo "stage-assets: --print-pins and --update-pins are exclusive" >&2; exit 2; }
+[ "$((print_pins + update_pins + print_src_key))" -le 1 ] || { echo "stage-assets: --print-pins, --update-pins and --print-src-key are exclusive" >&2; exit 2; }
 
 for tool in curl jq gpg ar tar zstd sha256sum unzip go xz cmp python3; do
   command -v "$tool" >/dev/null 2>&1 || { echo "stage-assets: $tool is required on the build host" >&2; exit 2; }
@@ -398,11 +402,11 @@ cache_get() {
       [ -s "$rec.$pid" ] && [ "$(sha_of "$f.$pid")" = "$(cat "$rec.$pid")" ]; then
       t="$work/remote-$1"
       mkdir -p "$t" && zstd -dcq "$f.$pid" | tar -x -C "$t"
-      if [ "$("$work/assetpack" digest "$t")" = "$3" ]; then
+      if [ "$3" = - ] && [ -n "$("$work/assetpack" digest "$t")" ] || [ "$("$work/assetpack" digest "$t")" = "$3" ]; then
         mv -f "$f.$pid" "$f" && mv -f "$rec.$pid" "$rec"
         say "$plat $asset: $1 from the asset cache, tree $3"
       else
-        say "warn: $u does not unpack to the pinned tree $3; staging it"
+        say "warn: $u does not unpack to the pinned tree $3 (or, for a built asset, does not unpack); staging it"
       fi
       chmod -R u+w "$t" && rm -rf "$t"
     fi
@@ -455,20 +459,50 @@ src_key() {
     "$([ "$kind" = script ] && sha_of "$versions")" "$files" | sha256sum | cut -d' ' -f1 | sed 's/^/src-/'
 }
 
+unpack_blob() {
+  zstd -dcq "$1" | tar -x -C "$2"
+}
+
+# the sha256 of the primary binary of an asset built from a Go package (the sha256 an OpenBao plugin catalog
+# registers); empty for a script-built tree
+built_binary_sha() {
+  local spec="$1" tree="$2" dst
+  [ "$(echo "$spec" | jq -r .kind)" = go ] || return 0
+  dst="$(echo "$spec" | jq -r '.members | to_entries[0].value')"
+  sha_of "$tree/$dst"
+}
+
+# <asset>.built.json beside the blob: what the build produced, which the release binary embeds and checks the unpacked
+# tree against (internal/assets/built.go); written after the blob so a record never names a blob that is not there
+write_record() {
+  local pdir="$1" a="$2" p="$3" d="$4" r="$5" z="$6" b="$7" tmp
+  tmp="$pdir/$a.built.json.$BASHPID"
+  jq -cn --arg a "$a" --arg p "$p" --arg d "$d" --argjson r "$r" --argjson z "$z" --arg b "$b" \
+    '{asset:$a, platform:$p, treeSha256:$d, rawBytes:$r, zstdBytes:$z, binarySha256:$b} | if $b == "" then del(.binarySha256) else . end' \
+    >"$tmp"
+  mv -f "$tmp" "$pdir/$a.built.json"
+}
+
 stage_one() {
-  local plat="$1" asset="$2" started="$SECONDS" pdir spec kind x tree digest raw zbytes pin in_key="" out_key how owned=0 member="" binary=""
+  local plat="$1" asset="$2" started="$SECONDS" pdir spec kind x tree digest raw zbytes pin in_key="" out_key how owned=0 built=0 member="" binary=""
   pdir="$blobs/${plat/\//_}"
   spec="$(jq -c --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p]' "$versions")"
   [ "$spec" != "null" ] || die "$asset has no fetch spec for $plat"
   kind="$(echo "$spec" | jq -r .kind)"
-  case "$kind" in go|script|gosrc|cargosrc) owned=1 ;; esac
+  case "$kind" in go|script) built=1 ;; gosrc|cargosrc) owned=1 ;; esac
   pin="$(jq -r --arg a "$asset" --arg p "$plat" '.assets[$a].platforms[$p].treeSha256 // ""' "$versions")"
+  [ "$built" = 0 ] || [ -z "$pin" ] || die "$asset is built from this repository's own commit (fetch kind $kind) and versions.json must not pin its output: remove platforms.$plat.treeSha256"
   x="$work/$asset-${plat/\//_}"
   tree="$x/tree"
   mkdir -p "$tree"
   export GNUPGHOME="$x/gnupg"
   mkdir -m 0700 "$GNUPGHOME"
-  if [ -n "$blob_cache" ] && [ -n "$pin" ] && [ "$print_pins" != 1 ]; then
+  if [ "$print_src_key" = 1 ]; then
+    [ "$built" = 1 ] && [ -n "$blob_cache" ] || die "--print-src-key needs a built asset (fetch kind go or script) and --blob-cache"
+    plat="$plat" asset="$asset" src_key "$spec"
+    return 0
+  fi
+  if [ -n "$blob_cache" ] && { [ -n "$pin" ] || [ "$built" = 1 ]; } && [ "$print_pins" != 1 ]; then
     case "$kind" in
       file|oci|debs|gosrc|cargosrc)
         in_key="in-$(printf '%s\n' "$plat" "$asset" "$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")" "$script_sha" "$pack_id" | sha256sum | cut -d' ' -f1)"
@@ -480,9 +514,16 @@ stage_one() {
         ;;
       go|script)
         in_key="$(src_key "$spec")"
-        if [ -n "$in_key" ] && cache_get "$in_key" "$pdir/$asset.tar.zst" "$pin"; then
+        if [ -n "$in_key" ] && cache_get "$in_key" "$pdir/$asset.tar.zst" -; then
+          unpack_blob "$pdir/$asset.tar.zst" "$tree"
+          digest="$("$work/assetpack" digest "$tree")"
+          raw="$(find "$tree" -type f -printf '%s\n' | awk '{s+=$1} END{print s+0}')"
+          binary="$(built_binary_sha "$spec" "$tree")"
+          write_record "$pdir" "$asset" "$plat" "$digest" "$raw" "$(stat -c %s "$pdir/$asset.tar.zst")" "$binary"
+          [ "$print_pins" != 1 ] || jq -cn --arg a "$asset" --arg p "$plat" --arg d "$digest" --argjson r "$raw" --argjson z "$(stat -c %s "$pdir/$asset.tar.zst")" \
+            '{asset:$a, platform:$p, treeSha256:$d, rawBytes:$r, zstdBytes:$z}'
           chmod -R u+w "$x" && rm -rf "$x"
-          say "ok $plat $asset tree $pin cached by its source inputs ($((SECONDS - started))s)"
+          say "ok $plat $asset tree $digest built record from its cached blob (source inputs hash as before) ($((SECONDS - started))s)"
           return 0
         fi
         ;;
@@ -501,7 +542,7 @@ stage_one() {
   esac
   digest="$("$work/assetpack" digest "$tree")"
   raw="$(find "$tree" -type f -printf '%s\n' | awk '{s+=$1} END{print s+0}')"
-  if [ "$pin" != "$digest" ]; then
+  if [ "$built" = 0 ] && [ "$pin" != "$digest" ]; then
     echo "stage-assets: $asset $plat unpacks to tree $digest, versions.json pins '${pin}'" >&2
     if [ "$print_pins" != 1 ] && ! { [ "$update_pins" = 1 ] && [ "$owned" = 1 ]; }; then
       return 1
@@ -517,7 +558,7 @@ stage_one() {
       cat "$x/tar" | zstd "${zstd_args[@]}" -o "$x/blob"
       cache_put "$out_key" "$x/blob"
     fi
-    [ -z "$in_key" ] || [ "$pin" != "$digest" ] || cache_put "$in_key" "$x/blob"
+    [ -z "$in_key" ] || { [ "$built" = 0 ] && [ "$pin" != "$digest" ]; } || cache_put "$in_key" "$x/blob"
   else
     "$work/assetpack" tar "$tree" | zstd "${zstd_args[@]}" -o "$x/blob"
   fi
@@ -525,6 +566,9 @@ stage_one() {
   if [ "$print_pins" = 1 ]; then
     jq -cn --arg a "$asset" --arg p "$plat" --arg d "$digest" --argjson r "$raw" --argjson z "$zbytes" \
       '{asset:$a, platform:$p, treeSha256:$d, rawBytes:$r, zstdBytes:$z}'
+  fi
+  if [ "$built" = 1 ]; then
+    binary="$(built_binary_sha "$spec" "$tree")"
   fi
   if [ "$update_pins" = 1 ] && [ "$owned" = 1 ]; then
     if jq -e --arg a "$asset" --arg p "$plat" '.assets[$a].fetch[$p].sha256 != null' "$versions" >/dev/null; then
@@ -537,6 +581,11 @@ stage_one() {
   fi
   rm -f "$pdir/$asset.tar.zst"
   mv -f "$x/blob" "$pdir/$asset.tar.zst"
+  if [ "$built" = 1 ]; then
+    write_record "$pdir" "$asset" "$plat" "$digest" "$raw" "$zbytes" "$binary"
+  else
+    rm -f "$pdir/$asset.built.json"
+  fi
   chmod -R u+w "$x" && rm -rf "$x"
   say "ok $plat $asset tree $digest raw $raw zstd $zbytes, $how ($((SECONDS - started))s)"
 }

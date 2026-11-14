@@ -102,38 +102,60 @@ mkdir -p "$shared_blobs" "$own_blobs"
 from_tree() {
   [ "$(jq -r --arg a "$1" --arg p "$2" '.assets[$a].fetch[$p].kind // ""' "$versions")" = go ]
 }
+srckeys="$dev_root/srckeys.$$"
+rm -rf "$srckeys" && mkdir -p "$srckeys"
+trap 'rm -rf "$srckeys"' EXIT
+from_script() {
+  [ "$(jq -r --arg a "$1" --arg p "$2" '.assets[$a].fetch[$p].kind // ""' "$versions")" = script ]
+}
+# a script-built asset (k8s-downloads, guest-downloads, swc-userns-stage) has no output pin in versions.json that
+# changes with its sources, so its shared blob is keyed by its entry and by stage-assets.sh's source-input key
+# (the script, the paths it names, the packages it builds from: the working tree's, uncommitted edits included)
+script_key() {
+  local plat="$1" asset="$2" k f="$srckeys/${1/\//_}-$2"
+  if [ -s "$f" ]; then
+    cat "$f"
+    return
+  fi
+  k="$("$root/scripts/stage-assets.sh" --blob-cache "$cache/blobs" --asset "$asset" --platform "$plat" --print-src-key 2>/dev/null)" || k=""
+  [ -n "$k" ] || k="nosrckey-$(git -C "$root" rev-parse HEAD 2>/dev/null || echo none)-$(date +%s)"
+  printf '%s' "$k" | tee "$f"
+}
 blob_of() {
-  local plat="$1" asset="$2"
+  local plat="$1" asset="$2" key
   if from_tree "$asset" "$plat"; then
     echo "$own_blobs/${plat/\//_}/$asset.tar.zst"
     return
   fi
-  echo "$shared_blobs/${plat/\//_}/$asset-$(jq -cS --arg a "$asset" '.assets[$a]' "$versions" | sha256sum | cut -c1-16).tar.zst"
+  key="$(jq -cS --arg a "$asset" '.assets[$a]' "$versions")"
+  if from_script "$asset" "$plat"; then
+    key="$key$(script_key "$plat" "$asset")"
+  fi
+  echo "$shared_blobs/${plat/\//_}/$asset-$(printf '%s' "$key" | sha256sum | cut -c1-16).tar.zst"
+}
+rec_of() {
+  local b
+  b="$(blob_of "$1" "$2")"
+  echo "${b%.tar.zst}.built.json"
 }
 {
   flock 9
   for plat in "${stage_plats[@]}"; do
     key="${plat/\//_}"
     missing=()
-    loose=()
     for asset in $(jq -r --arg p "$plat" '.platforms[$p].assets[]' "$versions"); do
       from_tree "$asset" "$plat" && continue
       [ -f "$(blob_of "$plat" "$asset")" ] && continue
-      if [ "$asset" = socialweb-computer-k8s-downloads ] && [ "$(. /etc/os-release && echo "$ID")" != fedora ]; then
-        loose+=(--asset "$asset")
-      else
-        missing+=(--asset "$asset")
-      fi
+      missing+=(--asset "$asset")
     done
-    if [ ${#missing[@]} -gt 0 ] || [ ${#loose[@]} -gt 0 ]; then
-      say "stage ${missing[*]} ${loose[*]} for $plat into $shared_blobs (once per versions.json entry of the asset)"
+    if [ ${#missing[@]} -gt 0 ]; then
+      say "stage ${missing[*]} for $plat into $shared_blobs (once per versions.json entry of the asset, and per source inputs of a script-built one)"
       rm -rf "$shared_blobs/.stage"
-      [ ${#missing[@]} -eq 0 ] || "$root/scripts/stage-assets.sh" --cache "$cache/assets" --blobs "$shared_blobs/.stage" --platform "$plat" "${missing[@]}"
-      # ponytail: the meshd bytes follow the compiler packages, so only Fedora matches the pin; elsewhere the downloads asset is staged unpinned (the gateway's /downloads would not match the pin), add a pinned Fedora build when a non-Fedora host needs the web app downloads
-      [ ${#loose[@]} -eq 0 ] || "$root/scripts/stage-assets.sh" --cache "$cache/assets" --blobs "$shared_blobs/.stage" --platform "$plat" "${loose[@]}" --print-pins >/dev/null
+      "$root/scripts/stage-assets.sh" --cache "$cache/assets" --blob-cache "$cache/blobs" --blobs "$shared_blobs/.stage" --platform "$plat" "${missing[@]}"
       mkdir -p "$shared_blobs/$key"
       for f in "$shared_blobs/.stage/$key"/*.tar.zst; do
         mv -f "$f" "$(blob_of "$plat" "$(basename "$f" .tar.zst)")"
+        [ ! -f "${f%.tar.zst}.built.json" ] || mv -f "${f%.tar.zst}.built.json" "$(rec_of "$plat" "$(basename "$f" .tar.zst)")"
       done
       rm -rf "$shared_blobs/.stage"
     fi
@@ -159,14 +181,11 @@ for plat in "${platforms[@]}"; do
   [ ${#tree_assets[@]} -gt 0 ] || continue
   say "stage ${tree_assets[*]} for $plat (built from the working tree, changed)"
   "$root/scripts/stage-assets.sh" --cache "$cache/assets" --blobs "$own_blobs" --platform "$plat" \
-    "${tree_assets[@]}" --print-pins >"$dev_root/tree-assets-pins.json" 2>"$dev_root/tree-assets-stage.log" \
+    "${tree_assets[@]}" >/dev/null 2>"$dev_root/tree-assets-stage.log" \
     || die "staging ${tree_assets[*]} failed: $(tail -3 "$dev_root/tree-assets-stage.log")"
   for b in "${built[@]}"; do
     echo "${b##*:}" >"${b%:*}.staged"
   done
-  if grep -q 'versions.json pins' "$dev_root/tree-assets-stage.log"; then
-    say "warn: $(grep 'versions.json pins' "$dev_root/tree-assets-stage.log" | cut -d' ' -f2 | tr '\n' ' ')built from the working tree differ from their versions.json pins (a release build refuses them)"
-  fi
 done
 say "assets staged ($(elapsed)s)"
 
@@ -186,6 +205,9 @@ for plat in "${platforms[@]}"; do
   {
     for asset in $(jq -r --arg p "$plat" '.platforms[$p].assets[]' "$versions"); do
       jq -n --arg k "$root/internal/assets/blobs/$key/$asset.tar.zst" --arg v "$(blob_of "$plat" "$asset")" '{($k): $v}'
+      if [ -f "$(rec_of "$plat" "$asset")" ]; then
+        jq -n --arg k "$root/internal/assets/blobs/$key/$asset.built.json" --arg v "$(rec_of "$plat" "$asset")" '{($k): $v}'
+      fi
     done
   } | jq -s '{Replace: add}' >"$overlay"
   say "go build $plat"

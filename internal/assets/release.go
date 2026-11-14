@@ -3,6 +3,7 @@
 package assets
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -23,7 +24,32 @@ func Ready() error {
 		return fmt.Errorf("release build for %s is missing embedded assets %s; it refuses to start (stage them with scripts/stage-assets.sh, then rebuild with -tags release)",
 			platform, strings.Join(missing, ", "))
 	}
+	var unrecorded []string
+	for _, p := range pins {
+		if p.Built && !digestName.MatchString(p.TreeSHA256) {
+			unrecorded = append(unrecorded, p.Name)
+		}
+	}
+	if len(unrecorded) > 0 {
+		return fmt.Errorf("release build for %s embeds the assets %s without the build record (<asset>%s) that stage-assets.sh writes beside their blobs; it refuses to start",
+			platform, strings.Join(unrecorded, ", "), BuiltSuffix)
+	}
 	return nil
+}
+
+func embeddedBuilt(asset string) (Built, bool, error) {
+	b, err := fs.ReadFile(blobs, blobDir+"/"+BuiltName(asset))
+	if errors.Is(err, fs.ErrNotExist) {
+		return Built{}, false, nil
+	}
+	if err != nil {
+		return Built{}, false, fmt.Errorf("assets: reading the build record of %s: %w", asset, err)
+	}
+	rec, err := ParseBuilt(b, asset, platform)
+	if err != nil {
+		return Built{}, false, err
+	}
+	return rec, true, nil
 }
 
 func Resolve(opts Options, executable string) (Exec, error) {

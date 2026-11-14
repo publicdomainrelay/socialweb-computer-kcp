@@ -13,7 +13,6 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devinstance"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/devsup"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
-	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
 )
 
 func (a *app) assetCache(vals clicfg.Values) (string, error) {
@@ -42,13 +41,15 @@ func (a *app) devExe(ctx context.Context, vals clicfg.Values, name, option strin
 }
 
 func currentSet(platform string) []string {
-	pins, err := versions.PlatformPins(platform)
+	pins, err := assets.PlatformPins(platform)
 	if err != nil {
 		return nil
 	}
 	out := make([]string, 0, len(pins))
 	for _, p := range pins {
-		out = append(out, p.TreeSHA256)
+		if p.TreeSHA256 != "" {
+			out = append(out, p.TreeSHA256)
+		}
 	}
 	return out
 }

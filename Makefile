@@ -3,11 +3,14 @@ SHELL := /bin/bash
 PLATFORMS ?= linux/amd64 linux/arm64
 BUILD_ROOT ?= $(HOME)/.tmp/socialweb-computer-build
 
-OWNED := $(shell jq -r '.assets | to_entries[] | select([.value.fetch[]?.kind] | any(. == "go" or . == "script" or . == "gosrc" or . == "cargosrc")) | .key' internal/versions/versions.json)
+# the assets built here from pinned upstream source: their output trees stay pinned in versions.json. The assets built from this
+# repository's own commit (fetch kind go or script) are not pinned: the build records their hashes (scripts/stage-assets.sh) and
+# scripts/check-reproducible.sh proves a cold rebuild gives the same bytes.
+OWNED := $(shell jq -r '.assets | to_entries[] | select([.value.fetch[]?.kind] | any(. == "gosrc" or . == "cargosrc")) | .key' internal/versions/versions.json)
 PLATFORM_FLAGS := $(addprefix --platform ,$(PLATFORMS))
 ASSET_FLAGS := $(addprefix --asset ,$(OWNED))
 
-.PHONY: all build pins check-pins dev
+.PHONY: all build pins check-pins reproducible dev
 
 all: build
 
@@ -22,3 +25,6 @@ check-pins: pins
 
 dev:
 	scripts/build-socialweb-computer.sh --dev --publish /var/tmp/swc
+
+reproducible:
+	scripts/check-reproducible.sh $(PLATFORM_FLAGS) --build-root "$(BUILD_ROOT)/reproduce"

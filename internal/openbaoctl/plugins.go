@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/johnandersen777/socialweb-computer-kcp/api/v1alpha1"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/assets"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/baosync"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/sha256sum"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/versions"
@@ -101,12 +102,12 @@ func (s *Servers) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]placedPl
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: %w", p.Name, err)
 		}
-		pin, err := versions.FetchSHA256(p.Asset.Name, platform)
+		pin, from, err := pluginPin(p.Asset.Name, platform)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %s: %w", p.Name, err)
 		}
-		if sum != pin || (p.Asset.Sha256 != "" && sum != p.Asset.Sha256) {
-			return nil, fmt.Errorf("plugin %s: %s has sha256 %s; internal/versions/versions.json pins %s for %s", p.Name, src, sum, pin, platform)
+		if (pin != "" && sum != pin) || (p.Asset.Sha256 != "" && sum != p.Asset.Sha256) {
+			return nil, fmt.Errorf("plugin %s: %s has sha256 %s; %s says %s for %s", p.Name, src, sum, from, pin, platform)
 		}
 		command := p.Asset.Name + "-" + sum[:PluginCommandBytes]
 		dst := filepath.Join(pdir, command)
@@ -124,6 +125,29 @@ func (s *Servers) placePlugins(o v1alpha1.OpenBaoServer, dir string) ([]placedPl
 		out = append(out, placedPlugin{spec: p, plugin: baosync.Plugin{Type: p.Type, Name: p.Name, Command: command, SHA256: sum}})
 	}
 	return out, nil
+}
+
+// pluginPin is the sha256 a plugin binary must have. A plugin is built from this repository's own commit, so
+// versions.json does not pin it: the build that produced the binary this one embeds recorded it
+// (assets.BuiltBinarySHA256). A build that embeds no assets (a plain go build; the plugin is given by an explicit
+// path) has nothing to compare with and checks only the sha256 the spec names, if any. An asset that is not built
+// here keeps its versions.json pin.
+func pluginPin(asset, platform string) (pin, from string, err error) {
+	built, err := assets.IsBuilt(asset)
+	if err != nil {
+		return "", "", err
+	}
+	if !built {
+		pin, err = versions.FetchSHA256(asset, platform)
+		return pin, "internal/versions/versions.json", err
+	}
+	if sum, ok := assets.BuiltBinarySHA256(asset); ok {
+		return sum, "the build record embedded in this binary", nil
+	}
+	if assets.Release() {
+		return "", "", fmt.Errorf("this release build embeds no build record for %s", asset)
+	}
+	return "", "this dev build embeds no build record", nil
 }
 
 func prunePlugins(dir string, keep []placedPlugin) []string {

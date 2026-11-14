@@ -91,6 +91,17 @@ steps:
         echo "$TARGET/$f sha256 $got (pinned $want)"
         test "$got" = "$want"
       done
+  - name: reproducible
+    timeout: 110
+    run: |
+      . /opt/ci/env
+      # the assets built from this commit (vmexec, the OpenBao plugins, swc-userns-stage, the two downloads trees) are not
+      # pinned in versions.json: this is their proof. A fresh clean checkout at a new path with empty go, cargo and meshd
+      # caches and no bucket cache stages them again, and every tree the release binary embeds must equal the cold build's,
+      # byte for byte (a cache that handed the release another tree fails it too). It gates the cache uploads and the stage.
+      bash scripts/check-reproducible.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" \
+        --build-root /root/repro-build --gomod-cache /root/release-build/cache/gomod \
+        --against /root/release-build/src/1/internal/assets/blobs
   - name: asset cache
     on: {refs: [refs/heads/main, refs/tags/v*]}
     timeout: 30

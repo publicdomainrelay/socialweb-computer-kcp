@@ -34,8 +34,8 @@ Output: dev/<worktree>/<goos>_<goarch>/socialweb-computer
 
 Without --dev it builds the release socialweb-computer binary (plan 0006 M4-BUILD) of one commit for
 each release platform of internal/versions/versions.json (in parallel), once, from a clean checkout.
-It stages every pinned asset with scripts/stage-assets.sh (in parallel, every tree checked against
-its pin), stages the embedded Deno for the policy engine, then runs
+It stages every pinned asset with scripts/stage-assets.sh (in parallel, every pinned tree checked against
+its pin, every built asset's tree recorded), stages the embedded Deno for the policy engine, then runs
 go build -tags "release embed_deno" with the go.mod toolchain, CGO_ENABLED=0, -trimpath, -buildvcs=true,
 GOPROXY=off. Its caches are content-addressed, so a warm build gives the same bytes as a clean one:
   cache/blobs     the zstd blob of an asset, by the sha256 of its versions.json entry, stage-assets.sh,
@@ -44,11 +44,17 @@ GOPROXY=off. Its caches are content-addressed, so a warm build gives the same by
   cache/cargo-target, cache/gocache   the cargo target dir and the go build cache
 A step whose key did not change is not run again.
 
---update-pins stages the assets built from this repository (fetch kind go or script) or from pinned
-upstream source (fetch kind gosrc, such as kcp) and writes their
-new tree and binary pins into versions.json in the clean checkout and in the working repository. Pins
-of downloaded assets are never changed; an upstream change still fails the build. make uses it by
-default; CI runs make check-pins and fails when versions.json differs from HEAD.
+An asset built from this repository's own commit (fetch kind go or script: socialweb-vmexec, the OpenBao
+plugins, swc-userns-stage, the two downloads trees) has no pin in versions.json: stage-assets.sh writes the tree
+digest, sizes and binary sha256 of its output into <asset>.built.json beside its blob, the release binary embeds
+that record and checks the unpacked tree against it, and the release's built-assets-<goos>-<goarch>.json and
+release.json (builds[].builtAssets) publish them. scripts/check-reproducible.sh is what proves a cold second
+build gives the same bytes.
+
+--update-pins stages the assets built from pinned upstream source (fetch kind gosrc, such as kcp, or cargosrc)
+and writes their new tree and binary pins into versions.json in the clean checkout and in the working
+repository. Pins of downloaded assets are never changed; an upstream change still fails the build. make uses
+it by default; CI runs make check-pins and fails when versions.json differs from HEAD.
 
   --platform    a release platform; repeat for more (default: every release platform)
   --commit      the commit to build (default HEAD of this checkout; uncommitted changes are not built)
@@ -287,10 +293,12 @@ build_once() {
       (cd "$out" && sha256sum socialweb-computer >socialweb-computer.sha256)
       "$out/socialweb-computer" version --json >"$out/version.json"
       "$out/socialweb-computer" version >"$out/version.txt"
+      jq -s 'sort_by(.asset)' "$tree/internal/assets/blobs/$key"/*.built.json >"$out/built-assets.json"
       jq -n --arg commit "$commit" --arg platform "$plat" --argjson build "$n" --arg go "$have_go" --arg mode "$mode" \
         --arg started "$started" --arg finished "$(utc)" --arg sha256 "$(sha_of "$out/socialweb-computer")" \
+        --slurpfile builtAssets "$out/built-assets.json" \
         --argjson denoEmbedded "$(jq -c '{version: .assets.deno.version, zips: (.assets.deno.fetch | with_entries(.value = .value.sha256))}' "$tree/internal/versions/versions.json")" \
-        '{commit: $commit, platform: $platform, build: $build, mode: $mode, go: $go, startedUtc: $started, finishedUtc: $finished, sha256: $sha256, denoEmbedded: $denoEmbedded}' \
+        '{commit: $commit, platform: $platform, build: $build, mode: $mode, go: $go, startedUtc: $started, finishedUtc: $finished, sha256: $sha256, denoEmbedded: $denoEmbedded, builtAssets: $builtAssets[0]}' \
         >"$out/build.json"
       say "build $n $plat: sha256 $(sha_of "$out/socialweb-computer")"
       timing "build $n $plat: go build" "$t"
@@ -320,6 +328,7 @@ for plat in "${platforms[@]}"; do
   cp "$a/socialweb-computer" "$release/$name"
   cp "$a/version.json" "$release/version-${plat/\//-}.json"
   cp "$a/version.txt" "$release/version-${plat/\//-}.txt"
+  cp "$a/built-assets.json" "$release/built-assets-${plat/\//-}.json"
   (cd "$release" && sha256sum "$name" >>SHA256SUMS)
   say "published $plat sha256 $(sha_of "$a/socialweb-computer") -> $release/$name"
 done

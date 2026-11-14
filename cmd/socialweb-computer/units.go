@@ -165,7 +165,7 @@ func runUnitsAudit(ctx context.Context, a *app, vals clicfg.Values, rest []strin
 		return a.fail(exitRefused, "units audit: %v", err)
 	}
 	defer p.manager.Close()
-	pins, err := versions.PlatformPins(assets.Platform())
+	pins, err := assets.PlatformPins(assets.Platform())
 	if err != nil {
 		return a.fail(exitFailed, "units audit: %v", err)
 	}

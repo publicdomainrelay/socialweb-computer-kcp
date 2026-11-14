@@ -166,12 +166,27 @@ type Asset struct {
 	Executables map[string]string        `json:"executables"`
 	LibraryPath string                   `json:"libraryPath,omitempty"`
 	Fetch       map[string]AssetFetch    `json:"fetch,omitempty"`
-	Platforms   map[string]AssetPlatform `json:"platforms"`
+	Platforms   map[string]AssetPlatform `json:"platforms,omitempty"`
+}
+
+// Built reports whether the asset is built from this repository's own commit (every fetch kind go or script):
+// its output hashes are never pinned in versions.json, the build that produces it records them (internal/assets).
+func (a Asset) Built() bool {
+	if len(a.Fetch) == 0 {
+		return false
+	}
+	for _, f := range a.Fetch {
+		if f.Kind != "go" && f.Kind != "script" {
+			return false
+		}
+	}
+	return true
 }
 
 type AssetFetch struct {
+	Kind    string            `json:"kind,omitempty"`
 	URL     string            `json:"url,omitempty"`
-	SHA256  string            `json:"sha256"`
+	SHA256  string            `json:"sha256,omitempty"`
 	Archive string            `json:"archive,omitempty"`
 	Members map[string]string `json:"members,omitempty"`
 }
@@ -249,6 +264,7 @@ type Pin struct {
 	Executables map[string]string
 	LibraryPath string
 	AssetPlatform
+	Built bool
 }
 
 func PlatformPins(platform string) ([]Pin, error) {
@@ -267,11 +283,15 @@ func PlatformPins(platform string) ([]Pin, error) {
 			return nil, fmt.Errorf("versions: platform %s lists asset %q that has no pin", platform, name)
 		}
 		ap, ok := a.Platforms[platform]
-		if !ok {
+		if !ok && a.Built() {
+			if _, has := a.Fetch[platform]; !has {
+				return nil, fmt.Errorf("versions: built asset %s has no fetch spec for %s", name, platform)
+			}
+		} else if !ok {
 			return nil, fmt.Errorf("versions: asset %s has no pin for %s", name, platform)
 		}
 		out = append(out, Pin{Name: name, Platform: platform, Version: a.Version, Executables: a.Executables,
-			LibraryPath: a.LibraryPath, AssetPlatform: ap})
+			LibraryPath: a.LibraryPath, AssetPlatform: ap, Built: a.Built()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

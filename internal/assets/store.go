@@ -55,7 +55,7 @@ func (s Store) log() *slog.Logger {
 
 func (s Store) Ensure(pin versions.Pin, open BlobSource) (string, error) {
 	if !digestName.MatchString(pin.TreeSHA256) {
-		return "", fmt.Errorf("assets: %s on %s has no tree sha256 pin (run scripts/stage-assets.sh --print-pins)", pin.Name, pin.Platform)
+		return "", fmt.Errorf("assets: %s on %s has no tree sha256 (a versions.json pin, or for an asset built from this repository the build record beside its blob)", pin.Name, pin.Platform)
 	}
 	if !filepath.IsAbs(s.Root) {
 		return "", fmt.Errorf("assets: the extraction root %q is not absolute", s.Root)
@@ -128,7 +128,7 @@ func (s Store) unpack(pin versions.Pin, open BlobSource, tmp string) error {
 		return err
 	}
 	if got != pin.TreeSHA256 {
-		return fmt.Errorf("assets: the embedded blob of %s unpacks to tree %s, but versions.json pins %s", pin.Name, got, pin.TreeSHA256)
+		return fmt.Errorf("assets: the embedded blob of %s unpacks to tree %s, but its pin (versions.json, or the build record of a built asset) is %s", pin.Name, got, pin.TreeSHA256)
 	}
 	return nil
 }

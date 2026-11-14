@@ -40,3 +40,5 @@ func Resolve(opts Options, executable string) (Exec, error) {
 }
 
 func embeddedBlob(name string) bool { return false }
+
+func embeddedBuilt(asset string) (Built, bool, error) { return Built{}, false, nil }

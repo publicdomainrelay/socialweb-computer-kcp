@@ -1678,7 +1678,7 @@
     "socialweb-vmexec": {
       "version": "this module",
       "source": "cmd/socialweb-vmexec of this module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-vmexec or internal/guestnet re-pins it",
+      "verify": "built from this commit, never pinned here: the build records the tree digest of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary and listed in the release's release.json), the binary re-hashes the unpacked tree against that record before every use, and CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference",
       "executables": {
         "socialweb-vmexec": "socialweb-vmexec"
       },
@@ -1697,24 +1697,12 @@
             "socialweb-vmexec": "socialweb-vmexec"
           }
         }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "0db4dbfd19bea1c44dba67214426b660f87ad750f2c787e4ca46c5b89c4b5f97",
-          "rawBytes": 2637950,
-          "zstdBytes": 981920
-        },
-        "linux/arm64": {
-          "treeSha256": "11529a824a0bd0734ed94321acb984734f339d7791ab2f821758b58b2a3ab9c9",
-          "rawBytes": 2621566,
-          "zstdBytes": 879332
-        }
       }
     },
     "openbao-plugin-auth-atproto": {
       "version": "this repository, on github.com/openbao/openbao/sdk/v2 v2.6.2 (the SDK release of the pinned bao v2.6.2)",
       "source": "cmd/openbao-plugin-auth-atproto, its own Go module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
-      "verify": "rebuilt from this commit; the binary must equal the fetch sha256 pin (the sha256 the OpenBao plugin catalog registers) and the unpacked tree the treeSha256 pin, so a change to cmd/openbao-plugin-auth-atproto re-pins it; moves together with the bao asset",
+      "verify": "built from this commit, never pinned here: the build records the tree digest and the binary sha256 (the sha256 the OpenBao plugin catalog registers) of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary); the plugin placement checks the placed file against that record, and CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference; moves together with the bao asset",
       "executables": {
         "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
       },
@@ -1723,7 +1711,6 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-atproto",
           "package": ".",
-          "sha256": "bd7b726232ea5b497a2a8d02b45bd1e05359ed2be12e8537b898f295366620b9",
           "members": {
             "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
           }
@@ -1732,7 +1719,6 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-atproto",
           "package": ".",
-          "sha256": "5f35c482fae7fb2c8c256236ceed455acbd436a13ebc56e873785d483e2ad2ed",
           "members": {
             "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
           }
@@ -1741,35 +1727,16 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-atproto",
           "package": ".",
-          "sha256": "b5b2d1840b6a5cfa125a6045b65c00435d1b4496697584cfde64598c8430985c",
           "members": {
             "openbao-plugin-auth-atproto": "openbao-plugin-auth-atproto"
           }
-        }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "37dea85fb01b3c6e4c0ce4543e834a1cbb12a9db10e3600c046b8b6a722e090d",
-          "rawBytes": 16433278,
-          "zstdBytes": 5157813
-        },
-        "linux/arm64": {
-          "treeSha256": "2ca657308f78ca106316957f0d0d8aae091a0f50b5908569479ff0cc6864f4a7",
-          "rawBytes": 15335550,
-          "zstdBytes": 4589897
-        },
-        "darwin/arm64": {
-          "treeSha256": "103721b8a0985135d19c262f30c13d69803c30e0bee82409e3fb47e9ccb3b1cf",
-          "rawBytes": 16328546,
-          "zstdBytes": 4987737,
-          "binarySha256": "b5b2d1840b6a5cfa125a6045b65c00435d1b4496697584cfde64598c8430985c"
         }
       }
     },
     "openbao-plugin-auth-sshsig": {
       "version": "this repository, on github.com/openbao/openbao/sdk/v2 v2.6.2 (the SDK release of the pinned bao v2.6.2)",
       "source": "cmd/openbao-plugin-auth-sshsig, its own Go module: CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' per platform, with the go.mod toolchain",
-      "verify": "rebuilt from this commit; the binary must equal the fetch sha256 pin (the sha256 the OpenBao plugin catalog registers) and the unpacked tree the treeSha256 pin, so a change to cmd/openbao-plugin-auth-sshsig re-pins it; moves together with the bao asset",
+      "verify": "built from this commit, never pinned here: the build records the tree digest and the binary sha256 (the sha256 the OpenBao plugin catalog registers) of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary); the plugin placement checks the placed file against that record, and CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference; moves together with the bao asset",
       "executables": {
         "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
       },
@@ -1778,7 +1745,6 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "62b84df545733353fb478d5b2e4aded9158f0a0a1bb258288e00679a44a60ea8",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
@@ -1787,7 +1753,6 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "f40a63039dcf6d7441806c961a3c9b863eaf3fcf65fe2ce221ce2a962cd45cd1",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
@@ -1796,35 +1761,16 @@
           "kind": "go",
           "module": "cmd/openbao-plugin-auth-sshsig",
           "package": ".",
-          "sha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499",
           "members": {
             "openbao-plugin-auth-sshsig": "openbao-plugin-auth-sshsig"
           }
-        }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "330dbd48ca4fd731d104ba2d361ec754520b9b4668367d4bd2a36f213ceee75a",
-          "rawBytes": 16228478,
-          "zstdBytes": 5093784
-        },
-        "linux/arm64": {
-          "treeSha256": "a03e44b8460a5a54a4577e3c083e9184e6164eb10a3696feb1f10543c35836be",
-          "rawBytes": 15204478,
-          "zstdBytes": 4532474
-        },
-        "darwin/arm64": {
-          "treeSha256": "eaa7c8fb8fb56754e7617ca485fa9bfa4156a6b59ba2ab4f3e0f79321504f154",
-          "rawBytes": 16146018,
-          "zstdBytes": 4930055,
-          "binarySha256": "2c0bc8271eaff905dd28be249f55eeb90117f5a80a167b3d9e9d95b82b323499"
         }
       }
     },
     "swc-userns-stage": {
       "version": "this module",
-      "source": "deploy/swc-userns-stage/stage.c of this module, built by scripts/build-userns-stage.sh in the pinned guest builder image (gcc, static, libc-free, no build id); byte-reproducible, linux/amd64 sha256 d15e47035b9f5d5b970017f7051dd82eabeb2c3176fb2a0a3655c9a49e100332",
-      "verify": "rebuilt from this commit; the sha256 must equal the pin; linux/amd64 only until stage.c gains an aarch64 entry stub",
+      "source": "deploy/swc-userns-stage/stage.c of this module, built by scripts/build-userns-stage.sh in the pinned guest builder image (gcc, static, libc-free, no build id); byte-reproducible",
+      "verify": "built from this commit, never pinned here: the build records the tree digest of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary), the binary re-hashes the unpacked tree against that record before every use, and CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference; linux/amd64 only until stage.c gains an aarch64 entry stub",
       "executables": {
         "swc-userns-stage": "swc-userns-stage"
       },
@@ -1832,24 +1778,16 @@
         "linux/amd64": {
           "kind": "script",
           "script": "scripts/build-userns-stage.sh",
-          "sha256": "d15e47035b9f5d5b970017f7051dd82eabeb2c3176fb2a0a3655c9a49e100332",
           "members": {
             "swc-userns-stage": "swc-userns-stage"
           }
-        }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "99e3ed4cbb177d456dc4c64fd4f79cbea69b40c977f30c166f9b62e1a4e66653",
-          "rawBytes": 8928,
-          "zstdBytes": 1344
         }
       }
     },
     "socialweb-computer-k8s-downloads": {
       "version": "this module",
       "source": "the pinned downloads the socialweb-computer-k8s web app serves at /downloads/<sha256>/<name>, built by scripts/build-web-app-downloads.sh: socialweb-meshd-x86_64 and socialweb-meshd-aarch64 by rust/build.sh (static musl, rustc of rust/rust-toolchain.toml in a mount namespace with fixed paths, zig cc and zig ar of the zig that rust/build.sh pins, and the toolchain's rust-lld), and socialweb-node-x86_64 and socialweb-node-aarch64 by go build from cmd/socialweb-node for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests and the users that download them are not the gateway's platform",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to rust/ or cmd/socialweb-node re-pins it; the web app refuses a sidecar that does not hash its file",
+      "verify": "built from this commit, never pinned here: the build records the tree digest of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary), the binary re-hashes the unpacked tree against that record before every use, CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference, and the web app refuses a sidecar that does not hash its file",
       "executables": {
         "socialweb-computer-k8s-downloads": "."
       },
@@ -1882,24 +1820,12 @@
             "socialweb-node-aarch64.sha256": "socialweb-node-aarch64.sha256"
           }
         }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "4a7447ee4334cba7fd20d911dc717b4211d795932a2eff386c8266ac40c9af97",
-          "rawBytes": 42480712,
-          "zstdBytes": 12904597
-        },
-        "linux/arm64": {
-          "treeSha256": "4a7447ee4334cba7fd20d911dc717b4211d795932a2eff386c8266ac40c9af97",
-          "rawBytes": 42480712,
-          "zstdBytes": 12904597
-        }
       }
     },
     "socialweb-guest-downloads": {
       "version": "this module",
       "source": "the pinned downloads a bidder's GuestControlPlane serves at /v1/downloads/<sha256>/<name> (plan 0034 D11), built by scripts/build-guest-downloads.sh: opentunnel-x86_64 and opentunnel-aarch64, the opentunnel member of the assets.opentunnel release tarballs (each tarball checked against its fetch sha256 pin before tar extracts the member), wootty-x86_64 and wootty-aarch64, the wootty member of the guestDownloads.files.wootty image layers (each layer blob fetched from its registry and checked against its sha256 pin before tar extracts the member), atirc-x86_64, the assets.atirc build for x86_64 (scripts/build-cargosrc.sh, linux/amd64 only on guests), and socialweb-guest-agent-x86_64 and socialweb-guest-agent-aarch64 by go build from cmd/socialweb-guest-agent for linux with CGO disabled, each with a sha256sum-format <name>.sha256 sidecar; the same tree on every platform, since the guests are not the bidder's platform",
-      "verify": "rebuilt from this commit; the unpacked tree must equal the treeSha256 pin, so a change to cmd/socialweb-guest-agent, to the assets.opentunnel or assets.atirc pins or to the guestDownloads.files pins re-pins it; the GuestControlPlane refuses a sidecar that does not hash its file",
+      "verify": "built from this commit, never pinned here: the build records the tree digest of its output beside the blob (internal/assets/blobs/<goos>_<goarch>/<asset>.built.json, embedded in the release binary), the binary re-hashes the unpacked tree against that record before every use, CI's reproducibility check (scripts/check-reproducible.sh) rebuilds it cold and fails on any byte of difference, the upstream tarballs and layers it takes in stay checked by the sha256 pins of assets.opentunnel, assets.atirc and guestDownloads.files, and the GuestControlPlane refuses a sidecar that does not hash its file",
       "executables": {
         "socialweb-guest-downloads": "."
       },
@@ -1943,18 +1869,6 @@
             "socialweb-guest-agent-aarch64": "socialweb-guest-agent-aarch64",
             "socialweb-guest-agent-aarch64.sha256": "socialweb-guest-agent-aarch64.sha256"
           }
-        }
-      },
-      "platforms": {
-        "linux/amd64": {
-          "treeSha256": "b6577c26c954858100fdb7d1ba4700ceff66bc76f0ac4c2a55c08c0540753328",
-          "rawBytes": 111889422,
-          "zstdBytes": 32127584
-        },
-        "linux/arm64": {
-          "treeSha256": "b6577c26c954858100fdb7d1ba4700ceff66bc76f0ac4c2a55c08c0540753328",
-          "rawBytes": 111889422,
-          "zstdBytes": 32127584
         }
       }
     }

@@ -29,7 +29,7 @@ type Listed struct {
 }
 
 func platformPins(p string) ([]versions.Pin, error) {
-	return versions.PlatformPins(p)
+	return PlatformPins(p)
 }
 
 func Listing() ([]Listed, error) { return ListingFor(Platform()) }
