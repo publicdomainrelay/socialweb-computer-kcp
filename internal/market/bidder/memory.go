@@ -189,8 +189,17 @@ func vmCgroupDir(root, vmName string) string {
 	suffix := "-" + vmName + ".service"
 	found := ""
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() || found != "" {
-			return fs.SkipDir
+		if found != "" {
+			return fs.SkipAll
+		}
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
 		}
 		if strings.HasPrefix(d.Name(), "socialweb-vm-") && strings.HasSuffix(d.Name(), suffix) {
 			found = path
