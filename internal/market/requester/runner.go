@@ -431,6 +431,25 @@ func CapacityBackoff(round int) time.Duration {
 	return min(d, CapacityBackoffMax)
 }
 
+// deadlineErr: the contract's own deadline (its vm-expires-at label, the compute.vm expiresAt every round carries) has passed, so
+// no RFP goes out for it: a bidder declines a payload whose expiresAt is past, and the cached compute.vm of an earlier round (or
+// of a requester that restarted) is that payload. An accepted contract (resumed) is left to its own deadlines. The error ends the
+// wait (isUnservable): nothing a later round sends is fresher than the deadline.
+func (r *contractRunner) deadlineErr(state *v1alpha1.NodeClaimContract) error {
+	if state != nil && state.Accept != nil && state.Accept.URI != "" {
+		return nil
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(r.snapshot().Labels[ContractExpiresAtLabel]), 10, 64)
+	if err != nil || sec <= 0 || r.q.now().Before(time.Unix(sec, 0)) {
+		return nil
+	}
+	msg := fmt.Sprintf("the contract's deadline %s has passed: no RFP is sent for it (a payload with an expiresAt in the past is declined by every bidder)", market.FormatTime(time.Unix(sec, 0)))
+	r.mu.Lock()
+	r.unservable = msg
+	r.mu.Unlock()
+	return errors.New(msg)
+}
+
 func (r *contractRunner) isUnservable() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -632,6 +651,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 	state.Phase = cmp.Or(state.Phase, v1alpha1.ContractRequested)
 	r.setState(state)
 	r.step(ctx, "preparing", 1)
+	if err := r.deadlineErr(state); err != nil {
+		return err
+	}
 
 	if state.Payload == nil || state.Payload.URI == "" {
 		payloadRecord, err := market.EncodeRecord(market.ComputeVM{Role: vmName, Kind: string(contract.Spec.ComputeKind),
@@ -692,6 +714,9 @@ func (r *contractRunner) requestOnce(ctx context.Context) error {
 		rfpOptions.Policies = []market.RecordRef{{URI: policyRef.URI, CID: policyRef.CID}}
 		if q.cfg.Spec.SuspendParticipation {
 			return ErrParticipationSuspended
+		}
+		if err := r.deadlineErr(state); err != nil {
+			return err
 		}
 		rfp, err := market.CreateRFP(ctx, q.repo, q.repoDID, rfpOptions, q.signer)
 		if err != nil {

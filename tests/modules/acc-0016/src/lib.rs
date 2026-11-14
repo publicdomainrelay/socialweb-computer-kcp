@@ -4,7 +4,10 @@
 // the release and every record gone. Then the same image is rented a second time on the same kcp: if the target names the
 // winner's kcp, the FirecrackerVM's status.image.fetched of that second boot must be false (the bidder kept the image, it
 // did not fetch it again; the first boot's is recorded). `badsha`: the same with the sha256's first digit changed: no bidder takes the RFP
-// (it refuses before it bids), so the contract fails before any receipt, nothing is held and nothing is booted.
+// (it refuses before it bids), so the contract fails before any receipt, nothing is held and nothing is booted. `bigmarker`: the
+// image of 2026-11-14 whose image.json names a 330 byte marker (a bidder refuses a marker over 256 bytes; the build now writes
+// 77): its url and sha256 are fixed below (published content-addressed, so the fixture is that object), every bidder declines
+// it as unservable and the request fails at once naming the marker, it does not wait for capacity.
 use abi::{Event, Handle, Run, entries};
 use serde_json::{Value, json};
 use steps::{MIN, S, host, kube, sw};
@@ -17,14 +20,24 @@ fn flipped(sha: &str) -> String {
     format!("{first}{}", c.as_str())
 }
 
-fn image_of(args: &Value, bad: bool) -> Option<(String, String, String)> {
+/// The CI image whose image.json (`marker`) is 330 bytes, over the 256 a bidder accepts; it is what every bidder refused on 2026-11-14.
+const BIGMARKER_URL: &str = "https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/vm-images/ci-toolchain/bb59b6472b7c62ff4ce70f77121b5e9481616d052246be1088dfcc83329e4507";
+const BIGMARKER_SHA: &str = "bb59b6472b7c62ff4ce70f77121b5e9481616d052246be1088dfcc83329e4507";
+const BIGMARKER_REASON: &str = "its marker is over 256 bytes";
+/// A request that fails at once on a refusal names it within this many seconds (the RFP's bid window, not a capacity wait).
+const FAST_S: f64 = 150.0;
+
+fn image_of(args: &Value, bad: bool, big: bool) -> Option<(String, String, String)> {
+    if big {
+        return Some((BIGMARKER_URL.into(), BIGMARKER_SHA.into(), String::new()));
+    }
     let url = args["image"]["url"].as_str()?.to_string();
     let sha = args["image"]["sha256"].as_str()?.to_string();
     let marker = args["marker"].as_str().unwrap_or_default().to_string();
     Some((url, if bad { flipped(&sha) } else { sha }, marker))
 }
 
-fn run_with(run: Run<Value>, bad: bool) -> Result<Handle, String> {
+fn run_with(run: Run<Value>, bad: bool, big: bool) -> Result<Handle, String> {
     let args = &run.args;
     let mut s = S::new(run.state, args["now"].as_str().unwrap_or_default());
     if let Some(h) = steps::market_event(&mut s, &run.event) {
@@ -39,7 +52,7 @@ fn run_with(run: Run<Value>, bad: bool) -> Result<Handle, String> {
     let receipt = s.st["receipt"].as_str().unwrap_or_default().to_string();
     let winner = receipt.trim_start_matches("at://").split('/').next().unwrap_or_default().to_string();
     let cluster = args["bidders"].as_array().into_iter().flatten().find(|b| b["did"] == winner.as_str()).and_then(|b| b["cluster"].as_str()).map(String::from);
-    let Some((url, sha, marker)) = image_of(args, bad) else {
+    let Some((url, sha, marker)) = image_of(args, bad, big) else {
         return Ok(s.skip("the input names no image {url, sha256} (deploy/vm-images/ci-toolchain.json)"));
     };
     let mut h = Handle::new();
@@ -68,6 +81,15 @@ fn run_with(run: Run<Value>, bad: bool) -> Result<Handle, String> {
                     }
                     s.reading("refused", json!({ "message": data["message"] }));
                     s.reading("refused_s", s.t());
+                    if big {
+                        let message = data["message"].as_str().unwrap_or_default();
+                        if !message.contains(BIGMARKER_REASON) || !message.contains("no bidder can serve this request") || message.contains("waiting") {
+                            return Ok(s.fail(format!("the request failed, but not at once naming the oversized marker: {message}")));
+                        }
+                        if s.t() > FAST_S {
+                            return Ok(s.fail(format!("the refusal took {} s, not under {FAST_S} s: it waited", s.t())));
+                        }
+                    }
                     return Ok(s.pass());
                 }
                 "contract" if bad && data["phase"] == "Held" => return Ok(s.fail("the contract was Held with a wrong image sha256")),
@@ -165,11 +187,15 @@ fn run_with(run: Run<Value>, bad: bool) -> Result<Handle, String> {
 }
 
 fn run_0016(run: Run<Value>) -> Result<Handle, String> {
-    run_with(run, false)
+    run_with(run, false, false)
 }
 
 fn badsha_0016(run: Run<Value>) -> Result<Handle, String> {
-    run_with(run, true)
+    run_with(run, true, false)
 }
 
-entries! { run => run_0016, badsha => badsha_0016 }
+fn bigmarker_0016(run: Run<Value>) -> Result<Handle, String> {
+    run_with(run, true, true)
+}
+
+entries! { run => run_0016, badsha => badsha_0016, bigmarker => bigmarker_0016 }

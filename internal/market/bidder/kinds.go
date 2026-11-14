@@ -101,11 +101,16 @@ func (b *Bidder) payloadDecline(ctx context.Context, rfpURI string, rfp *market.
 	if msg := b.imageErr.Load(); msg != nil && record.Kind != string(v1alpha1.ComputeKindDeno) && record.Image == nil {
 		return &Decline{Kind: DeclineUnservable, Reason: "bidder: the bidder's pinned guest image does not verify: " + *msg}, nil
 	}
-	if refused, kind := b.reserveVerdict(rfpURI, record, 0); refused != "" {
+	refused, kind := b.reserveVerdict(rfpURI, record, 0)
+	if refused != "" && kind == DeclineUnservable {
 		return &Decline{Kind: kind, Reason: refused}, nil
 	}
-	if refused := b.imageRefused(ctx, record); refused != "" {
-		return &Decline{Kind: DeclineUnservable, Reason: refused}, nil
+	// a refused image outranks a full bidder: a request no bidder can ever take must not wait for the room of one that is full now
+	if image := b.imageRefused(ctx, record); image != "" {
+		return &Decline{Kind: DeclineUnservable, Reason: image}, nil
+	}
+	if refused != "" {
+		return &Decline{Kind: kind, Reason: refused}, nil
 	}
 	return nil, nil
 }

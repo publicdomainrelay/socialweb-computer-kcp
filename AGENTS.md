@@ -950,9 +950,10 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   for capacity (`requester_waiting_for_capacity`, status message `waiting for a N-vCPU slot: round k`), deletes the RFP, and after a backoff
   of 30 s, 1 min, then 2 min (`CapacityBackoff`) publishes a fresh RFP that asks every bidder again (capacity changed), until the
   contract's own deadline (its `vm-expires-at` label, `run request --expires-in`; none: `DefaultCapacityWait`, 30 min), then fails with the
-  no-bids error and the round count. A bidderDids restriction that names no bidder, and bids all denied by policy, still fail at once. Only a genuine capacity shortage waits: the
+  no-bids error and the round count (the compute.vm of every round carries that deadline as its `expiresAt`; a round whose deadline has passed is never
+  sent: `deadlineErr` fails the contract instead, since every bidder declines a payload whose `expiresAt` is past). A bidderDids restriction that names no bidder, and bids all denied by policy, still fail at once. Only a genuine capacity shortage waits: the
   bidder answers submitRfp with `declined: {kind, reason}` (kind `capacity`: full now; `unservable`: its offering lacks the compute kind,
-  nestedVirt or images, the VM is above its maxCpus or maxMem, the requester image cannot be fetched or verified, guest tools or net it does not serve),
+  nestedVirt or images, the VM is above its maxCpus or maxMem, the requester image cannot be fetched or verified (every image check refusal, and before a capacity decline: a full bidder still names a refused image), guest tools or net it does not serve),
   and when every bidder the RFP went to declined `unservable` (or the discovery dropped every candidate for a capability or size
   its offering lacks) the contract fails at once with "no bidder can serve this request" and the reasons (`requester_bidder_declined` logs each);
   a bidder that is full, silent, or too old to answer `declined` keeps the round a waiting one. The atlibs requester module needs the same

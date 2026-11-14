@@ -11,6 +11,11 @@
 			"entry": "badsha",
 			"label": "Run 0016 bad sha",
 			"description": "Rent with the image's sha256 changed: no bidder takes it, the contract fails cleanly before any VM, nothing is held."
+		},
+		{
+			"entry": "bigmarker",
+			"label": "Run 0016 big marker",
+			"description": "Rent the CI image whose image.json marker is over 256 bytes: every bidder declines it as unservable and the request fails at once naming the marker; it does not wait for capacity."
 		}
 	],
 	"calls": [
