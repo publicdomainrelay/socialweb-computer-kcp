@@ -1,0 +1,24 @@
+{
+	"$type": "com.fedfork.exec.composition",
+	"name": "acceptance 0017",
+	"description": "Acceptance 0017: a release asked by another process while the owner holds an interactive ssh session settles in seconds, with the owner stopping after Released (or taken over when the owner dies). (docs/acceptance/0017-owner-release.md).",
+	"instances": [
+		{
+			"name": "test",
+			"module": "acc-0017"
+		},
+		{
+			"name": "assert",
+			"module": "assert"
+		}
+	],
+	"edges": [
+		{
+			"from": "test",
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"to": "assert",
+			"reason": "every record of the run RecordNotFound after the release"
+		}
+	]
+}
+

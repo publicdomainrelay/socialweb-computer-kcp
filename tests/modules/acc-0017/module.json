@@ -1,0 +1,30 @@
+{
+	"name": "acc-0017",
+	"description": "Acceptance 0017: an owner `run request --hold` with an interactive ssh session, released by another process: the release settles in seconds, the owner exits only after Released; killed: the owner is SIGKILLed right after the release was asked and the release client takes the invocation over.",
+	"actions": [
+		{
+			"entry": "run",
+			"label": "Run 0017",
+			"description": "A second process releases the invocation whose owner holds an interactive ssh session."
+		},
+		{
+			"entry": "killed",
+			"label": "Run 0017 killed",
+			"description": "The owner is killed (SIGKILL) 2 s after the release was asked; the release still completes."
+		}
+	],
+	"calls": [
+		"computer.socialweb.test.request.start",
+		"computer.socialweb.test.request.release",
+		"computer.socialweb.test.request.kill",
+		"computer.socialweb.test.request.summary",
+		"computer.socialweb.test.request.records",
+		"computer.socialweb.test.assert.recordsGone"
+	],
+	"hooks": [
+		{
+			"nsid": "computer.socialweb.test.assert.recordsGone",
+			"reason": "every record of the run RecordNotFound after the release"
+		}
+	]
+}
