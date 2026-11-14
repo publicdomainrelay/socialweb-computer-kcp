@@ -24,7 +24,7 @@ run's `logs/` (only the run's own VM is touched).
 
 The target's `requester` picks the binary: `release:<tag>`, `sha:<commit>` (CI's `main/<commit>`) or `local:<commit>` (a hand build
 published to `local/<commit>/binaries/` with `scripts/publish-spaces.ts`); a bare `release` is refused.
-`put:<label>` puts the host's `SWC_BINARY` (a release build of the checkout under test, a branch's: CI's `test` and
+`path:<file>` puts the host's `SWC_BINARY` (that file) (a release build of the checkout under test, a branch's: CI's `test` and
 `compositions` build it on their VM) on the VM with `request.put`, no bucket involved.
 
 ```sh
@@ -85,7 +85,7 @@ and polled, as the single-VM layout does: `target.sh` reads `dev status` of the 
 so are not `MarketBidder` apps of it: the target's `bidders` is empty, and an entry that needs a bidder's kcp (0015's kube reads,
 0014's fill and VM counts, a bidder core restart: 0007:restart) cannot run until a bidder's kcp is reachable from the atproto VM
 (`run bidder --kcp-front-address` on the overlay address, its admin kubeconfig put on the atproto VM). The binary under test of
-every VM may be `put:<label>` (`SWC_BINARY`).
+every VM may be `path:<file>` (`SWC_BINARY`).
 
 ## Later
 

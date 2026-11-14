@@ -19,15 +19,15 @@ fn dev_up(bidders: u64) -> String {
     format!("--profile market-network --bidders {bidders} --with-gateway --compute-kinds vm,deno --host-backend proc --ready-timeout 90s --network-timeout 20m")
 }
 
-/// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build); `put:<label>`
-/// is no prefix: the host puts its SWC_BINARY (a build of this checkout, a branch's) on the VM (request.put).
+/// The bucket prefix of a binary spec: releases/<tag>, main/<commit> (CI) or local/<commit> (a hand build); `path:<file>`
+/// is no prefix: the host puts its SWC_BINARY (the build of this checkout, a branch's, the same file) on the VM (request.put).
 fn prefix(spec: &str) -> Result<String, String> {
     match spec.split_once(':') {
-        Some(("put", _)) => Ok(PUT.into()),
+        Some(("path", _)) => Ok(PUT.into()),
         Some(("release", tag)) => Ok(format!("releases/{tag}")),
         Some(("sha", sha)) => Ok(format!("main/{sha}")),
         Some(("local", sha)) => Ok(format!("local/{sha}")),
-        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag>, sha:<commit> or local:<commit> (got {spec:?})")),
+        _ => Err(format!("staging installs a published linux binary: set the target's requester to release:<tag>, sha:<commit>, local:<commit> or path:<file> (got {spec:?})")),
     }
 }
 

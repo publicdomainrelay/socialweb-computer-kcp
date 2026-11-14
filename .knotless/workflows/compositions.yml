@@ -96,7 +96,7 @@ steps:
       git -C /opt/swc-watch checkout -q 83541a1bd622a8679d90226fa72cab2af87dcde3
       sh /opt/swc-watch/scripts/ci-capture.sh /work/runs/watch.ndjson 7200
       # the binary under test: this commit's build (step binary), put on each staging VM by the host
-      spec="put:$(git rev-parse HEAD)"
+      spec="path:/home/r2/swc-under-test"
       echo "requester $spec"
       jq --arg b "$spec" '.requester = $b | .accounts.r2 = {handle: "", did: "", guestRequester: true}' tests/targets/prod.json > /home/r2/target-ci.json
       chown r2 /home/r2/target-ci.json
