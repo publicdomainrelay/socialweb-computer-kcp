@@ -236,7 +236,7 @@ func (p *Provider) RefOf(vm *v1alpha1.FirecrackerVM) vmruntime.RuntimeRef {
 		ref.GuestAddress, ref.HostAddress = n.GuestIP, n.HostAddress
 	}
 	if img := vm.Status.Image; img != nil {
-		ref.ImageSHA256 = img.Sha256
+		ref.ImageSHA256, ref.ImageFetched = img.Sha256, img.Fetched
 	}
 	return ref
 }
@@ -251,7 +251,7 @@ func cmpString(a, b string) string {
 func runningStatus(st v1alpha1.FirecrackerVMStatus, gen int64, ref vmruntime.RuntimeRef) v1alpha1.FirecrackerVMStatus {
 	st.Phase, st.LostReason = v1alpha1.ComputeVMPhaseRunning, ""
 	st.Network = &v1alpha1.FirecrackerVMNetwork{GuestIP: ref.GuestAddress, HostAddress: ref.HostAddress}
-	st.Image = &v1alpha1.FirecrackerVMImage{Sha256: ref.ImageSHA256, Hypervisor: ref.Hypervisor}
+	st.Image = &v1alpha1.FirecrackerVMImage{Sha256: ref.ImageSHA256, Hypervisor: ref.Hypervisor, Fetched: ref.ImageFetched}
 	st.Runtime = &v1alpha1.FirecrackerVMRuntime{Backend: string(ref.Backend), Hypervisor: ref.Hypervisor, Unit: ref.Unit,
 		InvocationID: ref.InvocationID, Pid: int64(ref.PID), StartTicks: int64(ref.StartTicks), StartTime: ref.StartTime.UTC().Format(time.RFC3339Nano),
 		HostBootID: ref.HostBootID, Manager: ref.Manager, VMMID: ref.VMMID, VMMUID: int64(ref.VMMUID), Slot: int32(ref.Slot), Socket: ref.Socket}

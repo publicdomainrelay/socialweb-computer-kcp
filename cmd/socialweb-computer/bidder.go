@@ -32,6 +32,7 @@ import (
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/guestimagerelease"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/hostsvc"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/fsx"
+	"github.com/johnandersen777/socialweb-computer-kcp/internal/kit/memsize"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/progress"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/bidder"
 	"github.com/johnandersen777/socialweb-computer-kcp/internal/stack/request"
@@ -758,8 +759,13 @@ func (r *bidderRun) installedCore(ctx context.Context) int {
 		return r.a.fail(exitFailed, "%s: the systemd-user backend: %v", verb, err)
 	}
 	defer m.Close()
+	budgetMiB, err := memsize.ParseMiB(r.vals.String("requested-image-budget"))
+	if err != nil {
+		return r.a.fail(exitRefused, "%s: requested-image-budget: %v", verb, err)
+	}
 	rt, err := vmruntime.ForHost(vmruntime.Config{Manager: m, StateDir: state, RuntimeDir: runtimeDir, VMM: vmm, Exec: vmExecutables(paths, vmm),
-		ImageSource: vm.ImageSource, StopGrace: grace, Binaries: installedBinaries(state),
+		RequestedImageBudget: int64(budgetMiB) << 20,
+		ImageSource:          vm.ImageSource, StopGrace: grace, Binaries: installedBinaries(state),
 		ImageOut: r.a.stderr, ImageTTY: progress.IsTTYWriter(r.a.stderr)})
 	if err != nil {
 		return r.a.fail(exitFailed, "%s: the VM runtime: %v", verb, err)

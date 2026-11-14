@@ -59,6 +59,8 @@ type FirecrackerVMImage struct {
 	Sha256 string `json:"sha256,omitempty"`
 
 	Hypervisor string `json:"hypervisor,omitempty"`
+
+	Fetched bool `json:"fetched,omitempty"`
 }
 
 type FirecrackerVMRuntime struct {

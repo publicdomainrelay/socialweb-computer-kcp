@@ -569,7 +569,11 @@ again; user_data installs `atirc-agent.service`
   requester restart `resumeReceipt` only fails the contract). An image contract waits `RequestedFetchTimeout` more than
   `DefaultVMReadyTimeout` for the guest (the first fetch of a 4.8 GB rootfs). Verified image.json fetches are cached per
   (url, sha256); `Store.Verify` trusts the `.verified` stamp (sha, size, mtime per file) of an image dir, so a reused rootfs is
-  not hashed again. Fetch guard and its limits: docs/FEATURES.md Known limits. The CI toolchain image
+  not hashed again. Requested image dirs carry `.requested` and `.used` (touched on every Prepare): `Store.Collect` keeps them
+  by last use within `requested-image-budget` (`run bidder`/`install bidder`/`dev up`, `vmruntime.Config.RequestedImageBudget`,
+  default 16G), evicts the least recently used only over the budget or with under `DefaultMinFree` (8G) free, never one
+  a FirecrackerVM or work dir names or one used in the last `UsedGrace` (10 min); `FirecrackerVM.status.image.fetched` says a
+  boot fetched its image (composition 0016 asserts the second rent does not). Fetch guard and its limits: docs/FEATURES.md Known limits. The CI toolchain image
   (`deploy/vm-images/ci-toolchain.json`, `scripts/build-ci-image.sh`: the pinned base kernel and rootfs with
   `knotless-ci-toolchain.sh --bake` run in it, published content-addressed under `vm-images/ci-toolchain/<image.json sha256>/`)
   is the image of the knotless build binding; composition 0016 (`run`, `badsha`) is its testcase.

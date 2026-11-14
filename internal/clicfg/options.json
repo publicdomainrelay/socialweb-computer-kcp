@@ -397,6 +397,12 @@
       "description": "internal vm, dev up --handle, dev up --profile market-network, run bidder and install bidder (written to config.json): file:// or https:// base the pinned guest image (vmlinux, rootfs.ext4, image.json) is fetched from once and verified by sha256; run bidder without one downloads the image of its own build from guest-image-release-base instead, unless the installed bidder's own store already holds the pinned image and verifies, in which case no artifact is asked",
       "env": "SOCIALWEB_GUEST_IMAGE_SOURCE"
     },
+    "requested-image-budget": {
+      "type": "string",
+      "description": "run bidder, install bidder, dev up: how much disk the bidder keeps for the VM images requesters name (compute.vm image), <number>[K|M|G|T]: the images no VM uses are kept by last use and the least recently used go only when their total is over this budget (or the disk has under 8G free); an image a VM uses, or used in the last 10 minutes, never goes",
+      "env": "SOCIALWEB_REQUESTED_IMAGE_BUDGET",
+      "default": "16G"
+    },
     "guest-image-release-base": {
       "type": "string",
       "description": "The base the published guest image is searched under (guest-images/<target>/<pinned image.json sha256> first, then releases/<version>, main/<commit>, main/latest and the newest releases/v*) by run bidder and by install bidder when neither --guest-image-source nor a stored source names one; install bidder refuses an empty base, when nothing else names an image, rather than installing a bidder that can provision nothing",

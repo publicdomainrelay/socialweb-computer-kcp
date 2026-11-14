@@ -19,6 +19,13 @@ const (
 	FetchPrefix   = ".fetch-"
 	FetchKeep     = time.Hour
 	BinaryTimeout = 30 * time.Second
+
+	RequestedName = ".requested"
+	UsedName      = ".used"
+
+	DefaultBudget  int64 = 16 << 30
+	DefaultMinFree int64 = 8 << 30
+	UsedGrace            = 10 * time.Minute
 )
 
 var digestName = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -72,8 +79,73 @@ type GCReport struct {
 	Kept    []GCKept `json:"kept"`
 }
 
+type requestedImage struct {
+	path string
+	size int64
+	last time.Time
+}
+
+func (s Store) Touch(dir string) {
+	path := filepath.Join(dir, UsedName)
+	now := time.Now()
+	if os.Chtimes(path, now, now) == nil {
+		return
+	}
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		f.Close()
+	}
+}
+
+func imageBytes(dir string) int64 {
+	var n int64
+	for _, name := range []string{ManifestName, KernelName, RootfsName} {
+		if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			n += fi.Size()
+		}
+	}
+	return n
+}
+
+func lastUsed(dir string, fallback time.Time) time.Time {
+	if fi, err := os.Stat(filepath.Join(dir, UsedName)); err == nil {
+		return fi.ModTime()
+	}
+	if fi, err := os.Stat(dir); err == nil {
+		return fi.ModTime()
+	}
+	return fallback
+}
+
+func (s Store) evictRequested(rep *GCReport, held []requestedImage, now time.Time) error {
+	sort.Slice(held, func(i, j int) bool { return held[i].last.Before(held[j].last) })
+	var total int64
+	for _, h := range held {
+		total += h.size
+	}
+	free, freeKnown := freeBytes(s.Root)
+	for _, h := range held {
+		over := s.Budget > 0 && total > s.Budget
+		pressure := freeKnown && s.MinFree > 0 && free < s.MinFree
+		switch {
+		case !over && !pressure:
+			rep.Kept = append(rep.Kept, GCKept{Dir: h.path, Reason: "a requested image, kept by last use within the budget"})
+		case now.Sub(h.last) < UsedGrace:
+			rep.Kept = append(rep.Kept, GCKept{Dir: h.path, Reason: "a requested image used within the last " + UsedGrace.String()})
+		default:
+			if err := os.RemoveAll(h.path); err != nil {
+				return err
+			}
+			rep.Removed = append(rep.Removed, h.path)
+			total -= h.size
+			free += h.size
+		}
+	}
+	return nil
+}
+
 func (s Store) Collect(keep map[string]string, now time.Time) (GCReport, error) {
 	rep := GCReport{Root: s.Root, Removed: []string{}, Kept: []GCKept{}}
+	var held []requestedImage
 	if !filepath.IsAbs(s.Root) {
 		return rep, fmt.Errorf("guestimage: the image store root %q is not absolute", s.Root)
 	}
@@ -120,12 +192,19 @@ func (s Store) Collect(keep map[string]string, now time.Time) (GCReport, error) 
 					rep.Kept = append(rep.Kept, GCKept{Dir: path, Reason: why})
 					continue
 				}
+				if _, err := os.Stat(filepath.Join(path, RequestedName)); err == nil {
+					held = append(held, requestedImage{path: path, size: imageBytes(path), last: lastUsed(path, now)})
+					continue
+				}
 				if err := os.RemoveAll(path); err != nil {
 					return rep, err
 				}
 				rep.Removed = append(rep.Removed, path)
 			}
 		}
+	}
+	if err := s.evictRequested(&rep, held, now); err != nil {
+		return rep, err
 	}
 	return rep, nil
 }
