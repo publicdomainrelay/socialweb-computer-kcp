@@ -8,8 +8,9 @@ Sources:
 - Read-only ssh (`systemctl show`, `ss -ltnp`, the caddy site lines, `git log -1` of each checkout, the
   NAMES of env files and of `Environment=` variables) on fedproxy.com, mini-cloud-0001.chadig.com,
   mini-cloud-0002.chadig.com and qr.fedfork.com. Nothing was changed. No env file was read.
-- Not reached by ssh: socialweb.computer (the gateway), hat-7, hat-9 and this host (hat-8). The task
-  rules forbid ssh to the hats and the gateway. Their rows come from `scripts/deploy.sh`,
+- Not reached by ssh when this was written: socialweb.computer (the gateway), hat-7, hat-9 and this host (hat-8). That
+  task's rules forbade it; they no longer do: the owner owns all prod infra (the gateway, the hats, the k3s/k8s/kcp and
+  ssh gateways) and they are redeployed as needed. Their rows come from `scripts/deploy.sh`,
   `CONTRIBUTING.md`, `docs/deploy.md`, `~/.tmp/deploy/README.md` and public HTTPS probes.
   tray.fedfork.com is not in the known host list and was probed over HTTPS only.
 - The old org-root: `~/src/publicdomainrelay-kcp` (origin `github.com/publicdomainrelay/socialweb-computer`,
