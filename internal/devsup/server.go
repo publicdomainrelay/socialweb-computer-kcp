@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -82,6 +83,7 @@ type server struct {
 	life     context.Context
 	end      context.CancelFunc
 	stopOnce sync.Once
+	stopping atomic.Bool
 	conns    map[net.Conn]struct{}
 	wg       sync.WaitGroup
 }
@@ -183,6 +185,7 @@ func Run(ctx context.Context, o Options) error {
 
 func (s *server) shutdown() {
 	s.stopOnce.Do(func() {
+		s.stopping.Store(true)
 		s.wg.Go(func() {
 			s.stopAll()
 			s.finish()
@@ -671,6 +674,7 @@ func (s *server) handle(req hostsvc.ProcRequest) hostsvc.ProcResponse {
 	switch req.Op {
 	case hostsvc.ProcOpHello, hostsvc.ProcOpShutdown:
 		h := s.hello
+		h.Stopping = s.stopping.Load()
 		return hostsvc.ProcResponse{Hello: &h}
 	case hostsvc.ProcOpStart:
 		if req.Spec == nil {
@@ -729,6 +733,11 @@ func (s *server) start(spec hostsvc.UnitSpec) (hostsvc.UnitStatus, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping.Load() {
+		// a shutdown is stopping the units in order and then exits, killing everything it started: a unit started now
+		// would be killed under its caller (a restart of an instance whose owner died mid-stop)
+		return hostsvc.UnitStatus{}, errStopping
+	}
 	select {
 	case <-s.done:
 		return hostsvc.UnitStatus{}, errStopping
