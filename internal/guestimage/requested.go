@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -200,5 +202,9 @@ func (s Store) EnsureRequested(ctx context.Context, req Requested, pin Pin, capB
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrRequestedRefused, err)
 	}
+	if f, err := os.OpenFile(filepath.Join(res.Dir, RequestedName), os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		f.Close()
+	}
+	s.Touch(res.Dir)
 	return res, nil
 }

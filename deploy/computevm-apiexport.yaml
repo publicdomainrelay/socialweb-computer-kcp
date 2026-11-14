@@ -11,7 +11,7 @@ spec:
         crd: {}
     - group: socialweb.computer
       name: firecrackervms
-      schema: v1alpha1-8.firecrackervms.socialweb.computer
+      schema: v1alpha1-9.firecrackervms.socialweb.computer
       storage:
         crd: {}
     - group: socialweb.computer

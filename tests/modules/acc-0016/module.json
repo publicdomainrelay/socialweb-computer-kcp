@@ -5,7 +5,7 @@
 		{
 			"entry": "run",
 			"label": "Run 0016",
-			"description": "Rent with the image (input image {url, sha256} and marker): Held, /etc/swc-image is the marker, the toolchain answers, then the release."
+			"description": "Rent with the image (input image {url, sha256} and marker): Held, /etc/swc-image is the marker, the toolchain answers, the release; then rent it again: the bidder does not fetch it a second time."
 		},
 		{
 			"entry": "badsha",
@@ -18,6 +18,8 @@
 		"computer.socialweb.test.request.ssh",
 		"computer.socialweb.test.request.release",
 		"computer.socialweb.test.request.records",
+		"com.fedfork.exec.kube.list",
+		"com.fedfork.exec.kube.get",
 		"computer.socialweb.test.assert.recordsGone"
 	],
 	"hooks": [

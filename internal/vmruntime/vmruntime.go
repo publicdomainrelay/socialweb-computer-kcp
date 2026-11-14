@@ -94,6 +94,8 @@ type Config struct {
 	Binaries    []string
 	ImageOut    io.Writer
 	ImageTTY    bool
+
+	RequestedImageBudget int64
 }
 
 type Capabilities struct {
@@ -133,8 +135,10 @@ type Prepared struct {
 	Socket    string `json:"socket"`
 	VMMID     string `json:"vmmID"`
 	ImageDir  string `json:"imageDir"`
-	Vcpu      int    `json:"vcpu"`
-	MemMiB    int    `json:"memMiB"`
+
+	ImageFetched bool `json:"imageFetched,omitempty"`
+	Vcpu         int  `json:"vcpu"`
+	MemMiB       int  `json:"memMiB"`
 
 	WebRTCAddresses []string `json:"webrtcAddresses,omitempty"`
 }
@@ -159,6 +163,8 @@ type RuntimeRef struct {
 	GuestAddress string          `json:"guestAddress"`
 	HostAddress  string          `json:"hostAddress"`
 	ImageSHA256  string          `json:"imageSha256"`
+
+	ImageFetched bool `json:"imageFetched,omitempty"`
 }
 
 type Observation struct {

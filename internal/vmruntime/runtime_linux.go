@@ -100,7 +100,8 @@ func (r *hostRuntime) Capabilities() Capabilities {
 func (r *hostRuntime) imagePin() (guestimage.Pin, error) { return guestimage.PinFor(r.target) }
 
 func (r *hostRuntime) imageStore() guestimage.Store {
-	return guestimage.Store{Root: filepath.Join(r.cfg.StateDir, "images"), Out: r.cfg.ImageOut, TTY: r.cfg.ImageTTY}
+	return guestimage.Store{Root: filepath.Join(r.cfg.StateDir, "images"), Out: r.cfg.ImageOut, TTY: r.cfg.ImageTTY,
+		Budget: cmp.Or(r.cfg.RequestedImageBudget, guestimage.DefaultBudget), MinFree: guestimage.DefaultMinFree}
 }
 
 func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error) {
@@ -132,8 +133,10 @@ func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		SocketDir: SocketDir(r.cfg.RuntimeDir, spec.Handle, spec.Name),
 		VMMID:     VMMID(spec.Handle, spec.Name),
 		ImageDir:  img.Dir,
-		Vcpu:      manifest.Vcpu,
-		MemMiB:    manifest.MemMiB,
+
+		ImageFetched: img.Fetched,
+		Vcpu:         manifest.Vcpu,
+		MemMiB:       manifest.MemMiB,
 	}
 	p.Socket = filepath.Join(p.SocketDir, SocketFile)
 	if len(p.Socket) >= 108 {
@@ -537,7 +540,7 @@ func (r *hostRuntime) Await(ctx context.Context, p Prepared, slot int) (RuntimeR
 		StartTime: time.Now().UTC(), HostBootID: id.BootID, Manager: id.Manager, VMMID: p.VMMID,
 		Slot: slot, VMMUID: vmmUID, WorkDir: p.WorkDir, Socket: p.Socket,
 		GuestAddress: guestnet.GuestAddress, HostAddress: guestnet.HostAddress,
-		ImageSHA256: filepath.Base(p.ImageDir),
+		ImageSHA256: filepath.Base(p.ImageDir), ImageFetched: p.ImageFetched,
 	}
 	if err := fsx.WriteJSON(filepath.Join(p.WorkDir, RefFile), ref, 0o600); err != nil {
 		return RuntimeRef{}, err

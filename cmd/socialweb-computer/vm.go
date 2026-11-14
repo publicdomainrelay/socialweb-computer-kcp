@@ -104,7 +104,7 @@ func vmExecutables(paths map[string]string, vmm string) vmruntime.Executables {
 		VMM: paths[vmruntime.VMMExecutable(vmm)]}
 }
 
-var devVMOptions = append([]string{"handle", "vm-host-backend", "vm-runtime-dir", "guest-image-source", "vm-stop-grace", "vmm"},
+var devVMOptions = append([]string{"handle", "vm-host-backend", "vm-runtime-dir", "guest-image-source", "requested-image-budget", "vm-stop-grace", "vmm"},
 	devOnly("userns-stage-path", "pasta-path", "vmexec-path", "firecracker-path", "qemu-path")...)
 
 func (a *app) devVMExecutables(vals clicfg.Values) (map[string]devinstance.Executable, error) {

@@ -89,6 +89,10 @@ func PinFor(target string) (Pin, error) {
 }
 
 type Store struct {
+	Budget int64
+
+	MinFree int64
+
 	Root   string
 	Client *http.Client
 	Out    io.Writer

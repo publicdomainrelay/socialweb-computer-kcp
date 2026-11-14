@@ -48,7 +48,7 @@ var APIResources = []APIResource{
 		{Name: "Requester", Type: "string", JSONPath: ".spec.requester.did"},
 		{Name: "Age", Type: "date", JSONPath: ".metadata.creationTimestamp"},
 	}},
-	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 8, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
+	{Kind: "FirecrackerVM", Plural: "firecrackervms", Revision: 9, Export: "computevms", Object: FirecrackerVM{}, Contracts: []string{commonv1.ContractComputeVMs}, PrinterColumns: []PrinterColumn{
 		{Name: "Phase", Type: "string", JSONPath: ".status.phase"},
 		{Name: "GuestIP", Type: "string", JSONPath: ".status.network.guestIP"},
 		{Name: "Unit", Type: "string", JSONPath: ".status.runtime.unit"},
