@@ -900,7 +900,7 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   doubling to 30 s) and fails only on a deny or after `TransientResumeGiveUp` (2 min).
 - The PolicyEngine run cache (`internal/policyengine/cache`) hands a run only its own entries (its cache-key verdict, the policy/ keys of its rfp, bid and accept, their rec/ entries and the strongRefs in them, its trust snapshot), drops expired verdicts, and its `spec.limits.maxCacheBytes` unset means `sandbox.OutputLimit`/2 (32 KiB; the scope verdict store keeps the set value, unset is no byte cap). A policy action whose stdout passes `sandbox.OutputLimit` (64 KiB) fails with `policy action output exceeded 65536 bytes`.
 - Bidder capacity (`internal/market/bidder/vmsize.go`): a guest counts as its vCPUs and its memory plus the VM overhead
-  (`contract/host.VMCommitMiB`, the figure its cgroup may use). A bid only checks; an accept reserves (per RFP, 10 min,
+  (`contract/host.VMCommitMiB`, unchanged; the VM's cgroup itself may use up to 2 x the guest memory, `VMLimits`: MemoryMax = MemoryHigh = 2 x guest, MemorySwapMax = guest, so the host pages to swap rather than throttling or killing a VM; a host needs swap of about its RAM). A bid only checks; an accept reserves (per RFP, 10 min,
   dropped once its ComputeVM exists), and an accept that would overcommit is refused before any receipt: submitAccept
   answers 409 `CapacityExceeded`. The requester then deletes its accept, excludes that bidder and accepts the next bid of
   the same RFP (up to 3 times); when the bids run out after a refusal it publishes a new RFP without the refusers.

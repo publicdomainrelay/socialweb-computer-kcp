@@ -176,6 +176,5 @@ func VMCommitMiB(memMiB int) int {
 }
 
 func VMLimits(memMiB int) (memoryMax, memoryHigh, swapMax uint64) {
-	overhead := VMOverheadMiB(memMiB)
-	return uint64(memMiB+overhead) << 20, uint64(memMiB+overhead/2) << 20, uint64(max(512, memMiB/8)) << 20
+	return uint64(2*memMiB) << 20, uint64(2*memMiB) << 20, uint64(memMiB) << 20
 }

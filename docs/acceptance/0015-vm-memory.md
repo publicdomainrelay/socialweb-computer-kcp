@@ -1,9 +1,10 @@
 # Acceptance 0015: VM memory headroom
 
 Proves a guest that uses nearly all of its RAM and writes to disk with fsync keeps its VM: the host does not OOM-kill
-the VMM. A VM's cgroup leaves room for the VMM beside the guest (`MemoryMax` = guest + max(512 MiB, 10%),
-`MemoryHigh` = guest + half that, `MemorySwapMax` = max(512 MiB, guest/8)), and its drives are `cache=none,aio=native`
-so guest I/O does not charge the host page cache to the VM.
+the VMM. A VM's cgroup leaves the guest its whole RAM again beside the VMM and any host page cache (`MemoryMax` = `MemoryHigh`
+= 2 x guest, `MemorySwapMax` = guest, owner decision 2026-11-14: the host can always page to swap, so a VM is not
+throttled or killed early), and its QEMU drives are `cache=none,aio=native` so guest I/O does not charge the host page
+cache to the VM (firecracker has no such option: its rootfs page cache is charged, which the 2x headroom absorbs).
 
 - Code: `internal/contract/host/host.go` (`VMLimits`, `VMCommitMiB`), the QEMU drive options (main 34a4aeaa);
   `internal/market/bidder/memory.go` (the host's `compute.events.vm.memoryPressure` / `vm.oomKilled` reports)
