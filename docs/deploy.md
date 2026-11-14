@@ -40,22 +40,21 @@ sudo runuser -u swc-bidder -- env XDG_RUNTIME_DIR=/run/user/$(id -u swc-bidder) 
 
 Every prod bidder runs the policy `bidder-tangled-vouch`: it is the MarketBidder default when `spec.policy` is unset, and `install bidder` writes `bidder-policy` to config.json (`bidder-tangled-vouch` unless `--bidder-policy` names another), which `upgrade` and restarts keep. `open` is insecure and runs only when set explicitly (`--bidder-policy open` or `spec.policy: open`); never on a prod bidder. A requester gets bids only when the bidder operator vouches it (`sh.tangled.graph.vouch`, rkey the requester's DID): bob and john vouch alice, the acceptance requester (docs/acceptance/0001-auth-modes.md, Bidder policy).
 
-Verify the deployment by scaling a tenant cluster from zero and back:
+Verify the deployment with acceptance 0001, which is the canary: it scales a tenant k8s cluster through the gateway
+(nodes 0 -> 1 -> 2 -> 3 -> 2 -> 1 -> 0, each node a market VM rented through the gateway's NodeClaim path, the gateway's
+account modes and one VM per host) and releases everything. It takes about 12 minutes, runs alone (an exclusive entry), and
+needs the prod target's requester (`release` = the newest rc tag) and the bob account on the deploy host:
 
 ```bash
-GW=https://k8s.socialweb.computer AUD=did:web:k8s.socialweb.computer K=computer.socialweb.k8s
-# apply the Job below to the canary cluster, then poll it (README: Apply objects and read Jobs without a kubeconfig)
-jq -n '{cluster: "canary", manifest: {apiVersion: "batch/v1", kind: "Job",
-  metadata: {name: "scale-check", namespace: "default"},
-  spec: {backoffLimit: 0, template: {spec: {restartPolicy: "Never",
-    containers: [{name: "run", image: "docker.io/library/busybox:1.36.1", command: ["sh", "-c", "echo up"]}]}}}}}' |
-  curl -sS -X POST "$GW/xrpc/$K.kubectlApplyServerSide" -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.kubectlApplyServerSide)" -d @- | jq -c '{kind, name}'
-curl -sS "$GW/xrpc/$K.getJob?cluster=canary&namespace=default&name=scale-check&tailLines=50" \
-  -H "Authorization: Bearer $(goat account service-auth --aud $AUD --lxm $K.getJob)" | jq -c '{phase, succeeded}'
+cd tests && SWC_COMPAT_REQUESTER=release:<previous rc tag> ./gate.sh $PWD/targets/prod.json --account bob 0001:run
 ```
 
-A tenant cluster scales from zero when you apply a pod to it: the pod raises a `NodeClaim`, the cluster runs the RFP flow for a market VM, the node joins, and the pod runs. Deleting the pod returns the cluster to zero nodes and deletes the VM. Applying a Job on a cluster at zero nodes works the same way; poll `getJob` or watch `#nodeClaim` on `subscribeClusters`.
+The RESULT line is `0001:run PASS <seconds>`; a failure freezes the run (`GATE_FREEZE_TTL`, 900 s; attach with
+`swc-test-host attach <run dir>`, the path is in the log) and the gateway rolls back with the command below. Run the whole
+release gate (`./gate.sh $PWD/targets/prod.json --account bob,alice`, see AGENTS.md "Release pipeline") when a release is cut.
+Besides it, read `https://k8s.socialweb.computer/` (200), the web app's `/api/config` on the host, `docker ps` of the
+host's other tenants (the knotless runner and its siblings are never restarted by a gateway deploy) and
+`systemctl restart swc-ssh-gateway.service` (it runs `bin/current` and keeps the old binary until restarted).
 
 Roll back as the account with `socialweb-computer rollback --state-dir <state>` (or with
 `CONFIG_PATH_SOCIALWEB_COMPUTER=<state>/config.json` set).
