@@ -102,6 +102,15 @@ steps:
       bash scripts/check-reproducible.sh --platform linux/amd64 --platform linux/arm64 --commit "$KNOTLESS_RUN_SHA" \
         --build-root /root/repro-build --gomod-cache /root/release-build/cache/gomod \
         --against /root/release-build/src/1/internal/assets/blobs
+  - name: dev build
+    timeout: 40
+    run: |
+      . /opt/ci/env
+      # the dev build (scripts/build-socialweb-computer.sh --dev) is what live runs use: it must start. It is a -tags release
+      # binary with the blobs and build records overlaid; a built asset without its record refuses to start (2026-11-14).
+      command -v rsync >/dev/null 2>&1 || apt-get install -y -q rsync
+      case "$KNOTLESS_RUN_REF" in refs/tags/v*) ;; *) export ASSET_CACHE_URL=https://$SPACES_BUCKET.$SPACES_REGION.digitaloceanspaces.com/asset-cache ;; esac
+      bash scripts/check-dev-build.sh --build-root /root/dev-build
   - name: asset cache
     on: {refs: [refs/heads/main, refs/tags/v*]}
     timeout: 30
