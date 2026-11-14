@@ -1,5 +1,6 @@
-# knotless CI: `make check-pins` (make pins re-stages and re-pins the owned assets; it fails when
-# internal/versions/versions.json differs from the commit). 4 vCPU / 8 GB (binding kcp-small).
+# knotless CI: `make check-pins` (make pins re-stages and re-pins the assets built from pinned upstream source, kcp and atirc; it
+# fails when internal/versions/versions.json differs from the commit). The assets built from this repository's own commit are
+# not pinned there (the release workflow's `reproducible` step proves them), so a Go change under internal/ never fails it. 4 vCPU / 8 GB (binding kcp-small).
 # Runs only when asked for now (owner, 2026-11-13): off on push while we iterate; release no longer waits for it.
 on:
   asked:

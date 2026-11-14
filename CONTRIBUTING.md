@@ -41,7 +41,7 @@ Options:
 | `--platform P` | `linux/amd64` or `linux/arm64`; repeat for more. |
 | `--commit REV` | Commit to build. Default `HEAD`; uncommitted changes are not built. |
 | `--build-root DIR` | Checkouts, caches and outputs. Default `$HOME/.tmp/socialweb-computer-build`. |
-| `--update-pins` | Rebuild owned assets and write new pins to `internal/versions/versions.json`. `make` passes it. |
+| `--update-pins` | Rebuild the assets built from pinned upstream source (kcp, atirc) and write new pins to `internal/versions/versions.json`. `make` passes it. Assets built from this commit are not pinned: their hashes are recorded by the build (`<asset>.built.json`) and `scripts/check-reproducible.sh` proves them. |
 
 A code change in a running market network. Every component runs in the core process, so a component
 change needs a new core binary; `--sync-only` only re-mirrors the tree and does not build one:

@@ -679,9 +679,9 @@ again; user_data installs `atirc-agent.service`
   other UDP port is forwarded, and the addresses never go into kcp. A guest-facing local listener the bidder hands to a guest goes into
   `spec.hostPorts` (`GuestHostPorts`, `guestseed.HostPortsOf`); never widen the fence to all ports,
   and never open TCP to the LAN or to the host's own addresses.
-- After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, run `make pins` and commit the
-  `socialweb-vmexec` pin with the change, then `dev down` and `dev up` the network instead of a
-  `dev restart ... core`.
+- After a change to `cmd/socialweb-vmexec` or `internal/guestnet`, rebuild with `--dev --publish` (nothing to
+  re-pin: socialweb-vmexec is built from the commit and pinned nowhere), then `dev down` and `dev up` the network
+  instead of a `dev restart ... core`.
 
 ## Tests: Rust system integration tests
 
@@ -954,7 +954,8 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   on every push to `main` and `knotless-ci`; read its check
   (`knotless run list knotless://johnandersen777.bsky.social/socialweb-computer-kcp --commit <sha>`). Do not run it on
   hat-8 as well. A local `deploy/check.sh` on hat-8 (under `scripts/swc-heavy.sh`) is only for what CI does not run:
-  a VMM change (its tests are local only), a pins change (`make check-pins`), a guest image change.
+  a VMM change (its tests are local only), a pins change (`make check-pins`; it covers only what is built from
+  pinned upstream source), a guest image change.
   - `deploy/check.sh --fast`, in order: `gofmt -l` of `api`, `internal`, `cmd`, `hack` and `lexicons`;
     `go build ./...`; apigen into a scratch directory and a diff against every file
     `go run ./cmd/socialweb-apigen -root . -list` names (generated code must match its source);
@@ -996,14 +997,43 @@ A prod deployment guarantees nothing; the routine path preserves most things.
   keys.openpgp.org, and keeps the first that imports with the pinned primary fingerprint), the embedded
   Deno of the policy engine, then `go build -tags "release embed_deno"` with `CGO_ENABLED=0`.
   Each step is keyed by its inputs and does not run again when they did not change: asset blobs by
-  their pinned inputs (assets built here by their tar bytes), socialweb-meshd by rust/ and the
+  their pinned inputs (assets built from this commit by their source inputs), socialweb-meshd by rust/ and the
   toolchain, plus the go build cache and the cargo target dir. Tens of seconds warm; minutes with
   empty caches. Every phase prints a `timing` line. `make` builds with `--update-pins`: assets built
-  from this repository or from pinned upstream source are rebuilt and their new pins written to
+  from pinned upstream source (kcp, atirc) are rebuilt and their new pins written to
   `internal/versions/versions.json`; downloaded assets still verify their pins and never move.
-  `make pins` re-stages and re-pins only the owned assets. Commit the pin change with the source
-  change. The `pins` CI job runs `make check-pins`, which runs `make pins` and fails when
-  `versions.json` differs from HEAD. Checkouts, caches and outputs stay under
+  `make pins` re-stages and re-pins only those. The `pins` CI job runs `make check-pins`, which runs
+  `make pins` and fails when `versions.json` differs from HEAD.
+- **What `versions.json` pins, and what it never does.** It pins THIRD-PARTY inputs only: source archives, toolchains,
+  upstream binaries, images, debs, and the expected tree of what is built from them (kcp, atirc). The outputs of
+  what we build from this repository's own commit (every asset whose fetch kind is `go` or `script`:
+  socialweb-vmexec, the two OpenBao plugins, swc-userns-stage, socialweb-computer-k8s-downloads,
+  socialweb-guest-downloads) are NEVER pinned there: they change with every Go change under `internal/`
+  (cmd/socialweb-node and the guest agent import it), so pinning them cost one re-pin commit per change and a
+  broken `make check-pins` in between (53 pin commits in 477 on main by 2026-11-14). `deploy/check.sh` fails when
+  `versions.json` carries a `platforms` entry or a fetch `sha256` for one. Instead:
+  - `scripts/stage-assets.sh` writes what the build produced beside each blob,
+    `internal/assets/blobs/<goos>_<goarch>/<asset>.built.json` (tree digest, sizes, and for a Go asset the binary
+    sha256, which is the sha256 the OpenBao plugin catalog registers). It is ignored by git and embedded in the
+    release binary with the blob (`internal/assets/built.go`); `assets.PlatformPins` gives every consumer the
+    third-party pin from `versions.json` or the build record. The binary extracts the blob under its tree digest and
+    re-hashes the tree against the record before every use (`Store.Ensure`), `Ready()` refuses to start without
+    the record of an embedded built asset, and the plugin placement (`internal/openbaoctl/plugins.go`) checks the
+    placed binary against the record. A dev build (`--dev`) stages the working tree's assets and their records the
+    same way (a script-built asset's shared blob is keyed by `stage-assets.sh --print-src-key`).
+  - The release publishes the produced hashes: `release/<commit>/release.json` (`builds[].builtAssets`) and
+    `built-assets-<goos>-<goarch>.json`, beside `SHA256SUMS`; the binary's SHA256SUMS entry covers the embedded
+    blobs and records. The downloads trees carry their own sidecars (`<name>.sha256`): the web app and the
+    GuestControlPlane refuse a sidecar that does not hash its file, and a node or guest checks the sha256 in the
+    `/downloads/<sha256>/<name>` path against the bytes it fetched.
+  - The integrity proof is CI's, not a committed hash: the release workflow's `reproducible` step
+    (`scripts/check-reproducible.sh`, `make reproducible` locally) stages every built asset COLD (a fresh clean
+    checkout at a new path, empty go/cargo/meshd caches, no bucket asset cache) and fails on any byte of difference
+    from the blobs the release binary embeds, naming the asset, platform and files; it gates the cache uploads and
+    the stage. Without `--against` it builds twice and compares the two. A cache poisoned in the bucket
+    (`ASSET_CACHE_URL`, keyed by source inputs, not by output) is therefore caught at the next release, not trusted.
+  - Adding such an asset: give it fetch kind `go` or `script` and NO `platforms` / `sha256`; add its inputs to the
+    script's `# stage-assets inputs:` line so its cache key sees them. Checkouts, caches and outputs stay under
   `~/.tmp/socialweb-computer-build`; `release/<commit>/` holds the binaries and `SHA256SUMS` that
   `install` and `upgrade --binary --sha256` take. Never build it in the inner loop.
 
