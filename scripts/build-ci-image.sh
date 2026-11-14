@@ -18,8 +18,9 @@ marker written to /etc/swc-image. A requester rents it with compute.vm image {ur
   --out      where <name>/{vmlinux,rootfs.ext4,image.json,SHA256SUMS} land (default WORK/out)
   --work     scratch (default \$GUEST_IMAGE_WORK or \$HOME/.tmp/guest-image-build; never /tmp)
   --publish  upload <out>/<name> content-addressed to vm-images/<name>/<image.json sha256> in the
-             bucket (SPACES_* in the environment; refuses when any key already exists) and write
-             deploy/vm-images/<name>.json {url, sha256}
+             bucket (SPACES_* in the environment; refuses when any key already exists), write
+             deploy/vm-images/<name>.json {url, sha256, marker}, then prove a real bidder accepts a rent
+             with it (tests/gate.sh targets/prod.json 0016:run); the pin file is restored if that fails
 
 The bake is not bit-for-bit reproducible (apt and the toolchains download the current packages); the
 image is pinned by the sha256 of its outputs, and a change to the toolchain script is a new image.
@@ -79,7 +80,12 @@ docker image inspect "$builder" >/dev/null 2>&1 || docker build -q -t "$builder"
 
 commit="$(git -C "$root" rev-parse HEAD)"
 script_sha="$(sha_of "$root/scripts/knotless-ci-toolchain.sh")"
-marker="$name base=$base_pin kcp=$commit toolchain=$script_sha pins=$("$root/scripts/knotless-ci-pins.sh")"
+# The marker is the one line a requester sends and a bidder checks (at most 256 bytes: guestimage.RequestedMarkerMax; a longer one refuses the image
+# and a rent waits for capacity that never comes): `<name> <sha256 of the detail>`. The detail, four lines, is /etc/swc-image.detail in the image and
+# .inputs.ciImage in image.json; scripts/knotless-ci-baked.sh reads it.
+detail="$(printf 'base=%s\nkcp=%s\ntoolchain=%s\npins=%s\n' "$base_pin" "$commit" "$script_sha" "$("$root/scripts/knotless-ci-pins.sh")")"
+marker="$name $(printf '%s\n' "$detail" | sha256sum | cut -d' ' -f1)"
+[ "${#marker}" -le 256 ] || die "the marker is ${#marker} bytes: a bidder refuses one over 256"
 img="localhost/swc-ci-image-base:${base_pin:0:12}"
 ctr="swc-ci-image-$$"
 cleanup() { docker rm -f "$ctr" >/dev/null 2>&1 || true; }
@@ -97,8 +103,9 @@ say "baking the toolchain (scripts/knotless-ci-toolchain.sh --bake --wasm --deno
 docker run --name "$ctr" -v "$root:/src:ro" -w /src -e HOME=/root "$img" bash -euc '
   bash scripts/knotless-ci-toolchain.sh --bake --wasm --deno --arm64
   printf "%s\n" "$0" > /etc/swc-image
+  printf "%s\n" "$1" > /etc/swc-image.detail
   rm -rf /etc/ssh/ssh_host_* /var/lib/cloud /var/log/cloud-init* /var/lib/apt/lists/* /var/cache/apt/*.bin /root/.cache /tmp/* /var/tmp/*
-  : > /etc/machine-id' "$marker" >&2
+  : > /etc/machine-id' "$marker" "$detail" >&2
 
 say "the baked rootfs"
 docker export "$ctr" >"$tw/rootfs.tar"
@@ -127,9 +134,9 @@ rm -f "$dir"/*
 cp "$base/vmlinux" "$dir/vmlinux"
 mv "$tw/rootfs.ext4" "$dir/rootfs.ext4"
 jq --arg sha "$(sha_of "$dir/rootfs.ext4")" --argjson bytes "$(stat -c %s "$dir/rootfs.ext4")" \
-  --arg tar "$tar_sha" --arg marker "$marker" --arg base "$base_pin" \
+  --arg tar "$tar_sha" --arg marker "$marker" --arg base "$base_pin" --arg detail "$detail" \
   '.rootfs.sha256 = $sha | .rootfs.bytes = $bytes | .rootfsTarSha256 = $tar | .marker = $marker
-   | .inputs.ciImageBase = {sha256: $base}' "$base/image.json" >"$dir/image.json"
+   | .inputs.ciImageBase = {sha256: $base} | .inputs.ciImage = ($detail | split("\n") | map(select(length > 0) | split("=") | {(.[0]): .[1]}) | add)' "$base/image.json" >"$dir/image.json"
 (cd "$dir" && sha256sum vmlinux rootfs.ext4 image.json >SHA256SUMS)
 image_sha="$(sha_of "$dir/image.json")"
 cat "$dir/SHA256SUMS" >&2
@@ -147,7 +154,19 @@ if [ "$publish" = 1 ]; then
   deno run -A --no-lock "$root/scripts/publish-spaces.ts" --dir "$dir" --prefix "$prefix" --content-addressed
   curl -fsSL "$url/SHA256SUMS" | cmp -s - "$dir/SHA256SUMS" || die "$url/SHA256SUMS is not the built one"
   mkdir -p "$root/deploy/vm-images"
-  jq -n --arg url "$url" --arg sha "$image_sha" --arg marker "$marker" '{url: $url, sha256: $sha, marker: $marker}' \
-    >"$root/deploy/vm-images/$name.json"
+  pinfile="$root/deploy/vm-images/$name.json"
+  before="$(mktemp)"; if [ -f "$pinfile" ]; then cp "$pinfile" "$before"; else : >"$before"; fi
+  jq -n --arg url "$url" --arg sha "$image_sha" --arg marker "$marker" '{url: $url, sha256: $sha, marker: $marker}' >"$pinfile"
   say "published $url (pin in deploy/vm-images/$name.json)"
+  # A bidder refuses an image whose manifest it dislikes (a marker over 256 bytes, a size, a file's sha) and a rent that names it then waits for
+  # capacity that never comes (2026-11-14: two hours of stalled CI). So before anything is bound to it, one small rent proves a real bidder
+  # accepts it: acceptance 0016:run on prod rents the pinned image, matches the guest's reported marker, and releases. The pin stays only if it passes.
+  say "proving a rent with the image is accepted by a real bidder (tests/gate.sh targets/prod.json 0016:run)"
+  if ! (cd "$root/tests" && ./gate.sh targets/prod.json 0016:run); then
+    if [ -s "$before" ]; then cp "$before" "$pinfile"; else rm -f "$pinfile"; fi
+    rm -f "$before"
+    die "a rent with $url was not accepted (0016:run failed): the pin is not written; nothing is bound to the image"
+  fi
+  rm -f "$before"
+  say "a rent with the image was accepted: bind it (inputs.image {url, sha256}) to the CI bindings"
 fi
