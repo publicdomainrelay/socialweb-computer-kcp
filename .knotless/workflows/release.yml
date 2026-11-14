@@ -21,11 +21,7 @@ env:
 steps:
   - name: toolchain
     run: |
-      if [ -f /etc/swc-image ] && grep -q ci-toolchain /etc/swc-image && [ -f /opt/ci/env ]; then
-        echo "toolchain: baked into this image ($(cat /etc/swc-image)), not installed"
-      else
-        bash scripts/knotless-ci-toolchain.sh --deno --arm64
-      fi
+      if bash scripts/knotless-ci-baked.sh; then :; else bash scripts/knotless-ci-toolchain.sh --deno --arm64; fi
   - name: binaries
     timeout: 110
     run: |
