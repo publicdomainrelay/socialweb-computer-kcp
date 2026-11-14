@@ -768,8 +768,8 @@ gh-actions-runner-socialweb-computer-kcp.service`, `--remove` deletes it). The k
 `downloads/` and `guest-images/`); the `publish` workflow, after both pass at the commit, copies it inside the bucket
 (`scripts/copy-spaces.ts`) to `main/<sha>/` and `main/latest/` (a v* tag: `releases/<tag>/`) and checks it. `staging/` is
 scratch for a build whose gate failed. A non-tag release build restores the caches of `scripts/asset-cache-upload.sh`
-and `scripts/ci-build-cache.sh` (`build-cache/<kind>/<key>`: Go module and build caches by go.sum and Go version, cargo
-target by Cargo.lock, meshd by the rust/ tree) and main and v* builds upload what is new; a cached build gives the
+and `scripts/ci-build-cache.sh` (`build-cache/<kind>/<key>`: cargo target by Cargo.lock, meshd by the rust/ tree; the Go module
+and build caches are opt-in: restoring them costs more than they save) and main and v* builds upload what is new; a cached build gives the
 bytes of a cold one (`-trimpath`). Until it has passed on main, builds are hat-8
 release builds (never `--dev`), published by hand to `local/<sha>/binaries/` (testkit's `local:<sha>`), and the test host
 and module wasm to `tests/<tree>/` (`tests/publish-test-host.sh`):
