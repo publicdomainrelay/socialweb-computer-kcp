@@ -234,22 +234,38 @@ impl Account {
         }
     }
 
-    /// The app password: the first variable ending in ATPROTO_PASSWORD. The file must be owner-only.
+    /// The password: the one variable ending in ATPROTO_PASSWORD (several with the same value are one). The file must be
+    /// owner-only. A file with several such variables that differ is refused, never "the first": a wrong pick burns sign-ins
+    /// (and the account's rate limit) before anything says which variable it was.
     pub fn password(&self) -> Result<Secret> {
         let path = expand(&self.creds);
         check_private(&path)?;
         let text = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+        let mut found: Vec<(String, String)> = vec![];
         for line in text.lines() {
             let line = line.trim().trim_start_matches("export ").trim();
             if let Some((k, v)) = line.split_once('=')
                 && k.ends_with("ATPROTO_PASSWORD")
             {
-                return Ok(Secret(
+                found.push((
+                    k.to_string(),
                     v.trim().trim_matches(|c| c == '"' || c == '\'').to_string(),
                 ));
             }
         }
-        bail!("{}: no *ATPROTO_PASSWORD", path.display())
+        let Some((_, first)) = found.first() else {
+            bail!("{}: no *ATPROTO_PASSWORD", path.display());
+        };
+        if found.iter().any(|(_, v)| v != first) {
+            let names: Vec<&str> = found.iter().map(|(k, _)| k.as_str()).collect();
+            bail!(
+                "{}: {} variables ending in ATPROTO_PASSWORD with different values ({}); keep one (a gate-only creds file per account)",
+                path.display(),
+                found.len(),
+                names.join(", ")
+            );
+        }
+        Ok(Secret(first.clone()))
     }
 }
 
