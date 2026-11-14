@@ -7,7 +7,8 @@ D=${SWC_DIR:-/home/stg/stg}
 export SWC_READINGS=$D/readings
 export SWC_REPO=$D/suite
 cd $D/suite/tests
-compositions/staging/target.sh "$run" > $D/target-staging.json || exit 3
+# the target's own log (its stderr): a suite that fails here, before any test, says why (the module brings the logs back)
+compositions/staging/target.sh "$run" > $D/target-staging.json 2> $D/target-staging.log || { echo "RESULT target-staging $?"; cat $D/target-staging.log; exit 3; }
 failed=0
 for id in "$@"; do
   r=${id%%:*} e=${id#*:}; [ "$e" = "$id" ] && e=run

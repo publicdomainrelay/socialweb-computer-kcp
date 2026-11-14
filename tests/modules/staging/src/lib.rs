@@ -68,6 +68,20 @@ fn bg(step: &str, cmd: String) -> String {
     format!("rm -f {f}.rc; (setsid nohup sh -c '{cmd} > {f}.log 2>&1; echo $? > {f}.rc' < /dev/null > /dev/null 2>&1 &); echo started")
 }
 
+/// The suite's own logs on the VM (the target's, each composition's), tails of each: what a failed suite names its test by. Fetched
+/// before the run is torn down and kept in the readings (the run's dump, an artifact), pass or fail.
+const SUITE_LOGS: &str = "cd /home/stg/stg 2>/dev/null || exit 0; for f in target-staging.log suite-*.log; do [ -f \"$f\" ] || continue; echo \"=== $f ($(wc -c < \"$f\") bytes)\"; tail -c 6000 \"$f\"; done; echo '=== suite.log'; tail -c 4000 /home/stg/suite.log 2>/dev/null; exit 0";
+
+/// The suite's result with what it printed: its RESULT lines, and the tail of its own output when it failed (`suite exit 3` with no
+/// RESULT line is the target failing before any test ran: its stderr is in that tail).
+fn suite_result(rc: &str, results: &[&str], log: &str) -> Value {
+    if rc == "0" {
+        return json!({ "pass": true });
+    }
+    let tail: String = log.lines().filter(|l| !l.starts_with("RESULT ")).collect::<Vec<_>>().join("\n");
+    json!({ "pass": false, "error": format!("suite exit {rc}: {}{}", results.join(", "), if tail.trim().is_empty() { String::new() } else { format!("\n{tail}") }) })
+}
+
 /// `<rc>` (empty while it runs), then the log's tail.
 fn poll(step: &str) -> String {
     format!("cat /home/stg/{step}.rc 2>/dev/null; echo; tail -c 3000 /home/stg/{step}.log")
@@ -163,6 +177,11 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                     h = h.call(ssh("up", bg("up", swc(&format!("dev up {INST} {}", dev_up(args["bidders"].as_u64().unwrap_or(1)))))));
                 }
                 "install" => return Ok(s.fail(format!("install: {text}"))),
+                "suite-logs" => {
+                    s.st["readings"]["suiteLogs"] = json!(text);
+                    let r = s.st["pending"].clone();
+                    return Ok(down(&mut s, h, r));
+                }
                 "up" | "down" if o["ok"] == true => h = h.timer(&format!("poll-{id}"), 10_000),
                 "up" | "down" => return Ok(s.fail(format!("{id}: starting it on the VM: {text}"))),
                 "up-poll" | "down-poll" | "suite-poll" => {
@@ -183,8 +202,8 @@ fn run_staging(run: Run<Value>) -> Result<Handle, String> {
                             let results: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("RESULT ")).collect();
                             s.st["readings"]["suite"] = json!(results);
                             s.mark("suite");
-                            let r = if rc == "0" { json!({ "pass": true }) } else { json!({ "pass": false, "error": format!("suite exit {rc}: {}", results.join(", ")) }) };
-                            return Ok(down(&mut s, h, r));
+                            s.st["pending"] = suite_result(rc, &results, log);
+                            h = h.call(ssh("suite-logs", SUITE_LOGS.to_string()));
                         }
                         "0" => return Ok(finish(&mut s)),
                         rc if step == "up" => {
@@ -529,6 +548,11 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                     h = h.call(ssh("atproto", "atproto:suite", cmd));
                 }
                 "suite" if ok => h = h.timer("poll-atproto:suite", 30_000),
+                "suite-logs" => {
+                    s.st["readings"]["suiteLogs"] = json!(text);
+                    let r = s.st["pending"].clone();
+                    return Ok(down(&mut s, h, r));
+                }
                 "suite-poll" => {
                     let (rc, log) = text.split_once('\n').unwrap_or((text.as_str(), ""));
                     match rc.trim() {
@@ -538,8 +562,8 @@ fn run_multi(run: Run<Value>) -> Result<Handle, String> {
                             let results: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("RESULT ")).collect();
                             s.st["readings"]["suite"] = json!(results);
                             s.st["readings"]["suiteS"] = json!(s.since("suite"));
-                            let r = if rc == "0" { json!({ "pass": true }) } else { json!({ "pass": false, "error": format!("suite exit {rc}: {}", results.join(", ")) }) };
-                            return Ok(down(&mut s, h, r));
+                            s.st["pending"] = suite_result(rc, &results, log);
+                            h = h.call(ssh("atproto", "atproto:suite-logs", SUITE_LOGS.to_string()));
                         }
                     }
                 }
