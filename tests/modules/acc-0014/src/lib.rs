@@ -19,8 +19,14 @@ struct Shape {
     fit: i64,
     need_refusal: bool,
     rounds: u64,
-    /// rentals beyond the bidders' room: each refused by every bidder, then its new RFP refused at once
+    /// rentals beyond the bidders' room: each refused by every bidder, then its new RFP finds no bid: the requester
+    /// WAITS for capacity (requester_waiting_for_capacity) instead of failing
     fails: usize,
+    /// 0: the accept-fallback runs; 1 giveup: every bidder filled, one rental with a short --expires-in must fail at its
+    /// deadline "gave up waiting for capacity"; 2 wait: every bidder filled, a rental waits, a filler is released and it is Held
+    mode: u8,
+    /// the --expires-in of the rental of mode 1 and 2
+    expires: &'static str,
 }
 
 fn vms(id: &str, cluster: &str) -> abi::Call {
@@ -97,9 +103,10 @@ fn launch(s: &mut S, mut h: Handle, name: &str, shape: &Shape) -> Handle {
     let mut rs = vec![];
     for i in 0..shape.rentals {
         let n = format!("{name}-{round}-{i}");
-        let a = json!(["--hold", "--cpus", s.st["cpus"].to_string(), "--mem", s.st["mem"], "--expires-in", "1h"]);
+        let exp = if shape.mode > 0 { shape.expires } else { "1h" };
+        let a = json!(["--hold", "--cpus", s.st["cpus"].to_string(), "--mem", s.st["mem"], "--expires-in", exp]);
         h = h.call(steps::host_sub(&format!("req:{i}"), "request.start", json!({ "name": n, "args": a, "bidderDids": dids })));
-        rs.push(json!({ "name": n, "declined": [], "replaced": 0, "newRfp": 0 }));
+        rs.push(json!({ "name": n, "declined": [], "replaced": 0, "newRfp": 0, "waits": 0 }));
     }
     s.st["rentals"] = json!(rs);
     h.timer(&format!("round:{round}"), 20 * MIN)
@@ -113,14 +120,31 @@ fn check(s: &mut S, mut h: Handle, shape: &Shape) -> Result<Handle, Handle> {
     let mut declined_uris = vec![];
     let mut failed = vec![];
     for r in rentals(s) {
-        if r["failed"] == true {
+        if r["held"] != true && r["failed"] != true && shape.mode == 0 && shape.fails > 0 && r["waits"].as_u64().unwrap_or(0) > 0 {
+            // the documented end: every bidder refused it, the bids ran out, its new RFP (the refusers excluded) found no bid:
+            // it waits for capacity, a new RFP asking everyone after each backoff, until its deadline
             for d in r["declined"].as_array().into_iter().flatten() {
                 declined_uris.push(d["accept"].clone());
             }
             let n = r["declined"].as_array().map_or(0, Vec::len);
-            // the documented end: every bidder refused it, the bids ran out, its new RFP has no bidder left
-            if n < chosen(s).len() || r["newRfp"].as_u64().unwrap_or(0) == 0 || !r["failMsg"].as_str().unwrap_or_default().contains("requester_no_bidders") {
-                p.push(format!("{} failed, not after every bidder refused it and its new RFP found none: {} refusals, newRfp {}, {}", r["name"], n, r["newRfp"], r["failMsg"]));
+            if n < chosen(s).len() || r["newRfp"].as_u64().unwrap_or(0) == 0 {
+                p.push(format!("{} waits for capacity, not after every bidder refused it and its new RFP found none: {} refusals, newRfp {}", r["name"], n, r["newRfp"]));
+            }
+            failed.push(r["name"].clone());
+            continue;
+        }
+        if r["failed"] == true {
+            for d in r["declined"].as_array().into_iter().flatten() {
+                declined_uris.push(d["accept"].clone());
+            }
+            let msg = r["failMsg"].as_str().unwrap_or_default();
+            let waits = r["waits"].as_u64().unwrap_or(0);
+            if shape.mode == 1 {
+                if !msg.contains("gave up waiting for capacity") || waits < 2 {
+                    p.push(format!("{} failed, not by giving up waiting for capacity after at least 2 rounds ({waits} waiting lines): {msg}", r["name"]));
+                }
+            } else {
+                p.push(format!("{} failed instead of waiting for capacity: {msg}", r["name"]));
             }
             failed.push(r["name"].clone());
             continue;
@@ -141,13 +165,13 @@ fn check(s: &mut S, mut h: Handle, shape: &Shape) -> Result<Handle, Handle> {
         let c = per.get(&w).and_then(Value::as_i64).unwrap_or(0) + s.st["cpus"].as_i64().unwrap_or(0);
         per.insert(w, json!(c));
     }
-    for (w, c) in &per {
+    for (w, c) in per.iter().filter(|_| shape.mode == 0) {
         if c.as_i64().unwrap_or(0) > free[w].as_i64().unwrap_or(0) {
             p.push(format!("bidder {w} holds {c} vCPUs of this run, its room was {}", free[w]));
         }
     }
     if failed.len() != shape.fails {
-        p.push(format!("{} rentals failed ({}), the bidders' room leaves {} without a VM", failed.len(), json!(failed), shape.fails));
+        p.push(format!("{} rentals unresolved ({}), expected {}", failed.len(), json!(failed), shape.fails));
     }
     if !p.is_empty() {
         return Err(s.fail(p.join("; ")));
@@ -259,6 +283,26 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                 let d = b["did"].as_str().unwrap_or_default();
                 free[d] = json!(s.st["max"][d].as_i64().unwrap_or(0) - s.st["used"][d].as_i64().unwrap_or(0));
             }
+            if shape.mode > 0 {
+                // every bidder filled to its last vCPU by one pinned filler each; then one rental of `cpus` that has no room
+                let small = args["cpus"].as_i64().unwrap_or(2);
+                let mut plan = json!({});
+                for (d, f) in free.as_object().cloned().unwrap_or_default() {
+                    if f.as_i64().unwrap_or(0) > 0 {
+                        plan[&d] = f.clone();
+                    }
+                    free[&d] = json!(0);
+                }
+                s.reading("fillers", plan.clone());
+                s.reading("free", free.clone());
+                s.reading("cpus", small);
+                s.reading("mem", s.st["mem"].clone());
+                s.st["fill"] = plan;
+                s.st["free"] = free;
+                s.st["cpus"] = json!(small);
+                h = start_round(&mut s, h, &name, &shape);
+                return Ok(s.keep(h));
+            }
             let tight = free.as_object().into_iter().flatten().filter_map(|(_, v)| v.as_i64()).min().unwrap_or(0);
             let mut cpus = if shape.fit == 1 { tight / 2 + 1 } else { tight / shape.fit };
             // big bidders (a dev network's: the whole host's CPUs) get a filler each, so the contending guests stay
@@ -335,6 +379,10 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
         }
         Event::Message { id, data, .. } if id.starts_with("req:") => {
             let i: usize = id[4..].parse().unwrap_or(0);
+            let (freed, held_phase, since_freed) = (s.has("freed"), s.is("held"), s.since("freed"));
+            let mut free_filler = false;
+            let mut fail_now: Option<String> = None;
+            let mut held_readings: Option<(f64, Value, Value)> = None;
             let r = &mut s.st["rentals"][i];
             // the receipt: from the requester's own lines (requester_*, the core log); a refused accept has none
             if r["receipt"].is_null() && data["receipt"].is_string() {
@@ -347,13 +395,30 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                 }
                 "requester_accept_declined_replace" => r["replaced"] = json!(r["replaced"].as_u64().unwrap_or(0) + 1),
                 "requester_bids_exhausted_new_rfp" => r["newRfp"] = json!(r["newRfp"].as_u64().unwrap_or(0) + 1),
+                "requester_waiting_for_capacity" => {
+                    r["waits"] = json!(r["waits"].as_u64().unwrap_or(0) + 1);
+                    r["lastSlot"] = data["slot"].clone();
+                    r["lastRound"] = data["round"].clone();
+                    if shape.mode == 2 && held_phase && !freed && r["waits"].as_u64().unwrap_or(0) >= 2 {
+                        // two rounds shown: free the first filler's bidder
+                        free_filler = true;
+                    }
+                }
                 "contract" if data["phase"] == "Held" => {
+                    if shape.mode == 2 {
+                        if !freed {
+                            fail_now = Some("the rental was Held before any filler was released: the bidders were not full".into());
+                        } else if since_freed > 300.0 {
+                            fail_now = Some(format!("the waiting rental was Held {since_freed} s after the filler's release (more than one backoff and a boot: 300 s)"));
+                        }
+                        held_readings = Some((since_freed, r["waits"].clone(), r["lastSlot"].clone()));
+                    }
                     r["held"] = json!(true);
                     if r["receipt"].is_null() {
                         r["receipt"] = data["receipt"].clone();
                     }
                 }
-                "contract" if data["phase"] == "Failed" && r["held"] != true && shape.fails > 0 => {
+                "contract" if data["phase"] == "Failed" && r["held"] != true && (shape.fails > 0 || shape.mode > 0) => {
                     r["failed"] = json!(true);
                     r["failMsg"] = data["message"].clone();
                 }
@@ -363,9 +428,24 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                 "exited" if r["held"] != true && r["failed"] != true => return Ok(s.fail(format!("{} exited before Held: {}", s.st["rentals"][i]["name"], data))),
                 _ => {}
             }
+            if let Some(m) = fail_now {
+                return Ok(s.fail(m));
+            }
+            if let Some((t, rounds, slot)) = held_readings {
+                s.reading("heldAfterFreeS", t);
+                s.reading("waitRounds", rounds);
+                s.reading("waitSlot", slot);
+            }
+            if free_filler {
+                s.flag("freed");
+                s.mark("freed");
+                s.st["fillers"][0]["failed"] = json!(true);
+                let n = s.st["fillers"][0]["name"].clone();
+                h = h.call(host("freeing", "request.release", json!({ "name": n })));
+            }
             // every rental settled: the request log (Held, Failed) and the core log (requester_*) are two files, so
             // their lines settle 5 s before the check
-            if s.is("held") && rentals(&s).iter().all(|r| (r["held"] == true && r["receipt"].is_string()) || r["failed"] == true) {
+            if s.is("held") && rentals(&s).iter().all(|r| (r["held"] == true && r["receipt"].is_string()) || r["failed"] == true || (shape.mode == 0 && shape.fails > 0 && r["waits"].as_u64().unwrap_or(0) > 0)) {
                 s.set("settle");
                 h = h.timer("settle", 5_000);
             }
@@ -507,15 +587,27 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
 }
 
 fn fallback(r: Run<Value>) -> Result<Handle, String> {
-    drive(r, Shape { bidders: 3, rentals: 3, fit: 1, need_refusal: true, rounds: 3, fails: 0 })
+    drive(r, Shape { bidders: 3, rentals: 3, fit: 1, need_refusal: true, rounds: 3, fails: 0, mode: 0, expires: "1h" })
 }
 
 fn concurrent_0014(r: Run<Value>) -> Result<Handle, String> {
-    drive(r, Shape { bidders: 2, rentals: 4, fit: 2, need_refusal: false, rounds: 1, fails: 0 })
+    drive(r, Shape { bidders: 2, rentals: 4, fit: 2, need_refusal: false, rounds: 1, fails: 0, mode: 0, expires: "1h" })
 }
 
 fn exhausted_0014(r: Run<Value>) -> Result<Handle, String> {
-    drive(r, Shape { bidders: 2, rentals: 3, fit: 1, need_refusal: true, rounds: 1, fails: 1 })
+    drive(r, Shape { bidders: 2, rentals: 3, fit: 1, need_refusal: true, rounds: 1, fails: 1, mode: 0, expires: "1h" })
+}
+
+/// giveup: both bidders full (one pinned filler each), one rental with --expires-in 150s: it waits for capacity in rounds
+/// (a fresh RFP after 30 s, 1 min, ...) and fails at its deadline with "gave up waiting for capacity after N rounds".
+fn giveup_0014(r: Run<Value>) -> Result<Handle, String> {
+    drive(r, Shape { bidders: 2, rentals: 1, fit: 0, need_refusal: false, rounds: 1, fails: 1, mode: 1, expires: "150s" })
+}
+
+/// wait: both bidders full, one rental with --expires-in 15m waits (rounds 1..k logged); after two rounds a filler is
+/// released: the rental is Held on the freed bidder within one backoff and a boot.
+fn wait_0014(r: Run<Value>) -> Result<Handle, String> {
+    drive(r, Shape { bidders: 2, rentals: 1, fit: 0, need_refusal: false, rounds: 1, fails: 0, mode: 2, expires: "15m" })
 }
 
 
@@ -704,4 +796,4 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-entries! { run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, backtoback => backtoback_0014 }
+entries! { run => fallback, concurrent => concurrent_0014, exhausted => exhausted_0014, giveup => giveup_0014, wait => wait_0014, backtoback => backtoback_0014 }

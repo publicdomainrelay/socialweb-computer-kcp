@@ -24,13 +24,13 @@ accounts=${GATE_ACCOUNTS:-bob}
 if [ "${1:-}" = --account ]; then accounts=$2; shift 2; fi
 all="0001:run 0001:s2 0002:run 0003:run 0004:run 0005:run 0005:b 0005:r2fail 0006:run 0006:compat 0007:run 0007:restart 0008:run
   0009:run 0010:run 0011:run 0011:token 0012:run 0013:run 0013:c 0013:b
-  0014:run 0014:concurrent 0014:exhausted 0014:backtoback 0015:run 0015:pressure 0016:run 0016:badsha 0017:run 0017:killed 0017:killedlate 0017:half 0018:run"
+  0014:run 0014:concurrent 0014:exhausted 0014:giveup 0014:wait 0014:backtoback 0015:run 0015:pressure 0016:run 0016:badsha 0017:run 0017:killed 0017:killedlate 0017:half 0018:run"
 ids=${*:-$all}
 # VMs an entry holds at its peak (the rest hold one; host checks none)
 declare -A WEIGHT=([0003:run]=3 [0012:run]=3 [0013:run]=2 [0013:c]=2 [0013:b]=2 [0006:run]=0 [0008:run]=0 [0011:token]=0 [0016:badsha]=0 [0018:run]=0)
 # runs alone: k8s nodes one per host and its tenant scale-downs (0001), a bidder core restarted (0007:restart), bidders
 # filled to capacity or booked (0014)
-EXCLUSIVE=" ${GATE_EXCLUSIVE:-0001:run 0001:s2 0007:restart 0014:run 0014:concurrent 0014:exhausted 0014:backtoback} "
+EXCLUSIVE=" ${GATE_EXCLUSIVE:-0001:run 0001:s2 0007:restart 0014:run 0014:concurrent 0014:exhausted 0014:giveup 0014:wait 0014:backtoback} "
 cd "$(dirname "$0")"
 unset ATPROTO_HANDLE ATPROTO_PASSWORD ATP_USERNAME ATP_PASSWORD ATPROTO_PDS
 out=${GATE_OUT:-$HOME/.tmp/swc-system-tests/gate/$(date -u +%Y%m%dT%H%M%SZ)}

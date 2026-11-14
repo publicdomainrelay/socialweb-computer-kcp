@@ -8,7 +8,7 @@ next bid; with no bid left it deletes the RFP and issues a new one without the r
 - Code: `internal/market/bidder/vmsize.go` (bid-time check, accept-time reservation keyed by RFP URI, 10 min hold,
   dropped once the ComputeVM exists), `internal/market/requester/runner.go` (`replaceDeclined`, `reRFPAfterRefusals`,
   up to 3 replacements)
-- Test: `tests/compositions/0014` (module `tests/modules/acc-0014`), entries `run`, `concurrent`, `exhausted` and `backtoback`, through the kcp
+- Test: `tests/compositions/0014` (module `tests/modules/acc-0014`), entries `run`, `concurrent`, `exhausted`, `giveup`, `wait` and `backtoback`, through the kcp
   CLI requester (`run request`); staging only. The same fallback in the atlibs requester module (the cicd
   composition's) is `tests/compositions/knotless` entry `fallback` (concurrent workflows, one accept refused 409, the
   checks still succeed, the refused accept gone)
@@ -43,7 +43,9 @@ from the bidders' offerings (`maxCpus`) less the guests already on their kcp, so
 | `run` | first 3 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required; up to 3 rounds (a round where every first pick had room has none) |
 | `concurrent` | first 2 of the target | 4 | `min(free)/2` (two per bidder) | a reading |
 | `backtoback` | the target's first | 6 (input `count`), one after another | 1 (input `cpus`), mem 1G | none: every VM Held |
-| `exhausted` | first 2 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required: one rental is refused by both, its bids run out, its new RFP (the refusers excluded, as specified) has no bidder: Failed at once |
+| `giveup` | first 2 of the target | 1 | both bidders full (one pinned 1 h filler each) | one rental with `--expires-in 150s` has no room: it waits in rounds (at least 2 `requester_waiting_for_capacity`) and fails at its deadline with "gave up waiting for capacity after N rounds" |
+| `wait` | first 2 of the target | 1 | both bidders full | one rental with `--expires-in 15m` waits; after two rounds a filler is released: the rental is Held on the freed bidder within 300 s of the release (about one backoff and a boot); readings `waitRounds`, `heldAfterFreeS` |
+| `exhausted` | first 2 of the target | 3 | `min(free)/2 + 1` (one per bidder) | required: one rental is refused by both, its bids run out, its new RFP (the refusers excluded, as specified) finds no bid: the rental WAITS for capacity (`requester_waiting_for_capacity`, rounds with a backoff of 30 s, 1 min, 2 min, a fresh RFP asking every bidder each time) and is released by the test |
 
 Every rental is pinned to the entry's bidders (`--allow-bidder-dids`); mem 1G (input `mem`).
 
@@ -112,7 +114,7 @@ $B dev down $N
 
 - Every rental Held (`exhausted`: all but one), each on one of the entry's bidders and never on a bidder that refused it
 - `exhausted`: the one rental left without a VM was refused (409) by every bidder of the entry, logged
-  `requester_bids_exhausted_new_rfp`, and failed with `requester_no_bidders` ("denied by the contract" for each)
+  `requester_bids_exhausted_new_rfp`, and then waits for capacity (at least one `requester_waiting_for_capacity` line) instead of failing; the test releases it
 - No bidder over its vCPUs: this run's VMs on a bidder fit its free vCPUs; its kcp's live ComputeVMs' `spec.vm.cpus`
   sum to at most its `maxCpus`
 - Every refusal is a 409 `CapacityExceeded`; every refused accept record RecordNotFound (x3)

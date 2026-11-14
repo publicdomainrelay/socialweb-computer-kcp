@@ -18,6 +18,16 @@
 			"description": "Three rentals on two one-VM bidders: two Held, the third refused by both, its new RFP fails at once."
 		},
 		{
+			"entry": "giveup",
+			"label": "Run 0014 giveup",
+			"description": "Bidders full, a rental with a short --expires-in waits in rounds and fails at its deadline: gave up waiting for capacity."
+		},
+		{
+			"entry": "wait",
+			"label": "Run 0014 wait",
+			"description": "Bidders full, a rental waits for capacity; a filler is released and the rental is Held within about a backoff."
+		},
+		{
 			"entry": "backtoback",
 			"label": "Run 0014 back to back",
 			"description": "Six small VMs one after another on one bidder: every one Held, none ended before it came on network."
