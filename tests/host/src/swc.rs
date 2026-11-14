@@ -489,7 +489,7 @@ impl Swc {
             cmd.arg("--");
         }
         cmd.args(&pass);
-        // pty: the invocation runs on a pseudo-terminal (util-linux `script`) whose stdin stays open, so `run request`
+        // pty: the invocation runs on a pseudo-terminal (socat SYSTEM,pty) whose stdin stays open, so `run request`
         // without --exec opens its interactive ssh session (a terminal on stdin) and holds it
         let pty = input["pty"] == true;
         let mut spawn_cmd = if pty {
@@ -500,8 +500,10 @@ impl Swc {
                 .collect::<Vec<_>>()
                 .join(" ");
             let envs: Vec<_> = std_cmd.get_envs().filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string()))).collect();
-            let mut script = tokio::process::Command::new("script");
-            script.args(["-qefc", &line, "/dev/null"]).envs(envs);
+            // socat's SYSTEM address runs the line with sh -c on a pty; its `,` `:` `\\` are escaped
+            let esc = line.replace('\\', "\\\\").replace(',', "\\,").replace(':', "\\:");
+            let mut script = tokio::process::Command::new("socat");
+            script.args(["-", &format!("SYSTEM:{esc},pty,setsid,ctty,stderr")]).envs(envs);
             script.stdin(Stdio::piped());
             script
         } else {
@@ -1014,7 +1016,8 @@ impl Swc {
             // ask again once it is gone
             let mut r = self.release(n).await;
             // a Failed invocation the run released already leaves no invocation.json: nothing is left to release
-            if r.as_ref().is_err_and(|e| e.contains(&format!("no invocation {n} under"))) {
+            // an invocation a release process took over (its owner was killed) is released and its kcp application gone
+            if r.as_ref().is_err_and(|e| e.contains(&format!("no invocation {n} under")) || e.contains(&format!("the market network has no application {n}"))) {
                 r = Ok(json!({ "gone": true }));
             }
             for _ in 0..3 {

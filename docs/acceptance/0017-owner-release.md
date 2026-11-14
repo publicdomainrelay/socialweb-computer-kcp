@@ -16,7 +16,7 @@ takes the invocation over when the owner exits before the release settled).
 
 ## Preconditions
 
-- An account that may rent (prod: bob; staging: a generated account); `script` (util-linux) on the host running the test host
+- An account that may rent (prod: bob; staging: a generated account); `socat` on the host running the test host
   (the owner runs on a pseudo-terminal)
 
 ## Steps
@@ -35,11 +35,18 @@ SWC_TARGET=$PWD/targets/prod.json cargo run -p swc-test-host -- compositions/001
 3. `run`: the release returns within 60 s (it fails at 90 s: the test's own cut of the old 27 minutes); the owner exits, and at its
    exit its summary (`requests/<name>/summary.json`) says the contract is Released and `kcpRunning` false (the owner stopped
    its kcp only after Released); the release process's summary says the same
-4. `killed`: 2 s after the release was asked, the owner is SIGKILLed (`request.kill`: the `run request ... --name <name>`
+4. `killed`: 100 ms after the release was asked, inside the release, the owner is SIGKILLed (`request.kill`: the `run request ... --name <name>`
    process of this invocation; its kcp child keeps running); the release client takes the invocation over (`TakeOwner`,
    restarts the kcp from its state, releases) and still returns within 60 s with the summary Released
 5. Every record of the run is RecordNotFound afterwards
 
 ## Evidence
 
-(not yet run)
+capt dev network (hat-8, 3 bidders, 2026-11-14), CLI = main e13494b1 ("old") vs fix-owner-release 716f4ef4 ("fix"):
+
+- `run`: old 6/6 pass, fix 6/6 pass (each with a 0014:concurrent load beside it). The owner's re-read failure that made prod
+  gate 0004/0005 wait 27 minutes did not occur on the dev net: this entry passes on both and guards the scenario, it does not
+  reproduce that failure there
+- `killed` (the owner SIGKILLed 100 ms after the release was asked, which is inside the release): old fails twice (the release
+  returns Released in 0.3 s through the dying owner, no summary is ever written: the invocation is left unsettled), fix passes
+  twice (log `the owning process is gone before the release settled; taking the invocation over`, release 12.5 s and 14.8 s)

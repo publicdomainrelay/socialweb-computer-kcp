@@ -10,7 +10,7 @@
 		{
 			"entry": "killed",
 			"label": "Run 0017 killed",
-			"description": "The owner is killed (SIGKILL) 2 s after the release was asked; the release still completes."
+			"description": "The owner is killed (SIGKILL) 100 ms after the release was asked; the release still completes."
 		}
 	],
 	"calls": [
