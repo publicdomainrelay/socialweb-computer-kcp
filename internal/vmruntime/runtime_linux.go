@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -186,7 +187,7 @@ func (r *hostRuntime) Prepare(ctx context.Context, spec VMSpec) (Prepared, error
 		return Prepared{}, err
 	}
 	conf := fcapi.Config{
-		BootSource: fcapi.BootSource{KernelImagePath: filepath.Join(img.Dir, guestimage.KernelName), BootArgs: strings.Join(manifest.BootArgs, " ")},
+		BootSource: fcapi.BootSource{KernelImagePath: filepath.Join(img.Dir, guestimage.KernelName), BootArgs: strings.Join(append(slices.Clone(manifest.BootArgs), devBootArgsExtra()...), " ")},
 		Drives: []fcapi.Drive{
 			{DriveID: "rootfs", PathOnHost: rootfs, IsRootDevice: true},
 			{DriveID: "cidata", PathOnHost: seed, IsReadOnly: true},
@@ -823,4 +824,16 @@ func tailOf(path string, n int64) string {
 	}
 	b, _ := io.ReadAll(f)
 	return "--- " + filepath.Base(path) + " ---\n" + string(b)
+}
+
+func devBootArgsExtra() []string {
+	if v := os.Getenv("SWC_DEV_GUEST_BOOT_ARGS_EXTRA"); v != "" {
+		return strings.Fields(v)
+	}
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		if raw, err := os.ReadFile(filepath.Join(dir, "swc-dev-guest-boot-args-extra")); err == nil {
+			return strings.Fields(string(raw))
+		}
+	}
+	return nil
 }
