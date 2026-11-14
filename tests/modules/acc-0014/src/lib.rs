@@ -382,9 +382,18 @@ fn drive(run: Run<Value>, shape: Shape) -> Result<Handle, String> {
                 }
                 return Ok(s.keep(h.timer(&format!("offretry:{j}"), 10_000)));
             }
-            let o = match out(&s, &id, result.output()) {
-                Ok(o) => o,
-                Err(f) => return Ok(f),
+            // the release of a rental that Failed (no VM, its process already ending) may find the invocation's kcp
+            // gone ("its kcp does not answer", "no invocation"): nothing is left to release, the records are checked after
+            let tolerated = id.starts_with("rel:")
+                && result.output().is_err()
+                && id[4..].parse::<usize>().ok().and_then(|i| everyone(&s).get(i).map(|r| r["failed"] == true)) == Some(true);
+            let o = if tolerated {
+                json!({})
+            } else {
+                match out(&s, &id, result.output()) {
+                    Ok(o) => o,
+                    Err(f) => return Ok(f),
+                }
             };
             let j: usize = id.split(':').nth(1).and_then(|x| x.parse().ok()).unwrap_or(0);
             let b = chosen(&s).get(j).cloned().unwrap_or_default();
@@ -620,6 +629,7 @@ fn backtoback_0014(run: Run<Value>) -> Result<Handle, String> {
                     // a Failed invocation leaves nothing to release
                     if let Err(e) = &r
                         && !e.contains("no invocation")
+                        && !e.contains("kcp does not answer")
                     {
                         return Ok(s.fail(format!("{id}: {e}")));
                     }
