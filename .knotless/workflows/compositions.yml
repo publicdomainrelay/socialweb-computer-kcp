@@ -33,7 +33,7 @@ steps:
       # this commit's testhost run kept what the bucket lacks (a branch that changed tests/ or rust/) as dist/ artifacts
       art() { [ -n "${KNOTLESS_ARTIFACTS_URL:-}" ] && curl -sfo "$2" -H "Authorization: Bearer $KNOTLESS_ARTIFACTS_TOKEN" "$KNOTLESS_ARTIFACTS_URL?workflow=testhost&name=dist/$1"; }
       got=
-      if art tests.SHA256SUMS "$d/SHA256SUMS" && art swc-test-host "$d/swc-test-host" && art test-modules.tar.gz "$d/test-modules.tar.gz"; then
+      if art tests.SHA256SUMS "$d/SHA256SUMS" && art swc-test-host "$d/swc-test-host" && art test-modules.tar.gz "$d/test-modules.tar.gz" && (cd "$d" && sha256sum -c --quiet SHA256SUMS); then
         got=artifacts; echo "tests: testhost artifacts of this commit"
       else
         rm -f "$d/swc-test-host" "$d/test-modules.tar.gz"
@@ -57,7 +57,7 @@ steps:
       install -m 0755 tests/target/release/swc-test-host /usr/local/bin/swc-test-host
       # the static socialweb-meshd the multi-VM layout puts on each VM (SWC_MESHD), of this rust/ tree
       m=https://socialweb-computer-kcp.sfo3.digitaloceanspaces.com/meshd/$(git rev-parse HEAD:rust)
-      if art meshd.SHA256SUMS "$d/meshd.SHA256SUMS" && art socialweb-meshd-x86_64 "$d/socialweb-meshd-x86_64"; then
+      if art meshd.SHA256SUMS "$d/meshd.SHA256SUMS" && art socialweb-meshd-x86_64 "$d/socialweb-meshd-x86_64" && (cd "$d" && sha256sum -c --quiet meshd.SHA256SUMS); then
         echo "meshd: testhost artifacts of this commit"
         (cd "$d" && sha256sum -c --quiet meshd.SHA256SUMS)
       elif curl -sfo "$d/meshd.SHA256SUMS" "$m/SHA256SUMS" && curl -sfo "$d/socialweb-meshd-x86_64" "$m/socialweb-meshd-x86_64"; then
