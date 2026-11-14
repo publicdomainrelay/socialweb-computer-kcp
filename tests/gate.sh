@@ -73,6 +73,10 @@ run_one() {
     else
       res=FAIL note=$(jq -r '[.error, (.cleanupErrors // [] | join("; "))] | map(select(. != null and . != "")) | join(" | ") | .[0:200]' <<<"$doc" 2>/dev/null)
       [ -n "$note" ] || note="exit $rc: $(tail -1 "$out/$r-$e.log" | cut -c1-200)"
+      # a sign-in failure: this account is unusable for the rest of the run (its slot is not given another entry)
+      if grep -q "signing in .*createSession failed\|createSession failed" "$out/$r-$e.log" 2>/dev/null; then
+        echo "$account: $(grep -o 'createSession failed with [A-Za-z]*' "$out/$r-$e.log" | head -1)" > "$out/dead-$slot"
+      fi
     fi
   fi
   s=$(( $(date +%s) - t0 ))
@@ -108,9 +112,19 @@ while [ ${#queue[@]} -gt 0 ] || [ ${#pid_slot[@]} -gt 0 ]; do
     used=$((used + w)); excl=$x
   done
   queue=("${left[@]}")
+  if [ ${#pid_slot[@]} -eq 0 ] && [ ${#free[@]} -eq 0 ] && [ ${#queue[@]} -gt 0 ]; then
+    # every account's sign-in failed: the rest fail without trying
+    why=$(cat "$out"/dead-* 2>/dev/null | head -1)
+    for id in "${queue[@]}"; do
+      r=${id%%:*}; e=${id#*:}; [ "$e" = "$id" ] && e=run
+      echo "RESULT $r:$e FAIL 0 not run: no account can sign in (${why})"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$r:$e" FAIL 0 "not run: no account can sign in (${why})" "" "" > "$out/$r-$e.tsv"
+    done
+    queue=()
+  fi
   [ ${#pid_slot[@]} -gt 0 ] || continue
   wait -n -p done_pid
-  free+=("${pid_slot[$done_pid]}")
+  [ -f "$out/dead-${pid_slot[$done_pid]}" ] || free+=("${pid_slot[$done_pid]}")
   used=$((used - pid_weight[$done_pid])); excl=0
   unset "pid_slot[$done_pid]" "pid_weight[$done_pid]"
 done
