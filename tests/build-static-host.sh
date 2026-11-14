@@ -3,14 +3,15 @@
 # C deps (ring) build with zig cc: $ZIG, else the zig scripts/build-cargosrc.sh pins and caches.
 set -euo pipefail
 cd "$(dirname "$0")"
-zig="${ZIG:-$(ls ~/.cache/socialweb-meshd-zig/*/zig 2>/dev/null | head -1)}"
+zc="${MESHD_ZIG_CACHE:-$HOME/.cache/socialweb-meshd-zig}"
+zig="${ZIG:-$(ls "$zc"/*/zig 2>/dev/null | head -1 || true)}"
 if [ ! -x "$zig" ]; then
   zv="$(sed -n 's/^zig_version=//p' ../rust/build.sh)"
   zs="$(sed -n 's/^  x86_64) zig_sha256=\([0-9a-f]*\) ;;$/\1/p' ../rust/build.sh)"
   [ -n "$zv" ] && [ -n "$zs" ] || { echo "build-static-host: no zig (set ZIG), and rust/build.sh pins none" >&2; exit 1; }
-  zd="${MESHD_ZIG_CACHE:-$HOME/.cache/socialweb-meshd-zig}/$zs"
-  zt="$(mktemp -d "$zd.tmp.XXXXXX")"
+  zd="$zc/$zs"
   mkdir -p "${zd%/*}"
+  zt="$(mktemp -d "$zd.tmp.XXXXXX")"
   curl -fsSL --max-time 300 -o "$zt/zig.tar.xz" "https://ziglang.org/download/$zv/zig-x86_64-linux-$zv.tar.xz"
   echo "$zs  $zt/zig.tar.xz" | sha256sum -c --quiet -
   tar -xJf "$zt/zig.tar.xz" -C "$zt" --strip-components=1 && rm "$zt/zig.tar.xz"
