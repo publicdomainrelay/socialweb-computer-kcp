@@ -675,7 +675,13 @@ func (r *requestRun) stop(ctx context.Context, remove bool) {
 			return
 		}
 		if remove {
-			err = request.RemoveFromNetwork(ctx, netRec.AdminKubeconfig, r.inv.Name)
+			// a release that an earlier process (a killed owner) already carried out removed the application: that is the
+			// removal this asks for, not a failure that leaves the summary saying the kcp still runs
+			if _, found, gerr := request.NetworkApp(ctx, netRec.AdminKubeconfig, r.inv.Name); gerr == nil && !found {
+				err = nil
+			} else {
+				err = request.RemoveFromNetwork(ctx, netRec.AdminKubeconfig, r.inv.Name)
+			}
 		} else {
 			err = request.SetStopped(ctx, netRec.AdminKubeconfig, r.inv.Name, true)
 		}
@@ -1572,6 +1578,11 @@ func (a *app) restartLoaded(ctx context.Context, r *requestRun, verb string) (*r
 	r.log("starting the invocation's kcp again from its state dir", "verb", verb)
 	r.resuming = verb == "resume"
 	if err := r.start(ctx, false); err != nil {
+		if verb == "release" && errors.Is(err, request.ErrNoApplication) {
+			r.log("the market network no longer has the invocation's application (an earlier release finished it); the invocation is only removed")
+			r.cleanupOnly = true
+			return r, exitOK
+		}
 		if verb == "release" && r.inv.GuestRequester && r.kcp != nil {
 			r.log("the guest requester never got Ready; it retires its local accounts before its guest goes", "err", err.Error())
 			r.retire(context.WithoutCancel(ctx))

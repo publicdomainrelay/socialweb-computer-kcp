@@ -677,8 +677,11 @@ func SetStopped(ctx context.Context, kubeconfig, name string, stopped bool) erro
 			return applyNetworkApp(ctx, ri, name, &a)
 		}
 	}
-	return fmt.Errorf("request: the market network has no application %s", name)
+	return fmt.Errorf("%w %s", ErrNoApplication, name)
 }
+
+// ErrNoApplication: the market network no longer carries the invocation's application (a release already removed it).
+var ErrNoApplication = errors.New("request: the market network has no application")
 
 func RemoveFromNetwork(ctx context.Context, kubeconfig, name string) error {
 	ri, err := networkClient(kubeconfig)
