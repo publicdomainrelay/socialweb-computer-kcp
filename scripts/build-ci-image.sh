@@ -50,7 +50,16 @@ say() { echo "build-ci-image: $*" >&2; }
 case "$work" in /tmp|/tmp/*) die "--work $work is under /tmp (tmpfs on build hosts)" ;; esac
 for tool in docker jq sha256sum tar; do command -v "$tool" >/dev/null 2>&1 || die "$tool is required"; done
 
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 pin() { jq -r "$1" "$versions"; }
 t=".guestImages.targets[\"$target\"]"
 for f in vmlinux rootfs.ext4 image.json; do

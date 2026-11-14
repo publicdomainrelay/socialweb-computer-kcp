@@ -14,7 +14,16 @@ platforms=("$@")
 
 die() { echo "build-socialweb-computer --dev: $*" >&2; exit 1; }
 say() { echo "build-socialweb-computer --dev: $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 started_s="$(date +%s.%N)"
 elapsed() { awk -v a="$started_s" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }'; }
 

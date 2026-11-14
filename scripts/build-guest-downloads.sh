@@ -43,7 +43,16 @@ trap 'rm -rf "$work"' EXIT
 cache="${GUEST_DOWNLOADS_CACHE:-$work/cache}"
 mkdir -p "$cache"
 
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 
 fetch_pinned() {
   local url="$1" want="$2" auth="${3:-}" file="$cache/$2" part

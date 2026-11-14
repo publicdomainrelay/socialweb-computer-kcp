@@ -79,7 +79,16 @@ pinned_goroot="$(GOTOOLCHAIN="$want_go" go env GOROOT)" || die "cannot get the p
 export PATH="$pinned_goroot/bin:$PATH" GOTOOLCHAIN=local
 [ "$(go env GOVERSION)" = "$want_go" ] || die "the toolchain at $pinned_goroot is $(go env GOVERSION); go.mod pins $want_go"
 
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 dl_args=(-fSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20 --progress-bar)
 api_args=(-fsSL --retry 3 --connect-timeout 10 --speed-limit 10000 --speed-time 20)
 
@@ -386,7 +395,7 @@ cache_get() {
   if { [ ! -f "$f" ] || [ ! -f "$rec" ]; } && [ -n "${ASSET_CACHE_URL:-}" ] && [ -n "${3:-}" ]; then
     u="$ASSET_CACHE_URL/$asset/${plat/\//_}/$1"
     if curl -sfL --retry 2 --max-time 900 -o "$f.$pid" "$u.tar.zst" && curl -sfL --max-time 60 -o "$rec.$pid" "$u.sha256" &&
-      [ "$(sha_of "$f.$pid")" = "$(cat "$rec.$pid")" ]; then
+      [ -s "$rec.$pid" ] && [ "$(sha_of "$f.$pid")" = "$(cat "$rec.$pid")" ]; then
       t="$work/remote-$1"
       mkdir -p "$t" && zstd -dcq "$f.$pid" | tar -x -C "$t"
       if [ "$("$work/assetpack" digest "$t")" = "$3" ]; then
@@ -400,7 +409,7 @@ cache_get() {
     rm -f "$f.$pid" "$rec.$pid"
   fi
   [ -f "$f" ] && [ -f "$rec" ] || return 1
-  if [ "$(sha_of "$f")" != "$(cat "$rec")" ]; then
+  if [ ! -s "$rec" ] || [ "$(sha_of "$f")" != "$(cat "$rec")" ]; then
     say "warn: cached blob $f does not hash to its record; staging again"
     rm -f "$f" "$rec"
     return 1

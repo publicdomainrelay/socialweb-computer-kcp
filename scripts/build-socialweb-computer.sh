@@ -86,7 +86,16 @@ done
 die() { echo "build-socialweb-computer: $*" >&2; exit 1; }
 say() { echo "build-socialweb-computer: $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
 utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 now() { date +%s.%N; }
 since() { awk -v a="$1" -v b="$(now)" 'BEGIN { printf "%.1f", b - a }'; }
 timing() {

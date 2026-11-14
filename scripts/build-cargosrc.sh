@@ -36,7 +36,16 @@ done
 case "$arch" in x86_64|aarch64) ;; *) usage ;; esac
 
 die() { echo "build-cargosrc: $*" >&2; exit 1; }
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 
 src="$(jq -c --arg a "$asset" '.assets[$a].cargosrc' "$versions")"
 [ "$src" != null ] || die "assets.$asset has no cargosrc object"

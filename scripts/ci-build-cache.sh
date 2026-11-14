@@ -20,7 +20,16 @@ mode="${1:?usage: ci-build-cache.sh restore|save <build root>}"
 cache="$(cd "${2:?usage: ci-build-cache.sh restore|save <build root>}" && pwd -P)/cache"
 read -ra kinds <<<"${BUILD_CACHE_KINDS:-cargo-target meshd}"
 
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+sha_of() {
+  local h
+  h="$(sha256sum "$1" 2>/dev/null | cut -d' ' -f1)"
+  if [ -z "$h" ]; then
+    echo "sha_of: cannot hash $1" >&2
+    printf 'unhashable:%s\n' "$1"
+    return 1
+  fi
+  printf '%s\n' "$h"
+}
 want_go="$(awk '$1 == "toolchain" {print $2; exit}' go.mod)"
 [ -n "$want_go" ] || want_go="go$(awk '$1 == "go" {print $2; exit}' go.mod)"
 sums="$(sha_of go.sum)"
@@ -50,7 +59,7 @@ case "$mode" in
       t0=$SECONDS
       rm -rf "$work/x" && mkdir -p "$work/x"
       if curl -sfL --retry 2 --max-time 900 -o "$work/$k.tar.zst" "$u.tar.zst" && curl -sfL --max-time 60 -o "$work/$k.sha256" "$u.sha256" &&
-        [ "$(sha_of "$work/$k.tar.zst")" = "$(cat "$work/$k.sha256")" ] &&
+        [ -s "$work/$k.sha256" ] && [ "$(sha_of "$work/$k.tar.zst")" = "$(cat "$work/$k.sha256")" ] &&
         zstd -dcq "$work/$k.tar.zst" | tar -x -C "$work/x" && [ -d "$work/x/$k" ]; then
         rm -rf "${cache:?}/$k" && mv "$work/x/$k" "$cache/$k"
         echo "build-cache: $k restored from $u ($(du -sh "$cache/$k" | cut -f1), $((SECONDS - t0)) s)"
