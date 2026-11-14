@@ -85,7 +85,7 @@ done
 
 releasetargets="$(jq -r '.platforms | to_entries[] | select(.value.status == "release") | .key' internal/versions/versions.json)"
 crossfailed=""
-for target in darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64; do
+for target in ${CHECK_CROSS_TARGETS:-darwin/arm64 darwin/amd64 windows/amd64 windows/arm64 linux/arm64}; do
   goos="${target%/*}"
   goarch="${target#*/}"
   if ! GOOS="$goos" GOARCH="$goarch" go build ./...; then
@@ -110,6 +110,7 @@ elif ! GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go vet ./pkg/embedded; then
 else
   echo "check.sh: ok go build and go vet of pkg/embedded for ios/arm64"
 fi
+[ -z "${CHECK_CROSS_TARGETS:-}" ] || echo "check.sh: cross-OS builds limited to CHECK_CROSS_TARGETS=$CHECK_CROSS_TARGETS (the CI gate on a main push; a v* tag and a local check.sh build all)"
 if [ -n "$crossfailed" ]; then
   echo "check.sh: the tree must build and vet for every GOOS/GOARCH above; an OS-specific file needs its build tag and a twin for the other OSes (plans 0011, 0012)" >&2
   fail "cross-OS gate:$crossfailed"
