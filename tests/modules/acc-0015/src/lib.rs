@@ -1,6 +1,8 @@
 // docs/acceptance/0015-vm-memory.md: this run's own VM fills ~95% of its RAM (incompressible) and writes with fsync for
 // 5 min; the VM lives through it: its contract stays Held, no vm.terminated, the guest never reboots, its ComputeVM is not
 // Lost (OOMKilled). Then it is released and every record is gone. Prod and staging (it touches only its own VM).
+mod pressure;
+
 use abi::{Call, Event, Handle, Run, entries};
 use serde_json::{Value, json};
 use steps::{MIN, S, VM_TERMINATED, get_record, host, kube, out, termination_rkey};
@@ -247,4 +249,4 @@ fn run_0015(run: Run<Value>) -> Result<Handle, String> {
     Ok(s.keep(h))
 }
 
-entries! { run => run_0015 }
+entries! { run => run_0015, pressure => pressure::run }

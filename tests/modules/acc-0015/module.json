@@ -6,6 +6,11 @@
 			"entry": "run",
 			"label": "Run 0015",
 			"description": "The fill, the VM still Held and Running, then the release."
+		},
+		{
+			"entry": "pressure",
+			"label": "Run 0015 pressure",
+			"description": "Staging: the host's memory events fire exactly once per crossing of this run's own VM's MemoryHigh (lowered by the test) and re-arm."
 		}
 	],
 	"calls": [
@@ -16,7 +21,8 @@
 		"com.atproto.repo.getRecord",
 		"com.atproto.repo.listRecords",
 		"com.fedfork.exec.kube.list",
-		"computer.socialweb.test.assert.recordsGone"
+		"computer.socialweb.test.assert.recordsGone",
+		"computer.socialweb.test.vm.memory"
 	],
 	"hooks": [
 		{
