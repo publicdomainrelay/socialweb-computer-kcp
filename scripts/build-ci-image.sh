@@ -79,7 +79,7 @@ docker image inspect "$builder" >/dev/null 2>&1 || docker build -q -t "$builder"
 
 commit="$(git -C "$root" rev-parse HEAD)"
 script_sha="$(sha_of "$root/scripts/knotless-ci-toolchain.sh")"
-marker="$name base=$base_pin kcp=$commit toolchain=$script_sha"
+marker="$name base=$base_pin kcp=$commit toolchain=$script_sha pins=$("$root/scripts/knotless-ci-pins.sh")"
 img="localhost/swc-ci-image-base:${base_pin:0:12}"
 ctr="swc-ci-image-$$"
 cleanup() { docker rm -f "$ctr" >/dev/null 2>&1 || true; }

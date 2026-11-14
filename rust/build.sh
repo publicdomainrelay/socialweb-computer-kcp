@@ -24,9 +24,15 @@ usage() {
   echo "       CARGO_TARGET_DIR (default ~/.cache/socialweb-meshd-target)," >&2
   echo "       MESHD_CACHE (keep each binary in DIR keyed by the sha256 of the files of rust/, the rustc" >&2
   echo "       and cargo versions and the target; a hit skips cargo for that arch)" >&2
+  echo "  --prefetch (first argument): fetch the pinned zig into MESHD_ZIG_CACHE and stop (the CI image bake)" >&2
   exit 2
 }
 
+prefetch=0
+if [ "${1:-}" = --prefetch ]; then
+  prefetch=1
+  shift
+fi
 arches=("$@")
 if [ "${#arches[@]}" -eq 0 ]; then
   arches=(x86_64 aarch64)
@@ -56,6 +62,7 @@ if [ ! -x "$zig_dir/zig" ]; then
   mv -T "$zig_tmp" "$zig_dir" 2>/dev/null || rm -rf "$zig_tmp"
   [ -x "$zig_dir/zig" ]
 fi
+[ "$prefetch" = 0 ] || { echo "build.sh: zig $zig_version is in $zig_dir"; exit 0; }
 command -v unshare >/dev/null || { echo "build.sh: unshare not found" >&2; exit 1; }
 sysroot="$(rustc --print sysroot)"
 host="$(rustc -vV | sed -n 's/^host: //p')"
