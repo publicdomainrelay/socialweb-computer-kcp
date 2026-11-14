@@ -25,6 +25,8 @@ const (
 	MemoryEventCap = 10
 
 	memoryLowMark = 0.9
+
+	NetworkWindow = 2 * time.Minute
 )
 
 type memorySample struct {
@@ -45,6 +47,8 @@ type memoryWatch struct {
 	sentAt map[string]time.Time
 
 	sent map[string]int
+
+	windowLogged bool
 }
 
 func (b *Bidder) watchMemory(ctx context.Context) {
@@ -74,6 +78,7 @@ func (b *Bidder) watchMemory(ctx context.Context) {
 				watches[vm.Name] = w
 			}
 			b.observeMemory(ctx, root, &vm, w)
+			b.checkNetworkWindow(&vm, w)
 		}
 		for name := range watches {
 			if !live[name] {
@@ -235,4 +240,59 @@ func readBytes(path string) uint64 {
 	}
 	n, _ := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64)
 	return n
+}
+
+func (b *Bidder) checkNetworkWindow(vm *v1alpha1.ComputeVM, w *memoryWatch) {
+	if w.windowLogged || vm.CreationTimestamp.IsZero() || b.now().Sub(vm.CreationTimestamp.Time) < NetworkWindow {
+		return
+	}
+	if held := b.guests.GuestReport(vm); held != nil && (held.Address != "" || len(held.Networks) > 0) {
+		w.windowLogged = true
+		return
+	}
+	w.windowLogged = true
+	args := []any{"computevm", vm.Name, "window", NetworkWindow.String(), "age", b.now().Sub(vm.CreationTimestamp.Time).Round(time.Second).String()}
+	if w.dir == "" {
+		args = append(args, "cgroup", "not found")
+	} else {
+		args = append(args, "cgroup", w.dir, "readings", cgroupReadings(w.dir))
+	}
+	b.log.Warn("bidder_vm_network_window_missed: the guest has not reported an address within the requester's window; the VM cgroup readings follow", args...)
+}
+
+func cgroupReadings(dir string) string {
+	var out []string
+	flat := func(file string, keys ...string) {
+		raw, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			if len(keys) == 0 {
+				out = append(out, file+"["+strings.Join(fields, " ")+"]")
+				continue
+			}
+			for _, k := range keys {
+				if fields[0] == k && len(fields) > 1 {
+					out = append(out, file+":"+k+"="+fields[1])
+				}
+			}
+		}
+	}
+	for _, f := range []string{"memory.current", "memory.high", "memory.max", "memory.swap.current", "memory.swap.max"} {
+		if raw, err := os.ReadFile(filepath.Join(dir, f)); err == nil {
+			out = append(out, f+"="+strings.TrimSpace(string(raw)))
+		}
+	}
+	flat("memory.events")
+	flat("memory.stat", "anon", "file", "file_mapped", "file_dirty", "file_writeback", "swapcached", "workingset_refault_file", "pgscan", "pgsteal")
+	flat("memory.pressure")
+	flat("io.pressure")
+	flat("cpu.pressure")
+	flat("cpu.stat", "usage_usec", "nr_periods", "nr_throttled", "throttled_usec")
+	return strings.Join(out, " ")
 }
